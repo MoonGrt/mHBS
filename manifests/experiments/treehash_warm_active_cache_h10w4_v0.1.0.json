@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "result_id": "treehash_warm_active_cache_h10w4_v0.1.0",
+  "scope": "treehash_warm_active_cache",
+  "classification": "out_of_context_cache_storage_ppa",
+  "paper_comparable": false,
+  "integrated": false,
+  "complete_algorithm": false,
+  "device": "xc7a200tffg1156-2",
+  "tool": "2025.2",
+  "configuration": {
+    "tree_height": 10,
+    "window_height": 4,
+    "node_width_bits": 256,
+    "upper_capacity_nodes": 127,
+    "active_lower_capacity_nodes": 30,
+    "total_capacity_nodes": 157,
+    "logical_capacity_bytes": 5024,
+    "activation_control": "target_leaf_internal_alignment",
+    "upper_retention_rule": "height >= 4, global",
+    "lower_retention_rule": "height < 4, active aligned 16-leaf window"
+  },
+  "clock_constraint": {
+    "period_ns": 10.0,
+    "frequency_mhz": 100.0
+  },
+  "post_route": {
+    "slice_lut": 1244,
+    "logic_lut": 1072,
+    "distributed_ram_lut": 172,
+    "slice_register": 691,
+    "ramb36": 4,
+    "ramb18": 0,
+    "ramb36_equivalent": 4.0,
+    "dsp": 0,
+    "wns_ns": 0.556,
+    "timing_met": true
+  },
+  "functional_result": {
+    "testbench": "tb/integration/tb_micro_hbs_treehash_warm_active_cache.sv",
+    "target_leaf": 5,
+    "activation_examples": {
+      "target_5_base": 0,
+      "target_21_base": 16
+    },
+    "initial_auth_sibling_hits": 10,
+    "post_switch_lower_misses": 4,
+    "post_switch_upper_hits": 6,
+    "activation_target_fail_closed": true,
+    "busy_activation_fail_closed": true,
+    "lookup_active_activation_fail_closed": true,
+    "identity_bounds_fail_closed": true,
+    "oracle_match": true,
+    "provider_composition": {
+      "external_commands_per_auth_path": 1,
+      "target_5_cache_hits": 10,
+      "target_21_cache_hits": 10,
+      "recompute_requests": 0,
+      "auth_backpressure_cycles": 2,
+      "per_level_software_lookup_inputs": 0
+    }
+  },
+  "limitations": [
+    "This is an out-of-context cache storage/control point, not a complete XMSS or SLH-DSA Sign implementation.",
+    "The authentication-path provider is functionally composed in simulation but excluded from this cache-only PPA report.",
+    "Window refill and authentication-node recomputation latency are not included in this PPA point.",
+    "The 256-bit single-cycle node port can overprovision FPGA block-RAM width relative to logical stored bits.",
+    "Wide out-of-context data ports omit integration routing and top-level package-pin placement.",
+    "Vivado 2025.2 differs from the comparison paper's Vivado 2018.3 flow."
+  ],
+  "report_sha256": {
+    "utilization.rpt": "e0f2d46e24a5808288161ab0fe13d8f27b5d636a34d18ab209a05f5809bdee2e",
+    "timing_summary.rpt": "b21aaa483ee9a997d9afeabb0947dd85488beb834325512bad4f2d894ab2193f",
+    "run_identity.txt": "24fb54dac6b1b90f792d8a645bb3ff5baf4f9bd9b334ca1d81e47cb6a725cf1b"
+  },
+  "source_sha256": {
+    "rtl/treehash/micro_hbs_treehash_warm_active_cache.sv": "142b2c897f832fe5f8ec3210515d1df4c46f37339b12393c7826353dcf94155b",
+    "rtl/treehash/micro_hbs_treehash_auth_provider.sv": "684bf89a29385fd1fd0e2aef6be057f42ef55d751a96a352683b630c7addea25",
+    "tb/integration/tb_micro_hbs_treehash_warm_active_cache.sv": "918ca85942617105bac1d9576a2273b2676310c216f5e63fd67de7e21ba42d1d",
+    "tb/integration/tb_micro_hbs_treehash_warm_auth_integration.sv": "5802ac58f67cce6db9ade9344f3a4503f66a8644a9d8336c285e61e67aaa1e4b",
+    "experiments/synth_treehash_warm_active_cache.tcl": "dc22d33a527b308e10a31834d2d3c503c8c15c9c4a9427c834ad07e809808f2b",
+    "experiments/collect_treehash_warm_active_cache_ppa.py": "d0899b211253c05a25f09f0b9bca4dcf160c2ab5af8ad67ae5062b712abf1d22"
+  }
+}

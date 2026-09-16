@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "result_id": "data_lowering_v0.1.0",
+  "classification": "offline_compiler_evidence",
+  "paper_comparable": false,
+  "profile": "logical object slots to 64-bit Scratchpad words and v1/v2 data descriptors",
+  "result": {
+    "mapping": "physical_word = logical_slot * ceil(logical_slot_bytes / 8)",
+    "word_byte_order": "logical byte zero is physical word bits 7:0",
+    "tail_zero_padding_tested": true,
+    "deterministic_digest_tested": true,
+    "overlap_and_bounds_rejected": true,
+    "data_operations_encoded": ["LOAD", "STORE", "XOR", "EMIT"],
+    "xmss_multiregister_move_lowered": true,
+    "xmss_descriptor_version": 2,
+    "xmss_binding_entries": 2
+  },
+  "limitations": [
+    "The independent RTL v2 data slice now consumes the lowered descriptor and address-binding format; it is not yet connected to the complete XMSS program or its WOTS/TreeHash datapaths.",
+    "The fixed logical-slot stride prioritizes affine proof and isolation over compact physical packing.",
+    "This is initialization-time compilation; it does not authorize per-Job task or Hash input."
+  ],
+  "source_sha256": {
+    "model/data_lowering.py": "af33917eb5e46657f06de94217862f86409e7e76e59e2cc3cecc077fd155ad20",
+    "tests/test_data_lowering.py": "1347c7b74c20b9b9b34899fe329ea44eaeea3695c5d030e6e035485dc5dea259",
+    "microcode/xmss/xmss_shake256_h10_w4_keygen.json": "c038811f3ed3dfe860f0f12b2c58feba13e7d5691e37f199ce9107095003353d"
+  }
+}

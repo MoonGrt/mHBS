@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "result_id": "xmss_cache_sign_projection_v0.1.0",
+  "classification": "model_projection_not_rtl_cycles",
+  "paper_comparable": false,
+  "profile": "XMSS-SHAKE256_10_256",
+  "assumptions": {
+    "parallel_lanes": 2,
+    "keccak_round_unroll": 2,
+    "cycles_per_permutation": 12,
+    "perfect_lane_balance": true,
+    "composer_memory_control_output_cycles": 0,
+    "randomized_h_shake_calls": 4,
+    "wots_leaf_shake_calls": 3346,
+    "sign_core_shake_calls": 1554,
+    "sign_core_keccak_permutations": 1555
+  },
+  "storage_projection": {
+    "FULL_CACHE": {
+      "mode": "FULL_CACHE",
+      "retained_nodes": 2047,
+      "retained_bytes": 65504,
+      "cache_nodes": 2047,
+      "working_nodes": 0,
+      "auth_cache_hits": 10,
+      "auth_cache_misses": 0,
+      "auth_recompute_leaves": 0,
+      "auth_recompute_parents": 0,
+      "auth_recompute_node_upper_bound": 0
+    },
+    "SUBTREE_CACHE": {
+      "mode": "SUBTREE_CACHE",
+      "retained_nodes": 138,
+      "retained_bytes": 4416,
+      "cache_nodes": 127,
+      "working_nodes": 11,
+      "auth_cache_hits": 6,
+      "auth_cache_misses": 4,
+      "auth_recompute_leaves": 15,
+      "auth_recompute_parents": 11,
+      "auth_recompute_node_upper_bound": 26,
+      "warm_active_subtree_extra_nodes": 30,
+      "warm_active_subtree_total_cache_nodes": 157,
+      "warm_active_subtree_auth_recompute_nodes": 0
+    },
+    "TREEHASH_MIN": {
+      "mode": "TREEHASH_MIN",
+      "retained_nodes": 21,
+      "retained_bytes": 672,
+      "cache_nodes": 0,
+      "working_nodes": 21,
+      "auth_cache_hits": 0,
+      "auth_cache_misses": 10,
+      "auth_recompute_leaves": 1024,
+      "auth_recompute_parents": 1023,
+      "auth_recompute_node_upper_bound": 2047
+    }
+  },
+  "points": {
+    "FULL_CACHE_OR_WARM_ACTIVE_SUBTREE": {
+      "shake256_calls": 1554,
+      "keccak_permutations": 1555,
+      "ideal_p2_u2_cycles": 9336,
+      "auth_cache_hits": 10,
+      "auth_recompute_nodes": 0,
+      "ideal_floor_over_non_strict_paper_cycles": 0.641694
+    },
+    "SUBTREE_UPPER_ONLY_COLD": {
+      "shake256_calls": 51788,
+      "keccak_permutations": 51789,
+      "ideal_p2_u2_cycles": 310740,
+      "auth_cache_hits": 6,
+      "auth_cache_misses": 4,
+      "auth_recompute_leaves": 15,
+      "auth_recompute_parents": 11,
+      "auth_recompute_nodes": 26,
+      "ideal_floor_over_non_strict_paper_cycles": 21.358169
+    },
+    "TREEHASH_MIN": {
+      "shake256_calls": 3431950,
+      "keccak_permutations": 3431951,
+      "ideal_p2_u2_cycles": 20591712,
+      "auth_recompute_nodes": 2047,
+      "ideal_floor_over_non_strict_paper_cycles": 1415.335212
+    }
+  },
+  "non_strict_paper_reference": {
+    "reported_mean_cycles": 14549,
+    "semantic_alignment": "structural_match_trace_unproven",
+    "use": "diagnostic ratio only; not a speedup claim"
+  },
+  "decision": [
+    "The implemented upper-only SUBTREE cache is a cold-cache storage point, not a fast-signing point.",
+    "A warm active low subtree must be added to make all authentication nodes cache hits within a subtree window.",
+    "All cycle values are permutation-only lower bounds and exclude the complete RTL datapath."
+  ],
+  "source_sha256": {
+    "model/treehash.py": "5b6eb0312fff54955cd962b5fc6c1e1f9bc5e33168ea1e8731eefcce3bffb4de",
+    "manifests/programs/xmss_shake256_h10_w4_keygen_v0.1.0.json": "1c1ec8329f44e926233bb22f87b263bb3cad3f34ca700263171d89c06911cb9d",
+    "manifests/programs/xmss_shake256_h10_w4_sign_v0.1.0.json": "5f9808f72c4d24b8b85fe081a7aa78f3fbdd7341d2d32846bab1bc5391479b89",
+    "manifests/experiments/workload_audit_v0.1.0.json": "eadf7b15a4cfa20c2b355e8d5b6ba8a4bc921e4be5b7e6404a29aa569a0d0c3a"
+  }
+}

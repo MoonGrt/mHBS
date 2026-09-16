@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "result_id": "xmss_sign_prehash_v0.1.0",
+  "classification": "native_microcoded_rtl_functional_evidence",
+  "paper_comparable": false,
+  "profile": "RFC8391 XMSS-SHAKE256_10_256 paper-W4",
+  "scope": "JSON-lowered Sign PRF randomizer and H_msg",
+  "configuration": {
+    "keccak_unroll": 2,
+    "active_lanes": 1,
+    "scratchpad_words_64bit": 1024,
+    "exported_layouts": 10,
+    "exported_components": 91,
+    "executed_layout_ids": [9, 10],
+    "executed_components": 10,
+    "frozen_kat_message_bytes": 21
+  },
+  "result": {
+    "accepted_job_commands": 1,
+    "host_control_writes_during_busy": 0,
+    "runtime_task_descriptors": 0,
+    "runtime_hash_descriptors": 0,
+    "issued_hash_layout_requests": 2,
+    "retired_microinstructions": 3,
+    "retired_components": 10,
+    "scratchpad_reads": 23,
+    "scratchpad_writes": 8,
+    "absorbed_rate_blocks": 3,
+    "start_to_done_cycles": 400,
+    "randomizer_hex": "2da8a4bb73cda9f1e255ab8ce75549951b797daf8b1c65b981e8d7726227b52d",
+    "message_digest_hex": "c71f259a96bd2819ba9317caf0665fb6d33543f5802eedae9ad4368590344385",
+    "kat_equal": true
+  },
+  "command": "make rtl-xmss-sign-prehash-test",
+  "expected_stdout": "PASS JSON-lowered XMSS Sign PRF/H_msg RTL cycles=400 one Job, no runtime task/hash ingress",
+  "limitations": [
+    "Job fields are loaded into fixed Scratchpad slots while IDLE rather than entering through the final Job latch or DMA.",
+    "This test covers the first two Sign hashes, not WOTS signature generation, authentication-path service, or output streaming.",
+    "The 21-byte KAT message length is frozen in the descriptor image."
+  ],
+  "source_sha256": {
+    "rtl/composer/micro_hbs_descriptor_shake_composer.sv": "d973e1d660fd9079bb0206ee07515e54fe20b7768d5c1a47be1747adb60f7399",
+    "rtl/composer/micro_hbs_layout_component_store.sv": "0f920eefc474810688178b80592187b424aa28cb93352369ccbe9e26aabc6f07",
+    "rtl/composer/micro_hbs_layout_descriptor_store.sv": "5def17f529e95b5a9e3f04fd7447706ec3ee9b4db52d2e6a29179f6bf93d5bb8",
+    "rtl/top/micro_hbs_descriptor_shake_slice.sv": "0f62499d0e67d5d9d97224b013b9be16eb542fc782d95b9eaca6a1745a955fec",
+    "tb/integration/tb_micro_hbs_xmss_sign_prehash_slice.sv": "fe5d758188e8ae6076d557409b530e278a2ec57bfa922cfe282f97560b414876",
+    "model/layout_lowering.py": "861e99028c1fb33aaa3bcb0d97366dbc83eb78ef64d47711684b3259c4e4b348",
+    "scripts/export_xmss_layouts.py": "5353ea825c642e4ae7f121b796de2a8f6afe665bc817679b3535cbd798217f31",
+    "manifests/programs/xmss_sign_layout_image_v0.1.0.json": "c56ee792391e9372c1be48198e6bc55acbebbd88901bcea020042b2987a3aead",
+    "manifests/programs/rtl_images/xmss_xmss_shake256_h10_w4_sign_layouts.hex": "0bd4db80878f69552ed7af6cb3143021307147081e75f9f43ca96e8ab9d9f983",
+    "manifests/programs/rtl_images/xmss_xmss_shake256_h10_w4_sign_components.hex": "1dacca77f69b3b63d8a6028ffa3acce39c544c33f2f9c82f98bf9cd570a367ff"
+  }
+}

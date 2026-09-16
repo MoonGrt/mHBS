@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "manifest_version": "0.1.0",
+  "program": "rfc8391-xmss-shake256-n32-h10-paper-w4-verify",
+  "source": "microcode/xmss/xmss_shake256_h10_w4_verify.json",
+  "profile": "XMSS-SHAKE256_10_256",
+  "operation": "VERIFY",
+  "paper_parameter_notation": {
+    "n_bytes": 32,
+    "h": 10,
+    "w_bits": 4,
+    "len": 67
+  },
+  "rfc_parameter_notation": {
+    "oid": "0x00000010",
+    "wots_base": 16
+  },
+  "micro_isa_version": "0.1",
+  "source_sha256": "7af0073a8bb5bac11c0032fddb8cc77de6cb724b311e165fa800afd93a501cc7",
+  "program_sha256": "bd9f30f588dd199004dbe78317c956f890cacaf0beb536612932a712edfdfc81",
+  "static_words": 177,
+  "static_bytes": 1416,
+  "maximum_loop_depth": 2,
+  "maximum_call_depth": 0,
+  "scratch_slots": 256,
+  "dynamic_instructions": 2826,
+  "shake256_calls": 1835,
+  "keccak_permutations": 1836,
+  "hash_class_counts": {
+    "hash_message": 1,
+    "prf": 1248,
+    "thash_f": 510,
+    "thash_h": 76
+  },
+  "input_signature_bytes": 2500,
+  "input_signature_sha256": "d4382f3c15c6e876fd75566df439f70d9c4e39e64c3a7b7a6e31b42c0127dbb0",
+  "expected_public_root": "ba62bdc39af136a63e66f19d3cfcda232cf5cf485aec1e22c35d739bdc511425",
+  "hash_trace_sha256": "21ea309594cd5e007cfb13d0ddc37c30a79306fe9787b4a5cb9f20eb368f2986",
+  "one_bit_mutation": {
+    "signature_byte_offset": 36,
+    "xor_mask": "0x01",
+    "computed_root": "ae46cdfd88465a772898a8c6f7ee413a4144b92f33265e95afb4b01d26fa8f17",
+    "root_mismatch": true,
+    "oracle_rejects": true
+  },
+  "job_admission": {
+    "source_tuple": [
+      "public_key",
+      "message",
+      "signature"
+    ],
+    "signature_shape": {
+      "index_bytes": 4,
+      "randomizer_bytes": 32,
+      "wots_elements": 67,
+      "wots_element_bytes": 32,
+      "authentication_nodes": 10,
+      "authentication_node_bytes": 32
+    },
+    "note": "The complete signature is split once into statically sized fields because the frozen generic interpreter has no byte-slice component; execution remains one immutable Job."
+  },
+  "autonomy": {
+    "accepted_job_commands": 1,
+    "host_control_writes_during_busy": 0,
+    "external_task_descriptors": 0,
+    "external_hash_descriptors": 0,
+    "host_supplied_chain_lengths": 0
+  },
+  "evidence_level": "MODEL_PASS",
+  "limitations": [
+    "The one-time Job-admission shaping is an input binding operation, not an execution-time software task or Hash schedule.",
+    "The verification flow is proven against the frozen instruction model; it is not yet an integrated RTL timing result.",
+    "This result is not PAPER_COMPARABLE until matching storage semantics and integrated RTL timing exist."
+  ]
+}

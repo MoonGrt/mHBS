@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "result_id": "tree_push_slice_v0.1.0",
+  "classification": "rtl_functional_evidence",
+  "paper_comparable": false,
+  "configuration": {
+    "tree_height": 2,
+    "node_bytes": 32,
+    "keccak_unroll": 2,
+    "scratchpad_words_64bit": 64,
+    "layout_id": "0x0042",
+    "target_leaf": 2
+  },
+  "autonomy": {
+    "accepted_job_commands": 1,
+    "host_control_writes_during_busy": 0,
+    "external_task_descriptors": 0,
+    "external_hash_descriptors": 0
+  },
+  "result": {
+    "issued_tree_requests": 4,
+    "accepted_leaves": 4,
+    "internal_shake256_parent_calls": 3,
+    "retired_microinstructions": 11,
+    "root_and_auth_path_match_independent_hashlib_oracle": true,
+    "tree_request_backpressure_and_error_paths_tested_separately": true
+  },
+  "limitations": [
+    "Functional vertical slice only; it is not a complete LMS, XMSS or SLH-DSA operation.",
+    "TREE_HEIGHT and NODE_BYTES are synthesis parameters rather than dynamic layout-descriptor fields.",
+    "The parent operation is generic SHAKE256(left || right), not a standard-specific LMS/XMSS/SLH-DSA composer.",
+    "A Scratchpad response error after the first accepted leaf requires reset because the current TreeHash core has no transaction abort."
+  ],
+  "source_sha256": {
+    "rtl/top/micro_hbs_tree_push_slice.sv": "62bde213defd91c089f8fd4d81cdb22be821b6029aed085c18d8b73e50da0546",
+    "rtl/treehash/micro_hbs_tree_push_adapter.sv": "7bd2988295f9091dc77181aa9e0584cad8b41883cf0be96d8bf4b6b7aee4d112",
+    "rtl/sequencer/micro_hbs_sequencer.sv": "7ac5d4ffecb240f7873f5fde8958a1f17a7542e51936a27c31bbadac5f792303",
+    "rtl/treehash/micro_hbs_treehash_min.sv": "4f50400a5d7222c8b9ab2736d6c4edee5a59e9208466f9b004223fae98095c77",
+    "rtl/treehash/micro_hbs_tree_parent_shake.sv": "8b532fe500d341dc5ed6fb8b512f902482479a69f04ea7114587c8e139b0e019",
+    "rtl/memory/micro_hbs_scratchpad64.sv": "5e9c47071b3ea781bb4c374c27e63a2de4da12ddcacc287950fd575662a8727a",
+    "tb/integration/tb_micro_hbs_tree_push_slice.sv": "2a32460ba39d39abb7bc1cd477a0b276e03a823821bb02fd230818d9646628c5"
+  }
+}

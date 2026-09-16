@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "result_id": "lms_tree_parent_v0.1.0",
+  "scope": "rfc8554_lms_sha256_256_internal_parent_rtl",
+  "classification": "engineering_capability_evidence_only",
+  "paper_comparable": false,
+  "implementation_stage": "rtl_simulation",
+  "standard": "RFC 8554",
+  "configuration": {
+    "hash": "SHA256/256",
+    "identifier_bytes": 16,
+    "node_number_bytes": 4,
+    "domain_identifier_hex": "8383",
+    "node_bytes": 32,
+    "preimage_bytes": 86,
+    "sha256_blocks_per_parent": 2,
+    "preimage": "I || u32(r) || u16(D_INTR) || left || right",
+    "integer_encoding": "big-endian"
+  },
+  "common_vector_input": {
+    "identifier": "d08fabd4a2091ff0a8cb4ed834e74534",
+    "node_number": 17,
+    "left": "202122232425262728292a2b2c2d2e2f303132333435363738393a3b3c3d3e3f",
+    "right": "808182838485868788898a8b8c8d8e8f909192939495969798999a9b9c9d9e9f"
+  },
+  "vectors": [
+    {
+      "name": "base",
+      "digest": "1f4ab84cc2e79cea4150fcc2c2c4a18a7ab819873bbdbee447f48905dc428309"
+    },
+    {
+      "name": "left_right_swapped",
+      "digest": "5eb0454beb741733066069b69a87a4e345e1b6a6f42fe8ce13c30926f2981680"
+    },
+    {
+      "name": "node_number_18",
+      "node_number": 18,
+      "digest": "cdffcde6a6ee9d4991897ee33328ac0476039bacaca3d40358bb5d09fe9d4cfa"
+    },
+    {
+      "name": "identifier_first_byte_d1",
+      "identifier": "d18fabd4a2091ff0a8cb4ed834e74534",
+      "digest": "250090025c297d0534408b348285464ac05ee69d38c7bff568d6360dec4f25f9"
+    }
+  ],
+  "functional_checks": {
+    "python_hashlib_vectors_equal": true,
+    "exact_86_byte_preimage_layout": true,
+    "u32_node_number_big_endian": true,
+    "domain_identifier_8383": true,
+    "left_right_order_is_not_commuted": true,
+    "identifier_change_affects_parent": true,
+    "node_number_change_affects_parent": true,
+    "two_sha256_blocks_per_parent": true,
+    "request_valid_held_no_duplicate_accept": true,
+    "response_backpressure_holds_parent_and_status": true,
+    "hash_error_masks_parent_to_zero": true,
+    "iverilog_test_pass": true,
+    "verilator_rtl_lint_pass": true
+  },
+  "test_command": "iverilog -g2012 -Wall -s tb_micro_hbs_lms_tree_parent -o build/iverilog/lms_tree_parent.vvp rtl/hash_lane/micro_hbs_sha256_bounded.sv rtl/treehash/micro_hbs_lms_tree_parent.sv tb/unit/tb_micro_hbs_lms_tree_parent.sv && vvp build/iverilog/lms_tree_parent.vvp",
+  "limitations": [
+    "This module implements only the RFC 8554 LMS internal-parent hash; LM-OTS, LMS leaf construction, TreeHash control, authentication-path storage, and state management are out of scope.",
+    "The wrapper is fixed to SHA256/256 with 32-byte nodes and the 86-byte RFC 8554 internal-node preimage.",
+    "This is standalone RTL correctness evidence and is not yet connected to the data engine, cache refill path, or a complete LMS Job replay.",
+    "No synthesis, timing, area, throughput, or paper-comparison claim is attached to this manifest."
+  ],
+  "source_sha256": {
+    "rtl/hash_lane/micro_hbs_sha256_bounded.sv": "264e126a446c0e5b7cc3b9ed44447b7b5d88ab7a27e1f4e61841ed356c6af847",
+    "rtl/treehash/micro_hbs_lms_tree_parent.sv": "70ff0a9df58d78aaecddd2e9da6dd9badac60bbcab2d81ee308806a62e734540",
+    "tb/unit/tb_micro_hbs_lms_tree_parent.sv": "ea3f761f3073542ad3476418de4af80fa343762c64774ab3fe89e3d8a128e411"
+  }
+}

@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "result_id": "windowed_p2_u2_slice_v0.1.0",
+  "scope": "microsequencer_banked_window_static_p2_u2_slice",
+  "classification": "engineering_vertical_slice_not_algorithm_replay",
+  "paper_comparable": false,
+  "device": "xc7a200tffg1156-2",
+  "tool": "2025.2",
+  "configuration": {
+    "parallel_lanes": 2,
+    "unroll": 2,
+    "program_words": 512,
+    "pair_capacity": 3,
+    "message_capacity": 6,
+    "scheduler": "static_even_odd_microcode",
+    "integrated_with_microsequencer": true
+  },
+  "clock_constraint": {
+    "period_ns": 10.0,
+    "frequency_mhz": 100.0
+  },
+  "post_route": {
+    "slice_lut": 20204,
+    "slice_register": 11294,
+    "ramb36": 3,
+    "ramb18": 0,
+    "dsp": 0,
+    "wns_ns": 0.368,
+    "bram36_equivalent": 3.0,
+    "timing_met": true
+  },
+  "hierarchical_post_route": {
+    "top_glue": {
+      "slice_lut": 1,
+      "slice_register": 192
+    },
+    "sequencer": {
+      "slice_lut": 908,
+      "slice_register": 773
+    },
+    "adapter": {
+      "slice_lut": 19285,
+      "slice_register": 10324
+    },
+    "message_banks": {
+      "slice_lut": null,
+      "slice_register": null,
+      "ramb36": 2,
+      "basis": "two message-bank RAMs are absorbed into the top row; subtract the sequencer's one program-store RAMB36"
+    }
+  },
+  "functional_checks": {
+    "known_answer_hashes": 7,
+    "jobs": 2,
+    "hash_requests_per_job": 2,
+    "even_lane_masks": [
+      3,
+      3
+    ],
+    "odd_lane_masks": [
+      3,
+      1
+    ],
+    "even_bank_reads": [
+      36,
+      36
+    ],
+    "odd_bank_reads": [
+      36,
+      18
+    ],
+    "odd_lane_active_cycles": [
+      32,
+      16
+    ],
+    "even_lane_active_cycles": [
+      32,
+      32
+    ],
+    "even_lane_idle_cycles": [
+      52,
+      52
+    ],
+    "odd_lane_idle_cycles": [
+      52,
+      68
+    ],
+    "busy_window_cycles_even": 84,
+    "busy_window_cycles_odd": 84,
+    "compose_cycles_per_job": 38,
+    "busy_program_writes": 0,
+    "busy_message_writes_rejected": 2,
+    "external_bus_mutation_after_job_acceptance_safe": true,
+    "invalid_lane_mask_rejected_before_bank_read_or_lane_dispatch": true
+  },
+  "versus_rejected_wide_batch": {
+    "windowed_message_capacity": 6,
+    "rejected_wide_message_capacity": 5,
+    "lut_reduction_percent": 51.471,
+    "ff_reduction_percent": 28.324
+  },
+  "limitations": [
+    "This is a microsequencer/banked-composer/hash-lane vertical slice, not a complete LMS, XMSS or SLH-DSA replay.",
+    "The test preloads complete SHAKE messages while IDLE; the final algorithm path must compose them from raw Job data and internal nodes.",
+    "The 64-bit bank adds 18 read/assembly cycles per pair and is not the required one-cycle OTS rate-wide fast path.",
+    "The five-message rejected point and six-message windowed point are close but not identical capacities.",
+    "The external paper baseline remains non-strict and is not used for a speedup claim."
+  ],
+  "report_sha256": {
+    "utilization.rpt": "75306dae4f5252161a0ddae42b7afe51471392613e0c44a01b7e025fd7d9b608",
+    "utilization_hierarchical.rpt": "fdf4e0ee7d38fb1a443ce69ad851e215ecf736b69ce202e53b72d76911d20399",
+    "timing_summary.rpt": "2ecc1a35a40d4e1635cc03adbe586fc5bd22f0b937d977a1b9acec08ea7333e9",
+    "run_identity.txt": "45727ed7500657456f26abe467fb2e845d2a83285d60b87cd1d9b0bdbd855447"
+  },
+  "source_sha256": {
+    "rtl/sequencer/micro_hbs_program_store.sv": "6a3a615bfa5e6a589f7c6b91239edfadfdc086f42e4d2a5625c07d33e3703504",
+    "rtl/sequencer/micro_hbs_sequencer.sv": "7ac5d4ffecb240f7873f5fde8958a1f17a7542e51936a27c31bbadac5f792303",
+    "rtl/memory/micro_hbs_dual_message_bank64.sv": "9e2767bb3bc433607e250614a85e76be246ca262c61e5bea6e428fa907498ee1",
+    "rtl/hash_lane/micro_hbs_keccak_f1600.sv": "8f73d7a275390ba6d8bdcd7e3fc8f80554326f2fefc1611be7f8cb72ae0dc0ac",
+    "rtl/hash_lane/micro_hbs_shake256_single_block.sv": "60ef7c32ce8a775339dbf585bf1594e27f70ab59170a57c32506f4344c61c8b6",
+    "rtl/composer/micro_hbs_static_p2_window_adapter.sv": "99bf45c1ffeebf84b6ad7b9de548fde30cab673d4cbcb589beff25d11fa90f31",
+    "rtl/top/micro_hbs_windowed_p2_shake_slice.sv": "e178e9ebf6c06535e0c37a289295f062fd1896090e8540b48361af46d7cdf52b",
+    "tb/integration/tb_micro_hbs_windowed_p2_shake_slice.sv": "fb5f3444a6b7d1b12c38b96e83fceff14bae91c97abbac474a39eb0d1da9adce",
+    "experiments/synth_windowed_p2_shake_slice.tcl": "f41d6b38c86849cca713d5fb59d00f0af21f966dc26241a652cc71e75ba78af3",
+    "manifests/experiments/static_p2_u2_batch_v0.1.0.json": "ffa0c69842f4481f6ce52b24ed7b7379690a0fc96bb40df2d95389962c7a1364"
+  }
+}

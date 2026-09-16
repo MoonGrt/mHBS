@@ -1,0 +1,2270 @@
+{
+  "schema_version": 1,
+  "micro_isa_version": "0.1",
+  "name": "rfc8391-xmss-shake256-n32-h10-paper-w4-verify",
+  "entry": "entry",
+  "bounds": {
+    "scratch_slots": 256,
+    "max_loop_bound": 1024,
+    "max_dynamic_instructions": 100000
+  },
+  "layouts": {
+    "0": {
+      "name": "message_digest",
+      "class": "hash_message",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 4096,
+      "destination": {
+        "base": 219
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000002"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "randomizer",
+          "length": 32
+        },
+        {
+          "kind": "job_bytes",
+          "field": "public_root",
+          "length": 32
+        },
+        {
+          "kind": "job_int",
+          "field": "index",
+          "bytes": 32
+        },
+        {
+          "kind": "job_bytes",
+          "field": "message"
+        }
+      ]
+    },
+    "1": {
+      "name": "thash_f_key",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 240
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            0,
+            {
+              "kind": "reg",
+              "reg": 0
+            },
+            {
+              "kind": "reg",
+              "reg": 1
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 7
+                  },
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  }
+                ]
+              }
+            },
+            0
+          ]
+        }
+      ]
+    },
+    "2": {
+      "name": "thash_f_mask",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 241
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            0,
+            {
+              "kind": "reg",
+              "reg": 0
+            },
+            {
+              "kind": "reg",
+              "reg": 1
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 7
+                  },
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  }
+                ]
+              }
+            },
+            1
+          ]
+        }
+      ]
+    },
+    "3": {
+      "name": "thash_f_core",
+      "class": "thash_f",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 0,
+        "index_reg": 1
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        {
+          "kind": "memory",
+          "base": 240
+        },
+        {
+          "kind": "xor",
+          "left": {
+            "kind": "memory",
+            "base": 0,
+            "index_reg": 1
+          },
+          "right": {
+            "kind": "memory",
+            "base": 241
+          }
+        }
+      ]
+    },
+    "4": {
+      "name": "thash_h_key",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 240
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            1,
+            {
+              "kind": "reg",
+              "reg": 0
+            },
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            0
+          ]
+        }
+      ]
+    },
+    "5": {
+      "name": "thash_h_mask_left",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 241
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            1,
+            {
+              "kind": "reg",
+              "reg": 0
+            },
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            1
+          ]
+        }
+      ]
+    },
+    "6": {
+      "name": "thash_h_mask_right",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 242
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            1,
+            {
+              "kind": "reg",
+              "reg": 0
+            },
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            2
+          ]
+        }
+      ]
+    },
+    "7": {
+      "name": "thash_h_core",
+      "class": "thash_h",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 128,
+      "destination": {
+        "base_reg": 6,
+        "index_reg": 3
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "kind": "memory",
+          "base": 240
+        },
+        {
+          "kind": "xor",
+          "left": {
+            "kind": "memory",
+            "base_reg": 5,
+            "index_reg": 3,
+            "stride": 2
+          },
+          "right": {
+            "kind": "memory",
+            "base": 241
+          }
+        },
+        {
+          "kind": "xor",
+          "left": {
+            "kind": "memory",
+            "base": 1,
+            "base_reg": 5,
+            "index_reg": 3,
+            "stride": 2
+          },
+          "right": {
+            "kind": "memory",
+            "base": 242
+          }
+        }
+      ]
+    },
+    "8": {
+      "name": "auth_thash_h_key",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 240
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            2,
+            0,
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            0
+          ]
+        }
+      ]
+    },
+    "9": {
+      "name": "auth_thash_h_mask_left",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 241
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            2,
+            0,
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            1
+          ]
+        }
+      ]
+    },
+    "10": {
+      "name": "auth_thash_h_mask_right",
+      "class": "prf",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 96,
+      "destination": {
+        "base": 242
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000003"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 32
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            0,
+            0,
+            2,
+            0,
+            {
+              "kind": "reg",
+              "reg": 4
+            },
+            {
+              "kind": "reg",
+              "reg": 3
+            },
+            2
+          ]
+        }
+      ]
+    },
+    "11": {
+      "name": "authentication_path_thash_h_core",
+      "class": "thash_h",
+      "hash": "shake256",
+      "output_bytes": 32,
+      "max_input_bytes": 128,
+      "destination": {
+        "base": 137
+      },
+      "components": [
+        {
+          "kind": "literal",
+          "hex": "0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "kind": "memory",
+          "base": 240
+        },
+        {
+          "kind": "ordered_pair",
+          "condition": {
+            "op": "and",
+            "args": [
+              {
+                "op": "shr",
+                "value": {
+                  "kind": "job_int",
+                  "field": "index"
+                },
+                "shift": {
+                  "kind": "reg",
+                  "reg": 4
+                }
+              },
+              {
+                "kind": "literal_int",
+                "value": 1
+              }
+            ]
+          },
+          "when_zero": [
+            {
+              "kind": "xor",
+              "left": {
+                "kind": "memory",
+                "base": 137
+              },
+              "right": {
+                "kind": "memory",
+                "base": 241
+              }
+            },
+            {
+              "kind": "xor",
+              "left": {
+                "kind": "memory",
+                "base": 221,
+                "index_reg": 4
+              },
+              "right": {
+                "kind": "memory",
+                "base": 242
+              }
+            }
+          ],
+          "when_nonzero": [
+            {
+              "kind": "xor",
+              "left": {
+                "kind": "memory",
+                "base": 221,
+                "index_reg": 4
+              },
+              "right": {
+                "kind": "memory",
+                "base": 241
+              }
+            },
+            {
+              "kind": "xor",
+              "left": {
+                "kind": "memory",
+                "base": 137
+              },
+              "right": {
+                "kind": "memory",
+                "base": 242
+              }
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "moves": {
+    "0": {
+      "name": "carry_odd_ltree_node",
+      "source": {
+        "base_reg": 5,
+        "index_reg": 7
+      },
+      "destination": {
+        "base_reg": 6,
+        "index_reg": 3
+      }
+    }
+  },
+  "program": [
+    {
+      "label": "entry"
+    },
+    {
+      "op": "LOAD",
+      "imm": 0
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 0
+    },
+    {
+      "op": "LOAD",
+      "imm": 1
+    },
+    {
+      "op": "LOAD",
+      "imm": 10
+    },
+    {
+      "op": "LOAD",
+      "imm": 11
+    },
+    {
+      "op": "LOAD",
+      "imm": 12
+    },
+    {
+      "op": "LOAD",
+      "imm": 13
+    },
+    {
+      "op": "LOAD",
+      "imm": 14
+    },
+    {
+      "op": "LOAD",
+      "imm": 15
+    },
+    {
+      "op": "LOAD",
+      "imm": 16
+    },
+    {
+      "op": "LOAD",
+      "imm": 17
+    },
+    {
+      "op": "LOAD",
+      "imm": 18
+    },
+    {
+      "op": "LOAD",
+      "imm": 19
+    },
+    {
+      "op": "LOAD",
+      "imm": 20
+    },
+    {
+      "op": "LOAD",
+      "imm": 21
+    },
+    {
+      "op": "LOAD",
+      "imm": 22
+    },
+    {
+      "op": "LOAD",
+      "imm": 23
+    },
+    {
+      "op": "LOAD",
+      "imm": 24
+    },
+    {
+      "op": "LOAD",
+      "imm": 25
+    },
+    {
+      "op": "LOAD",
+      "imm": 26
+    },
+    {
+      "op": "LOAD",
+      "imm": 27
+    },
+    {
+      "op": "LOAD",
+      "imm": 28
+    },
+    {
+      "op": "LOAD",
+      "imm": 29
+    },
+    {
+      "op": "LOAD",
+      "imm": 30
+    },
+    {
+      "op": "LOAD",
+      "imm": 31
+    },
+    {
+      "op": "LOAD",
+      "imm": 32
+    },
+    {
+      "op": "LOAD",
+      "imm": 33
+    },
+    {
+      "op": "LOAD",
+      "imm": 34
+    },
+    {
+      "op": "LOAD",
+      "imm": 35
+    },
+    {
+      "op": "LOAD",
+      "imm": 36
+    },
+    {
+      "op": "LOAD",
+      "imm": 37
+    },
+    {
+      "op": "LOAD",
+      "imm": 38
+    },
+    {
+      "op": "LOAD",
+      "imm": 39
+    },
+    {
+      "op": "LOAD",
+      "imm": 40
+    },
+    {
+      "op": "LOAD",
+      "imm": 41
+    },
+    {
+      "op": "LOAD",
+      "imm": 42
+    },
+    {
+      "op": "LOAD",
+      "imm": 43
+    },
+    {
+      "op": "LOAD",
+      "imm": 44
+    },
+    {
+      "op": "LOAD",
+      "imm": 45
+    },
+    {
+      "op": "LOAD",
+      "imm": 46
+    },
+    {
+      "op": "LOAD",
+      "imm": 47
+    },
+    {
+      "op": "LOAD",
+      "imm": 48
+    },
+    {
+      "op": "LOAD",
+      "imm": 49
+    },
+    {
+      "op": "LOAD",
+      "imm": 50
+    },
+    {
+      "op": "LOAD",
+      "imm": 51
+    },
+    {
+      "op": "LOAD",
+      "imm": 52
+    },
+    {
+      "op": "LOAD",
+      "imm": 53
+    },
+    {
+      "op": "LOAD",
+      "imm": 54
+    },
+    {
+      "op": "LOAD",
+      "imm": 55
+    },
+    {
+      "op": "LOAD",
+      "imm": 56
+    },
+    {
+      "op": "LOAD",
+      "imm": 57
+    },
+    {
+      "op": "LOAD",
+      "imm": 58
+    },
+    {
+      "op": "LOAD",
+      "imm": 59
+    },
+    {
+      "op": "LOAD",
+      "imm": 60
+    },
+    {
+      "op": "LOAD",
+      "imm": 61
+    },
+    {
+      "op": "LOAD",
+      "imm": 62
+    },
+    {
+      "op": "LOAD",
+      "imm": 63
+    },
+    {
+      "op": "LOAD",
+      "imm": 64
+    },
+    {
+      "op": "LOAD",
+      "imm": 65
+    },
+    {
+      "op": "LOAD",
+      "imm": 66
+    },
+    {
+      "op": "LOAD",
+      "imm": 67
+    },
+    {
+      "op": "LOAD",
+      "imm": 68
+    },
+    {
+      "op": "LOAD",
+      "imm": 69
+    },
+    {
+      "op": "LOAD",
+      "imm": 70
+    },
+    {
+      "op": "LOAD",
+      "imm": 71
+    },
+    {
+      "op": "LOAD",
+      "imm": 72
+    },
+    {
+      "op": "LOAD",
+      "imm": 73
+    },
+    {
+      "op": "LOAD",
+      "imm": 74
+    },
+    {
+      "op": "LOAD",
+      "imm": 75
+    },
+    {
+      "op": "LOAD",
+      "imm": 76
+    },
+    {
+      "op": "LOAD",
+      "imm": 80
+    },
+    {
+      "op": "LOAD",
+      "imm": 81
+    },
+    {
+      "op": "LOAD",
+      "imm": 82
+    },
+    {
+      "op": "LOAD",
+      "imm": 83
+    },
+    {
+      "op": "LOAD",
+      "imm": 84
+    },
+    {
+      "op": "LOAD",
+      "imm": 85
+    },
+    {
+      "op": "LOAD",
+      "imm": 86
+    },
+    {
+      "op": "LOAD",
+      "imm": 87
+    },
+    {
+      "op": "LOAD",
+      "imm": 88
+    },
+    {
+      "op": "LOAD",
+      "imm": 89
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 217
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 1,
+      "imm": 67
+    },
+    {
+      "op": "LOAD",
+      "imm": 4
+    },
+    {
+      "op": "LOAD",
+      "imm": 2
+    },
+    {
+      "op": "LOOP_SETUP",
+      "flags": 1,
+      "rd": 6,
+      "rs": 2,
+      "target": "after_wots_chain"
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 1
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 2
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 3
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "label": "after_wots_chain"
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 67
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 0
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 33
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 7,
+      "imm": 66
+    },
+    {
+      "op": "MOVI",
+      "rd": 3,
+      "imm": 33
+    },
+    {
+      "op": "STORE",
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 67
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 101
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 1
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 17
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 101
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 118
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 2
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 8
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 7,
+      "imm": 16
+    },
+    {
+      "op": "MOVI",
+      "rd": 3,
+      "imm": 8
+    },
+    {
+      "op": "STORE",
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 118
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 127
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 3
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 7,
+      "imm": 8
+    },
+    {
+      "op": "MOVI",
+      "rd": 3,
+      "imm": 4
+    },
+    {
+      "op": "STORE",
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 127
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 132
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 4
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 2
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 7,
+      "imm": 4
+    },
+    {
+      "op": "MOVI",
+      "rd": 3,
+      "imm": 2
+    },
+    {
+      "op": "STORE",
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 132
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 135
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 5
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 1
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "MOVI",
+      "rd": 7,
+      "imm": 2
+    },
+    {
+      "op": "MOVI",
+      "rd": 3,
+      "imm": 1
+    },
+    {
+      "op": "STORE",
+      "imm": 0
+    },
+    {
+      "op": "MOVI",
+      "rd": 5,
+      "imm": 135
+    },
+    {
+      "op": "MOVI",
+      "rd": 6,
+      "imm": 137
+    },
+    {
+      "op": "MOVI",
+      "rd": 4,
+      "imm": 6
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 3,
+      "imm": 1
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 4
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 5
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 6
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "LOOP_SETUP",
+      "rs": 4,
+      "imm": 10
+    },
+    {
+      "op": "LOAD",
+      "imm": 3
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 8
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 9
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 10
+    },
+    {
+      "op": "HASH_LAYOUT",
+      "imm": 11
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "EMIT",
+      "rd": 137
+    },
+    {
+      "op": "HALT"
+    }
+  ],
+  "loads": {
+    "0": {
+      "name": "signature_index_to_leaf_register",
+      "source": {
+        "kind": "job_int",
+        "field": "index",
+        "bytes": 4
+      },
+      "destination_reg": 0,
+      "endian": "big"
+    },
+    "1": {
+      "name": "wots_chain_lengths",
+      "source": {
+        "kind": "memory",
+        "base": 219
+      },
+      "transform": "base_w_checksum",
+      "log_w": 4,
+      "len1": 64,
+      "len2": 3,
+      "destination": {
+        "base": 150
+      }
+    },
+    "2": {
+      "name": "remaining_wots_chain_steps",
+      "source": {
+        "kind": "literal",
+        "hex": ""
+      },
+      "transform": "integer_expression",
+      "expression": {
+        "op": "sub",
+        "left": {
+          "kind": "literal_int",
+          "value": 15
+        },
+        "right": {
+          "kind": "reg",
+          "reg": 7
+        }
+      },
+      "bytes": 1,
+      "destination": {
+        "base": 217
+      }
+    },
+    "3": {
+      "name": "authentication_parent_index",
+      "source": {
+        "kind": "literal",
+        "hex": ""
+      },
+      "transform": "integer_expression",
+      "expression": {
+        "op": "shr",
+        "value": {
+          "kind": "job_int",
+          "field": "index"
+        },
+        "shift": {
+          "kind": "reg",
+          "reg": 4,
+          "add": 1
+        }
+      },
+      "destination_reg": 3
+    },
+    "4": {
+      "name": "current_wots_chain_start",
+      "source": {
+        "kind": "memory",
+        "base": 150,
+        "index_reg": 1
+      },
+      "destination_reg": 7,
+      "endian": "big"
+    },
+    "10": {
+      "name": "load_wots_signature_element_00",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_00",
+        "length": 32
+      },
+      "destination": {
+        "base": 0
+      }
+    },
+    "11": {
+      "name": "load_wots_signature_element_01",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_01",
+        "length": 32
+      },
+      "destination": {
+        "base": 1
+      }
+    },
+    "12": {
+      "name": "load_wots_signature_element_02",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_02",
+        "length": 32
+      },
+      "destination": {
+        "base": 2
+      }
+    },
+    "13": {
+      "name": "load_wots_signature_element_03",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_03",
+        "length": 32
+      },
+      "destination": {
+        "base": 3
+      }
+    },
+    "14": {
+      "name": "load_wots_signature_element_04",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_04",
+        "length": 32
+      },
+      "destination": {
+        "base": 4
+      }
+    },
+    "15": {
+      "name": "load_wots_signature_element_05",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_05",
+        "length": 32
+      },
+      "destination": {
+        "base": 5
+      }
+    },
+    "16": {
+      "name": "load_wots_signature_element_06",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_06",
+        "length": 32
+      },
+      "destination": {
+        "base": 6
+      }
+    },
+    "17": {
+      "name": "load_wots_signature_element_07",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_07",
+        "length": 32
+      },
+      "destination": {
+        "base": 7
+      }
+    },
+    "18": {
+      "name": "load_wots_signature_element_08",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_08",
+        "length": 32
+      },
+      "destination": {
+        "base": 8
+      }
+    },
+    "19": {
+      "name": "load_wots_signature_element_09",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_09",
+        "length": 32
+      },
+      "destination": {
+        "base": 9
+      }
+    },
+    "20": {
+      "name": "load_wots_signature_element_10",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_10",
+        "length": 32
+      },
+      "destination": {
+        "base": 10
+      }
+    },
+    "21": {
+      "name": "load_wots_signature_element_11",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_11",
+        "length": 32
+      },
+      "destination": {
+        "base": 11
+      }
+    },
+    "22": {
+      "name": "load_wots_signature_element_12",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_12",
+        "length": 32
+      },
+      "destination": {
+        "base": 12
+      }
+    },
+    "23": {
+      "name": "load_wots_signature_element_13",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_13",
+        "length": 32
+      },
+      "destination": {
+        "base": 13
+      }
+    },
+    "24": {
+      "name": "load_wots_signature_element_14",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_14",
+        "length": 32
+      },
+      "destination": {
+        "base": 14
+      }
+    },
+    "25": {
+      "name": "load_wots_signature_element_15",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_15",
+        "length": 32
+      },
+      "destination": {
+        "base": 15
+      }
+    },
+    "26": {
+      "name": "load_wots_signature_element_16",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_16",
+        "length": 32
+      },
+      "destination": {
+        "base": 16
+      }
+    },
+    "27": {
+      "name": "load_wots_signature_element_17",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_17",
+        "length": 32
+      },
+      "destination": {
+        "base": 17
+      }
+    },
+    "28": {
+      "name": "load_wots_signature_element_18",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_18",
+        "length": 32
+      },
+      "destination": {
+        "base": 18
+      }
+    },
+    "29": {
+      "name": "load_wots_signature_element_19",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_19",
+        "length": 32
+      },
+      "destination": {
+        "base": 19
+      }
+    },
+    "30": {
+      "name": "load_wots_signature_element_20",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_20",
+        "length": 32
+      },
+      "destination": {
+        "base": 20
+      }
+    },
+    "31": {
+      "name": "load_wots_signature_element_21",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_21",
+        "length": 32
+      },
+      "destination": {
+        "base": 21
+      }
+    },
+    "32": {
+      "name": "load_wots_signature_element_22",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_22",
+        "length": 32
+      },
+      "destination": {
+        "base": 22
+      }
+    },
+    "33": {
+      "name": "load_wots_signature_element_23",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_23",
+        "length": 32
+      },
+      "destination": {
+        "base": 23
+      }
+    },
+    "34": {
+      "name": "load_wots_signature_element_24",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_24",
+        "length": 32
+      },
+      "destination": {
+        "base": 24
+      }
+    },
+    "35": {
+      "name": "load_wots_signature_element_25",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_25",
+        "length": 32
+      },
+      "destination": {
+        "base": 25
+      }
+    },
+    "36": {
+      "name": "load_wots_signature_element_26",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_26",
+        "length": 32
+      },
+      "destination": {
+        "base": 26
+      }
+    },
+    "37": {
+      "name": "load_wots_signature_element_27",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_27",
+        "length": 32
+      },
+      "destination": {
+        "base": 27
+      }
+    },
+    "38": {
+      "name": "load_wots_signature_element_28",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_28",
+        "length": 32
+      },
+      "destination": {
+        "base": 28
+      }
+    },
+    "39": {
+      "name": "load_wots_signature_element_29",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_29",
+        "length": 32
+      },
+      "destination": {
+        "base": 29
+      }
+    },
+    "40": {
+      "name": "load_wots_signature_element_30",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_30",
+        "length": 32
+      },
+      "destination": {
+        "base": 30
+      }
+    },
+    "41": {
+      "name": "load_wots_signature_element_31",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_31",
+        "length": 32
+      },
+      "destination": {
+        "base": 31
+      }
+    },
+    "42": {
+      "name": "load_wots_signature_element_32",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_32",
+        "length": 32
+      },
+      "destination": {
+        "base": 32
+      }
+    },
+    "43": {
+      "name": "load_wots_signature_element_33",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_33",
+        "length": 32
+      },
+      "destination": {
+        "base": 33
+      }
+    },
+    "44": {
+      "name": "load_wots_signature_element_34",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_34",
+        "length": 32
+      },
+      "destination": {
+        "base": 34
+      }
+    },
+    "45": {
+      "name": "load_wots_signature_element_35",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_35",
+        "length": 32
+      },
+      "destination": {
+        "base": 35
+      }
+    },
+    "46": {
+      "name": "load_wots_signature_element_36",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_36",
+        "length": 32
+      },
+      "destination": {
+        "base": 36
+      }
+    },
+    "47": {
+      "name": "load_wots_signature_element_37",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_37",
+        "length": 32
+      },
+      "destination": {
+        "base": 37
+      }
+    },
+    "48": {
+      "name": "load_wots_signature_element_38",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_38",
+        "length": 32
+      },
+      "destination": {
+        "base": 38
+      }
+    },
+    "49": {
+      "name": "load_wots_signature_element_39",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_39",
+        "length": 32
+      },
+      "destination": {
+        "base": 39
+      }
+    },
+    "50": {
+      "name": "load_wots_signature_element_40",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_40",
+        "length": 32
+      },
+      "destination": {
+        "base": 40
+      }
+    },
+    "51": {
+      "name": "load_wots_signature_element_41",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_41",
+        "length": 32
+      },
+      "destination": {
+        "base": 41
+      }
+    },
+    "52": {
+      "name": "load_wots_signature_element_42",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_42",
+        "length": 32
+      },
+      "destination": {
+        "base": 42
+      }
+    },
+    "53": {
+      "name": "load_wots_signature_element_43",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_43",
+        "length": 32
+      },
+      "destination": {
+        "base": 43
+      }
+    },
+    "54": {
+      "name": "load_wots_signature_element_44",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_44",
+        "length": 32
+      },
+      "destination": {
+        "base": 44
+      }
+    },
+    "55": {
+      "name": "load_wots_signature_element_45",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_45",
+        "length": 32
+      },
+      "destination": {
+        "base": 45
+      }
+    },
+    "56": {
+      "name": "load_wots_signature_element_46",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_46",
+        "length": 32
+      },
+      "destination": {
+        "base": 46
+      }
+    },
+    "57": {
+      "name": "load_wots_signature_element_47",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_47",
+        "length": 32
+      },
+      "destination": {
+        "base": 47
+      }
+    },
+    "58": {
+      "name": "load_wots_signature_element_48",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_48",
+        "length": 32
+      },
+      "destination": {
+        "base": 48
+      }
+    },
+    "59": {
+      "name": "load_wots_signature_element_49",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_49",
+        "length": 32
+      },
+      "destination": {
+        "base": 49
+      }
+    },
+    "60": {
+      "name": "load_wots_signature_element_50",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_50",
+        "length": 32
+      },
+      "destination": {
+        "base": 50
+      }
+    },
+    "61": {
+      "name": "load_wots_signature_element_51",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_51",
+        "length": 32
+      },
+      "destination": {
+        "base": 51
+      }
+    },
+    "62": {
+      "name": "load_wots_signature_element_52",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_52",
+        "length": 32
+      },
+      "destination": {
+        "base": 52
+      }
+    },
+    "63": {
+      "name": "load_wots_signature_element_53",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_53",
+        "length": 32
+      },
+      "destination": {
+        "base": 53
+      }
+    },
+    "64": {
+      "name": "load_wots_signature_element_54",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_54",
+        "length": 32
+      },
+      "destination": {
+        "base": 54
+      }
+    },
+    "65": {
+      "name": "load_wots_signature_element_55",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_55",
+        "length": 32
+      },
+      "destination": {
+        "base": 55
+      }
+    },
+    "66": {
+      "name": "load_wots_signature_element_56",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_56",
+        "length": 32
+      },
+      "destination": {
+        "base": 56
+      }
+    },
+    "67": {
+      "name": "load_wots_signature_element_57",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_57",
+        "length": 32
+      },
+      "destination": {
+        "base": 57
+      }
+    },
+    "68": {
+      "name": "load_wots_signature_element_58",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_58",
+        "length": 32
+      },
+      "destination": {
+        "base": 58
+      }
+    },
+    "69": {
+      "name": "load_wots_signature_element_59",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_59",
+        "length": 32
+      },
+      "destination": {
+        "base": 59
+      }
+    },
+    "70": {
+      "name": "load_wots_signature_element_60",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_60",
+        "length": 32
+      },
+      "destination": {
+        "base": 60
+      }
+    },
+    "71": {
+      "name": "load_wots_signature_element_61",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_61",
+        "length": 32
+      },
+      "destination": {
+        "base": 61
+      }
+    },
+    "72": {
+      "name": "load_wots_signature_element_62",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_62",
+        "length": 32
+      },
+      "destination": {
+        "base": 62
+      }
+    },
+    "73": {
+      "name": "load_wots_signature_element_63",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_63",
+        "length": 32
+      },
+      "destination": {
+        "base": 63
+      }
+    },
+    "74": {
+      "name": "load_wots_signature_element_64",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_64",
+        "length": 32
+      },
+      "destination": {
+        "base": 64
+      }
+    },
+    "75": {
+      "name": "load_wots_signature_element_65",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_65",
+        "length": 32
+      },
+      "destination": {
+        "base": 65
+      }
+    },
+    "76": {
+      "name": "load_wots_signature_element_66",
+      "source": {
+        "kind": "job_bytes",
+        "field": "wots_signature_66",
+        "length": 32
+      },
+      "destination": {
+        "base": 66
+      }
+    },
+    "80": {
+      "name": "load_authentication_node_00",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_00",
+        "length": 32
+      },
+      "destination": {
+        "base": 221
+      }
+    },
+    "81": {
+      "name": "load_authentication_node_01",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_01",
+        "length": 32
+      },
+      "destination": {
+        "base": 222
+      }
+    },
+    "82": {
+      "name": "load_authentication_node_02",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_02",
+        "length": 32
+      },
+      "destination": {
+        "base": 223
+      }
+    },
+    "83": {
+      "name": "load_authentication_node_03",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_03",
+        "length": 32
+      },
+      "destination": {
+        "base": 224
+      }
+    },
+    "84": {
+      "name": "load_authentication_node_04",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_04",
+        "length": 32
+      },
+      "destination": {
+        "base": 225
+      }
+    },
+    "85": {
+      "name": "load_authentication_node_05",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_05",
+        "length": 32
+      },
+      "destination": {
+        "base": 226
+      }
+    },
+    "86": {
+      "name": "load_authentication_node_06",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_06",
+        "length": 32
+      },
+      "destination": {
+        "base": 227
+      }
+    },
+    "87": {
+      "name": "load_authentication_node_07",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_07",
+        "length": 32
+      },
+      "destination": {
+        "base": 228
+      }
+    },
+    "88": {
+      "name": "load_authentication_node_08",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_08",
+        "length": 32
+      },
+      "destination": {
+        "base": 229
+      }
+    },
+    "89": {
+      "name": "load_authentication_node_09",
+      "source": {
+        "kind": "job_bytes",
+        "field": "authentication_node_09",
+        "length": 32
+      },
+      "destination": {
+        "base": 230
+      }
+    }
+  }
+}

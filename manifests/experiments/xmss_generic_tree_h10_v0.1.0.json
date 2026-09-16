@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "result_id": "xmss_generic_tree_h10_v0.1.0",
+  "classification": "native_microcoded_rtl_functional_and_cycle_evidence",
+  "paper_comparable": false,
+  "profile": "RFC8391 XMSS-SHAKE256_10_256 paper-W4",
+  "scope": "complete h=10 Keygen tree using JSON-component leaves and real TreeHash parents",
+  "configuration": {
+    "keccak_unroll": 2,
+    "active_lanes": 1,
+    "scratchpad_words_64bit": 1024,
+    "microcode_words": 93,
+    "executed_layout_ids": [0, 1, 2, 3, 4, 5, 6, 7],
+    "loaded_layouts": 8,
+    "loaded_components": 81,
+    "tree_height": 10,
+    "target_leaf": 5,
+    "job_seed_payload_bits": 512,
+    "autonomous_job_seed_writes": 8
+  },
+  "result": {
+    "accepted_job_commands": 1,
+    "host_control_writes_during_busy": 0,
+    "runtime_task_descriptors": 0,
+    "runtime_hash_descriptors": 0,
+    "generated_leaves": 1024,
+    "tree_parent_hashes": 1023,
+    "issued_hash_layout_requests": 3426304,
+    "issued_data_requests": 5121,
+    "issued_tree_requests": 1024,
+    "retired_microinstructions": 4776963,
+    "retired_components": 30486528,
+    "composer_scratch_reads": 23293952,
+    "composer_scratch_writes": 13705216,
+    "scratchpad_transactions": 37044232,
+    "job_admission_scratchpad_writes": 8,
+    "total_physical_scratchpad_transactions": 37044240,
+    "absorbed_rate_blocks": 3426304,
+    "start_to_done_cycles": 675417082,
+    "root_hex": "ba62bdc39af136a63e66f19d3cfcda232cf5cf485aec1e22c35d739bdc511425",
+    "authentication_nodes": 10,
+    "rfc8391_oracle_equal": true,
+    "fused_leaf_baseline_cycles": 57204676,
+    "generic_to_fused_cycle_ratio": 11.807026,
+    "root_words_emitted": 4,
+    "emitted_root_equal": true
+  },
+  "commands": {
+    "fast_integration_regression": "make rtl-xmss-generic-tree-h2-test",
+    "full_measurement": "make rtl-xmss-generic-tree-h10-test"
+  },
+  "expected_stdout": "PASS JSON-component XMSS h10 TreeHash cycles=675417082 hash=3426304 data=5121 tree=1024 retired=4776963 components=30486528 scratch=23293952/13705216/37044232 blocks=3426304",
+  "limitations": [
+    "The RTL latches SK.seed and PK.seed from one Job and autonomously commits eight 64-bit words to fixed internal Scratchpad slots before starting the sequencer; the parent context receives the same immutable Job fields directly, while pointer-based DMA byte slicing is not implemented.",
+    "The printed scratchpad_transactions counter is the post-admission arbiter count; total physical Scratchpad traffic is that value plus the eight Job-admission writes recorded separately.",
+    "The final TreeHash root is autonomously written to logical slot 230 and emitted by the unchanged final EMIT instruction through a dedicated static descriptor namespace.",
+    "The timing-pipelined generic byte-serial component path is a functional P1/U2 point and is 11.807026 times the cycle count of the fused serial-leaf h=10 baseline; it is not a paper-comparable optimized design.",
+    "Tree parent layout 8 still uses the existing RFC 8391 parent context rather than the component-program pipeline-temp lowering."
+  ],
+  "source_sha256": {
+    "rtl/top/micro_hbs_xmss_generic_leaf_slice.sv": "9a0c4b0bee962c8773f4c15bbb7a0f43280cc462ed3db8009d6e7428a55de678",
+    "tb/integration/tb_micro_hbs_xmss_generic_tree_h2.sv": "e375ad91d0635799c1bf4fbe73a335b079cf9af5ea5770bbf6e3ab6841e8fb06",
+    "rtl/memory/micro_hbs_data_engine.sv": "0522a6465c260c85942559d143dcea824b1860a6261b37fda5fd9bf0da854a80",
+    "rtl/composer/micro_hbs_descriptor_shake_composer.sv": "d973e1d660fd9079bb0206ee07515e54fe20b7768d5c1a47be1747adb60f7399",
+    "rtl/treehash/micro_hbs_tree_push_adapter.sv": "7bd2988295f9091dc77181aa9e0584cad8b41883cf0be96d8bf4b6b7aee4d112",
+    "rtl/treehash/micro_hbs_xmss_tree_parent_context.sv": "50a56650a2f251fe36c1541460ea81b103c72067f39dc895c68f48631ef87d93",
+    "manifests/programs/rtl_images/xmss_xmss_shake256_h10_w4_keygen.hex": "2bdabc32521c7b95915fea57dd6bf834642482bcb82bb77d9b857df88c267b02",
+    "manifests/programs/rtl_images/xmss_xmss_shake256_h10_w4_sign_layouts.hex": "0bd4db80878f69552ed7af6cb3143021307147081e75f9f43ca96e8ab9d9f983",
+    "manifests/programs/rtl_images/xmss_xmss_shake256_h10_w4_sign_components.hex": "1dacca77f69b3b63d8a6028ffa3acce39c544c33f2f9c82f98bf9cd570a367ff"
+  }
+}

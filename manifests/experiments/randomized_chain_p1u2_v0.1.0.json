@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "result_id": "randomized_chain_p1u2_v0.1.0",
+  "scope": "randomized_f_vertical_slice",
+  "classification": "engineering_vertical_slice_ppa",
+  "paper_comparable": false,
+  "complete_algorithm": false,
+  "contains_real_hash_lane": true,
+  "device": "xc7a200tffg1156-2",
+  "tool": "2025.2",
+  "configuration": {
+    "lanes": 1,
+    "unroll": 2,
+    "program_words": 512,
+    "scratch_words_64bit": 32
+  },
+  "clock_constraint": {
+    "period_ns": 10.0,
+    "frequency_mhz": 100.0
+  },
+  "post_route": {
+    "slice_lut": 7685,
+    "slice_register": 6039,
+    "ramb36": 2,
+    "dsp": 0,
+    "wns_ns": 0.568,
+    "timing_met": true
+  },
+  "functional_result": {
+    "manifest": "manifests/experiments/randomized_chain_slice_v0.1.0.json",
+    "cycles": 260,
+    "internal_shake_calls": 9,
+    "oracle_match": true
+  },
+  "limitations": [
+    "The slice implements randomized-F chaining, not a complete HBS Keygen or Sign operation.",
+    "The Scratchpad adapter is single-port and serialized rather than banked/OTS-wide.",
+    "Wide out-of-context ports lack top-level package-pin placement.",
+    "Vivado 2025.2 differs from the paper's Vivado 2018.3 flow.",
+    "This checkpoint cannot be divided into the paper-reported area or cycles to claim improvement."
+  ],
+  "report_sha256": {
+    "utilization.rpt": "033f3d3e76634f5d471d732e347e01254da85821817a3ba6397811052ea94147",
+    "timing_summary.rpt": "7758dc5f14b90ec7b3cdf4b8426e04c276bc1ef0f5ddb8b43862b0a682ffc5b2",
+    "run_identity.txt": "0de932a1616545a65fb09c96341679a3733d01b6ed1003732fb3ca9ff9c707d7"
+  },
+  "source_sha256": {
+    "rtl/sequencer/micro_hbs_program_store.sv": "6a3a615bfa5e6a589f7c6b91239edfadfdc086f42e4d2a5625c07d33e3703504",
+    "rtl/sequencer/micro_hbs_sequencer.sv": "7ac5d4ffecb240f7873f5fde8958a1f17a7542e51936a27c31bbadac5f792303",
+    "rtl/memory/micro_hbs_scratchpad64.sv": "5e9c47071b3ea781bb4c374c27e63a2de4da12ddcacc287950fd575662a8727a",
+    "rtl/hash_lane/micro_hbs_keccak_f1600.sv": "8f73d7a275390ba6d8bdcd7e3fc8f80554326f2fefc1611be7f8cb72ae0dc0ac",
+    "rtl/hash_lane/micro_hbs_shake256_single_block.sv": "60ef7c32ce8a775339dbf585bf1594e27f70ab59170a57c32506f4344c61c8b6",
+    "rtl/composer/micro_hbs_randomized_hash.sv": "0ab7e4ec733eff46b662b7591c2148742dfbfc80744d4aad23430ad56b2da33b",
+    "rtl/composer/micro_hbs_randomized_f_scratch_adapter.sv": "510dc77711fd15fdee9abadf5713d9fe738e8a4b148bdb60ff203f8a560bff39",
+    "rtl/top/micro_hbs_randomized_chain_slice.sv": "0ad88e57560131594c9590a4ccb02686168a95b99d0deb63c7fefddaf86e93ac",
+    "experiments/synth_randomized_chain_slice.tcl": "7f74801c691728d3c320d05aafa3f9554bf2d84309b8fdf61579ad8c1e5b939c"
+  }
+}
