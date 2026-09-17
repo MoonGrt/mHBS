@@ -7,24 +7,18 @@ from enum import IntEnum
 
 
 class Opcode(IntEnum):
-    NOP = 0x00
-    MOVI = 0x01
-    ADDI = 0x02
-    HASH_LAYOUT = 0x03
-    LOOP_SETUP = 0x04
+    SET_REG = 0x01
+    ADD_IMM = 0x02
+    HASH = 0x03
+    LOOP_BEGIN = 0x04
     LOOP_END = 0x05
     CALL = 0x06
-    RET = 0x07
-    LOAD = 0x08
-    STORE = 0x09
-    XOR = 0x0A
+    RETURN = 0x07
+    DATA_LOAD = 0x08
+    DATA_MOVE = 0x09
     TREE_PUSH = 0x0B
-    EMIT = 0x0C
+    OUTPUT = 0x0C
     HALT = 0x0D
-    FAIL = 0x0E
-    WAIT = 0x0F
-    BARRIER = 0x10
-    JUMP = 0x11
 
 
 @dataclass(frozen=True)

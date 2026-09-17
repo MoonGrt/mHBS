@@ -18,7 +18,7 @@ SLH_SIGN_PROGRAM = ROOT / "microcode/slh_dsa/slh_dsa_shake_128f_sign.json"
 
 class MicrocodeTests(unittest.TestCase):
     def test_instruction_round_trip(self) -> None:
-        inst = Instruction(Opcode.HASH_LAYOUT, flags=3, rd=7, rs=9, imm=0x12345678)
+        inst = Instruction(Opcode.HASH, flags=3, rd=7, rs=9, imm=0x12345678)
         self.assertEqual(Instruction.decode(inst.encode()), inst)
 
     def test_illegal_opcode_rejected(self) -> None:
@@ -35,7 +35,7 @@ class MicrocodeTests(unittest.TestCase):
                 "layouts": {"0": {}},
                 "program": [
                     {"label": "entry"},
-                    {"op": "HASH_LAYOUT", "imm": 0},
+                    {"op": "HASH", "imm": 0},
                     {"op": "HALT"},
                 ],
             }
@@ -50,7 +50,7 @@ class MicrocodeTests(unittest.TestCase):
                 "layouts": {"0": {}},
                 "program": [
                     {"label": "entry"},
-                    {"op": "HASH_LAYOUT", "flags": 0, "imm": 0},
+                    {"op": "HASH", "flags": 0, "imm": 0},
                     {"op": "HALT"},
                 ],
             }
@@ -65,7 +65,7 @@ class MicrocodeTests(unittest.TestCase):
                 "layouts": {"0": {}},
                 "program": [
                     {"label": "entry"},
-                    {"op": "HASH_LAYOUT", "flags": 3, "imm": 0},
+                    {"op": "HASH", "flags": 3, "imm": 0},
                     {"op": "HALT"},
                 ],
             }
@@ -74,14 +74,28 @@ class MicrocodeTests(unittest.TestCase):
         self.assertEqual(image["words"][0], 0x0303000000000000)
         self.assertTrue(verify_image(image)["verified"])
 
+    def test_hash_layout_pair_feedback_defer_is_preserved(self) -> None:
+        image = assemble_document(
+            {
+                "layouts": {"0": {}},
+                "program": [
+                    {"label": "entry"},
+                    {"op": "HASH", "flags": 7, "imm": 0},
+                    {"op": "HALT"},
+                ],
+            }
+        )
+        self.assertEqual(image["instructions"][0].flags, 7)
+        self.assertTrue(verify_image(image)["verified"])
+
     def test_verifier_rejects_opcode_specific_flags(self) -> None:
-        for opcode, flags in (("NOP", 1), ("LOOP_SETUP", 2), ("EMIT", 2)):
+        for opcode, flags in (("SET_REG", 1), ("LOOP_BEGIN", 2), ("OUTPUT", 2)):
             with self.subTest(opcode=opcode, flags=flags):
                 program = [
                     {"label": "entry"},
                     {"op": opcode, "flags": flags, "imm": 1},
                 ]
-                if opcode == "LOOP_SETUP":
+                if opcode == "LOOP_BEGIN":
                     program.append({"op": "LOOP_END"})
                 program.append({"op": "HALT"})
                 image = assemble_document(
@@ -99,7 +113,7 @@ class MicrocodeTests(unittest.TestCase):
 
     def test_verifier_rejects_missing_layout(self) -> None:
         image = assemble_document(
-            {"program": [{"label": "entry"}, {"op": "HASH_LAYOUT", "imm": 9}, {"op": "HALT"}]}
+            {"program": [{"label": "entry"}, {"op": "HASH", "imm": 9}, {"op": "HALT"}]}
         )
         with self.assertRaisesRegex(VerificationError, "undefined layout"):
             verify_image(image)
@@ -130,7 +144,7 @@ class MicrocodeTests(unittest.TestCase):
             },
             "program": [
                 {"label": "entry"},
-                {"op": "HASH_LAYOUT", "imm": 0},
+                {"op": "HASH", "imm": 0},
                 {"op": "HALT"},
             ],
         }
@@ -139,51 +153,29 @@ class MicrocodeTests(unittest.TestCase):
         self.assertEqual(result.error, "ERR_UNINITIALIZED_READ")
         self.assertEqual(result.output, b"")
 
-    def test_xor_uses_static_descriptor_and_emits_exact_bytes(self) -> None:
-        document = {
-            "bounds": {"scratch_slots": 4},
-            "loads": {
-                "0": {
-                    "source": {"kind": "job_bytes", "field": "left", "length": 4},
-                    "destination": {"base": 0},
-                },
-                "1": {
-                    "source": {"kind": "job_bytes", "field": "right", "length": 4},
-                    "destination": {"base": 1},
-                },
-            },
-            "xors": {
-                "0": {
-                    "source_a": {"base": 0},
-                    "source_b": {"base": 1},
-                    "destination": {"base": 2},
-                }
-            },
-            "program": [
-                {"label": "entry"},
-                {"op": "LOAD", "imm": 0},
-                {"op": "LOAD", "imm": 1},
-                {"op": "XOR", "imm": 0},
-                {"op": "EMIT", "rd": 2},
-                {"op": "HALT"},
-            ],
+    def test_removed_opcodes_are_rejected(self) -> None:
+        removed = {
+            "NOP": 0x00,
+            "XOR": 0x0A,
+            "FAIL": 0x0E,
+            "WAIT": 0x0F,
+            "BARRIER": 0x10,
+            "JUMP": 0x11,
         }
-        result = MicroInterpreter(assemble_document(document)).execute(
-            {"left": bytes.fromhex("00ff55aa"), "right": bytes.fromhex("f00f0ff0")}
-        )
-        self.assertTrue(result.done)
-        self.assertIsNone(result.error)
-        self.assertEqual(result.output, bytes.fromhex("f0f05a5a"))
-        xor_event = next(event for event in result.trace if event["opcode"] == "XOR")
-        self.assertEqual(xor_event["memory_event"], "xor")
-        self.assertEqual(xor_event["output_bytes"], 4)
-
-    def test_verifier_rejects_missing_xor_descriptor(self) -> None:
-        image = assemble_document(
-            {"program": [{"label": "entry"}, {"op": "XOR", "imm": 7}, {"op": "HALT"}]}
-        )
-        with self.assertRaisesRegex(VerificationError, "undefined XOR descriptor"):
-            verify_image(image)
+        for opcode, encoding in removed.items():
+            with self.subTest(opcode=opcode):
+                with self.assertRaises(AssemblyError):
+                    assemble_document(
+                        {
+                            "program": [
+                                {"label": "entry"},
+                                {"op": opcode},
+                                {"op": "HALT"},
+                            ]
+                        }
+                    )
+                with self.assertRaisesRegex(ValueError, "illegal opcode"):
+                    Instruction.decode(encoding << 56)
 
     def test_lmots_interpreter_matches_independent_oracle_trace(self) -> None:
         image = load_and_assemble(PROGRAM)
@@ -210,7 +202,7 @@ class MicrocodeTests(unittest.TestCase):
         model_trace = [
             (event["hash_class"], event["hash_input_digest"], event["hash_output"])
             for event in result.trace
-            if event["opcode"] == "HASH_LAYOUT"
+            if event["opcode"] == "HASH"
         ]
         self.assertEqual(model_trace, oracle_trace)
 
@@ -242,8 +234,8 @@ class MicrocodeTests(unittest.TestCase):
     def test_slh_dsa_sign_image_is_bounded_without_algorithm_opcode(self) -> None:
         image = load_and_assemble(SLH_SIGN_PROGRAM)
         verification = verify_image(image)
-        self.assertEqual(verification["word_count"], 144)
-        self.assertEqual(verification["image_bytes"], 1152)
+        self.assertEqual(verification["word_count"], 165)
+        self.assertEqual(verification["image_bytes"], 1320)
         self.assertLessEqual(verification["max_loop_depth"], 4)
         opcode_names = {instruction.opcode.name for instruction in image["instructions"]}
         self.assertNotIn("SLH_DSA", opcode_names)

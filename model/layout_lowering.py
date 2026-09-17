@@ -1,4 +1,4 @@
-"""Lower JSON HASH_LAYOUT components into the native RTL component image.
+"""Lower JSON HASH components into the native RTL component image.
 
 This is an offline image builder, not a runtime.  It turns the existing JSON
 layout language into the algorithm-independent descriptor formats consumed by
@@ -527,13 +527,43 @@ def _destination_word(
     base_reg = _bounded(destination.get("base_reg", 0), 3, "destination base_reg")
     use_index = "index_reg" in destination
     index_reg = _bounded(destination.get("index_reg", 0), 3, "destination index_reg")
-    stride = int(destination.get("stride", 1 if use_index else 0))
+    stride = int(destination.get(
+        "stride", destination.get("pair_stride", 1 if use_index else 0)
+    ))
     if use_index and stride <= 0:
         raise LayoutLoweringError("destination index stride must be positive")
     stride = _bounded(stride, 8, "destination stride")
     return (
         (base << 24) | (base_reg << 21) | (int(use_base) << 20)
         | (index_reg << 17) | (int(use_index) << 16) | (stride << 8)
+    )
+
+
+def _capture_destination_base(
+    layout: Mapping[str, Any], destination: Mapping[str, Any],
+    memory_slot_map: Mapping[int, int],
+) -> int:
+    """Encode the optional same-affine-shape capture destination base.
+
+    Feedback-chain capture reuses the normal destination's base/index terms;
+    only the constant base changes.  This keeps the immutable descriptor at
+    128 bits and lets the generic composer derive both lane addresses.
+    """
+
+    capture = layout.get("capture_destination")
+    if capture is None:
+        return 0
+    if not isinstance(capture, Mapping):
+        raise LayoutLoweringError("capture_destination must be a mapping")
+    for key in ("base_reg", "index_reg", "stride"):
+        if capture.get(key) != destination.get(key):
+            raise LayoutLoweringError(
+                f"capture_destination {key} must match destination"
+            )
+    logical_base = int(capture.get("base", 0))
+    return _bounded(
+        memory_slot_map.get(logical_base, logical_base), 8,
+        "capture destination base",
     )
 
 
@@ -557,6 +587,7 @@ def lower_layouts(
     memory_lengths = memory_lengths or {}
     memory_slot_map = memory_slot_map or {}
     components: list[int] = []
+    component_programs: dict[tuple[int, ...], int] = {}
     layouts: list[LoweredLayout] = []
     for layout_id in layout_ids:
         try:
@@ -565,7 +596,7 @@ def lower_layouts(
             raise LayoutLoweringError(f"unknown layout {layout_id}") from exc
         if layout.get("hash") != "shake256":
             raise LayoutLoweringError("component mode currently supports SHAKE256")
-        component_pc = len(components)
+        layout_components: list[int] = []
         message_bytes = 0
         for source in layout.get("components", []):
             lowered, byte_count = _lower_component(
@@ -576,11 +607,18 @@ def lower_layouts(
                 memory_lengths=memory_lengths,
                 memory_slot_map=memory_slot_map,
             )
-            components.extend(lowered)
+            layout_components.extend(lowered)
             message_bytes += byte_count
-        component_count = len(components) - component_pc
+        component_count = len(layout_components)
         if not 0 < component_count <= 255:
             raise LayoutLoweringError("layout component count must be 1..255")
+        program_key = tuple(layout_components)
+        if program_key in component_programs:
+            component_pc = component_programs[program_key]
+        else:
+            component_pc = len(components)
+            component_programs[program_key] = component_pc
+            components.extend(layout_components)
         if component_pc > 0xFFFF or message_bytes > 0xFFFF:
             raise LayoutLoweringError("layout image exceeds RTL field width")
         maximum = int(layout.get("max_input_bytes", message_bytes))
@@ -592,13 +630,49 @@ def lower_layouts(
         destination = layout.get("destination")
         if not isinstance(destination, Mapping):
             raise LayoutLoweringError("layout destination must be explicit")
+        repeat_prefix = layout.get("repeat_prefix")
+        pair_patch = layout.get("pair_patch")
+        prefix_recipe = None
+        prefix_domain = 0
+        prefix_preserve_counter = False
+        if repeat_prefix is not None:
+            if not isinstance(repeat_prefix, Mapping):
+                raise LayoutLoweringError("repeat_prefix must be a mapping")
+            prefix_recipe = repeat_prefix.get("recipe")
+            if prefix_recipe not in {
+                "hbs_64byte_f_chain", "hbs_64byte_feedback"
+            }:
+                raise LayoutLoweringError("unsupported repeat_prefix recipe")
+            if message_bytes != 64 or output_bytes != 16:
+                raise LayoutLoweringError(
+                    "repeat_prefix requires 64-byte input and 16-byte output"
+                )
+            prefix_preserve_counter = prefix_recipe == "hbs_64byte_feedback"
+            prefix_domain = _bounded(
+                repeat_prefix.get("domain", 0), 3, "repeat_prefix domain"
+            )
+        descriptor_flags = (
+            output_bytes
+            | (int(repeat_prefix is not None) << 8)
+            | (int(prefix_preserve_counter) << 9)
+            | (prefix_domain << 10)
+            | (int(pair_patch is not None) << 13)
+        )
+        if pair_patch is not None:
+            if not isinstance(pair_patch, Mapping) or pair_patch != {
+                "recipe": "adjacent_be32",
+                "byte_offset": 44,
+                "register": 7,
+            }:
+                raise LayoutLoweringError("unsupported pair_patch recipe")
         descriptor = (
             (FORMAT_VERSION << 120) | (CAP_SHAKE256 << 112)
             | (INPUT_COMPONENT_PROGRAM << 104) | (OUTPUT_LOGICAL_SLOT << 96)
-            | (output_bytes << 80) | (message_bytes << 64)
+            | (descriptor_flags << 80) | (message_bytes << 64)
             | (component_pc << 48) | (component_count << 40)
             | (component_count << 32)
             | _destination_word(destination, memory_slot_map)
+            | _capture_destination_base(layout, destination, memory_slot_map)
         )
         layouts.append(LoweredLayout(
             layout_id=int(layout_id), name=str(layout.get("name", layout_id)),

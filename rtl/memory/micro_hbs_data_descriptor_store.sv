@@ -5,13 +5,14 @@
 //
 // Fixed 128-bit descriptor format:
 //   [127:120] format_version (FORMAT_VERSION)
-//   [119:104] flags          ([0] LOAD, [1] STORE, [2] XOR, [3] EMIT;
+//   [119:104] flags          ([0] DATA_LOAD, [1] DATA_MOVE, [2] reserved,
+//                             [3] OUTPUT;
 //                             [15:4] generic modifiers/reserved)
 //   [103:88]  source_a       (64-bit Scratchpad word address)
 //   [87:72]   source_b       (64-bit Scratchpad word address)
 //   [71:56]   destination    (64-bit Scratchpad word address)
 //   [55:40]   word_count
-//   [39:36]   last_bytes     (consumer interprets 1..8 for EMIT)
+//   [39:36]   last_bytes     (consumer interprets 1..8 for OUTPUT)
 //   [35:32]   address_mode   (reserved for generic indexed addressing)
 //   [31:0]    reserved
 //

@@ -15,9 +15,22 @@ module micro_hbs_shake256_stream #(
     input  wire [1087:0] block_data,
     input  wire [7:0]    block_bytes,
     input  wire          block_last,
+    input  wire          repeat_enable,
+    input  wire          repeat_prefix,
+    input  wire          repeat_prefix_preserve_counter,
+    input  wire [2:0]    repeat_prefix_domain,
+    input  wire [7:0]    repeat_count,
+    input  wire [7:0]    repeat_counter_offset,
+    input  wire [7:0]    repeat_feedback_offset,
+    input  wire [5:0]    repeat_feedback_bytes,
+    input  wire [31:0]   repeat_counter_start,
+    input  wire          capture_enable,
+    input  wire [7:0]    capture_after,
     output logic [255:0] digest,
     output logic [1087:0] rate_output,
     output logic         digest_valid,
+    output wire [255:0]  capture_digest,
+    output wire          capture_valid,
     output logic         error
 );
     typedef enum logic [1:0] {S_IDLE, S_ABSORB, S_PERMUTE} state_t;
@@ -66,8 +79,18 @@ module micro_hbs_shake256_stream #(
         .start(permutation_start),
         .ready(permutation_ready),
         .state_in(permutation_input),
+        .chain_enable(repeat_enable && final_pending),
+        .chain_prefix(repeat_prefix && final_pending),
+        .chain_prefix_preserve_counter(repeat_prefix_preserve_counter),
+        .chain_prefix_domain(repeat_prefix_domain),
+        .chain_count(repeat_count),
+        .chain_counter_offset(repeat_counter_offset),
+        .chain_feedback_offset(repeat_feedback_offset),
+        .chain_feedback_bytes(repeat_feedback_bytes),
+        .chain_counter_start(repeat_counter_start),
+        .capture_enable(capture_enable && final_pending), .capture_after,
         .state_out(permutation_result),
-        .done(permutation_done),
+        .done(permutation_done), .capture_digest, .capture_valid,
         .rounds_executed(permutation_rounds)
     );
 

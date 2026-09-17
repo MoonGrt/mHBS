@@ -22,6 +22,7 @@ module micro_hbs_scratchpad64 #(
     output logic                    scrub_done
 );
     localparam integer INTERNAL_ADDRESS_WIDTH = (WORDS <= 2) ? 1 : $clog2(WORDS);
+    localparam integer WORDS_IS_POWER_OF_TWO = (WORDS & (WORDS - 1)) == 0;
     (* ram_style = "block" *) logic [63:0] memory [0:WORDS-1];
     logic [INTERNAL_ADDRESS_WIDTH-1:0] scrub_address;
     wire memory_write_enable;
@@ -29,15 +30,27 @@ module micro_hbs_scratchpad64 #(
     wire [63:0] memory_write_data;
     wire memory_read_enable;
     wire [INTERNAL_ADDRESS_WIDTH-1:0] memory_read_address;
+    wire request_in_bounds;
+
+    generate
+        if (WORDS_IS_POWER_OF_TWO && ADDRESS_WIDTH == INTERNAL_ADDRESS_WIDTH) begin
+            assign request_in_bounds = 1'b1;
+        end else if (WORDS_IS_POWER_OF_TWO) begin
+            assign request_in_bounds
+                = request_address[ADDRESS_WIDTH-1:INTERNAL_ADDRESS_WIDTH] == '0;
+        end else begin
+            assign request_in_bounds = request_address < WORDS;
+        end
+    endgenerate
 
     assign request_ready = !scrub_busy && !scrub_start;
     assign memory_write_enable = scrub_busy
-        || (request_valid && request_ready && request_address < WORDS && request_write);
+        || (request_valid && request_ready && request_in_bounds && request_write);
     assign memory_write_address = scrub_busy
         ? scrub_address : request_address[INTERNAL_ADDRESS_WIDTH-1:0];
     assign memory_write_data = scrub_busy ? 64'b0 : request_write_data;
     assign memory_read_enable = request_valid && request_ready
-        && request_address < WORDS && !request_write;
+        && request_in_bounds && !request_write;
     assign memory_read_address = request_address[INTERNAL_ADDRESS_WIDTH-1:0];
 
     initial begin
@@ -77,7 +90,7 @@ module micro_hbs_scratchpad64 #(
                 scrub_busy <= 1'b1;
                 scrub_address <= '0;
             end else if (request_valid) begin
-                if (request_address >= WORDS) begin
+                if (!request_in_bounds) begin
                     bounds_error <= 1'b1;
                 end
             end

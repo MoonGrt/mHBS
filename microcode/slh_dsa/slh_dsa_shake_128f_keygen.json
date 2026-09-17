@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "micro_isa_version": "0.1",
+  "micro_isa_version": "0.2",
   "name": "fips205-slh-dsa-shake-128f-keygen",
   "entry": "entry",
   "bounds": {
@@ -68,17 +68,17 @@
   },
   "program": [
     {"label": "entry"},
-    {"op": "LOOP_SETUP", "rs": 0, "imm": 8},
-      {"op": "LOOP_SETUP", "rs": 1, "imm": 35},
-        {"op": "HASH_LAYOUT", "imm": 0},
-        {"op": "LOOP_SETUP", "rs": 2, "imm": 15},
-          {"op": "HASH_LAYOUT", "imm": 1},
+    {"op": "LOOP_BEGIN", "rs": 0, "imm": 8},
+      {"op": "LOOP_BEGIN", "rs": 1, "imm": 35},
+        {"op": "HASH", "imm": 0},
+        {"op": "LOOP_BEGIN", "rs": 2, "imm": 15},
+          {"op": "HASH", "imm": 1},
         {"op": "LOOP_END"},
       {"op": "LOOP_END"},
-      {"op": "HASH_LAYOUT", "imm": 2},
+      {"op": "HASH", "imm": 2},
       {"op": "TREE_PUSH", "rd": 100, "imm": 3},
     {"op": "LOOP_END"},
-    {"op": "EMIT", "rd": 110},
+    {"op": "OUTPUT", "rd": 110},
     {"op": "HALT"}
   ]
 }

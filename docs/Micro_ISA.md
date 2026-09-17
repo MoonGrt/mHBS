@@ -1,4 +1,4 @@
-# μHBS Micro-ISA v0.1
+# μHBS Micro-ISA v0.2
 
 ## 固定编码
 
@@ -11,56 +11,54 @@
 +--------------+--------------+--------------+--------------+-------------+
 ```
 
-所有保留位必须为零。只实现 R0–R7 八个公开控制/计数寄存器，不构成通用寄存器文件；密码字节保存在有边界的 Scratchpad。
+只实现 R0–R7 八个控制/计数寄存器；密码数据保存在有界 Scratchpad。
+保留位和指令专用 `flags` 组合必须通过静态校验。
 
 | Opcode | Code | 语义 |
 |---|---:|---|
-| NOP | 0x00 | 无副作用 |
-| MOVI | 0x01 | `R[rd] = imm` |
-| ADDI | 0x02 | `R[rd] = R[rs] + sext(imm)`，溢出报错 |
-| HASH_LAYOUT | 0x03 | 由 layout `imm[15:0]` 组合并发往 `lane_mask=flags[1:0]`；同时锁存 `R[rs]` 的值供 layout 做地址/索引绑定，`rd` 是受 layout 解释的目标槽 |
-| LOOP_SETUP | 0x04 | 默认压入 `{counter=R[rs], bound=imm, body_pc=pc+1}`；`flags[0]=1` 时从受界 `Scratchpad[R[rd]]` 读取 8-bit bound，`imm` 是 bound=0 时的镜像内 exit PC |
-| LOOP_END | 0x05 | 计数递增并回跳；结束时弹栈 |
-| CALL | 0x06 | 压入返回地址并跳 `imm` |
-| RET | 0x07 | 弹出返回地址 |
-| LOAD | 0x08 | 按 `imm` 选择静态 load/post-process descriptor；支持将 Job 数据或 Scratchpad 数据载入受界寄存器/槽位 |
-| STORE | 0x09 | 按 `imm` 选择静态 move descriptor，在有界 Scratchpad 槽位间复制 |
-| XOR | 0x0a | 按 `imm` 选择静态 XOR descriptor，对两个等长字节串异或并写入受界目标 |
-| TREE_PUSH | 0x0b | 节点入栈并执行等高 reduce |
-| EMIT | 0x0c | `imm[31:16]` 选择静态输出 descriptor；物理起点为 descriptor base + `rd+imm[15:0]`，`flags[0]=1` 时再加 `R[rs]` |
-| HALT | 0x0d | 成功结束 Job |
-| FAIL | 0x0e | 以 `imm` 错误码终止 |
-| WAIT | 0x0f | 等待 `lane_mask` 完成 |
-| BARRIER | 0x10 | 等待全部已发射 lane 完成 |
-| JUMP | 0x11 | 跳到镜像内直接地址 `imm` |
+| `SET_REG` | `0x01` | `R[rd] = imm` |
+| `ADD_IMM` | `0x02` | `R[rd] = R[rs] + sext(imm)`，溢出报错 |
+| `HASH` | `0x03` | 按 `imm` 选择 layout descriptor 组织输入并发送至 `flags[1:0]` 选择的等价 Hash lane |
+| `LOOP_BEGIN` | `0x04` | 建立有界循环；边界为 `imm` 或受界 Scratchpad 动态值 |
+| `LOOP_END` | `0x05` | 计数递增并回跳，结束时弹出循环栈 |
+| `CALL` | `0x06` | 压入返回地址并跳转至 `imm` |
+| `RETURN` | `0x07` | 弹出子程序返回地址 |
+| `DATA_LOAD` | `0x08` | 执行静态 load/parse/transform descriptor，将 Job 或 Scratchpad 数据载入寄存器/槽位 |
+| `DATA_MOVE` | `0x09` | 按 move descriptor 在有界 Scratchpad 槽位间复制数据 |
+| `TREE_PUSH` | `0x0b` | 将节点压入参数化 Merkle 栈，并执行已就绪的等高父节点 Hash |
+| `OUTPUT` | `0x0c` | 按输出 descriptor 将 Scratchpad 片段追加到 Job 结果流 |
+| `HALT` | `0x0d` | 在循环栈和调用栈平衡时成功结束 Job |
 
-`HASH_LAYOUT` 的 lane mask 必须是 `01/10/11`；为保持单 lane 源程序简洁，assembler 仅在源指令完全省略 `flags` 时默认编码为 `01`。显式 `flags=0` 不会被改写，并由静态 verifier 拒绝。
+`0x00`、`0x0a`、`0x0e`–`0x11` 是从 v0.1 删除后保留的编码空洞；解码器必须将其视为非法
+opcode，不得重解释旧镜像。被删除的指令为 `NOP`、`XOR`、`FAIL`、
+`WAIT`、`BARRIER`和`JUMP`，原因是九个已编译的 Keygen/Sign/Verify 程序均不使用。
 
-当前 RTL Microsequencer 已为 `LOAD/STORE/XOR/EMIT` 实现统一的内部请求/响应控制、背压、错误传播和可选的受界寄存器写回；`TREE_PUSH` 也已有独立内部请求/响应通道。128-bit data descriptor、串行 AGU、Scratchpad `LOAD/STORE/XOR`、`EMIT` 输出流和固定优先级 Scratchpad 仲裁已在同一条 Job 数据切片中连通。进一步的组合切片已让 data、EMIT 和 TreeHash 共享同一个单端口 Scratchpad，完成 49 次可归属交易。离线 lowering 已统一 logical slot 与 64-bit word；RTL v2 切片已消费 multi-register binding side table。`HASH_LAYOUT` 的组件模式现可解释 JSON lowering 后的 literal/zero/register、双寄存器 affine memory 与 XOR；XMSS layout 0--7 已用该通路完成整棵 h=10 Keygen 树、自主 root 写回和 EMIT，layout 9--10 已执行 Sign PRF/H_msg。layout `0x0200` 融合 capability 现保留为 57,204,676-cycle 对照点；地址时序流水后的通用路径为 675,417,082 cycles（含 Job seed 自主装载），说明下一步需要 rate-wide/banked 组件输入。expression/context、layout-8 pipeline temp 和 OTS-wide P2/U2 尚未完成。
+Layout 内部仍允许等长数据 XOR，这是 Hash 输入表达式，不是 `XOR`微指令。
 
-`HASH_LAYOUT`、`TREE_PUSH` 等操作的展开语义由版本化 layout manifest 定义；不得依据算法 ID 进入隐藏 sub-FSM。
+## 参数化语义
 
-为覆盖宽树地址与认证路径左右次序，layout manifest 允许受限、无副作用的
-整数表达式（寄存器/内存/TreeHash context 上的加、减、乘、移位、按位运算）
-以及 `ordered_pair`。这些表达式只构造当前一次 Hash 的 ADRS 与输入顺序，
-不得发起 Hash、循环或隐式任务。小树 layout 可声明
-`restart_on_complete`，每次完成后显式释放 TreeHash context，供 FORS/XMSS
-认证子树复用；每个内部 Hash 仍进入有序 trace。
+`HASH`、`DATA_LOAD`、`DATA_MOVE`、`TREE_PUSH`和`OUTPUT`的展开语义由版本化
+descriptor manifest 定义。硬件不得根据 SLH-DSA、XMSS、LMS、FORS 或 WOTS
+等算法 ID 进入隐藏 sub-FSM。
 
-Layout composer 的通用能力包括固定宽度 word-array 编码、有界存储引用、
-等长字节串 XOR 和有界的 hash pipeline 临时值。这些能力由 layout
-显式描述，不引入 XMSS 专用 opcode；每个 pipeline 内部 Hash 仍单独记入 trace
-和工作量计数。
-
-当前 RTL layout `0x0100` 将 `R[rs]` 绑定到 32-byte address 的 word 6，
-从 Scratchpad 的 `rd..rd+3` 读取并写回 randomized-F node。它是版本化
-layout capability，而不是 XMSS task opcode；非法 layout、lane mask 或
-Scratchpad 地址均 fail closed。
-
-WOTS 共用后处理以静态 load descriptor 表达 `base_w + checksum`，输出每个
-digit 到受界 Scratchpad 槽位。动态循环只能从这些槽位读取公开的、
-8-bit 上界；Job 不包含由软件计算的 chain length。
+`HASH` lane mask 必须是 `01/10/11`。assembler 仅在源指令省略 `flags`时
+默认为 `01`；显式 `flags=0` 会被静态 verifier 拒绝。`flags[2]` 是双 lane
+配对操作的有界写延迟契约。
 
 ## 静态 verifier
 
-装载前必须证明：opcode/flags 合法、全部直接跳转在镜像内、loop/call 深度不超过 6/4、公开 loop bound 不超过 manifest、layout capability 与 lane/input 模式一致、Scratchpad 范围有界、所有可达正常路径以 HALT 结束。Job 执行期间由硬件重复检查 PC、栈和地址边界。
+装载前必须证明：opcode/flags 合法，loop/call 深度不超过 6/4，直接目标在
+镜像内，layout/load/move descriptor 存在，且所有可达正常路径能达到
+`HALT`。Job 执行期间硬件再次检查 PC、栈、寄存器和地址边界。
+
+## 灵活性边界
+
+当前 ISA 是“可编程 HBS 算法编排器”，不是通用 CPU：
+
+- 九个 SLH-DSA/XMSS/LMS Keygen、Sign、Verify 镜像只使用这 12 条指令，不含算法命名 opcode。
+- 算法差异由微码流程和 descriptor 数据表达，因此可更换参数集、树形和签名输出顺序。
+- 当前没有条件比较/分支；适合公开有界、数据无关的 HBS 控制流，不适合任意控制程序。
+- `HASH`和`TREE_PUSH`目前是阻塞退休；Python 的多 lane issue-window 调度收益尚未成为 RTL 执行语义。优先应用硬件 scoreboard 隐式处理依赖，只在真正需要显式同步时再定义新指令。
+- Verify 微码当前输出重建 root，接受/拒绝比较在外部完成；XMSS/LMS 的持久化状态事务也在 ISA 之外。
+
+因此，v0.2 已达到最初的“灵活微码 HBS”核心意图：同一小型指令集可编排多算法和三种操作，而不是把每种 HBS 任务固定为硬件宏操作。但它尚未实现非阻塞多 lane 调度和完全自治的 Verify/状态提交。

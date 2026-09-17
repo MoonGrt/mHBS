@@ -5,6 +5,8 @@
 > 直接对照：`references/papers/Unified_HBS_Architecture_2026_Reader`
 > 核心边界：μHBS 必须能脱离 HashFlow 独立构建和运行；不引入通用 runtime；不由软件逐任务或逐 Hash 喂入。
 
+> 当前 SLH-DSA 性能优化、并行运行和 8 核资源规则以 `docs/Optimization_Execution_Plan.md` 为准。其已接受基线为 14,333,951 cycles、33,985 LUT、23,269 FF、7 RAMB36、0 DSP、WNS -0.406 ns；本文件中的旧阶段估算不得覆盖该实测基线。
+
 ## 1. 执行摘要
 
 μHBS 将实现为一个独立的、微码驱动的 HBS 硬件引擎。软件在初始化阶段可以装载微码和 layout 表，在任务阶段只提交一条粗粒度 Job Descriptor，然后等待完成中断或输出流。

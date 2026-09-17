@@ -49,7 +49,7 @@ module micro_hbs_expr_load_adapter #(
     output wire                         busy,
     output logic [31:0]                 accepted_commands
 );
-    localparam logic [7:0] OP_LOAD = 8'h08;
+    localparam logic [7:0] OP_DATA_LOAD = 8'h08;
     localparam logic [15:0] ERR_CFG_BUSY = 16'h0f01;
     localparam logic [15:0] ERR_CFG_ID   = 16'h0f02;
     localparam logic [15:0] ERR_CFG_FMT  = 16'h0f03;
@@ -85,7 +85,7 @@ module micro_hbs_expr_load_adapter #(
     assign descriptor_cfg_ready = !engine_busy && state == S_IDLE;
     assign token_cfg_ready = !engine_busy && state == S_IDLE && expr_cfg_ready;
     assign cmd_ready = state == S_IDLE;
-    assign cmd_match = cmd_opcode == OP_LOAD && cmd_imm < DESCRIPTOR_COUNT
+    assign cmd_match = cmd_opcode == OP_DATA_LOAD && cmd_imm < DESCRIPTOR_COUNT
         && configured[cmd_imm[INDEX_WIDTH-1:0]];
     assign busy = state != S_IDLE;
     assign rsp_valid = state == S_RESPONSE;
@@ -171,7 +171,7 @@ module micro_hbs_expr_load_adapter #(
                     rsp_error <= 1'b0;
                     rsp_error_code <= '0;
                     rsp_reg_write <= 1'b0;
-                    if (cmd_opcode != OP_LOAD || !cmd_match) begin
+                    if (cmd_opcode != OP_DATA_LOAD || !cmd_match) begin
                         rsp_error <= 1'b1;
                         rsp_error_code <= ERR_COMMAND;
                         state <= S_RESPONSE;

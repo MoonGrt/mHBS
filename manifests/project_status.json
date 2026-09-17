@@ -110,7 +110,7 @@
         "Narrow layout-expression and static FORS digit-unpack RTL capabilities cover tc137 address/index extraction without an algorithm-specific opcode",
         "A complete serial RFC 8391 WOTS+ leaf capability performs 67 PRF_keygen, 1005 randomized-F and 66 L-tree parent operations per leaf; two leaves flow from HASH_LAYOUT through Scratchpad and TREE_PUSH in one Job",
         "The complete SLH-DSA ACVP trace is cycle-metered against executable RTL contracts: U2 SHAKE stream measures 15/30/75 cycles for 1/2/5 blocks and the no-stall 64-bit output path measures 3 cycles per word",
-        "The timing-pipelined complete current single-effective-lane P1/U2 RTL path retires 221811 microinstructions in 15167426 START-to-DONE cycles and emits the byte-exact 17088-byte signature",
+        "The current single-effective-lane P1/U2 RTL path retires 221811 microinstructions in 6283432 START-to-DONE cycles and emits the byte-exact 17088-byte signature; rate-wide composition, chained component prefetch and overlapped sequential source requests reduce cycles by 56.164% versus the 14333951-cycle baseline",
         "The native microcoded XMSS h=10 RTL path generates 1024 WOTS+ leaves and 1023 randomized-H parents from one immutable Job; the root and all ten authentication nodes match the independent RFC 8391 oracle",
         "The XMSS h=10 path retires 3075 microinstructions in 57204676 START-to-DONE cycles with zero BUSY host control writes",
         "The existing XMSS Sign JSON directly generates immutable RTL layout/component images; layouts 9 and 10 execute PRF randomizer plus H_msg from one Job in 400 cycles and match the KAT"
@@ -151,17 +151,23 @@
       "missing": "Atomic NVM integration, power-loss fault injection and zeroization assertions for Hash-lane, feedback and top-level sensitive registers"
     },
     "gate_8": {
-      "status": "PARTIAL_TIMING_FAIL",
+      "status": "PARTIAL_PREFETCH_PASS",
       "evidence": [
         "Control-only routed checkpoint is engineering evidence and explicitly non-comparable",
         "Real randomized-F P1/U2 vertical slice routes at 7,685 LUT, 6,039 FF, 2 RAMB36, 0 DSP and WNS +0.568 ns at 100 MHz",
         "The functional slice completes a three-step dynamic chain in 260 cycles versus a 108-cycle Keccak active-round floor",
         "Layout W288 rejection and W32 acceptance, h=10 FULL/SUBTREE/warm-active cache stores, static P2/U2 wide-batch rejection, windowed P2/U2 and raw-Job randomized-F P2/U2 have hash-locked OOC reports",
-        "Complete timing-pipelined SLH-DSA P1/U2 RTL measures 15167426 START-to-DONE cycles and routes at 34185 LUT, 23289 FF, 7 RAMB36 and 0 DSP",
-        "The complete top fails the 100 MHz target with WNS -1.050 ns; its 11.050 ns critical path has moved to the bitfield adapter after component and layout-destination pipeline splitting",
+        "Complete current SLH-DSA P1/U2 RTL measures 6283432 START-to-DONE cycles with byte-exact tc137 output; the historical flat-write rate-wide v1 routes at 41800 LUT, 23371 FF, 7 RAMB36, 0 DSP and WNS -3.016 ns",
+        "The 64-bit masked append removes 5533847 total cycles (38.607%) and 82.721% of composer emit-state cycles without changing Hash, permutation, Scratchpad or component counts",
+        "A staged 64-bit rate-word buffer removes the v1 flat-byte-write crossbar: v2 routes at 33808 LUT, 23391 FF, 7 RAMB36, 0 DSP and WNS -0.918 ns; LUT-cycle and timing-aware LUT-time improve 38.926% and 35.921% versus the pre-rate-wide baseline",
+        "Chained look-ahead reuses the existing four address multipliers and records 732201/732201 subsequent-component hits with zero bubble or validation-stall cycles; component control falls 65.753% to 1144073 cycles",
+        "Overlapping each aligned successor Scratchpad request with current-word emission removes 320069 more cycles while keeping the 630294/205939 read/write transaction counts unchanged",
+        "The current complete point routes at 34399 LUT, 23686 FF, 7 RAMB36, 0 DSP and WNS -1.122 ns; LUT-cycle and timing-aware LUT-time improve 55.630% and 52.577% versus the pre-rate-wide complete baseline",
+        "Component operand folding plus bitfield operand/product pipelining removes 833475 cycles (5.495%) and improves LUT-cycle product by 6.048% versus the pre-fold routed point",
+        "The bitfield pipeline adds only 1694 cycles while improving WNS from -1.485 ns to -0.406 ns; the 10.406 ns critical path is now in the composer destination-address path",
         "The native microcoded XMSS h=10 functional replay is a correctness/cycle result and is not labelled as the final P2 design or a paper-comparable point"
       ],
-      "missing": "Bitfield-adapter timing pipelining and TreeHash-parent SHAKE sharing for timing/area closure; complete P2/U1/U2 points, B1-M ablation and Go/No-Go"
+      "missing": "Banked/coalesced Scratchpad and lane-local feedback, TreeHash-parent SHAKE sharing and 100 MHz timing closure; complete P2/U1/U2 points, B1-M ablation and Go/No-Go"
     }
   }
 }

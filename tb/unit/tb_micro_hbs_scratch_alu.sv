@@ -6,9 +6,7 @@ module tb_micro_hbs_scratch_alu;
     logic rst_n = 1'b0;
     logic cmd_valid = 1'b0;
     wire cmd_ready;
-    logic [7:0] cmd_opcode = '0;
     logic [5:0] cmd_source_a = '0;
-    logic [5:0] cmd_source_b = '0;
     logic [5:0] cmd_destination = '0;
     logic [15:0] cmd_word_count = '0;
     wire rsp_valid;
@@ -47,8 +45,8 @@ module tb_micro_hbs_scratch_alu;
     always #5 clk = ~clk;
 
     micro_hbs_scratch_alu #(.WORDS(64), .ADDRESS_WIDTH(6)) dut (
-        .clk, .rst_n, .cmd_valid, .cmd_ready, .cmd_opcode,
-        .cmd_source_a, .cmd_source_b, .cmd_destination, .cmd_word_count,
+        .clk, .rst_n, .cmd_valid, .cmd_ready,
+        .cmd_source_a, .cmd_destination, .cmd_word_count,
         .rsp_valid, .rsp_ready, .rsp_error, .rsp_error_code,
         .scratch_request_valid(alu_request_valid),
         .scratch_request_ready(alu_request_ready),
@@ -109,18 +107,14 @@ module tb_micro_hbs_scratch_alu;
     endtask
 
     task automatic issue;
-        input [7:0] opcode;
         input [5:0] source_a;
-        input [5:0] source_b;
         input [5:0] destination;
         input [15:0] words;
         begin
             host_mode = 1'b0;
             @(negedge clk);
             if (!cmd_ready) $fatal(1, "command not ready");
-            cmd_opcode = opcode;
             cmd_source_a = source_a;
-            cmd_source_b = source_b;
             cmd_destination = destination;
             cmd_word_count = words;
             cmd_valid = 1'b1;
@@ -164,41 +158,31 @@ module tb_micro_hbs_scratch_alu;
         host_store(10, 64'h0123_4567_89ab_cdef);
         host_store(11, 64'h1111_2222_3333_4444);
         host_store(12, 64'hfeed_face_cafe_beef);
-        host_store(30, 64'hffff_0000_ffff_0000);
-        host_store(31, 64'h00ff_00ff_00ff_00ff);
-
-        issue(8'h09, 10, 0, 20, 3);
+        issue(10, 20, 3);
         finish_response(1'b0, 16'h0000);
         host_load_check(20, 64'h0123_4567_89ab_cdef);
         host_load_check(21, 64'h1111_2222_3333_4444);
         host_load_check(22, 64'hfeed_face_cafe_beef);
 
-        issue(8'h0a, 10, 30, 40, 2);
-        finish_response(1'b0, 16'h0000);
-        host_load_check(40, 64'hfedc_4567_7654_cdef);
-        host_load_check(41, 64'h11ee_22dd_33cc_44bb);
-
         // All bounds are checked before the first read/write.
-        issue(8'h09, 63, 0, 50, 2);
+        issue(63, 50, 2);
         finish_response(1'b1, 16'h0403);
-        issue(8'h0a, 10, 63, 50, 2);
+        issue(10, 63, 2);
         finish_response(1'b1, 16'h0403);
-        issue(8'h08, 10, 0, 20, 1);
-        finish_response(1'b1, 16'h0401);
-        issue(8'h09, 10, 0, 20, 0);
+        issue(10, 20, 0);
         finish_response(1'b1, 16'h0402);
         // Large counts must not wrap in the command-time end calculation.
-        issue(8'h09, 0, 0, 0, 16'hffff);
+        issue(0, 0, 16'hffff);
         finish_response(1'b1, 16'h0403);
 
-        if (accepted_commands != 7 || completed_responses != 7
-            || error_responses != 5 || scratch_reads != 7
-            || scratch_writes != 5)
+        if (accepted_commands != 5 || completed_responses != 5
+            || error_responses != 4 || scratch_reads != 3
+            || scratch_writes != 3)
             $fatal(1, "counter mismatch cmd=%0d done=%0d err=%0d rd=%0d wr=%0d",
                    accepted_commands, completed_responses, error_responses,
                    scratch_reads, scratch_writes);
 
-        $display("PASS Scratchpad STORE/XOR word engine range precheck/backpressure/counters");
+        $display("PASS Scratchpad DATA_MOVE word engine range precheck/backpressure/counters");
         $finish;
     end
 endmodule

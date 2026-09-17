@@ -143,7 +143,7 @@ module tb_micro_hbs_layout_descriptor_store;
         if (configured_count != 3 || accepted_loads != 3)
             $fatal(1, "ID 1 initialization accounting mismatch");
 
-        // During BUSY, a HASH_LAYOUT lookup still works while a simultaneous
+        // During BUSY, a HASH lookup still works while a simultaneous
         // host overwrite attempt is rejected.  The old immutable word wins.
         @(negedge clk);
         engine_busy = 1'b1;

@@ -26,12 +26,11 @@ class DataLoweringTests(unittest.TestCase):
         ]
         descriptors = [
             LogicalDescriptor(
-                4, "EMIT", 13, source_a=AddressExpression(base=0)
+                4, "OUTPUT", 13, source_a=AddressExpression(base=0)
             ),
             LogicalDescriptor(
-                2, "XOR", 8,
+                2, "DATA_MOVE", 8,
                 source_a=AddressExpression(base=0),
-                source_b=AddressExpression(base=2),
                 destination=AddressExpression(base=3),
             ),
         ]
@@ -58,14 +57,14 @@ class DataLoweringTests(unittest.TestCase):
         self.assertEqual(sum(first.initialized_words), 3)
         self.assertEqual(first.placements[0].last_bytes, 5)
 
-        xor_fields = decode_descriptor_word(first.descriptors[0].word)
+        move_fields = decode_descriptor_word(first.descriptors[0].word)
         emit_fields = decode_descriptor_word(first.descriptors[1].word)
-        self.assertEqual(xor_fields["format_version"], 1)
-        self.assertEqual(xor_fields["flags"], 0x0004)
-        self.assertEqual(xor_fields["source_a"], 0)
-        self.assertEqual(xor_fields["source_b"], 4)
-        self.assertEqual(xor_fields["destination"], 6)
-        self.assertEqual(xor_fields["word_count"], 1)
+        self.assertEqual(move_fields["format_version"], 1)
+        self.assertEqual(move_fields["flags"], 0x0002)
+        self.assertEqual(move_fields["source_a"], 0)
+        self.assertEqual(move_fields["source_b"], 0)
+        self.assertEqual(move_fields["destination"], 6)
+        self.assertEqual(move_fields["word_count"], 1)
         self.assertEqual(emit_fields["flags"], 0x0008)
         self.assertEqual(emit_fields["word_count"], 2)
         self.assertEqual(emit_fields["last_bytes"], 5)
@@ -76,7 +75,7 @@ class DataLoweringTests(unittest.TestCase):
     def test_v1_shared_unit_stride_register_is_encodable(self) -> None:
         result = lower_logical_data(
             [], [LogicalDescriptor(
-                0, "STORE", 8,
+                0, "DATA_MOVE", 8,
                 source_a=AddressExpression(base=2, index_reg=3),
                 destination=AddressExpression(base=8, index_reg=3),
             )],
@@ -89,18 +88,14 @@ class DataLoweringTests(unittest.TestCase):
         self.assertEqual(fields["address_mode"], 0b0101)
         self.assertEqual(result.bindings, ())
 
-    def test_all_four_data_operations_encode_in_v1(self) -> None:
+    def test_all_three_data_operations_encode_in_v1(self) -> None:
         descriptors = [
-            LogicalDescriptor(0, "LOAD", 4,
+            LogicalDescriptor(0, "DATA_LOAD", 4,
                               source_a=AddressExpression(base=1)),
-            LogicalDescriptor(1, "STORE", 8,
+            LogicalDescriptor(1, "DATA_MOVE", 8,
                               source_a=AddressExpression(base=1),
                               destination=AddressExpression(base=2)),
-            LogicalDescriptor(2, "XOR", 8,
-                              source_a=AddressExpression(base=1),
-                              source_b=AddressExpression(base=2),
-                              destination=AddressExpression(base=3)),
-            LogicalDescriptor(3, "EMIT", 5,
+            LogicalDescriptor(3, "OUTPUT", 5,
                               source_a=AddressExpression(base=3)),
         ]
         result = lower_logical_data(
@@ -109,9 +104,9 @@ class DataLoweringTests(unittest.TestCase):
         )
         fields = [decode_descriptor_word(item.word)
                   for item in result.descriptors]
-        self.assertEqual([item["flags"] for item in fields], [1, 2, 4, 8])
-        self.assertEqual([item["word_count"] for item in fields], [1, 1, 1, 1])
-        self.assertEqual([item["last_bytes"] for item in fields], [4, 8, 8, 5])
+        self.assertEqual([item["flags"] for item in fields], [1, 2, 8])
+        self.assertEqual([item["word_count"] for item in fields], [1, 1, 1])
+        self.assertEqual([item["last_bytes"] for item in fields], [4, 8, 5])
 
     def test_existing_xmss_multiregister_move_lowers_to_v2_side_table(self) -> None:
         path = ROOT / "microcode/xmss/xmss_shake256_h10_w4_keygen.json"
@@ -169,9 +164,9 @@ class DataLoweringTests(unittest.TestCase):
 
     def test_table_wide_v2_keeps_common_v1_fields(self) -> None:
         descriptors = [
-            LogicalDescriptor(1, "EMIT", 13,
+            LogicalDescriptor(1, "OUTPUT", 13,
                               source_a=AddressExpression(base=4)),
-            LogicalDescriptor(2, "STORE", 8,
+            LogicalDescriptor(2, "DATA_MOVE", 8,
                               source_a=AddressExpression(base=0, base_reg=1),
                               destination=AddressExpression(base=8)),
         ]
@@ -205,7 +200,7 @@ class DataLoweringTests(unittest.TestCase):
                     lower_logical_data(**arguments)
 
         dynamic_oob = LogicalDescriptor(
-            0, "EMIT", 8,
+            0, "OUTPUT", 8,
             source_a=AddressExpression(base=14, index_reg=2, stride=2),
         )
         with self.assertRaisesRegex(DataLoweringError, "out of bounds"):
@@ -224,14 +219,14 @@ class DataLoweringTests(unittest.TestCase):
         with self.assertRaisesRegex(DataLoweringError, "one word"):
             lower_logical_data(
                 [], [LogicalDescriptor(
-                    0, "LOAD", 9, source_a=AddressExpression(base=0)
+                    0, "DATA_LOAD", 9, source_a=AddressExpression(base=0)
                 )], logical_slot_count=2, logical_slot_bytes=16,
                 scratch_capacity_words=4,
             )
         duplicate = [
-            LogicalDescriptor(7, "EMIT", 1,
+            LogicalDescriptor(7, "OUTPUT", 1,
                               source_a=AddressExpression(base=0)),
-            LogicalDescriptor(7, "EMIT", 1,
+            LogicalDescriptor(7, "OUTPUT", 1,
                               source_a=AddressExpression(base=1)),
         ]
         with self.assertRaisesRegex(DataLoweringError, "duplicate descriptor"):

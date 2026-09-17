@@ -14,6 +14,7 @@ FORS_ROOTS = 0
 WOTS_VALUES = 0
 WOTS_DIGITS = 35
 XMSS_AUTH = 70
+WOTS_SIGNATURE_VALUES = 108
 DIGEST = 231
 TREE_ADDRESS = 232
 LEAF_INDEX = 233
@@ -297,6 +298,60 @@ def build_document() -> dict[str, object]:
         ],
         80,
     )
+    layouts["21"] = shake_layout(
+        "wots_chain_f_capture",
+        "f",
+        {"base": WOTS_VALUES, "index_reg": 1},
+        adrs_components(0, reg(0), reg(1), reg(7))
+        + [{"kind": "memory", "base": WOTS_VALUES, "index_reg": 1}],
+        64,
+    )
+    layouts["21"]["capture_destination"] = {
+        "base": WOTS_SIGNATURE_VALUES,
+        "index_reg": 1,
+    }
+    # Generic prefix-to-feedback recipe: the first permutation evaluates the
+    # descriptor below (WOTS PRF), then the bounded 64-byte repeat datapath
+    # clears the domain word at byte 32 and feeds each 16-byte result back at
+    # byte 48 while stepping the BE32 counter at byte 44.  Keeping this in a
+    # layout flag, rather than adding an algorithm opcode, lets microcode
+    # select the fused chain while preserving the generic HASH instruction.
+    layouts["22"] = shake_layout(
+        "wots_private_chain",
+        "prf",
+        {"base": WOTS_VALUES, "index_reg": 1},
+        adrs_components(5, reg(0), reg(1), zero)
+        + [{"kind": "job_bytes", "field": "sk_seed", "length": 16}],
+        64,
+    )
+    layouts["22"]["repeat_prefix"] = {
+        "recipe": "hbs_64byte_f_chain",
+        "initial_class": "prf",
+        "repeat_class": "f",
+    }
+    layouts["22"]["capture_destination"] = {
+        "base": WOTS_SIGNATURE_VALUES,
+        "index_reg": 1,
+    }
+    layouts["23"] = shake_layout(
+        "fors_private_leaf",
+        "prf",
+        {"base": TREE_ROOT, "pair_stride": 1},
+        adrs_components(6, reg(5), zero, reg(7))
+        + [{"kind": "job_bytes", "field": "sk_seed", "length": 16}],
+        64,
+    )
+    layouts["23"]["repeat_prefix"] = {
+        "recipe": "hbs_64byte_feedback",
+        "domain": 3,
+        "initial_class": "prf",
+        "repeat_class": "f",
+    }
+    layouts["23"]["pair_patch"] = {
+        "recipe": "adjacent_be32",
+        "byte_offset": 44,
+        "register": 7,
+    }
 
     digest_int = mem(DIGEST)
     fors_shift = binary(
@@ -354,7 +409,7 @@ def build_document() -> dict[str, object]:
         "5": {
             "name": "subtree_current_leaf",
             "transform": "integer_expression",
-            "expression": op("add", reg(3), reg(2)),
+            "expression": op("add", reg(3), op("mul", lit(2), reg(2))),
             "destination_reg": 7,
         },
         "6": {
@@ -411,6 +466,20 @@ def build_document() -> dict[str, object]:
             "bytes": 12,
             "destination": {"base": TREE_ADDRESS},
         },
+        "14": {
+            "name": "wots_pair_even_digit",
+            "source": {"kind": "memory", "base": WOTS_DIGITS,
+                       "index_reg": 1, "stride": 2},
+            "destination_reg": 2,
+            "endian": "big",
+        },
+        "15": {
+            "name": "wots_pair_odd_digit",
+            "source": {"kind": "memory", "base": WOTS_DIGITS + 1,
+                       "index_reg": 1, "stride": 2},
+            "destination_reg": 3,
+            "endian": "big",
+        },
     }
     moves = {
         "0": {
@@ -437,142 +506,179 @@ def build_document() -> dict[str, object]:
 
     program: list[dict[str, object]] = [
         {"label": "entry"},
-        {"op": "HASH_LAYOUT", "imm": 0},
-        {"op": "EMIT", "rd": RANDOMIZER},
-        {"op": "HASH_LAYOUT", "imm": 1},
-        {"op": "LOAD", "imm": 0},
-        {"op": "LOAD", "imm": 1},
-        {"op": "LOAD", "imm": 2},
-        {"op": "LOOP_SETUP", "rs": 0, "imm": 33},
-        {"op": "LOAD", "imm": 3},
-        {"op": "HASH_LAYOUT", "imm": 2},
+        {"op": "HASH", "imm": 0},
+        {"op": "OUTPUT", "rd": RANDOMIZER},
+        {"op": "HASH", "imm": 1},
+        {"op": "DATA_LOAD", "imm": 0},
+        {"op": "DATA_LOAD", "imm": 1},
+        {"op": "DATA_LOAD", "imm": 2},
+        {"op": "LOOP_BEGIN", "rs": 0, "imm": 33},
+        {"op": "DATA_LOAD", "imm": 3},
+        {"op": "HASH", "imm": 2},
     ]
     for height in range(6):
         program.extend(
             [
-                {"op": "MOVI", "rd": 6, "imm": height},
-                {"op": "LOAD", "imm": 4},
+                {"op": "SET_REG", "rd": 6, "imm": height},
+                {"op": "DATA_LOAD", "imm": 4},
             ]
         )
         if height == 0:
             program.extend(
                 [
-                    {"op": "MOVI", "rd": 2, "imm": 0},
-                    {"op": "LOAD", "imm": 5},
-                    {"op": "HASH_LAYOUT", "imm": 3},
-                    {"op": "HASH_LAYOUT", "imm": 4},
+                    {"op": "SET_REG", "rd": 2, "imm": 0},
+                    {"op": "DATA_LOAD", "imm": 5},
+                    {"op": "HASH", "imm": 23,
+                     "repeat": {"count": 2, "counter_reg": 7,
+                                "counter_offset": 44}},
                 ]
             )
         else:
             program.extend(
                 [
-                    {"op": "LOOP_SETUP", "rs": 2, "imm": 1 << height},
-                    {"op": "LOAD", "imm": 5},
-                    {"op": "HASH_LAYOUT", "imm": 3},
-                    {"op": "HASH_LAYOUT", "imm": 4},
+                    {"op": "LOOP_BEGIN", "rs": 2,
+                     "imm": 1 << (height - 1)},
+                    {"op": "DATA_LOAD", "imm": 5},
+                    {"op": "HASH", "flags": 3, "rs": 2, "imm": 23,
+                     "repeat": {"count": 2, "counter_reg": 7,
+                                "counter_offset": 44}},
                     {"op": "TREE_PUSH", "rd": TREE_ROOT, "imm": 4 + height},
+                    {"op": "TREE_PUSH", "rd": TREE_ROOT + 1,
+                     "imm": 4 + height},
                     {"op": "LOOP_END"},
                 ]
             )
-        program.append({"op": "STORE", "imm": 0})
+        program.append({"op": "DATA_MOVE", "imm": 0})
     program.extend(
         [
-            {"op": "LOAD", "imm": 6},
-            *({"op": "EMIT", "flags": 1, "rd": 0, "rs": 6, "imm": offset} for offset in range(7)),
+            {"op": "DATA_LOAD", "imm": 6},
+            *({"op": "OUTPUT", "flags": 1, "rd": 0, "rs": 6, "imm": offset} for offset in range(7)),
             {"op": "LOOP_END"},
-            {"op": "LOOP_SETUP", "rs": 0, "imm": 33},
-            {"op": "LOAD", "imm": 3},
-            {"op": "HASH_LAYOUT", "imm": 10},
-            {"op": "LOOP_SETUP", "rs": 2, "imm": 6},
-            {"op": "HASH_LAYOUT", "imm": 11},
+            {"op": "LOOP_BEGIN", "rs": 0, "imm": 33},
+            {"op": "DATA_LOAD", "imm": 3},
+            {"op": "HASH", "imm": 10},
+            {"op": "LOOP_BEGIN", "rs": 2, "imm": 6},
+            {"op": "HASH", "imm": 11},
             {"op": "LOOP_END"},
-            {"op": "STORE", "imm": 1},
+            {"op": "DATA_MOVE", "imm": 1},
             {"op": "LOOP_END"},
-            {"op": "HASH_LAYOUT", "imm": 12},
+            {"op": "HASH", "imm": 12},
             # The first 21 layers need their recovered root for the next
             # layer.  The final layer only emits its XMSS signature.
-            {"op": "LOOP_SETUP", "rs": 4, "imm": 21},
-            {"op": "CALL", "target": "xmss_sign_layer"},
-            {"op": "LOOP_SETUP", "rs": 1, "imm": 35},
-            {"op": "LOAD", "imm": 10},
-            {"op": "LOAD", "imm": 11},
-            {"op": "MOVI", "rd": 6, "imm": DYNAMIC_BOUND},
-            {"op": "LOOP_SETUP", "flags": 1, "rd": 6, "rs": 2, "target": "after_wots_recovery_chain"},
-            {"op": "HASH_LAYOUT", "imm": 18},
+            {"op": "LOOP_BEGIN", "rs": 4, "imm": 21},
+            {"op": "CALL", "target": "xmss_auth_layer"},
+            {"op": "CALL", "target": "wots_selected_full"},
+            {"op": "HASH", "imm": 19},
+            {"op": "LOOP_BEGIN", "rs": 2, "imm": 3},
+            {"op": "HASH", "imm": 20},
             {"op": "LOOP_END"},
-            {"label": "after_wots_recovery_chain"},
+            {"op": "DATA_LOAD", "imm": 12},
+            {"op": "DATA_LOAD", "imm": 13},
             {"op": "LOOP_END"},
-            {"op": "HASH_LAYOUT", "imm": 19},
-            {"op": "LOOP_SETUP", "rs": 2, "imm": 3},
-            {"op": "HASH_LAYOUT", "imm": 20},
-            {"op": "LOOP_END"},
-            {"op": "LOAD", "imm": 12},
-            {"op": "LOAD", "imm": 13},
-            {"op": "LOOP_END"},
-            {"op": "CALL", "target": "xmss_sign_layer"},
+            {"op": "CALL", "target": "xmss_auth_layer"},
+            {"op": "CALL", "target": "wots_selected_final"},
             {"op": "HALT"},
-            {"label": "xmss_sign_layer"},
-            {"op": "LOAD", "imm": 2},
+            {"label": "xmss_auth_layer"},
+            {"op": "DATA_LOAD", "imm": 2},
         ]
     )
     for height in range(3):
         program.extend(
             [
-                {"op": "MOVI", "rd": 6, "imm": height},
-                {"op": "LOAD", "imm": 7},
+                {"op": "SET_REG", "rd": 6, "imm": height},
+                {"op": "DATA_LOAD", "imm": 7},
             ]
         )
         if height == 0:
             program.extend(
                 [
-                    {"op": "MOVI", "rd": 2, "imm": 0},
-                    {"op": "LOAD", "imm": 8},
+                    {"op": "SET_REG", "rd": 2, "imm": 0},
+                    {"op": "DATA_LOAD", "imm": 8},
                     {"op": "CALL", "target": "wots_pkgen"},
-                    {"op": "STORE", "imm": 2},
+                    {"op": "DATA_MOVE", "imm": 2},
                 ]
             )
         else:
             program.extend(
                 [
-                    {"op": "LOOP_SETUP", "rs": 2, "imm": 1 << height},
-                    {"op": "LOAD", "imm": 8},
+                    {"op": "LOOP_BEGIN", "rs": 2, "imm": 1 << height},
+                    {"op": "DATA_LOAD", "imm": 8},
                     {"op": "CALL", "target": "wots_pkgen"},
                     {"op": "TREE_PUSH", "rd": WORK, "imm": 15 + height},
                     {"op": "LOOP_END"},
                 ]
             )
-        program.append({"op": "STORE", "imm": 3})
+        program.append({"op": "DATA_MOVE", "imm": 3})
     program.extend(
         [
-            {"op": "ADDI", "rd": 0, "rs": 5, "imm": 0},
-            {"op": "LOAD", "imm": 9},
-            {"op": "LOOP_SETUP", "rs": 1, "imm": 35},
-            {"op": "HASH_LAYOUT", "imm": 13},
-            {"op": "ADDI", "rd": 6, "rs": 1, "imm": WOTS_DIGITS},
-            {"op": "LOOP_SETUP", "flags": 1, "rd": 6, "rs": 7, "target": "after_wots_sign_chain"},
-            {"op": "HASH_LAYOUT", "imm": 14},
+            {"op": "RETURN"},
+            {"label": "wots_selected_full"},
+            {"op": "ADD_IMM", "rd": 0, "rs": 5, "imm": 0},
+            {"op": "DATA_LOAD", "imm": 9},
+            {"op": "LOOP_BEGIN", "rs": 1, "imm": 17},
+            {"op": "DATA_LOAD", "imm": 14},
+            {"op": "DATA_LOAD", "imm": 15},
+            {"op": "SET_REG", "rd": 7, "imm": 0},
+            {"op": "HASH", "flags": 3, "rs": 1, "imm": 22,
+             "repeat": {"count": 16, "counter_reg": 7,
+                        "counter_offset": 44, "capture_reg_base": 2}},
             {"op": "LOOP_END"},
-            {"label": "after_wots_sign_chain"},
-            {"op": "EMIT", "flags": 1, "rd": WOTS_VALUES, "rs": 1},
+            {"op": "SET_REG", "rd": 1, "imm": 34},
+            {"op": "SET_REG", "rd": 1, "imm": 17},
+            {"op": "DATA_LOAD", "imm": 14},
+            {"op": "SET_REG", "rd": 1, "imm": 34},
+            {"op": "SET_REG", "rd": 7, "imm": 0},
+            {"op": "HASH", "imm": 22,
+             "repeat": {"count": 16, "counter_reg": 7,
+                        "counter_offset": 44, "capture_reg_base": 2}},
+            {"op": "LOOP_BEGIN", "rs": 1, "imm": 35},
+            {"op": "OUTPUT", "flags": 1, "rd": WOTS_SIGNATURE_VALUES,
+             "rs": 1},
             {"op": "LOOP_END"},
-            {"op": "EMIT", "rd": XMSS_AUTH},
-            {"op": "EMIT", "rd": XMSS_AUTH + 1},
-            {"op": "EMIT", "rd": XMSS_AUTH + 2},
-            {"op": "RET"},
+            {"op": "OUTPUT", "rd": XMSS_AUTH},
+            {"op": "OUTPUT", "rd": XMSS_AUTH + 1},
+            {"op": "OUTPUT", "rd": XMSS_AUTH + 2},
+            {"op": "RETURN"},
+            {"label": "wots_selected_final"},
+            {"op": "ADD_IMM", "rd": 0, "rs": 5, "imm": 0},
+            {"op": "DATA_LOAD", "imm": 9},
+            {"op": "LOOP_BEGIN", "rs": 1, "imm": 35},
+            {"op": "HASH", "imm": 13},
+            {"op": "ADD_IMM", "rd": 6, "rs": 1, "imm": WOTS_DIGITS},
+            {"op": "LOOP_BEGIN", "flags": 1, "rd": 6, "rs": 7,
+             "target": "after_final_wots_sign_chain"},
+            {"op": "HASH", "imm": 14},
+            {"op": "LOOP_END"},
+            {"label": "after_final_wots_sign_chain"},
+            {"op": "OUTPUT", "flags": 1, "rd": WOTS_VALUES, "rs": 1},
+            {"op": "LOOP_END"},
+            {"op": "OUTPUT", "rd": XMSS_AUTH},
+            {"op": "OUTPUT", "rd": XMSS_AUTH + 1},
+            {"op": "OUTPUT", "rd": XMSS_AUTH + 2},
+            {"op": "RETURN"},
             {"label": "wots_pkgen"},
-            {"op": "LOOP_SETUP", "rs": 1, "imm": 35},
-            {"op": "HASH_LAYOUT", "imm": 13},
-            {"op": "LOOP_SETUP", "rs": 7, "imm": 15},
-            {"op": "HASH_LAYOUT", "imm": 14},
+            # The first 34 WOTS chains form 17 statically adjacent pairs.
+            # flags=3 asks the bounded P2 composer to evaluate logical chain
+            # indices 2*R1 and 2*R1+1 with the same chain-step R7.  Chain 34
+            # remains an ordinary single-lane tail below.
+            {"op": "LOOP_BEGIN", "rs": 1, "imm": 17},
+            {"op": "SET_REG", "rd": 7, "imm": 0},
+            {"op": "HASH", "flags": 3, "rs": 1, "imm": 22,
+             "repeat": {"count": 16, "counter_reg": 7,
+                        "counter_offset": 44}},
             {"op": "LOOP_END"},
-            {"op": "LOOP_END"},
-            {"op": "HASH_LAYOUT", "imm": 15},
-            {"op": "RET"},
+            {"op": "SET_REG", "rd": 1, "imm": 34},
+            {"op": "SET_REG", "rd": 7, "imm": 0},
+            {"op": "HASH", "imm": 22,
+             "repeat": {"count": 16, "counter_reg": 7,
+                        "counter_offset": 44}},
+            {"op": "HASH", "imm": 15},
+            {"op": "RETURN"},
         ]
     )
     return {
         "schema_version": 1,
-        "micro_isa_version": "0.1",
+        "micro_isa_version": "0.2",
         "name": "fips205-slh-dsa-shake-128f-sign",
         "entry": "entry",
         "bounds": {

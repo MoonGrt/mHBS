@@ -12,6 +12,9 @@ MANIFESTS = (
     ROOT / "manifests/programs/xmss_shake256_h10_w4_sign_v0.1.0.json",
     ROOT / "manifests/programs/slh_dsa_shake_128f_keygen_v0.1.0.json",
     ROOT / "manifests/programs/slh_dsa_shake_128f_sign_v0.1.0.json",
+    ROOT / "manifests/programs/slh_dsa_shake_128f_verify_v0.1.0.json",
+    ROOT / "manifests/programs/lms_sign_h10_w4_v0.1.0.json",
+    ROOT / "manifests/programs/lms_verify_h10_w4_v0.1.0.json",
 )
 
 

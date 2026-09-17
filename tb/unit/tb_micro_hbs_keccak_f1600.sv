@@ -24,11 +24,21 @@ module tb_micro_hbs_keccak_f1600;
 
     micro_hbs_keccak_f1600 #(.UNROLL(1)) dut_u1 (
         .clk, .rst_n, .start, .ready(ready_u1), .state_in,
-        .state_out(state_out_u1), .done(done_u1), .rounds_executed(rounds_u1)
+        .chain_enable(1'b0), .chain_count(8'd1),
+        .chain_counter_offset(8'b0), .chain_feedback_offset(8'b0),
+        .chain_feedback_bytes(6'b0), .chain_counter_start(32'b0),
+        .capture_enable(1'b0), .capture_after(8'b0),
+        .state_out(state_out_u1), .done(done_u1),
+        .capture_digest(), .capture_valid(), .rounds_executed(rounds_u1)
     );
     micro_hbs_keccak_f1600 #(.UNROLL(2)) dut_u2 (
         .clk, .rst_n, .start, .ready(ready_u2), .state_in,
-        .state_out(state_out_u2), .done(done_u2), .rounds_executed(rounds_u2)
+        .chain_enable(1'b0), .chain_count(8'd1),
+        .chain_counter_offset(8'b0), .chain_feedback_offset(8'b0),
+        .chain_feedback_bytes(6'b0), .chain_counter_start(32'b0),
+        .capture_enable(1'b0), .capture_after(8'b0),
+        .state_out(state_out_u2), .done(done_u2),
+        .capture_digest(), .capture_valid(), .rounds_executed(rounds_u2)
     );
 
     initial begin

@@ -4,7 +4,7 @@
 
 面向 LMS、XMSS 与 SLH-DSA 的循环压缩、微码驱动共享加速器。
 
-> 当前状态：实施中。LMS、XMSS 和 SLH-DSA Keygen/Sign 微程序已在模型层匹配标准或官方 KAT；7 幅微码已经静态 verifier 导出为 RTL `$readmemh` 镜像。XMSS h=10 通用 RTL 路径已完成 root/auth/EMIT。SLH-DSA-SHAKE-128f 的完整 deterministic Sign 已在独立、无 DMA 的微码 RTL 路径跑通：一条原子 Job 自主执行 `PRF_msg`、`H_msg`、33 棵 FORS 树及 22 层 WOTS+/XMSS Hypertree，17,088-byte 输出逐字匹配 NIST ACVP tc137；时序流水化 P1/U2 START-to-DONE 实测 15,167,426 cycles，104,937 次 SHAKE 与 105,641 次 permutation 全部闭合。完整顶层 post-route 为 34,185 LUT / 23,289 FF / 7 RAMB36 / 0 DSP；100 MHz 尚未收敛（WNS −1.050 ns）。详见 [Final Gate Report](docs/Final_Gate_Report.md)。
+> 当前状态：实施中。LMS、XMSS 和 SLH-DSA Keygen/Sign 微程序已在模型层匹配标准或官方 KAT；7 幅微码已经静态 verifier 导出为 RTL `$readmemh` 镜像。当前唯一完整综合顶层为 `rtl/top/micro_hbs_slh_dsa_top.sv`。它在独立、无 DMA 的路径上由一条原子 Job 自主执行 SLH-DSA-SHAKE-128f deterministic Sign：`PRF_msg`、`H_msg`、33 棵 FORS 树及 22 层 WOTS+/XMSS Hypertree，17,088-byte 输出逐字匹配 NIST ACVP tc137。64-bit rate-wide composer、链式 component 预取、连续源字请求重叠及 lane-local Hash 反馈缓存后，P1/U2 START-to-DONE 实测 6,002,014 cycles，较 14,333,951-cycle 基线减少 58.127%；post-route 为 34,874 LUT / 23,903 FF / 7 RAMB36 / 0 DSP、WNS −1.489 ns，timing-aware LUT×time 较原基线改善 52.560%。详见 [Final Gate Report](docs/Final_Gate_Report.md)。
 
 > 分阶段实施、独立性契约和论文 Gate 见 [Execution Plan](Execution_Plan.md)；当前局部实测与收益边界见 [Expected Benefits](docs/Expected_Benefits.md)。两项已固定的架构取舍见 [Layout Expression Tradeoff](docs/Layout_Expression_Tradeoff.md) 与 [Static P2 Tradeoff](docs/Static_P2_Tradeoff.md)。
 > SLH-DSA 周期的已计入范围和未计入边界见 [SLH-DSA Cycle Measurement](docs/SLH_DSA_Cycle_Measurement.md)。
@@ -17,12 +17,7 @@ make sim-xmss
 make sim-slh-dsa
 make sim-slh-dsa-cycles
 make export-slh-dsa-layouts rtl-slh-dsa-full-test
-make rtl-descriptor-shake-test
-make rtl-xmss-sign-prehash-test
-make rtl-xmss-generic-leaf-test
-make rtl-xmss-generic-tree-h2-test
-make rtl-xmss-generic-tree-h10-test
-make rtl-xmss-wots-tree-h10-test
+make rtl-unit-test
 make ci
 ```
 
@@ -43,23 +38,10 @@ Hypertree，重建 deterministic SigGen tc137 的完整 17,088-byte 签名，
 并逐一核对 104,937 个 SHAKE 输入/输出。主机不提供 FORS index、WOTS
 chain length、树决策、task 或 Hash descriptor。
 
-`make rtl-xmss-wots-tree-h10-test` 在真实 RTL 中由一条 Job
-执行 XMSS-SHAKE256_10_256 的全部 1,024 个 WOTS+ leaf 与
-1,023 个 TreeHash parent，不接收软件 task、Hash descriptor 或预装 leaf。
-
-`make rtl-xmss-sign-prehash-test` 直接加载由现有 XMSS Sign JSON 离线生成的
-layout/component 镜像，在同一条 Job 内完成随机化值 `R` 与 `H_msg`；执行期间
-没有软件 task/Hash ingress。Job 字段当前在 IDLE 期放入固定 Scratchpad 槽，
-尚未替换为最终 DMA/Job latch。
-
-`make rtl-xmss-generic-leaf-test` 用同一套 JSON-lowered layout/component
-镜像执行一个完整 WOTS+ public-key generation 和 L-tree，一条 Job
-锁存 `SK.seed`/`PK.seed` 并自主写入内部 Scratchpad，随后完成 3,346 次 SHAKE，
-659,517 cycles，得到与 RFC 8391
-oracle 一致的 leaf。`make rtl-xmss-generic-tree-h2-test` 是纳入 CI 的
-4-leaf/3-parent 快速闭环；`make rtl-xmss-generic-tree-h10-test` 使用同一
-RTL 路径完成 1,024 leaf/1,023 parent、root 写回与 EMIT，时序流水版实测 675,417,082 cycles。
-后者耗时较长，不放入默认 `ci-core`。
+早期 capability slice、被否决的宽表达式/P2 实验和测试 stub 已从
+`rtl/` 删除；历史结论仍保留在文档与 Git 历史中。LMS/XMSS 当前保留模型、
+微码以及 SHA-256、状态管理和标准父节点 RTL 基础模块，但不再把阶段性
+验证 slice 描述成正式综合顶层。
 
 ## 1. 项目背景
 
@@ -286,18 +268,19 @@ RESERVE_INDEX
 
 ## 6. 微指令模型
 
-基础指令应保持与具体算法正交。
+当前 Micro-ISA v0.2 仅保留 12 条被实际程序使用的通用指令：
 
-| 类别 | 候选指令 | 功能 |
+| 类别 | 指令 | 功能 |
 |---|---|---|
-| 程序控制 | `CALL`, `RET`, `JUMP` | 子程序和流程控制 |
-| 循环控制 | `LOOP_SETUP`, `LOOP_END` | 配置并执行硬件循环 |
-| Hash | `HASH_LAYOUT` | 按模板构造输入并启动 Hash |
-| 地址 | `ADDR_SET`, `ADDR_INC`, `ADDR_BIND` | 更新内存地址和 ADRS 字段 |
-| 数据 | `LOAD`, `STORE`, `XOR`, `MOVE` | Scratchpad 数据操作 |
-| TreeHash | `TREE_PUSH`, `TREE_REDUCE`, `TREE_CAPTURE` | 流式树计算 |
-| 输出 | `EMIT`, `RETURN_ROOT` | 输出签名段或根 |
-| 同步 | `WAIT`, `BARRIER` | 多 Hash lane 和访存同步 |
+| 标量 | `SET_REG`, `ADD_IMM` | 控制参数与计数地址 |
+| 流程 | `LOOP_BEGIN`, `LOOP_END`, `CALL`, `RETURN`, `HALT` | 有界循环、子程序和结束 |
+| Hash | `HASH` | 按 layout descriptor 构造输入并启动等价 Hash lane |
+| 数据 | `DATA_LOAD`, `DATA_MOVE` | 受界数据加载、解析、变换和复制 |
+| TreeHash | `TREE_PUSH` | 参数化 Merkle 栈入栈和等高归约 |
+| 输出 | `OUTPUT` | 输出签名段或重建根 |
+
+`NOP/XOR/FAIL/WAIT/BARRIER/JUMP` 因九个已编译程序均未使用，
+已从 v0.2 删除。编码保留为非法空洞。
 
 指令格式示意：
 
@@ -319,7 +302,7 @@ MicroOp {
 允许使用融合执行优化热点，但基础架构不依赖带有算法名称的指令。候选融合操作包括：
 
 - Hash 输出反馈；
-- `LOAD + HASH + STORE`；
+- `DATA_LOAD + HASH + DATA_MOVE`；
 - `TREE_PUSH + TREE_REDUCE`；
 - Hash 完成后自动更新 ADRS；
 - 根据 Base-w digit 设置动态循环上界。
@@ -345,13 +328,13 @@ SLH-DSA-128f Sign: 104,937 Hash
 FORS_SIGN:
     LOOP fors_tree, K
         LOOP leaf, 2^A
-            HASH_LAYOUT FORS_PRF
+            HASH FORS_PRF
             TREE_PUSH
             TREE_REDUCE
         END
         TREE_CAPTURE
     END
-    HASH_LAYOUT FORS_ROOTS
+    HASH FORS_ROOTS
 
 HT_SIGN:
     LOOP layer, D

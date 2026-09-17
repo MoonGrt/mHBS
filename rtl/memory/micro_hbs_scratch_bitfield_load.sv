@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Generic MSB-first bit-field LOAD from a byte string held in Scratchpad.
+// Generic MSB-first bit-field DATA_LOAD from a Scratchpad byte string.
 //
 // A command reads at most two adjacent 64-bit words, extracts 1..64 bits and
 // either returns a 32-bit sequencer-register write or writes a 1..16-byte
@@ -74,7 +74,6 @@ module micro_hbs_scratch_bitfield_load #(
     logic [127:0] field_mask;
     logic [127:0] field_value;
     integer byte_index;
-    integer value_byte_index;
 
     function automatic [63:0] reverse_bytes64(input [63:0] value);
         integer index;
@@ -108,12 +107,12 @@ module micro_hbs_scratch_bitfield_load #(
             scratch_request_write = 1'b1;
             scratch_request_address = destination_word + write_word_index;
             for (byte_index = 0; byte_index < 8; byte_index = byte_index + 1) begin
-                value_byte_index = output_bytes - 1
-                    - (write_word_index * 8 + byte_index);
                 if ((write_word_index * 8 + byte_index) < output_bytes
-                    && value_byte_index >= 0 && value_byte_index < 8)
+                    && (output_bytes - 1
+                        - (write_word_index * 8 + byte_index)) < 8)
                     scratch_request_write_data[8*byte_index +: 8]
-                        = extracted_value >> (8*value_byte_index);
+                        = extracted_value >> (8 * (output_bytes - 1
+                            - (write_word_index * 8 + byte_index)));
             end
         end
     end

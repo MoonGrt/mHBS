@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Static-descriptor 96-bit shift LOAD.  This keeps wide tree addresses in
+// Static-descriptor 96-bit shift DATA_LOAD.  This keeps wide tree addresses in
 // Scratchpad while the sequencer register file remains 32-bit.
 // Descriptor: version, capability, source word, destination word,
 // byte count, direction bit (1=right), shift amount.
@@ -28,7 +28,7 @@ module micro_hbs_wide_shift_load_adapter #(
     input wire scratch_response_error,
     output wire busy
 );
-    localparam logic [7:0] OP_LOAD = 8'h08;
+    localparam logic [7:0] OP_DATA_LOAD = 8'h08;
     localparam logic [15:0] ERR_CFG = 16'h1101;
     localparam logic [15:0] ERR_COMMAND = 16'h1102;
     localparam logic [15:0] ERR_SCRATCH = 16'h1103;
@@ -64,7 +64,7 @@ module micro_hbs_wide_shift_load_adapter #(
 
     assign cfg_ready = !engine_busy && state == S_IDLE;
     assign cmd_ready = state == S_IDLE;
-    assign cmd_match = cmd_opcode == OP_LOAD && cmd_imm < DESCRIPTOR_COUNT
+    assign cmd_match = cmd_opcode == OP_DATA_LOAD && cmd_imm < DESCRIPTOR_COUNT
         && configured[cmd_imm[INDEX_WIDTH-1:0]];
     assign rsp_valid = state == S_RESPONSE;
     assign busy = state != S_IDLE;
@@ -132,7 +132,7 @@ module micro_hbs_wide_shift_load_adapter #(
                 S_IDLE: if (cmd_valid) begin
                     rsp_error <= 1'b0;
                     rsp_error_code <= '0;
-                    if (cmd_opcode != OP_LOAD || !cmd_match) begin
+                    if (cmd_opcode != OP_DATA_LOAD || !cmd_match) begin
                         rsp_error <= 1'b1;
                         rsp_error_code <= ERR_COMMAND;
                         state <= S_RESPONSE;

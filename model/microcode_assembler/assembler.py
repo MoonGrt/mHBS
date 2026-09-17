@@ -44,18 +44,44 @@ def assemble_document(document: dict[str, Any]) -> dict[str, Any]:
                 raise AssemblyError(f"undefined label: {target}")
             imm = labels[target]
         # JSON written before the RTL lane-mask contract commonly omitted the
-        # HASH_LAYOUT flags field.  Preserve that source compatibility while
+        # HASH flags field.  Preserve that source compatibility while
         # producing a legal single-lane command.  An explicitly supplied zero
         # remains zero so the verifier can reject author intent rather than
         # silently rewriting it.
         if "flags" in item:
             flags = int(item["flags"])
         else:
-            flags = 1 if opcode == Opcode.HASH_LAYOUT else 0
+            flags = 1 if opcode == Opcode.HASH else 0
+        rd = int(item.get("rd", 0))
+        if "repeat" in item:
+            if opcode != Opcode.HASH or not isinstance(item["repeat"], dict):
+                raise AssemblyError("repeat is legal only on HASH")
+            repeat = item["repeat"]
+            count = int(repeat.get("count", 0))
+            counter_reg = int(repeat.get("counter_reg", -1))
+            counter_offset = int(repeat.get("counter_offset", -1))
+            if not 1 <= count <= 0xFF:
+                raise AssemblyError("HASH repeat count must fit 1..255")
+            if not 0 <= counter_reg < 8:
+                raise AssemblyError("HASH repeat counter_reg must be R0..R7")
+            if not 0 <= counter_offset <= 0xFF:
+                raise AssemblyError("HASH repeat counter_offset must fit one byte")
+            if not 0 <= int(imm) <= 0xFFFF:
+                raise AssemblyError("HASH repeat layout id must fit 16 bits")
+            flags |= 0x08
+            if "capture_reg_base" in repeat:
+                capture_reg_base = int(repeat["capture_reg_base"])
+                if not 0 <= capture_reg_base < 8:
+                    raise AssemblyError(
+                        "HASH repeat capture_reg_base must be R0..R7"
+                    )
+                flags |= 0x10 | capture_reg_base << 5
+            rd = counter_reg
+            imm = counter_offset << 24 | count << 16 | int(imm)
         inst = Instruction(
             opcode,
             flags,
-            int(item.get("rd", 0)),
+            rd,
             int(item.get("rs", 0)),
             int(imm),
         )
@@ -66,7 +92,7 @@ def assemble_document(document: dict[str, Any]) -> dict[str, Any]:
     raw = b"".join(word.to_bytes(8, "big") for word in words)
     return {
         "schema_version": 1,
-        "micro_isa_version": document.get("micro_isa_version", "0.1"),
+        "micro_isa_version": document.get("micro_isa_version", "0.2"),
         "name": document.get("name", "unnamed"),
         "entry": labels.get(document.get("entry", "entry"), 0),
         "word_count": len(words),
@@ -77,7 +103,6 @@ def assemble_document(document: dict[str, Any]) -> dict[str, Any]:
         "layouts": document.get("layouts", {}),
         "moves": document.get("moves", {}),
         "loads": document.get("loads", {}),
-        "xors": document.get("xors", {}),
         "bounds": document.get("bounds", {}),
     }
 

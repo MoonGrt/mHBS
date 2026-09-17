@@ -40,8 +40,8 @@ WORD_BYTES = 8
 FORMAT_V1 = 1
 FORMAT_V2 = 2
 
-OPERATION_FLAGS = {"LOAD": 0x0001, "STORE": 0x0002,
-                   "XOR": 0x0004, "EMIT": 0x0008}
+OPERATION_FLAGS = {"DATA_LOAD": 0x0001, "DATA_MOVE": 0x0002,
+                   "OUTPUT": 0x0008}
 OPERAND_CODES = {"source_a": 0, "source_b": 1, "destination": 2}
 
 
@@ -167,7 +167,7 @@ def descriptor_from_program_move(
     descriptor_id: int | None = None,
     byte_count: int,
 ) -> LogicalDescriptor:
-    """Translate one existing interpreter ``moves`` entry to a STORE input."""
+    """Translate one existing interpreter ``moves`` entry to a DATA_MOVE input."""
 
     try:
         move = document["moves"][str(move_id)]
@@ -177,7 +177,7 @@ def descriptor_from_program_move(
         raise DataLoweringError(f"invalid move descriptor {move_id}") from exc
     return LogicalDescriptor(
         descriptor_id=move_id if descriptor_id is None else descriptor_id,
-        operation="STORE",
+        operation="DATA_MOVE",
         byte_count=byte_count,
         source_a=source,
         destination=destination,
@@ -221,13 +221,11 @@ def _logical_range(
 
 def _required_operands(descriptor: LogicalDescriptor) -> tuple[str, ...]:
     operation = descriptor.operation.upper()
-    if operation == "LOAD":
+    if operation == "DATA_LOAD":
         required = ("source_a",)
-    elif operation == "STORE":
+    elif operation == "DATA_MOVE":
         required = ("source_a", "destination")
-    elif operation == "XOR":
-        required = ("source_a", "source_b", "destination")
-    elif operation == "EMIT":
+    elif operation == "OUTPUT":
         required = ("source_a",)
     else:
         raise DataLoweringError(f"unsupported operation {descriptor.operation!r}")
@@ -445,8 +443,8 @@ def lower_logical_data(
                 f"1..{logical_slot_bytes}"
             )
         operation = item.operation.upper()
-        if operation == "LOAD" and item.byte_count > WORD_BYTES:
-            raise DataLoweringError("RTL LOAD descriptor must select one word")
+        if operation == "DATA_LOAD" and item.byte_count > WORD_BYTES:
+            raise DataLoweringError("RTL DATA_LOAD descriptor must select one word")
         required = _required_operands(item)
         required_by_descriptor.append((item, required))
         for operand in required:

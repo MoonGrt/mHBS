@@ -80,6 +80,13 @@ module micro_hbs_randomized_hash #(
     micro_hbs_shake256_single_block #(.UNROLL(UNROLL)) shake (
         .clk, .rst_n, .start(shake_start), .ready(shake_ready),
         .message(shake_message), .message_length(shake_length),
+        .repeat_enable(1'b0), .repeat_prefix(1'b0),
+        .repeat_prefix_preserve_counter(1'b0),
+        .repeat_prefix_domain(3'b0), .repeat_count(8'd1),
+        .repeat_counter_offset(8'b0), .repeat_feedback_offset(8'b0),
+        .repeat_feedback_bytes(6'b0), .repeat_counter_start(32'b0),
+        .capture_enable(1'b0), .capture_after(8'b0),
+        .capture_digest(), .capture_valid(),
         .digest(shake_digest), .done(shake_done), .error(shake_error)
     );
 

@@ -1,0 +1,527 @@
+{
+  "schema_version": 1,
+  "micro_isa_version": "0.2",
+  "name": "rfc8554-lms-sha256-m32-h10-w4-verify",
+  "entry": "entry",
+  "bounds": {
+    "scratch_slots": 192,
+    "max_loop_bound": 1024,
+    "max_dynamic_instructions": 3000000
+  },
+  "layouts": {
+    "0": {
+      "name": "lmots_message_digest",
+      "class": "lmots_message",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 4096,
+      "destination": {
+        "base": 141
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "memory",
+          "base": 138
+        },
+        {
+          "kind": "literal",
+          "hex": "8181"
+        },
+        {
+          "kind": "memory",
+          "base": 139
+        },
+        {
+          "kind": "job_bytes",
+          "field": "message"
+        }
+      ]
+    },
+    "1": {
+      "name": "lmots_verify_chain_step",
+      "class": "ots_chain",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 55,
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "memory",
+          "base": 138
+        },
+        {
+          "kind": "reg",
+          "reg": 0,
+          "bytes": 2
+        },
+        {
+          "kind": "word_array",
+          "word_bytes": 1,
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 7
+                  },
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 0,
+          "index_reg": 0
+        }
+      ]
+    },
+    "2": {
+      "name": "lmots_public_compress",
+      "class": "ots_compress",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 2166,
+      "destination": {
+        "base": 134
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "memory",
+          "base": 138
+        },
+        {
+          "kind": "literal",
+          "hex": "8080"
+        },
+        {
+          "kind": "memory_range",
+          "base": 0,
+          "count": 67
+        }
+      ]
+    },
+    "3": {
+      "name": "lms_leaf_candidate",
+      "class": "merkle_leaf",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 54,
+      "destination": {
+        "base": 136
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "memory_int",
+                    "base": 138
+                  },
+                  {
+                    "kind": "literal_int",
+                    "value": 1024
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "kind": "literal",
+          "hex": "8282"
+        },
+        {
+          "kind": "memory",
+          "base": 134
+        }
+      ]
+    },
+    "4": {
+      "name": "lms_auth_path",
+      "class": "merkle_internal",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 86,
+      "destination": {
+        "base": 136
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "shr",
+                "value": {
+                  "kind": "reg",
+                  "reg": 5
+                },
+                "shift": {
+                  "kind": "literal_int",
+                  "value": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "literal",
+          "hex": "8383"
+        },
+        {
+          "kind": "ordered_pair",
+          "condition": {
+            "op": "and",
+            "args": [
+              {
+                "kind": "reg",
+                "reg": 5
+              },
+              {
+                "kind": "literal_int",
+                "value": 1
+              }
+            ]
+          },
+          "when_zero": [
+            {
+              "kind": "memory",
+              "base": 136
+            },
+            {
+              "kind": "memory",
+              "base": 137
+            }
+          ],
+          "when_nonzero": [
+            {
+              "kind": "memory",
+              "base": 137
+            },
+            {
+              "kind": "memory",
+              "base": 136
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "loads": {
+    "0": {
+      "name": "signature_q",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "kind": "literal_int",
+          "value": 0
+        },
+        "length": 4
+      },
+      "destination": {
+        "base": 138
+      }
+    },
+    "1": {
+      "name": "q_node_index_register",
+      "source": {
+        "kind": "memory",
+        "base": 138
+      },
+      "destination_reg": 5,
+      "endian": "big"
+    },
+    "2": {
+      "name": "signature_randomizer",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "kind": "literal_int",
+          "value": 8
+        },
+        "length": 32
+      },
+      "destination": {
+        "base": 139
+      }
+    },
+    "3": {
+      "name": "lmots_coefficients",
+      "source": {
+        "kind": "memory",
+        "base": 141
+      },
+      "transform": "base_w_checksum",
+      "log_w": 4,
+      "len1": 64,
+      "len2": 3,
+      "destination": {
+        "base": 67
+      }
+    },
+    "4": {
+      "name": "lmots_y_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "kind": "literal_int",
+              "value": 40
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "kind": "reg",
+                  "reg": 0
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 32
+                }
+              ]
+            }
+          ]
+        },
+        "length": 32
+      },
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      }
+    },
+    "5": {
+      "name": "lmots_coefficient_register",
+      "source": {
+        "kind": "memory",
+        "base": 67,
+        "index_reg": 0
+      },
+      "destination_reg": 7,
+      "endian": "big"
+    },
+    "6": {
+      "name": "lmots_verify_chain_bound",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "sub",
+        "left": {
+          "kind": "literal_int",
+          "value": 15
+        },
+        "right": {
+          "kind": "reg",
+          "reg": 7
+        }
+      },
+      "bytes": 1,
+      "destination": {
+        "base": 140
+      }
+    },
+    "7": {
+      "name": "lms_auth_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "kind": "literal_int",
+              "value": 2188
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "kind": "reg",
+                  "reg": 2
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 32
+                }
+              ]
+            }
+          ]
+        },
+        "length": 32
+      },
+      "destination": {
+        "base": 137
+      }
+    },
+    "8": {
+      "name": "next_lms_node_index",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "shr",
+        "value": {
+          "kind": "reg",
+          "reg": 5
+        },
+        "shift": {
+          "kind": "literal_int",
+          "value": 1
+        }
+      },
+      "destination_reg": 5
+    }
+  },
+  "program": [
+    {
+      "label": "entry"
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 0
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 1
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 2
+    },
+    {
+      "op": "HASH",
+      "imm": 0
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 3
+    },
+    {
+      "op": "SET_REG",
+      "rd": 6,
+      "imm": 140
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 0,
+      "imm": 67
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 4
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 5
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 6
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "flags": 1,
+      "rd": 6,
+      "rs": 2,
+      "target": "after_verify_chain"
+    },
+    {
+      "op": "HASH",
+      "imm": 1
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "label": "after_verify_chain"
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "HASH",
+      "imm": 2
+    },
+    {
+      "op": "HASH",
+      "imm": 3
+    },
+    {
+      "op": "ADD_IMM",
+      "rd": 5,
+      "rs": 5,
+      "imm": 1024
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 2,
+      "imm": 10
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 7
+    },
+    {
+      "op": "HASH",
+      "imm": 4
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 8
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 136
+    },
+    {
+      "op": "HALT"
+    }
+  ]
+}

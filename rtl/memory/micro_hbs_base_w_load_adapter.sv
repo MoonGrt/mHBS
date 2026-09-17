@@ -1,10 +1,10 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Descriptor-driven WOTS base-w/checksum LOAD for the SLH-DSA n=16,w=16
+// Descriptor-driven WOTS base-w/checksum DATA_LOAD for SLH-DSA n=16,w=16
 // profile.  The transform itself is generic base-w logic; the descriptor
 // supplies physical source/destination word addresses and the sequencer only
-// supplies the immutable LOAD id.
+// supplies the immutable DATA_LOAD id.
 module micro_hbs_base_w_load_adapter #(
     parameter integer DESCRIPTOR_COUNT = 16,
     parameter integer SCRATCH_WORDS = 1024,
@@ -38,7 +38,7 @@ module micro_hbs_base_w_load_adapter #(
     input  wire                         scratch_response_error,
     output wire                         busy
 );
-    localparam logic [7:0] OP_LOAD = 8'h08;
+    localparam logic [7:0] OP_DATA_LOAD = 8'h08;
     localparam logic [15:0] ERR_CFG = 16'h1001;
     localparam logic [15:0] ERR_COMMAND = 16'h1002;
     localparam logic [15:0] ERR_SCRATCH = 16'h1003;
@@ -70,7 +70,7 @@ module micro_hbs_base_w_load_adapter #(
 
     assign cfg_ready = !engine_busy && state == S_IDLE;
     assign cmd_ready = state == S_IDLE;
-    assign cmd_match = cmd_opcode == OP_LOAD && cmd_imm < DESCRIPTOR_COUNT
+    assign cmd_match = cmd_opcode == OP_DATA_LOAD && cmd_imm < DESCRIPTOR_COUNT
         && configured[cmd_imm[INDEX_WIDTH-1:0]];
     assign busy = state != S_IDLE;
     assign rsp_valid = state == S_RESPONSE;
@@ -138,7 +138,7 @@ module micro_hbs_base_w_load_adapter #(
                 S_IDLE: if (cmd_valid) begin
                     rsp_error <= 1'b0;
                     rsp_error_code <= '0;
-                    if (cmd_opcode != OP_LOAD || !cmd_match) begin
+                    if (cmd_opcode != OP_DATA_LOAD || !cmd_match) begin
                         rsp_error <= 1'b1;
                         rsp_error_code <= ERR_COMMAND;
                         state <= S_RESPONSE;

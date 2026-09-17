@@ -1,8 +1,8 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Iterative Keccak-f[1600] permutation lane. UNROLL is deliberately limited to
-// the U=1/U=2 experiment points in Execution_Plan.md.
+// Iterative Keccak-f[1600] permutation lane. UNROLL may be any positive
+// divisor of 24 so one RTL can explore the area/latency frontier.
 module micro_hbs_keccak_f1600 #(
     parameter integer UNROLL = 1
 ) (
@@ -11,16 +11,38 @@ module micro_hbs_keccak_f1600 #(
     input  wire          start,
     output logic         ready,
     input  wire [1599:0] state_in,
+    input  wire          chain_enable,
+    input  wire          chain_prefix,
+    input  wire          chain_prefix_preserve_counter,
+    input  wire [2:0]    chain_prefix_domain,
+    input  wire [7:0]    chain_count,
+    input  wire [7:0]    chain_counter_offset,
+    input  wire [7:0]    chain_feedback_offset,
+    input  wire [5:0]    chain_feedback_bytes,
+    input  wire [31:0]   chain_counter_start,
+    input  wire          capture_enable,
+    input  wire [7:0]    capture_after,
     output logic [1599:0] state_out,
     output logic         done,
+    output logic [255:0] capture_digest,
+    output logic         capture_valid,
     output logic [5:0]   rounds_executed
 );
     logic [1599:0] state_reg;
     logic [4:0] round_index;
     logic active;
-    wire [1599:0] after_round_0;
-    wire [1599:0] after_round_1;
+    logic [1599:0] chain_template;
+    logic [7:0] chains_remaining;
+    logic [31:0] chain_counter;
+    logic [7:0] chain_iteration;
+    wire [31:0] chain_counter_next = chain_counter + 1'b1;
+    wire [31:0] chain_transition_counter
+        = chain_prefix && chain_iteration == 1
+        ? chain_counter : chain_counter_next;
     wire [1599:0] advanced_state;
+    logic [1599:0] next_chain_state;
+    wire [1599:0] round_state [0:UNROLL];
+    genvar round_step;
 
     function automatic [63:0] rotl64;
         input [63:0] value;
@@ -133,14 +155,41 @@ module micro_hbs_keccak_f1600 #(
         end
     endfunction
 
-    assign after_round_0 = keccak_round(state_reg, round_index);
-    assign after_round_1 = keccak_round(after_round_0, round_index + 1'b1);
-    assign advanced_state = (UNROLL == 2) ? after_round_1 : after_round_0;
+    assign round_state[0] = state_reg;
+    generate
+        for (round_step = 0; round_step < UNROLL;
+             round_step = round_step + 1) begin : generate_rounds
+            assign round_state[round_step + 1] = keccak_round(
+                round_state[round_step], round_index + round_step
+            );
+        end
+    endgenerate
+    assign advanced_state = round_state[UNROLL];
     assign ready = !active;
 
+    // state_in is already a padded SHAKE rate block.  The implemented repeat
+    // recipe is the 64-byte HBS chain block used by the descriptor composer:
+    // a BE32 step counter at byte 44 and 16 feedback bytes at byte 48.  Keep
+    // these slices static so synthesis does not infer a 1600-bit variable
+    // byte crossbar.  The composer rejects every other repeat geometry.
+    always_comb begin
+        next_chain_state = chain_template;
+        if (chain_prefix)
+            next_chain_state[8*32 +: 32]
+                = {5'b0, chain_prefix_domain, 24'b0};
+        if (!chain_prefix_preserve_counter)
+            next_chain_state[8*44 +: 32] = {
+                chain_transition_counter[7:0],
+                chain_transition_counter[15:8],
+                chain_transition_counter[23:16],
+                chain_transition_counter[31:24]
+            };
+        next_chain_state[8*48 +: 128] = advanced_state[127:0];
+    end
+
     initial begin
-        if (UNROLL != 1 && UNROLL != 2)
-            $error("micro_hbs_keccak_f1600 supports only UNROLL=1 or UNROLL=2");
+        if (UNROLL < 1 || UNROLL > 24 || (24 % UNROLL) != 0)
+            $error("micro_hbs_keccak_f1600 UNROLL must divide 24");
     end
 
     always_ff @(posedge clk or negedge rst_n) begin
@@ -150,11 +199,24 @@ module micro_hbs_keccak_f1600 #(
             round_index <= '0;
             rounds_executed <= '0;
             active <= 1'b0;
+            chain_template <= '0;
+            chains_remaining <= '0;
+            chain_counter <= '0;
+            chain_iteration <= '0;
             done <= 1'b0;
+            capture_digest <= '0;
+            capture_valid <= 1'b0;
         end else begin
             done <= 1'b0;
+            capture_valid <= 1'b0;
             if (start && ready) begin
                 state_reg <= state_in;
+                chain_template <= state_in;
+                chains_remaining <= chain_enable ? chain_count : 8'd1;
+                chain_counter <= chain_counter_start;
+                chain_iteration <= 8'd1;
+                if (capture_enable && capture_after == 0)
+                    capture_digest <= '0;
                 round_index <= '0;
                 rounds_executed <= '0;
                 active <= 1'b1;
@@ -162,9 +224,23 @@ module micro_hbs_keccak_f1600 #(
                 state_reg <= advanced_state;
                 rounds_executed <= rounds_executed + UNROLL;
                 if (round_index + UNROLL >= 24) begin
-                    state_out <= advanced_state;
-                    active <= 1'b0;
-                    done <= 1'b1;
+                    if (capture_enable && capture_after == chain_iteration)
+                        capture_digest <= advanced_state[255:0];
+                    if (chain_enable && chains_remaining > 1) begin
+                        state_reg <= next_chain_state;
+                        chain_template <= next_chain_state;
+                        chains_remaining <= chains_remaining - 1'b1;
+                        if (!chain_prefix_preserve_counter
+                            && !(chain_prefix && chain_iteration == 1))
+                            chain_counter <= chain_counter + 1'b1;
+                        chain_iteration <= chain_iteration + 1'b1;
+                        round_index <= '0;
+                    end else begin
+                        state_out <= advanced_state;
+                        active <= 1'b0;
+                        done <= 1'b1;
+                        capture_valid <= capture_enable;
+                    end
                 end else begin
                     round_index <= round_index + UNROLL;
                 end

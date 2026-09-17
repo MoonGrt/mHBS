@@ -37,8 +37,8 @@ EXPECTED_IMAGES = {
         "3acd65c14ef1d8fc1b49fb4ca7c4df7b9065dbfb0d6a07b5a88f2a56e04014dc",
     ),
     "microcode/slh_dsa/slh_dsa_shake_128f_sign.json": (
-        144,
-        "13f881f3d37012faad097fb163935d26c230de930dc1e76229ef42184b37e446",
+        151,
+        "d31465df7953bb6e9a5a6b060442a7b261fabe8b4383c7a07aaa80564e516504",
     ),
 }
 
@@ -46,13 +46,13 @@ EXPECTED_IMAGES = {
 def _write_program(path: Path, word_count: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     program = [{"label": "entry"}]
-    program.extend({"op": "NOP"} for _ in range(word_count - 1))
+    program.extend({"op": "SET_REG"} for _ in range(word_count - 1))
     program.append({"op": "HALT"})
     path.write_text(
         json.dumps(
             {
                 "schema_version": 1,
-                "micro_isa_version": "0.1",
+                "micro_isa_version": "0.2",
                 "name": f"boundary-{word_count}",
                 "entry": "entry",
                 "program": program,
@@ -100,7 +100,7 @@ class RtlImageExportTests(unittest.TestCase):
                 hash_instructions = [
                     instruction
                     for instruction in image["instructions"]
-                    if instruction.opcode == Opcode.HASH_LAYOUT
+                    if instruction.opcode == Opcode.HASH
                 ]
                 self.assertTrue(hash_instructions)
                 self.assertTrue(

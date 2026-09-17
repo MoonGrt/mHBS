@@ -121,7 +121,7 @@ module tb_micro_hbs_data_descriptor_store;
     endtask
 
     initial begin
-        // flags[3:0] demonstrate generic LOAD/STORE/XOR/EMIT capability use.
+        // The store preserves descriptor fields; bit 2 is reserved in v0.2.
         descriptor_a = descriptor(1, 16'b0000_0000_0000_1111,
                                   16'd4, 16'd12, 16'd20, 16'd8,
                                   4'd5, 4'd0, 32'b0);

@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Descriptor-driven execution path for LOAD, STORE, XOR and EMIT.
+// Descriptor-driven execution path for DATA_LOAD, DATA_MOVE and OUTPUT.
 // Commands originate only from the Microsequencer.  Descriptor lookup and
 // address generation are serialized deliberately: this is a deterministic
 // single-Job engine, not a task runtime or descriptor scheduler.
@@ -10,9 +10,9 @@
 //   [0] add R[rs] as a word index to source_a
 //   [1] add R[rs] as a word index to source_b
 //   [2] add R[rs] as a word index to destination
-//   [3] LOAD selects bits [63:32] instead of [31:0]
+//   [3] DATA_LOAD selects bits [63:32] instead of [31:0]
 //
-// For EMIT, EMIT_DESCRIPTOR_BASE + imm[31:16] selects the descriptor and the
+// For OUTPUT, EMIT_DESCRIPTOR_BASE + imm[31:16] selects the descriptor and the
 // effective source base is
 // descriptor.source_a + rd + imm[15:0] + (flags[0] ? R[rs] : 0).  Therefore
 // existing direct rd+imm object selection remains expressible while the
@@ -105,10 +105,9 @@ module micro_hbs_data_engine #(
     output logic [31:0]                 completed_commands,
     output logic [31:0]                 error_commands
 );
-    localparam logic [7:0] OP_LOAD  = 8'h08;
-    localparam logic [7:0] OP_STORE = 8'h09;
-    localparam logic [7:0] OP_XOR   = 8'h0a;
-    localparam logic [7:0] OP_EMIT  = 8'h0c;
+    localparam logic [7:0] OP_DATA_LOAD  = 8'h08;
+    localparam logic [7:0] OP_DATA_MOVE = 8'h09;
+    localparam logic [7:0] OP_OUTPUT  = 8'h0c;
 
     localparam logic [15:0] ERR_OPCODE       = 16'h0701;
     localparam logic [15:0] ERR_DESCRIPTOR   = 16'h0702;
@@ -124,7 +123,10 @@ module micro_hbs_data_engine #(
     } state_t;
     state_t state;
 
-    typedef enum logic [1:0] {A_SOURCE_A, A_SOURCE_B, A_DESTINATION} addr_t;
+    typedef enum logic [1:0] {
+        A_SOURCE_A = 2'd0,
+        A_DESTINATION = 2'd2
+    } addr_t;
     addr_t address_phase;
 
     logic [7:0] opcode_latched;
@@ -134,7 +136,7 @@ module micro_hbs_data_engine #(
     logic [31:0] rs_value_latched;
     logic [255:0] registers_latched;
     logic [15:0] flags_desc;
-    logic [15:0] source_a_desc, source_b_desc, destination_desc;
+    logic [15:0] source_a_desc, destination_desc;
     logic [15:0] word_count_desc;
     logic [3:0] last_bytes_desc, address_mode_desc;
     logic [7:0] format_version_desc;
@@ -146,7 +148,6 @@ module micro_hbs_data_engine #(
     logic [15:0] binding_base_scale_latched;
     logic [15:0] binding_index_stride_latched;
     logic [ADDRESS_WIDTH-1:0] source_a_address;
-    logic [ADDRESS_WIDTH-1:0] source_b_address;
     logic [ADDRESS_WIDTH-1:0] destination_address;
 
     wire agu_req_ready, agu_rsp_valid, agu_rsp_error;
@@ -177,13 +178,13 @@ module micro_hbs_data_engine #(
     wire [ADDRESS_WIDTH-1:0] emit_sp_req_address;
 
     wire exec_start = (state == S_EXECUTE_START);
-    wire load_active = (opcode_latched == OP_LOAD);
-    wire alu_active = (opcode_latched == OP_STORE || opcode_latched == OP_XOR);
-    wire emit_active = (opcode_latched == OP_EMIT);
+    wire load_active = (opcode_latched == OP_DATA_LOAD);
+    wire alu_active = (opcode_latched == OP_DATA_MOVE);
+    wire emit_active = (opcode_latched == OP_OUTPUT);
 
     assign cmd_ready = (state == S_IDLE);
     assign descriptor_lookup_valid = (state == S_LOOKUP_REQUEST);
-    assign descriptor_lookup_id = (opcode_latched == OP_EMIT)
+    assign descriptor_lookup_id = (opcode_latched == OP_OUTPUT)
         ? (EMIT_DESCRIPTOR_BASE + imm_latched[31:16])
         : imm_latched[15:0];
     assign descriptor_rsp_ready = (state == S_LOOKUP_RESPONSE);
@@ -202,7 +203,7 @@ module micro_hbs_data_engine #(
         agu_span = word_count_desc;
         case (address_phase)
             A_SOURCE_A: begin
-                if (opcode_latched == OP_EMIT) begin
+                if (opcode_latched == OP_OUTPUT) begin
                     agu_base = {16'b0, source_a_desc}
                         + (({24'b0, rd_latched}
                             + {16'b0, imm_latched[15:0]}
@@ -211,12 +212,9 @@ module micro_hbs_data_engine #(
                            * EMIT_INSTRUCTION_STRIDE_WORDS);
                 end else begin
                     agu_base = {16'b0, source_a_desc};
-                    if (opcode_latched == OP_LOAD)
+                    if (opcode_latched == OP_DATA_LOAD)
                         agu_span = 16'd1;
                 end
-            end
-            A_SOURCE_B: begin
-                agu_base = {16'b0, source_b_desc};
             end
             default: begin
                 agu_base = {16'b0, destination_desc};
@@ -283,8 +281,7 @@ module micro_hbs_data_engine #(
         .WRITE_ACK(SCRATCH_WRITE_ACK)
     ) scratch_alu (
         .clk, .rst_n, .cmd_valid(exec_start && alu_active),
-        .cmd_ready(alu_cmd_ready), .cmd_opcode(opcode_latched),
-        .cmd_source_a(source_a_address), .cmd_source_b(source_b_address),
+        .cmd_ready(alu_cmd_ready), .cmd_source_a(source_a_address),
         .cmd_destination(destination_address),
         .cmd_word_count(word_count_desc), .rsp_valid(alu_rsp_valid),
         .rsp_ready(state == S_EXECUTE_WAIT && alu_active),
@@ -349,10 +346,9 @@ module micro_hbs_data_engine #(
                                                   input logic [15:0] f);
         begin
             case (op)
-                OP_LOAD:  descriptor_matches = (f[3:0] == 4'b0001);
-                OP_STORE: descriptor_matches = (f[3:0] == 4'b0010);
-                OP_XOR:   descriptor_matches = (f[3:0] == 4'b0100);
-                OP_EMIT:  descriptor_matches = (f[3:0] == 4'b1000);
+                OP_DATA_LOAD:  descriptor_matches = (f[3:0] == 4'b0001);
+                OP_DATA_MOVE: descriptor_matches = (f[3:0] == 4'b0010);
+                OP_OUTPUT:  descriptor_matches = (f[3:0] == 4'b1000);
                 default:  descriptor_matches = 1'b0;
             endcase
         end
@@ -370,7 +366,6 @@ module micro_hbs_data_engine #(
             registers_latched <= '0;
             flags_desc <= '0;
             source_a_desc <= '0;
-            source_b_desc <= '0;
             destination_desc <= '0;
             word_count_desc <= '0;
             last_bytes_desc <= '0;
@@ -386,7 +381,6 @@ module micro_hbs_data_engine #(
             binding_base_scale_latched <= '0;
             binding_index_stride_latched <= '0;
             source_a_address <= '0;
-            source_b_address <= '0;
             destination_address <= '0;
             rsp_valid <= 1'b0;
             rsp_error <= 1'b0;
@@ -414,10 +408,10 @@ module micro_hbs_data_engine #(
                         rsp_reg_write <= 1'b0;
                         rsp_reg_index <= '0;
                         rsp_reg_value <= '0;
-                        if (cmd_opcode != OP_LOAD && cmd_opcode != OP_STORE
-                            && cmd_opcode != OP_XOR && cmd_opcode != OP_EMIT)
+                        if (cmd_opcode != OP_DATA_LOAD && cmd_opcode != OP_DATA_MOVE
+                            && cmd_opcode != OP_OUTPUT)
                             fail_command(ERR_OPCODE);
-                        else if (cmd_opcode != OP_EMIT
+                        else if (cmd_opcode != OP_OUTPUT
                                  && cmd_imm[31:16] != 0)
                             fail_command(ERR_DESCRIPTOR);
                         else
@@ -445,18 +439,17 @@ module micro_hbs_data_engine #(
                                  || (descriptor_format_version == 8'h02
                                      && descriptor_reserved[11:0] != 0)
                                  || descriptor_word_count == 0
-                                 || (opcode_latched == OP_LOAD
+                                 || (opcode_latched == OP_DATA_LOAD
                                      && descriptor_word_count != 1)
-                                 || (opcode_latched == OP_EMIT
+                                 || (opcode_latched == OP_OUTPUT
                                      && (descriptor_last_bytes == 0
                                          || descriptor_last_bytes > 8))
-                                 || (opcode_latched != OP_LOAD
+                                 || (opcode_latched != OP_DATA_LOAD
                                      && descriptor_address_mode[3]))
                             fail_command(ERR_DESCRIPTOR_FMT);
                         else begin
                             flags_desc <= descriptor_flags;
                             source_a_desc <= descriptor_source_a;
-                            source_b_desc <= descriptor_source_b;
                             destination_desc <= descriptor_destination;
                             word_count_desc <= descriptor_word_count;
                             last_bytes_desc <= descriptor_last_bytes;
@@ -547,18 +540,11 @@ module micro_hbs_data_engine #(
                             case (address_phase)
                                 A_SOURCE_A: begin
                                     source_a_address <= agu_rsp_address;
-                                    if (opcode_latched == OP_STORE
-                                        || opcode_latched == OP_XOR) begin
-                                        address_phase <= (opcode_latched == OP_XOR)
-                                            ? A_SOURCE_B : A_DESTINATION;
+                                    if (opcode_latched == OP_DATA_MOVE) begin
+                                        address_phase <= A_DESTINATION;
                                         state <= S_ADDRESS_PREP;
                                     end else
                                         state <= S_EXECUTE_START;
-                                end
-                                A_SOURCE_B: begin
-                                    source_b_address <= agu_rsp_address;
-                                    address_phase <= A_DESTINATION;
-                                    state <= S_ADDRESS_PREP;
                                 end
                                 default: begin
                                     destination_address <= agu_rsp_address;

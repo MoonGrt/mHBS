@@ -1,0 +1,359 @@
+{
+  "isa": [
+    {
+      "description": "write an immediate value to a register",
+      "encoding": 1,
+      "name": "SET_REG"
+    },
+    {
+      "description": "add an immediate value to a register",
+      "encoding": 2,
+      "name": "ADD_IMM"
+    },
+    {
+      "description": "execute a statically described Hash layout",
+      "encoding": 3,
+      "name": "HASH"
+    },
+    {
+      "description": "enter a static or scratch-bounded loop",
+      "encoding": 4,
+      "name": "LOOP_BEGIN"
+    },
+    {
+      "description": "advance or exit the active loop",
+      "encoding": 5,
+      "name": "LOOP_END"
+    },
+    {
+      "description": "call a microcode subroutine",
+      "encoding": 6,
+      "name": "CALL"
+    },
+    {
+      "description": "return from a microcode subroutine",
+      "encoding": 7,
+      "name": "RETURN"
+    },
+    {
+      "description": "execute a static data-load or transform descriptor",
+      "encoding": 8,
+      "name": "DATA_LOAD"
+    },
+    {
+      "description": "copy a scratch value using a static move descriptor",
+      "encoding": 9,
+      "name": "DATA_MOVE"
+    },
+    {
+      "description": "push a leaf and perform ready TreeHash reductions",
+      "encoding": 11,
+      "name": "TREE_PUSH"
+    },
+    {
+      "description": "append one scratch value to the result stream",
+      "encoding": 12,
+      "name": "OUTPUT"
+    },
+    {
+      "description": "complete the Job successfully",
+      "encoding": 13,
+      "name": "HALT"
+    }
+  ],
+  "isa_opcode_count": 12,
+  "programs": {
+    "lms.keygen": {
+      "opcode_counts": {
+        "HALT": 1,
+        "HASH": 4,
+        "LOOP_BEGIN": 3,
+        "LOOP_END": 3,
+        "OUTPUT": 1,
+        "TREE_PUSH": 1
+      },
+      "opcode_type_count": 6,
+      "program_sha256": "666f209b192894c3bce29df2cb802e0586a7628df9dcd8425edb66a159df89c0",
+      "source": "microcode/lms/lms_public_h10_w4.json",
+      "source_sha256": "0594ebb0c415c0d618eda75597e4013b73b795139f224d5888bcefe3d97f2a76",
+      "static_words": 13
+    },
+    "lms.sign": {
+      "opcode_counts": {
+        "DATA_LOAD": 7,
+        "HALT": 1,
+        "HASH": 7,
+        "LOOP_BEGIN": 6,
+        "LOOP_END": 6,
+        "OUTPUT": 6,
+        "SET_REG": 1,
+        "TREE_PUSH": 1
+      },
+      "opcode_type_count": 8,
+      "program_sha256": "38bf06f9534c9f585161f5587e6f2ac709bcec2857b56fee2298b673bbdaf031",
+      "source": "microcode/lms/lms_sign_h10_w4.json",
+      "source_sha256": "17b9974df9aaec3252b8d8ac5aeaac2a1f4874bf29675614f61978be748ac57a",
+      "static_words": 35
+    },
+    "lms.verify": {
+      "opcode_counts": {
+        "ADD_IMM": 1,
+        "DATA_LOAD": 9,
+        "HALT": 1,
+        "HASH": 5,
+        "LOOP_BEGIN": 3,
+        "LOOP_END": 3,
+        "OUTPUT": 1,
+        "SET_REG": 1
+      },
+      "opcode_type_count": 8,
+      "program_sha256": "e5da150175f4b9e1d693a9bc40ce4bc86fe31115522fcd0ac3d9b2d2634f5e81",
+      "source": "microcode/lms/lms_verify_h10_w4.json",
+      "source_sha256": "b731d1c41444b38961190539fe787ae7efb4ef7b1097b08bc8d3e483d9d0fb24",
+      "static_words": 24
+    },
+    "slh_dsa.keygen": {
+      "opcode_counts": {
+        "HALT": 1,
+        "HASH": 3,
+        "LOOP_BEGIN": 3,
+        "LOOP_END": 3,
+        "OUTPUT": 1,
+        "TREE_PUSH": 1
+      },
+      "opcode_type_count": 6,
+      "program_sha256": "3acd65c14ef1d8fc1b49fb4ca7c4df7b9065dbfb0d6a07b5a88f2a56e04014dc",
+      "source": "microcode/slh_dsa/slh_dsa_shake_128f_keygen.json",
+      "source_sha256": "17a15013e9582209767810cda0c8a5a73d6c9c191e57adc934003243b5d75593",
+      "static_words": 12
+    },
+    "slh_dsa.sign": {
+      "opcode_counts": {
+        "ADD_IMM": 3,
+        "CALL": 7,
+        "DATA_LOAD": 32,
+        "DATA_MOVE": 11,
+        "HALT": 1,
+        "HASH": 31,
+        "LOOP_BEGIN": 17,
+        "LOOP_END": 17,
+        "OUTPUT": 16,
+        "RETURN": 4,
+        "SET_REG": 19,
+        "TREE_PUSH": 7
+      },
+      "opcode_type_count": 12,
+      "program_sha256": "b1dc8326eb3f34653931f1a733a26c72b5377be389e1b4a39dfacd340eac9eb3",
+      "source": "microcode/slh_dsa/slh_dsa_shake_128f_sign.json",
+      "source_sha256": "8d8ddd4a44626bf6f1d2d7fea25f3d68766e65323216f7c5ed4a0a650740003a",
+      "static_words": 165
+    },
+    "slh_dsa.verify": {
+      "opcode_counts": {
+        "DATA_LOAD": 15,
+        "DATA_MOVE": 1,
+        "HALT": 1,
+        "HASH": 7,
+        "LOOP_BEGIN": 6,
+        "LOOP_END": 6,
+        "OUTPUT": 1,
+        "SET_REG": 1
+      },
+      "opcode_type_count": 8,
+      "program_sha256": "358ed180e6efabfc9a1bdbea393c7203a9a0dd27faab91fca5a2823f2a70fbc9",
+      "source": "microcode/slh_dsa/slh_dsa_shake_128f_verify.json",
+      "source_sha256": "a140dde4bd93b439ac8e4f2817090aafe28910e2031592c99a7bf9b3d2186054",
+      "static_words": 38
+    },
+    "xmss.keygen": {
+      "opcode_counts": {
+        "DATA_MOVE": 5,
+        "HALT": 1,
+        "HASH": 32,
+        "LOOP_BEGIN": 11,
+        "LOOP_END": 11,
+        "OUTPUT": 1,
+        "SET_REG": 31,
+        "TREE_PUSH": 1
+      },
+      "opcode_type_count": 8,
+      "program_sha256": "3476fabab809518692c924bcb270cc257b25de46fff2f6a0ea2b685774aa0f2e",
+      "source": "microcode/xmss/xmss_shake256_h10_w4_keygen.json",
+      "source_sha256": "280291a98f720567505fdf721f6efe792d804f252a6e53fbfbff5fa1c11807b6",
+      "static_words": 93
+    },
+    "xmss.sign": {
+      "opcode_counts": {
+        "ADD_IMM": 1,
+        "DATA_LOAD": 3,
+        "DATA_MOVE": 5,
+        "HALT": 1,
+        "HASH": 38,
+        "LOOP_BEGIN": 15,
+        "LOOP_END": 15,
+        "OUTPUT": 4,
+        "SET_REG": 31,
+        "TREE_PUSH": 1
+      },
+      "opcode_type_count": 10,
+      "program_sha256": "a1c7a16eea923fc875ff7f25bde49343af6445eac76ab6023d02c83491ac661a",
+      "source": "microcode/xmss/xmss_shake256_h10_w4_sign.json",
+      "source_sha256": "9dc8ccb060a5d27d982e4dfc3b6c15b9dc153044c0f9ec3edc3e2447d9ac7c6b",
+      "static_words": 114
+    },
+    "xmss.verify": {
+      "opcode_counts": {
+        "DATA_LOAD": 82,
+        "DATA_MOVE": 5,
+        "HALT": 1,
+        "HASH": 36,
+        "LOOP_BEGIN": 10,
+        "LOOP_END": 10,
+        "OUTPUT": 1,
+        "SET_REG": 32
+      },
+      "opcode_type_count": 8,
+      "program_sha256": "bd9f30f588dd199004dbe78317c956f890cacaf0beb536612932a712edfdfc81",
+      "source": "microcode/xmss/xmss_shake256_h10_w4_verify.json",
+      "source_sha256": "02037feff0d2371d7875e662b5ea8baaf8693f8cb0e3f00447b26adefdfd9a41",
+      "static_words": 177
+    }
+  },
+  "result_id": "microcode_isa_usage_v0.2.0",
+  "schema_version": 1,
+  "static_usage_matrix": {
+    "ADD_IMM": {
+      "lms.keygen": 0,
+      "lms.sign": 0,
+      "lms.verify": 1,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 3,
+      "slh_dsa.verify": 0,
+      "xmss.keygen": 0,
+      "xmss.sign": 1,
+      "xmss.verify": 0
+    },
+    "CALL": {
+      "lms.keygen": 0,
+      "lms.sign": 0,
+      "lms.verify": 0,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 7,
+      "slh_dsa.verify": 0,
+      "xmss.keygen": 0,
+      "xmss.sign": 0,
+      "xmss.verify": 0
+    },
+    "DATA_LOAD": {
+      "lms.keygen": 0,
+      "lms.sign": 7,
+      "lms.verify": 9,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 32,
+      "slh_dsa.verify": 15,
+      "xmss.keygen": 0,
+      "xmss.sign": 3,
+      "xmss.verify": 82
+    },
+    "DATA_MOVE": {
+      "lms.keygen": 0,
+      "lms.sign": 0,
+      "lms.verify": 0,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 11,
+      "slh_dsa.verify": 1,
+      "xmss.keygen": 5,
+      "xmss.sign": 5,
+      "xmss.verify": 5
+    },
+    "HALT": {
+      "lms.keygen": 1,
+      "lms.sign": 1,
+      "lms.verify": 1,
+      "slh_dsa.keygen": 1,
+      "slh_dsa.sign": 1,
+      "slh_dsa.verify": 1,
+      "xmss.keygen": 1,
+      "xmss.sign": 1,
+      "xmss.verify": 1
+    },
+    "HASH": {
+      "lms.keygen": 4,
+      "lms.sign": 7,
+      "lms.verify": 5,
+      "slh_dsa.keygen": 3,
+      "slh_dsa.sign": 31,
+      "slh_dsa.verify": 7,
+      "xmss.keygen": 32,
+      "xmss.sign": 38,
+      "xmss.verify": 36
+    },
+    "LOOP_BEGIN": {
+      "lms.keygen": 3,
+      "lms.sign": 6,
+      "lms.verify": 3,
+      "slh_dsa.keygen": 3,
+      "slh_dsa.sign": 17,
+      "slh_dsa.verify": 6,
+      "xmss.keygen": 11,
+      "xmss.sign": 15,
+      "xmss.verify": 10
+    },
+    "LOOP_END": {
+      "lms.keygen": 3,
+      "lms.sign": 6,
+      "lms.verify": 3,
+      "slh_dsa.keygen": 3,
+      "slh_dsa.sign": 17,
+      "slh_dsa.verify": 6,
+      "xmss.keygen": 11,
+      "xmss.sign": 15,
+      "xmss.verify": 10
+    },
+    "OUTPUT": {
+      "lms.keygen": 1,
+      "lms.sign": 6,
+      "lms.verify": 1,
+      "slh_dsa.keygen": 1,
+      "slh_dsa.sign": 16,
+      "slh_dsa.verify": 1,
+      "xmss.keygen": 1,
+      "xmss.sign": 4,
+      "xmss.verify": 1
+    },
+    "RETURN": {
+      "lms.keygen": 0,
+      "lms.sign": 0,
+      "lms.verify": 0,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 4,
+      "slh_dsa.verify": 0,
+      "xmss.keygen": 0,
+      "xmss.sign": 0,
+      "xmss.verify": 0
+    },
+    "SET_REG": {
+      "lms.keygen": 0,
+      "lms.sign": 1,
+      "lms.verify": 1,
+      "slh_dsa.keygen": 0,
+      "slh_dsa.sign": 19,
+      "slh_dsa.verify": 1,
+      "xmss.keygen": 31,
+      "xmss.sign": 31,
+      "xmss.verify": 32
+    },
+    "TREE_PUSH": {
+      "lms.keygen": 1,
+      "lms.sign": 1,
+      "lms.verify": 0,
+      "slh_dsa.keygen": 1,
+      "slh_dsa.sign": 7,
+      "slh_dsa.verify": 0,
+      "xmss.keygen": 1,
+      "xmss.sign": 1,
+      "xmss.verify": 0
+    }
+  },
+  "status": "PASS"
+}

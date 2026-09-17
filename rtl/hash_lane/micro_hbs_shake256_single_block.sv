@@ -12,18 +12,29 @@ module micro_hbs_shake256_single_block #(
     output logic         ready,
     input  wire [1087:0] message,
     input  wire [7:0]    message_length,
+    input  wire          repeat_enable,
+    input  wire          repeat_prefix,
+    input  wire          repeat_prefix_preserve_counter,
+    input  wire [2:0]    repeat_prefix_domain,
+    input  wire [7:0]    repeat_count,
+    input  wire [7:0]    repeat_counter_offset,
+    input  wire [7:0]    repeat_feedback_offset,
+    input  wire [5:0]    repeat_feedback_bytes,
+    input  wire [31:0]   repeat_counter_start,
+    input  wire          capture_enable,
+    input  wire [7:0]    capture_after,
     output logic [255:0] digest,
     output logic         done,
+    output logic [255:0] capture_digest,
+    output logic         capture_valid,
     output logic         error
 );
-    logic active;
-    logic permutation_start;
-    logic [1599:0] padded_state;
+    wire permutation_start = start && ready && message_length <= 135;
+    wire [1599:0] padded_state = pad_shake256(message, message_length);
     wire permutation_ready;
     wire [1599:0] permutation_result;
     wire permutation_done;
     wire [5:0] permutation_rounds;
-    integer byte_index;
 
     function automatic [1599:0] pad_shake256;
         input [1087:0] input_message;
@@ -47,39 +58,33 @@ module micro_hbs_shake256_single_block #(
         .start(permutation_start),
         .ready(permutation_ready),
         .state_in(padded_state),
+        .chain_enable(repeat_enable),
+        .chain_prefix(repeat_prefix),
+        .chain_prefix_preserve_counter(repeat_prefix_preserve_counter),
+        .chain_prefix_domain(repeat_prefix_domain),
+        .chain_count(repeat_count),
+        .chain_counter_offset(repeat_counter_offset),
+        .chain_feedback_offset(repeat_feedback_offset),
+        .chain_feedback_bytes(repeat_feedback_bytes),
+        .chain_counter_start(repeat_counter_start),
+        .capture_enable, .capture_after,
         .state_out(permutation_result),
         .done(permutation_done),
+        .capture_digest, .capture_valid,
         .rounds_executed(permutation_rounds)
     );
 
-    assign ready = !active && permutation_ready;
+    assign ready = permutation_ready;
+    assign digest = permutation_result[255:0];
+    assign done = permutation_done;
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            active <= 1'b0;
-            permutation_start <= 1'b0;
-            padded_state <= '0;
-            digest <= '0;
-            done <= 1'b0;
             error <= 1'b0;
         end else begin
-            permutation_start <= 1'b0;
-            done <= 1'b0;
             error <= 1'b0;
-            if (start && ready) begin
-                if (message_length > 135) begin
-                    error <= 1'b1;
-                end else begin
-                    padded_state <= pad_shake256(message, message_length);
-                    permutation_start <= 1'b1;
-                    active <= 1'b1;
-                end
-            end else if (active && permutation_done) begin
-                for (byte_index = 0; byte_index < 32; byte_index = byte_index + 1)
-                    digest[8*byte_index +: 8] <= permutation_result[8*byte_index +: 8];
-                active <= 1'b0;
-                done <= 1'b1;
-            end
+            if (start && ready && message_length > 135)
+                error <= 1'b1;
         end
     end
 endmodule

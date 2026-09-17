@@ -6,13 +6,13 @@
 |---|---|---|---|
 | 0 边界与工作量 | PASS_WITH_NON_STRICT_B0 | 标准/论文边界、报告值、自动审计已冻结 | B0 无精确 trace，14 点均不可直接算 speedup |
 | 1 独立模型与微码 | PASS_LMS_KEYGEN_SLICE | RFC 8554 H10/W4 KAT；104 B 程序；1,100,799 Hash trace digest 匹配 | XMSS/SLH-DSA 属 Gate 4 |
-| 2 单 lane RTL | PASS_COMPLETE_SLH_SIGN_P1_U2 | Microsequencer–动态循环–Scratchpad–composer–TreeHash–SHAKE–EMIT 完整连通；`HASH_LAYOUT` 支持 16/32-byte logical slot、136-byte SHAKE 输出、仿射/移位表达式、conditional ordered-pair、memory-range 和静态 relocation；SLH-DSA 使用原子 Job + payload-only message stream，无 DMA | 通用变长消息 descriptor selection；banked OTS-wide/P2 |
+| 2 单 lane RTL | PASS_COMPLETE_SLH_SIGN_P1_U2 | Microsequencer–动态循环–Scratchpad–composer–TreeHash–SHAKE–OUTPUT 完整连通；`HASH` 支持 16/32-byte logical slot、136-byte SHAKE 输出、仿射/移位表达式、conditional ordered-pair、memory-range 和静态 relocation；SLH-DSA 使用原子 Job + payload-only message stream，无 DMA | 通用变长消息 descriptor selection；banked OTS-wide/P2 |
 | 3 TreeHash | PARTIAL_DYNAMIC_MIN | 模型三模式一致；RTL `TREEHASH_MIN` h=10 root/auth 一致；版本化 tree descriptor 在同一 elaboration 选择 h=2/h=3 MIN 并精确产生 root/auth；SUBTREE/FULL 在 cache 未接入时 fail-closed；RFC 8554 86-byte/two-block LMS parent 独立向量通过；XMSS 和 FIPS 205 parent、fault/cancel recovery、warm cache 157 nodes/5,024 B 及 provider 两窗口10/10 hit 已验证 | LMS parent 接入完整 TreeHash；SUBTREE/FULL descriptor 接入真实 cache refill/miss 重算；cache-assisted Sign replay 与集成 BRAM–Sign-latency Pareto |
-| 4 XMSS/SLH-DSA | PASS_COMPLETE_SLH_SIGN | XMSS h=10 通用 Keygen 流水版为 675,417,082 cycles；SLH-DSA tc137 无 DMA RTL 已用原始 144-word JSON 微程序完成 PRF_msg/H_msg、FORS 和 22 层 Hypertree/WOTS+，17,088-byte 签名逐字匹配，15,167,426 cycles | 其他 SLH-DSA profile、通用变长消息和 P2 replay |
+| 4 XMSS/SLH-DSA | PASS_COMPLETE_SLH_SIGN | XMSS h=10 通用 Keygen 流水版为 675,417,082 cycles；SLH-DSA tc137 无 DMA RTL 已用原始 144-word JSON 微程序完成 PRF_msg/H_msg、FORS 和 22 层 Hypertree/WOTS+，17,088-byte 签名逐字匹配；rate-wide、component 预取、连续源读重叠及 lane-local Hash 反馈后为 6,002,014 cycles | 其他 SLH-DSA profile、通用变长消息和 P2 replay |
 | 5 P2/U2 | PARTIAL_RAW_JOB_P2_U2 | static P2 even/odd masks 与 7 KAT 通过；banked window 点 20,204 LUT/11,294 FF/3 RAMB36/WNS +0.368 ns；raw-Job randomized-F 从 seed/ADRS/2 nodes/bound 自主组合并本地反馈，lane 1 相邻 chain address 硬件派生，14,811 LUT/10,850 FF/1 RAMB36/WNS +0.788 ns | 任意 chain pair 微码寻址、OTS 单周期 rate-wide、完整算法 P2/U2 与 B1 消融 |
 | 6 冻结后扩展 | PARTIAL_MODEL_FREEZE | 不改 ISA/interpreter/verifier/RTL，只新增 177-word XMSS Verify 微码；1,835 次 SHAKE 有序 trace 与 oracle 一致；1-bit 变异拒绝 | 完整 RTL 冻结快照与 replay；将 Job admission 的签名字段拆分改为内部 DMA byte-slice；再增 held-out profile |
 | 7 状态安全 | PARTIAL_RTL_PROTOCOL | 模型与 RTL 均通过 persist-before-release、cancel/soft-reset burn、consume、回滚和耗尽；Scratchpad scrub 锁住外部端口并在 16 cycles 后逐字检查全零 | 真实原子 NVM 集成、掉电 fault injection、Hash lane/反馈/顶层敏感寄存器清零断言 |
-| 8 PPA/论文 | PARTIAL_TIMING_FAIL | 完整 SLH-DSA P1/U2 post-route 为 34,185 LUT / 23,289 FF / 7 RAMB36 / 0 DSP；component 和 layout 目的地址分段将 WNS 从 −9.513 ns 改善到 −1.050 ns | 100 MHz 尚差 1.050 ns，下一路径是 bitfield adapter；需复用 parent SHAKE、P2 组合、B1–M 消融 |
+| 8 PPA/论文 | PARTIAL_FEEDBACK_PASS | staged 64-bit composer、链式 component 预取、连续源 request 重叠和 128-bit Hash 反馈缓存把完整周期由 14,333,951 降到 6,002,014（−58.127%），签名和全部算法计数不变；Scratchpad 读降至 442,682（−29.766%）；post-route 为 34,874 LUT / 23,903 FF / 7 RAMB36 / 0 DSP、WNS −1.489 ns；timing-aware LUT×time 较原基线改善 52.560% | Wave 3 的 35% 读/25% 写门槛、banked/coalesced Scratchpad、100 MHz 时序闭合、P2 与 B1–M 消融 |
 
 ## 已验证数值
 
@@ -60,25 +60,25 @@ bounded AGU RTL                       base/base-reg/index×stride/span PASS
 sequencer data register writeback    valid/index/value + bounds PASS
 sequencer TREE_PUSH channel          backpressure/error/counter PASS
 Scratchpad STORE/XOR RTL              3-word copy / 2-word XOR PASS
-EMIT stream RTL                       keep/last/backpressure/error PASS
-descriptor-driven data slice          LOAD/XOR/STORE/EMIT / one Job PASS
+OUTPUT stream RTL                       keep/last/backpressure/error PASS
+descriptor-driven data slice          LOAD/XOR/STORE/OUTPUT / one Job PASS
 descriptor SHAKE composer              five component kinds / affine XOR / cross-rate resume PASS
 XMSS JSON layout image                 10 layouts / 91 components / deterministic export
 XMSS Sign PRF + H_msg RTL              1 Job / 2 Hash / 400 cycles / KAT-equal
 XMSS generic component leaf RTL        1 Job / 3,346 Hash / 659,517 cycles / KAT-equal
-XMSS generic h10 TreeHash RTL           1 Job / 1,024 leaves / 675,417,082 cycles / root+auth+EMIT equal
-shared Scratchpad integration         data 32 / TreeHash 16 / EMIT 1 transactions
+XMSS generic h10 TreeHash RTL           1 Job / 1,024 leaves / 675,417,082 cycles / root+auth+OUTPUT equal
+shared Scratchpad integration         data 32 / TreeHash 16 / OUTPUT 1 transactions
 TREE_PUSH one-Job vertical slice      4 leaves / 3 SHAKE parents / h2 root+auth PASS
 XMSS randomized-H TreeHash slice      RFC8391 ADRS/root/auth PASS
 XMSS WOTS+ leaf RTL                    67 PRF_keygen / 1,005 F / 66 L-tree H
 XMSS WOTS+ SHAKE per leaf              3,346 / oracle-equal leaf
-WOTS-to-TreeHash h10 Job                1024 HASH_LAYOUT / 1024 TREE_PUSH / root+10 auth PASS
+WOTS-to-TreeHash h10 Job                1024 HASH / 1024 TREE_PUSH / root+10 auth PASS
 WOTS-to-TreeHash h10 cycles             57,204,676
 WOTS-to-TreeHash Scratchpad             4-word reused leaf buffer / 8,192 total transactions
 SLH-DSA SHAKE-n16 parent RTL           80-byte input / 1 SHAKE / 1 permutation / 3 vectors PASS
 TreeHash abort recovery                scratch/parent fault + cancel / next tree PASS without reset
 offline data lowering                  v1 + XMSS multi-register v2 side table / 7 tests PASS
-descriptor-v2 data slice               R5+R7 -> R6+R3 / STORE->EMIT / one Job PASS
+descriptor-v2 data slice               R5+R7 -> R6+R3 / STORE->OUTPUT / one Job PASS
 descriptor-v2 negative paths           missing binding 0x080a / affine OOB 0x0312 / no leaked output
 bounded SHA-256 RTL                     0/3/55/56/86/119-byte vectors / 120-byte reject PASS
 RFC8554 LMS parent RTL                  86 bytes / 2 blocks / 4 independent vectors PASS
@@ -106,14 +106,23 @@ SLH-DSA Sign ordered trace digest      c4a46c56...63e82e7 / equal
 SLH-DSA Sign autonomy                  1 Job / 0 host task/hash inputs
 SLH-DSA RTL complete FORS              33 trees / 3,696 B output / compressed root equal
 SLH-DSA RTL complete Sign output       17,088 B / 2,136 words / every word equal
-SLH-DSA RTL complete Sign cycles       15,167,426 / 151.67426 ms normalized at 100 MHz
+SLH-DSA RTL complete Sign cycles       6,002,014 / 60.02014 ms normalized at 100 MHz
+SLH-DSA rate-wide cycle reduction      5,533,847 / 38.607%; emit state -82.721%
 SLH-DSA RTL SHAKE accounting           102,968 sequencer + 1,969 TreeHash = 104,937
 SLH-DSA RTL permutation accounting     103,672 sequencer + 1,969 TreeHash = 105,641
 SLH-DSA RTL micro/data/tree traffic    221,811 instructions / 5,542 data / 2,178 TREE_PUSH
-SLH-DSA RTL scratch/component traffic  630,294 reads / 205,939 writes / 835,169 components
-SLH-DSA complete top post-route        34,185 LUT / 23,289 FF / 7 RAMB36 / 0 DSP
-SLH-DSA complete top 100 MHz timing    WNS -1.050 ns / 11.050 ns critical path / FAIL
-SLH-DSA complete top critical path     layout descriptor -> block-buffer enable / 29 levels
+SLH-DSA RTL scratch/component traffic  442,682 reads / 205,939 writes / 835,169 components
+SLH-DSA feedback cache                 187,612 read hits / 29.766% read reduction / 0 added BRAM
+SLH-DSA feedback post-route            34,874 LUT / 23,903 FF / 7 RAMB36 / 0 DSP
+SLH-DSA feedback 100 MHz timing        WNS -1.489 ns / 11.489 ns critical period / FAIL
+SLH-DSA pre-rate-wide post-route       33,985 LUT / 23,269 FF / 7 RAMB36 / 0 DSP
+SLH-DSA pre-rate-wide 100 MHz timing   WNS -0.406 ns / 10.406 ns critical period / FAIL
+SLH-DSA rate-wide v1 post-route        41,800 LUT / 23,371 FF / 7 RAMB36 / 0 DSP
+SLH-DSA rate-wide v1 timing            WNS -3.016 ns / 13.016 ns critical period / FAIL
+SLH-DSA rate-wide v1 timing-aware ATP  LUT×time improves 5.549%, but fails PPA gate
+SLH-DSA rate-wide v2 post-route        33,808 LUT / 23,391 FF / 7 RAMB36 / 0 DSP
+SLH-DSA rate-wide v2 timing            WNS -0.918 ns / 10.918 ns critical period / FAIL
+SLH-DSA rate-wide v2 ATP               LUT×cycles -38.926% / LUT×time -35.921%
 U2 SHAKE stream cycle calibration     1/2/5 blocks -> 15/30/75 cycles
 64-bit output cycle calibration       1/2/3 words -> 3/6/9 cycles, no stall
 SLH-DSA Keygen accounted lower bound  86,461 cycles / 0.86461 ms at 100 MHz

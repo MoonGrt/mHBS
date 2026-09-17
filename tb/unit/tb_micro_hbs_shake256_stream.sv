@@ -30,8 +30,15 @@ module tb_micro_hbs_shake256_stream;
 
     micro_hbs_shake256_stream #(.UNROLL(2)) dut (
         .clk, .rst_n, .hash_start, .hash_ready, .block_valid, .block_ready,
-        .block_data, .block_bytes, .block_last, .digest, .rate_output,
-        .digest_valid, .error
+        .block_data, .block_bytes, .block_last,
+        .repeat_enable(1'b0), .repeat_prefix(1'b0),
+        .repeat_prefix_preserve_counter(1'b0),
+        .repeat_prefix_domain(3'b0), .repeat_count(8'd1),
+        .repeat_counter_offset(8'b0), .repeat_feedback_offset(8'b0),
+        .repeat_feedback_bytes(6'b0), .repeat_counter_start(32'b0),
+        .capture_enable(1'b0), .capture_after(8'b0),
+        .digest, .rate_output, .digest_valid,
+        .capture_digest(), .capture_valid(), .error
     );
 
     task automatic begin_hash;

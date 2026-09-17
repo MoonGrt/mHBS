@@ -284,7 +284,7 @@ module tb_micro_hbs_output_stream;
         if (stall_cycles == 0)
             $fatal(1, "test did not exercise output backpressure");
 
-        $display("PASS internal EMIT output stream: indexed bounds, partial keep, %0d stalled cycles, no loss/duplication, Scratchpad error propagation",
+        $display("PASS internal OUTPUT stream: indexed bounds, partial keep, %0d stalled cycles, no loss/duplication, Scratchpad error propagation",
                  stall_cycles);
         $finish;
     end

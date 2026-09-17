@@ -1,0 +1,528 @@
+{
+  "schema_version": 1,
+  "micro_isa_version": "0.2",
+  "name": "rfc8554-lms-sha256-m32-h10-w4-sign",
+  "entry": "entry",
+  "bounds": {
+    "scratch_slots": 192,
+    "max_loop_bound": 1024,
+    "max_dynamic_instructions": 3000000
+  },
+  "layouts": {
+    "0": {
+      "name": "lmots_message_digest",
+      "class": "lmots_message",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 4096,
+      "destination": {
+        "base": 141
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "job_int",
+          "field": "q",
+          "bytes": 4
+        },
+        {
+          "kind": "literal",
+          "hex": "8181"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "randomizer",
+          "length": 32
+        },
+        {
+          "kind": "job_bytes",
+          "field": "message"
+        }
+      ]
+    },
+    "1": {
+      "name": "lmots_signature_private_element",
+      "class": "lmots_prf",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 55,
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "job_int",
+          "field": "q",
+          "bytes": 4
+        },
+        {
+          "kind": "reg",
+          "reg": 0,
+          "bytes": 2
+        },
+        {
+          "kind": "literal",
+          "hex": "ff"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "seed",
+          "length": 32
+        }
+      ]
+    },
+    "2": {
+      "name": "lmots_signature_chain_step",
+      "class": "ots_chain",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 55,
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "job_int",
+          "field": "q",
+          "bytes": 4
+        },
+        {
+          "kind": "reg",
+          "reg": 0,
+          "bytes": 2
+        },
+        {
+          "kind": "reg",
+          "reg": 2,
+          "bytes": 1
+        },
+        {
+          "kind": "memory",
+          "base": 0,
+          "index_reg": 0
+        }
+      ]
+    },
+    "3": {
+      "name": "tree_lmots_private_element",
+      "class": "lmots_prf",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 55,
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "reg",
+          "reg": 3,
+          "bytes": 4
+        },
+        {
+          "kind": "reg",
+          "reg": 0,
+          "bytes": 2
+        },
+        {
+          "kind": "literal",
+          "hex": "ff"
+        },
+        {
+          "kind": "job_bytes",
+          "field": "seed",
+          "length": 32
+        }
+      ]
+    },
+    "4": {
+      "name": "tree_lmots_chain_step",
+      "class": "ots_chain",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 55,
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "reg",
+          "reg": 3,
+          "bytes": 4
+        },
+        {
+          "kind": "reg",
+          "reg": 0,
+          "bytes": 2
+        },
+        {
+          "kind": "reg",
+          "reg": 1,
+          "bytes": 1
+        },
+        {
+          "kind": "memory",
+          "base": 0,
+          "index_reg": 0
+        }
+      ]
+    },
+    "5": {
+      "name": "tree_lmots_public_compress",
+      "class": "ots_compress",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 2166,
+      "destination": {
+        "base": 134
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "reg",
+          "reg": 3,
+          "bytes": 4
+        },
+        {
+          "kind": "literal",
+          "hex": "8080"
+        },
+        {
+          "kind": "memory_range",
+          "base": 0,
+          "count": 67
+        }
+      ]
+    },
+    "6": {
+      "name": "lms_leaf",
+      "class": "merkle_leaf",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 54,
+      "destination": {
+        "base": 135
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "reg",
+          "reg": 3,
+          "add": 1024,
+          "bytes": 4
+        },
+        {
+          "kind": "literal",
+          "hex": "8282"
+        },
+        {
+          "kind": "memory",
+          "base": 134
+        }
+      ]
+    },
+    "7": {
+      "name": "lms_tree_reduce_with_authentication",
+      "class": "merkle_internal",
+      "hash": "sha256",
+      "output_bytes": 32,
+      "max_input_bytes": 86,
+      "tree_height": 10,
+      "storage_mode": "TREEHASH_MIN",
+      "subtree_height": 4,
+      "root_destination": 170,
+      "target_leaf_field": "q",
+      "auth_destination": 150,
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "identifier",
+          "length": 16
+        },
+        {
+          "kind": "tree_index",
+          "bytes": 4
+        },
+        {
+          "kind": "literal",
+          "hex": "8383"
+        },
+        {
+          "kind": "tree_left"
+        },
+        {
+          "kind": "tree_right"
+        }
+      ]
+    }
+  },
+  "loads": {
+    "0": {
+      "name": "signature_q",
+      "source": {
+        "kind": "job_int",
+        "field": "q",
+        "bytes": 4
+      },
+      "destination": {
+        "base": 160
+      }
+    },
+    "1": {
+      "name": "lmots_typecode",
+      "source": {
+        "kind": "literal",
+        "hex": "00000003"
+      },
+      "destination": {
+        "base": 161
+      }
+    },
+    "2": {
+      "name": "signature_randomizer",
+      "source": {
+        "kind": "job_bytes",
+        "field": "randomizer",
+        "length": 32
+      },
+      "destination": {
+        "base": 162
+      }
+    },
+    "3": {
+      "name": "lmots_coefficients",
+      "source": {
+        "kind": "memory",
+        "base": 141
+      },
+      "transform": "base_w_checksum",
+      "log_w": 4,
+      "len1": 64,
+      "len2": 3,
+      "destination": {
+        "base": 67
+      }
+    },
+    "4": {
+      "name": "lmots_coefficient_register",
+      "source": {
+        "kind": "memory",
+        "base": 67,
+        "index_reg": 0
+      },
+      "destination_reg": 7,
+      "endian": "big"
+    },
+    "5": {
+      "name": "lmots_sign_chain_bound",
+      "source": {
+        "kind": "reg",
+        "reg": 7,
+        "bytes": 1
+      },
+      "destination": {
+        "base": 140
+      }
+    },
+    "6": {
+      "name": "lms_typecode",
+      "source": {
+        "kind": "literal",
+        "hex": "00000006"
+      },
+      "destination": {
+        "base": 163
+      }
+    }
+  },
+  "program": [
+    {
+      "label": "entry"
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 0
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 1
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 2
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 160
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 161
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 162
+    },
+    {
+      "op": "HASH",
+      "imm": 0
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 3
+    },
+    {
+      "op": "SET_REG",
+      "rd": 6,
+      "imm": 140
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 0,
+      "imm": 67
+    },
+    {
+      "op": "HASH",
+      "imm": 1
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 4
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 5
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "flags": 1,
+      "rd": 6,
+      "rs": 2,
+      "target": "after_signature_chain"
+    },
+    {
+      "op": "HASH",
+      "imm": 2
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "label": "after_signature_chain"
+    },
+    {
+      "op": "OUTPUT",
+      "flags": 1,
+      "rd": 0,
+      "rs": 0
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 6
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 163
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 3,
+      "imm": 1024
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 0,
+      "imm": 67
+    },
+    {
+      "op": "HASH",
+      "imm": 3
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 1,
+      "imm": 15
+    },
+    {
+      "op": "HASH",
+      "imm": 4
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "HASH",
+      "imm": 5
+    },
+    {
+      "op": "HASH",
+      "imm": 6
+    },
+    {
+      "op": "TREE_PUSH",
+      "rd": 135,
+      "imm": 7
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 0,
+      "imm": 10
+    },
+    {
+      "op": "OUTPUT",
+      "flags": 1,
+      "rd": 150,
+      "rs": 0
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "HALT"
+    }
+  ]
+}

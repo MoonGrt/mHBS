@@ -41,6 +41,20 @@ class MicroInterpreter:
         self.loop_end, self.loop_start = self._pair_loops(self.code)
         self.scratch_slots = int(image.get("bounds", {}).get("scratch_slots", 256))
         self.max_steps = int(image.get("bounds", {}).get("max_dynamic_instructions", 10_000_000))
+        self._dependency_memory_reads: set[int] | None = None
+        self._dependency_register_reads: set[int] | None = None
+
+    def _begin_dependency_capture(self) -> None:
+        self._dependency_memory_reads = set()
+        self._dependency_register_reads = set()
+
+    def _track_memory_read(self, address: int) -> None:
+        if self._dependency_memory_reads is not None:
+            self._dependency_memory_reads.add(address)
+
+    def _track_register_read(self, register: int) -> None:
+        if self._dependency_register_reads is not None:
+            self._dependency_register_reads.add(register)
 
     @staticmethod
     def _pair_loops(code: list[Instruction]) -> tuple[dict[int, int], dict[int, int]]:
@@ -48,7 +62,7 @@ class MicroInterpreter:
         start_to_end: dict[int, int] = {}
         end_to_start: dict[int, int] = {}
         for pc, inst in enumerate(code):
-            if inst.opcode == Opcode.LOOP_SETUP:
+            if inst.opcode == Opcode.LOOP_BEGIN:
                 stack.append(pc)
             elif inst.opcode == Opcode.LOOP_END:
                 start = stack.pop()
@@ -59,9 +73,13 @@ class MicroInterpreter:
     def _address(self, component: dict[str, Any], regs: list[int]) -> int:
         address = int(component.get("base", 0))
         if "base_reg" in component:
-            address += regs[int(component["base_reg"])]
+            register = int(component["base_reg"])
+            self._track_register_read(register)
+            address += regs[register]
         if "index_reg" in component:
-            address += regs[int(component["index_reg"])] * int(component.get("stride", 1))
+            register = int(component["index_reg"])
+            self._track_register_read(register)
+            address += regs[register] * int(component.get("stride", 1))
         if not 0 <= address < self.scratch_slots:
             raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
         return address
@@ -83,7 +101,9 @@ class MicroInterpreter:
         if kind == "literal_int":
             value = int(expression["value"])
         elif kind == "reg":
-            value = regs[int(expression["reg"])]
+            register = int(expression["reg"])
+            self._track_register_read(register)
+            value = regs[register]
         elif kind == "job_int":
             value = job.get(expression["field"])
             if not isinstance(value, int):
@@ -92,6 +112,7 @@ class MicroInterpreter:
             address = self._address(expression, regs)
             if address not in memory:
                 raise ExecutionFault("ERR_UNINITIALIZED_READ", self.pc)
+            self._track_memory_read(address)
             value = int.from_bytes(memory[address], expression.get("endian", "big"))
         elif kind == "context":
             name = str(expression["name"])
@@ -182,6 +203,17 @@ class MicroInterpreter:
             if expected is not None and len(value) != int(expected):
                 raise ExecutionFault("ERR_JOB_FIELD_LENGTH", self.pc)
             return value
+        if kind == "job_slice":
+            value = job.get(component["field"])
+            if not isinstance(value, bytes):
+                raise ExecutionFault("ERR_JOB_FIELD", self.pc)
+            offset = self._eval_int_expression(
+                component["offset"], job, regs, memory, context
+            )
+            length = int(component["length"])
+            if offset < 0 or length < 0 or offset + length > len(value):
+                raise ExecutionFault("ERR_JOB_FIELD_LENGTH", self.pc)
+            return value[offset : offset + length]
         if kind == "job_int":
             value = job.get(component["field"])
             if not isinstance(value, int) or value < 0:
@@ -191,7 +223,9 @@ class MicroInterpreter:
             except OverflowError as exc:
                 raise ExecutionFault("ERR_JOB_FIELD_WIDTH", self.pc) from exc
         if kind == "reg":
-            value = regs[int(component["reg"])] + int(component.get("add", 0))
+            register = int(component["reg"])
+            self._track_register_read(register)
+            value = regs[register] + int(component.get("add", 0))
             try:
                 return value.to_bytes(int(component["bytes"]), component.get("endian", "big"))
             except OverflowError as exc:
@@ -200,6 +234,7 @@ class MicroInterpreter:
             address = self._address(component, regs)
             if address not in memory:
                 raise ExecutionFault("ERR_UNINITIALIZED_READ", self.pc)
+            self._track_memory_read(address)
             return memory[address]
         if kind == "memory_range":
             base = int(component["base"])
@@ -210,6 +245,7 @@ class MicroInterpreter:
             for address in range(base, base + count):
                 if address not in memory:
                     raise ExecutionFault("ERR_UNINITIALIZED_READ", self.pc)
+                self._track_memory_read(address)
                 chunks.append(memory[address])
             return b"".join(chunks)
         if kind == "temp":
@@ -265,7 +301,9 @@ class MicroInterpreter:
                     if word_kind == "literal_int":
                         value = int(word["value"])
                     elif word_kind == "reg":
-                        value = regs[int(word["reg"])] + int(word.get("add", 0))
+                        register = int(word["reg"])
+                        self._track_register_read(register)
+                        value = regs[register] + int(word.get("add", 0))
                     elif word_kind == "expr":
                         value = self._eval_int_expression(
                             word["expression"], job, regs, memory, context
@@ -304,9 +342,12 @@ class MicroInterpreter:
         frozen_job = dict(job)
         regs = [0] * 8
         memory: dict[int, bytes] = {}
+        memory_dependencies: dict[int, frozenset[int]] = {}
+        register_dependencies: list[frozenset[int]] = [frozenset() for _ in regs]
+        value_dependencies: dict[bytes, frozenset[int]] = {}
         output = bytearray()
         trace: list[dict[str, Any]] = []
-        loops: list[dict[str, int]] = []
+        loops: list[dict[str, Any]] = []
         calls: list[int] = []
         counters = {
             "accepted_job_commands": 1,
@@ -319,14 +360,67 @@ class MicroInterpreter:
         }
         trace_digest = hashlib.sha256()
         tree: TreeHash | None = None
+        pair_trace_records: list[list[bytes]] = [[], []]
+        next_hash_id = 0
+        active_tree_hash_events: list[dict[str, Any]] = []
 
-        def record_hash(kind: str, data: bytes, value: bytes) -> None:
+        def hash_record(kind: str, data: bytes, value: bytes) -> bytes:
             record = {
                 "hash_class": kind,
                 "hash_input_digest": hashlib.sha256(data).hexdigest(),
                 "hash_output": value.hex(),
             }
-            trace_digest.update(json.dumps(record, sort_keys=True, separators=(",", ":")).encode())
+            return json.dumps(
+                record, sort_keys=True, separators=(",", ":")
+            ).encode()
+
+        def record_hash(kind: str, data: bytes, value: bytes) -> None:
+            trace_digest.update(hash_record(kind, data, value))
+
+        def control_dependencies() -> set[int]:
+            dependencies: set[int] = set()
+            for frame in loops:
+                dependencies.update(frame.get("dependencies", ()))
+            return dependencies
+
+        def captured_dependencies(*extra: frozenset[int] | set[int]) -> frozenset[int]:
+            dependencies = control_dependencies()
+            for address in self._dependency_memory_reads or ():
+                dependencies.update(memory_dependencies.get(address, ()))
+            for register in self._dependency_register_reads or ():
+                dependencies.update(register_dependencies[register])
+            for values in extra:
+                dependencies.update(values)
+            return frozenset(dependencies)
+
+        def allocate_hash(
+            kind: str,
+            data: bytes,
+            value: bytes,
+            dependencies: frozenset[int],
+            *,
+            address: int | None = None,
+            lane: int | None = None,
+        ) -> dict[str, Any]:
+            nonlocal next_hash_id
+            hash_id = next_hash_id
+            next_hash_id += 1
+            event = {
+                "hash_id": hash_id,
+                "hash_class": kind,
+                "hash_input_length": len(data),
+                "hash_input_digest": hashlib.sha256(data).hexdigest(),
+                "hash_output": value.hex(),
+                "dependency_hash_ids": sorted(dependencies),
+            }
+            if address is not None:
+                event["effective_address"] = address
+                memory_dependencies[address] = frozenset((hash_id,))
+            if lane is not None:
+                event["lane"] = lane
+            prior = value_dependencies.get(value, frozenset())
+            value_dependencies[value] = prior | frozenset((hash_id,))
+            return event
 
         self.pc = int(self.image["entry"])
         done = False
@@ -346,35 +440,47 @@ class MicroInterpreter:
                     "loop_depth": len(loops),
                     "call_depth": len(calls),
                 }
+                self._begin_dependency_capture()
                 next_pc = self.pc + 1
 
-                if inst.opcode == Opcode.NOP:
-                    pass
-                elif inst.opcode == Opcode.MOVI:
+                if inst.opcode == Opcode.SET_REG:
                     regs[inst.rd] = inst.imm
-                elif inst.opcode == Opcode.ADDI:
+                    register_dependencies[inst.rd] = frozenset()
+                elif inst.opcode == Opcode.ADD_IMM:
+                    self._track_register_read(inst.rs)
                     signed_imm = inst.imm if inst.imm < (1 << 31) else inst.imm - (1 << 32)
                     value = regs[inst.rs] + signed_imm
                     if not 0 <= value < (1 << 32):
                         raise ExecutionFault("ERR_ARITH_OVERFLOW", self.pc)
                     regs[inst.rd] = value
-                elif inst.opcode == Opcode.LOOP_SETUP:
+                    register_dependencies[inst.rd] = captured_dependencies()
+                elif inst.opcode == Opcode.LOOP_BEGIN:
                     if len(loops) >= 6:
                         raise ExecutionFault("ERR_LOOP_OVERFLOW", self.pc)
                     regs[inst.rs] = 0
+                    register_dependencies[inst.rs] = frozenset()
                     if inst.flags & 0x01:
+                        self._track_register_read(inst.rd)
                         bound_address = regs[inst.rd]
                         if not 0 <= bound_address < self.scratch_slots:
                             raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
                         if bound_address not in memory or len(memory[bound_address]) != 1:
                             raise ExecutionFault("ERR_DYNAMIC_LOOP_BOUND", self.pc)
+                        self._track_memory_read(bound_address)
                         bound = memory[bound_address][0]
                     else:
                         bound = inst.imm
                     if bound == 0:
                         next_pc = inst.imm
                     else:
-                        loops.append({"setup": self.pc, "counter_reg": inst.rs, "bound": bound})
+                        loops.append(
+                            {
+                                "setup": self.pc,
+                                "counter_reg": inst.rs,
+                                "bound": bound,
+                                "dependencies": tuple(captured_dependencies()),
+                            }
+                        )
                 elif inst.opcode == Opcode.LOOP_END:
                     if not loops or loops[-1]["setup"] != self.loop_start[self.pc]:
                         raise ExecutionFault("ERR_LOOP_UNDERFLOW", self.pc)
@@ -390,35 +496,198 @@ class MicroInterpreter:
                         raise ExecutionFault("ERR_CALL_OVERFLOW", self.pc)
                     calls.append(self.pc + 1)
                     next_pc = inst.imm
-                elif inst.opcode == Opcode.RET:
+                elif inst.opcode == Opcode.RETURN:
                     if not calls:
                         raise ExecutionFault("ERR_CALL_UNDERFLOW", self.pc)
                     next_pc = calls.pop()
-                elif inst.opcode == Opcode.JUMP:
-                    next_pc = inst.imm
-                elif inst.opcode == Opcode.HASH_LAYOUT:
-                    layout = self.image["layouts"][str(inst.imm)]
-                    data = self._compose(layout, frozen_job, regs, memory)
-                    result = self._hash(layout["hash"], data, int(layout["output_bytes"]))
-                    destination = layout.get("destination", {"base": inst.rd})
-                    address = self._address(destination, regs)
-                    memory[address] = result
-                    counters["hash_calls"] += 1
-                    if layout["hash"] == "shake256":
-                        counters["keccak_permutations"] += len(data) // 136 + 1
-                    record_hash(layout.get("class", "unspecified"), data, result)
+                elif inst.opcode == Opcode.HASH:
+                    repeat_mode = bool(inst.flags & 0x08)
+                    capture_mode = bool(inst.flags & 0x10)
+                    capture_reg_base = inst.flags >> 5
+                    layout_id = inst.imm & 0xFFFF if repeat_mode else inst.imm
+                    repeat_count = (inst.imm >> 16) & 0xFF if repeat_mode else 1
+                    layout = self.image["layouts"][str(layout_id)]
+                    repeat_prefix = layout.get("repeat_prefix")
+                    prefix_mode = repeat_mode and isinstance(repeat_prefix, dict)
+                    prefix_recipe = (
+                        repeat_prefix.get("recipe") if prefix_mode else None
+                    )
+                    if prefix_mode and prefix_recipe not in {
+                        "hbs_64byte_f_chain", "hbs_64byte_feedback"
+                    }:
+                        raise ExecutionFault("ERR_BAD_DESCRIPTOR", self.pc)
+                    # flags[1:0]=2'b11 is the bounded static P2 operation:
+                    # evaluate the adjacent logical indices 2*R[rs] and
+                    # 2*R[rs]+1.  The hardware may defer the intermediate
+                    # writes when flags[2] is set, but atomic software writes
+                    # are observably equivalent at instruction boundaries.
+                    pair_mode = (inst.flags & 0x03) == 0x03
+                    self._track_register_read(inst.rs)
+                    original_index = regs[inst.rs]
+                    original_counter = regs[inst.rd] if repeat_mode else 0
+                    lanes = (0, 1) if pair_mode else (None,)
+                    lane_events = []
+                    prefix_templates: dict[int | None, bytes] = {}
+                    prefix_results: dict[int | None, bytes] = {}
+                    prefix_hash_ids: dict[int | None, int] = {}
+                    captured_values: dict[int | None, tuple[bytes, frozenset[int]]] = {}
+                    capture_after = {
+                        lane: regs[capture_reg_base + (0 if lane is None else lane)]
+                        for lane in lanes
+                    } if capture_mode else {}
+                    if capture_mode:
+                        destination = layout.get("destination", {"base": inst.rd})
+                        for lane in lanes:
+                            if lane is not None:
+                                regs[inst.rs] = 2 * original_index + lane
+                            address = self._address(destination, regs)
+                            if capture_after[lane] == 0 and not prefix_mode:
+                                captured_values[lane] = (
+                                    memory[address],
+                                    memory_dependencies.get(address, frozenset()),
+                                )
+                        regs[inst.rs] = original_index
+                    for repeat_index in range(repeat_count):
+                        if repeat_mode:
+                            regs[inst.rd] = original_counter + repeat_index
+                        for lane in lanes:
+                            self._begin_dependency_capture()
+                            self._track_register_read(inst.rs)
+                            if lane is not None:
+                                regs[inst.rs] = 2 * original_index + lane
+                            if prefix_mode and repeat_index > 0:
+                                data_image = bytearray(prefix_templates[lane])
+                                data_image[32:36] = int(
+                                    repeat_prefix.get("domain", 0)
+                                ).to_bytes(4, "big")
+                                if prefix_recipe == "hbs_64byte_f_chain":
+                                    data_image[44:48] = (
+                                        original_counter + repeat_index - 1
+                                    ).to_bytes(4, "big")
+                                data_image[48:64] = prefix_results[lane]
+                                data = bytes(data_image)
+                                dependencies = captured_dependencies(
+                                    frozenset((prefix_hash_ids[lane],))
+                                )
+                                hash_class = str(repeat_prefix.get(
+                                    "repeat_class", layout.get("class", "unspecified")
+                                ))
+                            else:
+                                data = self._compose(layout, frozen_job, regs, memory)
+                                pair_patch = layout.get("pair_patch")
+                                if pair_mode and lane == 1 and isinstance(
+                                    pair_patch, dict
+                                ):
+                                    data_image = bytearray(data)
+                                    patch_offset = int(pair_patch["byte_offset"])
+                                    patch_register = int(pair_patch["register"])
+                                    data_image[patch_offset:patch_offset + 4] = (
+                                        regs[patch_register] + 1
+                                    ).to_bytes(4, "big")
+                                    data = bytes(data_image)
+                                dependencies = captured_dependencies()
+                                hash_class = str(
+                                    repeat_prefix.get(
+                                        "initial_class",
+                                        layout.get("class", "unspecified"),
+                                    )
+                                    if prefix_mode else layout.get(
+                                        "class", "unspecified"
+                                    )
+                                )
+                                if prefix_mode:
+                                    prefix_templates[lane] = data
+                            result = self._hash(
+                                layout["hash"], data, int(layout["output_bytes"])
+                            )
+                            destination = layout.get("destination", {"base": inst.rd})
+                            address = self._address(destination, regs)
+                            if pair_mode and lane is not None:
+                                address += lane * int(
+                                    destination.get("pair_stride", 0)
+                                )
+                                if not 0 <= address < self.scratch_slots:
+                                    raise ExecutionFault(
+                                        "ERR_SCRATCH_BOUNDS", self.pc
+                                    )
+                            memory[address] = result
+                            memory_dependencies[address] = dependencies
+                            if (capture_mode
+                                    and capture_after[lane]
+                                    + (1 if prefix_mode else 0)
+                                    == repeat_index + 1):
+                                captured_values[lane] = (result, dependencies)
+                            counters["hash_calls"] += 1
+                            if layout["hash"] == "shake256":
+                                counters["keccak_permutations"] += len(data) // 136 + 1
+                            if pair_mode:
+                                pair_trace_records[lane].append(
+                                    hash_record(
+                                        hash_class, data, result
+                                    )
+                                )
+                            else:
+                                record_hash(
+                                    hash_class, data, result
+                                )
+                            lane_event = allocate_hash(
+                                hash_class,
+                                data,
+                                result,
+                                dependencies,
+                                address=address,
+                                lane=0 if lane is None else lane,
+                            )
+                            lane_events.append(lane_event)
+                            if prefix_mode:
+                                prefix_results[lane] = result
+                                prefix_hash_ids[lane] = int(lane_event["hash_id"])
+                        regs[inst.rs] = original_index
+                    regs[inst.rs] = original_index
+                    if capture_mode:
+                        capture_destination = layout.get("capture_destination")
+                        if not isinstance(capture_destination, dict):
+                            raise ExecutionFault("ERR_BAD_DESCRIPTOR", self.pc)
+                        for lane in lanes:
+                            if lane not in captured_values:
+                                raise ExecutionFault("ERR_BAD_DESCRIPTOR", self.pc)
+                            if lane is not None:
+                                regs[inst.rs] = 2 * original_index + lane
+                            capture_address = self._address(capture_destination, regs)
+                            capture_value, capture_dependencies = captured_values[lane]
+                            memory[capture_address] = capture_value
+                            memory_dependencies[capture_address] = capture_dependencies
+                        regs[inst.rs] = original_index
+                    if repeat_mode:
+                        regs[inst.rd] = original_counter + repeat_count
+                    if pair_mode and not (inst.flags & 0x04):
+                        # Deferred pair feedback changes the physical service
+                        # order, not the logical SLH-DSA chain order.  Flush
+                        # the completed pair chain-major so the architectural
+                        # trace remains comparable with the independent oracle.
+                        for lane_records in pair_trace_records:
+                            for record in lane_records:
+                                trace_digest.update(record)
+                            lane_records.clear()
+                    final_event = lane_events[-1]
                     event.update(
                         {
-                            "layout_id": inst.imm,
-                            "effective_address": address,
+                            "layout_id": layout_id,
+                            "effective_address": final_event["effective_address"],
                             "hash_class": layout.get("class", "unspecified"),
-                            "hash_input_length": len(data),
-                            "hash_input_digest": hashlib.sha256(data).hexdigest(),
-                            "hash_output": result.hex(),
+                            "hash_input_length": final_event["hash_input_length"],
+                            "hash_input_digest": final_event["hash_input_digest"],
+                            "hash_output": final_event["hash_output"],
+                            "hash_id": final_event["hash_id"],
+                            "dependency_hash_ids": final_event[
+                                "dependency_hash_ids"
+                            ],
+                            "hash_lanes": lane_events,
                         }
                     )
                 elif inst.opcode == Opcode.TREE_PUSH:
                     layout = self.image["layouts"][str(inst.imm)]
+                    self._track_register_read(inst.rs)
                     address = inst.rd + (regs[inst.rs] if inst.flags & 0x01 else 0)
                     if not 0 <= address < self.scratch_slots:
                         raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
@@ -427,6 +696,10 @@ class MicroInterpreter:
                     tree_height = int(layout["tree_height"])
                     if tree is None:
                         def parent_hash(height: int, start_leaf: int, left: bytes, right: bytes) -> bytes:
+                            child_dependencies = (
+                                value_dependencies.get(left, frozenset())
+                                | value_dependencies.get(right, frozenset())
+                            )
                             heap_index = ((1 << tree_height) + start_leaf) >> height
                             context = {
                                 "tree_left": left,
@@ -439,7 +712,9 @@ class MicroInterpreter:
                             }
                             if "parent_pipeline" in layout:
                                 temps: dict[str, bytes] = {}
+                                temp_dependencies: dict[str, frozenset[int]] = {}
                                 for step in layout["parent_pipeline"]:
+                                    self._begin_dependency_capture()
                                     data = self._compose(
                                         step, frozen_job, regs, memory, context, temps
                                     )
@@ -450,10 +725,27 @@ class MicroInterpreter:
                                     if step["hash"] == "shake256":
                                         counters["keccak_permutations"] += len(data) // 136 + 1
                                     record_hash(step.get("class", "tree_internal"), data, value)
-                                    temps[str(step["name"])] = value
+                                    dependencies = captured_dependencies(
+                                        child_dependencies,
+                                        *temp_dependencies.values(),
+                                    )
+                                    hash_event = allocate_hash(
+                                        step.get("class", "tree_internal"),
+                                        data,
+                                        value,
+                                        dependencies,
+                                        lane=1,
+                                    )
+                                    active_tree_hash_events.append(hash_event)
+                                    name = str(step["name"])
+                                    temps[name] = value
+                                    temp_dependencies[name] = frozenset(
+                                        (int(hash_event["hash_id"]),)
+                                    )
                                 result_name = str(layout.get("pipeline_result", layout["parent_pipeline"][-1]["name"]))
                                 return temps[result_name]
 
+                            self._begin_dependency_capture()
                             data = self._compose(
                                 layout, frozen_job, regs, memory, context, {}
                             )
@@ -462,6 +754,15 @@ class MicroInterpreter:
                             if layout["hash"] == "shake256":
                                 counters["keccak_permutations"] += len(data) // 136 + 1
                             record_hash(layout.get("class", "tree_internal"), data, value)
+                            active_tree_hash_events.append(
+                                allocate_hash(
+                                    layout.get("class", "tree_internal"),
+                                    data,
+                                    value,
+                                    captured_dependencies(child_dependencies),
+                                    lane=1,
+                                )
+                            )
                             return value
 
                         tree = TreeHash(
@@ -471,6 +772,7 @@ class MicroInterpreter:
                             frozen_job.get(layout.get("target_leaf_field", "target_leaf")),
                             int(layout.get("subtree_height", 4)),
                         )
+                    active_tree_hash_events = []
                     reductions = tree.push(memory[address])
                     event.update(
                         {
@@ -478,6 +780,7 @@ class MicroInterpreter:
                             "effective_address": address,
                             "tree_event": "push",
                             "tree_reductions": len(reductions),
+                            "tree_hashes": list(active_tree_hash_events),
                         }
                     )
                     if tree.metrics.leaf_count == (1 << tree_height):
@@ -491,17 +794,24 @@ class MicroInterpreter:
                         if not 0 <= root_address < self.scratch_slots:
                             raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
                         memory[root_address] = root
+                        memory_dependencies[root_address] = value_dependencies.get(
+                            root, frozenset()
+                        )
                         if "auth_destination" in layout:
                             auth_destination = int(layout["auth_destination"])
                             if auth_destination < 0 or auth_destination + len(auth) > self.scratch_slots:
                                 raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
                             for auth_offset, auth_node in enumerate(auth):
-                                memory[auth_destination + auth_offset] = auth_node
+                                auth_address = auth_destination + auth_offset
+                                memory[auth_address] = auth_node
+                                memory_dependencies[auth_address] = (
+                                    value_dependencies.get(auth_node, frozenset())
+                                )
                         event["tree_event"] = "root"
                         event["auth_nodes"] = len(auth)
                         if layout.get("restart_on_complete", False):
                             tree = None
-                elif inst.opcode == Opcode.LOAD:
+                elif inst.opcode == Opcode.DATA_LOAD:
                     descriptor = self.image["loads"][str(inst.imm)]
                     transform = descriptor.get("transform")
                     value = (
@@ -516,9 +826,13 @@ class MicroInterpreter:
                             regs[int(descriptor["destination_reg"])] = int.from_bytes(
                                 value, descriptor.get("endian", "big")
                             )
+                            register_dependencies[
+                                int(descriptor["destination_reg"])
+                            ] = captured_dependencies()
                         else:
                             destination = self._address(descriptor["destination"], regs)
                             memory[destination] = value
+                            memory_dependencies[destination] = captured_dependencies()
                             event["effective_address"] = destination
                     elif transform == "base_w_checksum":
                         log_w = int(descriptor["log_w"])
@@ -552,7 +866,9 @@ class MicroInterpreter:
                         if destination + len(all_digits) > self.scratch_slots:
                             raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
                         for offset, digit in enumerate(all_digits):
-                            memory[destination + offset] = bytes([digit])
+                            address = destination + offset
+                            memory[address] = bytes([digit])
+                            memory_dependencies[address] = captured_dependencies()
                         event.update(
                             {
                                 "effective_address": destination,
@@ -568,6 +884,9 @@ class MicroInterpreter:
                             if integer >= (1 << 32):
                                 raise ExecutionFault("ERR_REGISTER_WIDTH", self.pc)
                             regs[int(descriptor["destination_reg"])] = integer
+                            register_dependencies[
+                                int(descriptor["destination_reg"])
+                            ] = captured_dependencies()
                         else:
                             width = int(descriptor["bytes"])
                             try:
@@ -580,6 +899,7 @@ class MicroInterpreter:
                                 descriptor["destination"], regs
                             )
                             memory[destination] = encoded
+                            memory_dependencies[destination] = captured_dependencies()
                             event.update(
                                 {
                                     "effective_address": destination,
@@ -589,13 +909,15 @@ class MicroInterpreter:
                             )
                     else:
                         raise ExecutionFault("ERR_LOAD_TRANSFORM", self.pc)
-                elif inst.opcode == Opcode.STORE:
+                elif inst.opcode == Opcode.DATA_MOVE:
                     move = self.image["moves"][str(inst.imm)]
                     source = self._address(move["source"], regs)
                     destination = self._address(move["destination"], regs)
                     if source not in memory:
                         raise ExecutionFault("ERR_UNINITIALIZED_READ", self.pc)
+                    self._track_memory_read(source)
                     memory[destination] = memory[source]
+                    memory_dependencies[destination] = captured_dependencies()
                     event.update(
                         {
                             "effective_address": destination,
@@ -603,28 +925,7 @@ class MicroInterpreter:
                             "memory_event": "copy",
                         }
                     )
-                elif inst.opcode == Opcode.XOR:
-                    descriptor = self.image["xors"][str(inst.imm)]
-                    source_a = self._address(descriptor["source_a"], regs)
-                    source_b = self._address(descriptor["source_b"], regs)
-                    destination = self._address(descriptor["destination"], regs)
-                    if source_a not in memory or source_b not in memory:
-                        raise ExecutionFault("ERR_UNINITIALIZED_READ", self.pc)
-                    left = memory[source_a]
-                    right = memory[source_b]
-                    if len(left) != len(right):
-                        raise ExecutionFault("ERR_XOR_LENGTH", self.pc)
-                    memory[destination] = bytes(a ^ b for a, b in zip(left, right))
-                    event.update(
-                        {
-                            "effective_address": destination,
-                            "source_address": source_a,
-                            "source_b_address": source_b,
-                            "memory_event": "xor",
-                            "output_bytes": len(left),
-                        }
-                    )
-                elif inst.opcode == Opcode.EMIT:
+                elif inst.opcode == Opcode.OUTPUT:
                     address = inst.rd + (regs[inst.rs] if inst.flags & 0x01 else 0) + inst.imm
                     if not 0 <= address < self.scratch_slots:
                         raise ExecutionFault("ERR_SCRATCH_BOUNDS", self.pc)
@@ -636,15 +937,11 @@ class MicroInterpreter:
                     if loops or calls:
                         raise ExecutionFault("ERR_UNBALANCED_STACK", self.pc)
                     done = True
-                elif inst.opcode == Opcode.FAIL:
-                    raise ExecutionFault(f"PROGRAM_FAIL_{inst.imm}", self.pc)
-                elif inst.opcode in (Opcode.WAIT, Opcode.BARRIER):
-                    pass  # Hashes are atomic in the Phase-1 functional model.
                 else:
                     raise ExecutionFault("ERR_UNIMPLEMENTED_OPCODE", self.pc)
 
                 if self.trace_mode == "full" or (
-                    self.trace_mode == "hash" and inst.opcode in (Opcode.HASH_LAYOUT, Opcode.TREE_PUSH)
+                    self.trace_mode == "hash" and inst.opcode in (Opcode.HASH, Opcode.TREE_PUSH)
                 ):
                     trace.append(event)
                 self.pc = next_pc

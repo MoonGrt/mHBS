@@ -19,7 +19,7 @@
 // capability/input/output values describe generic datapath features; this
 // store does not recognize LMS, XMSS, SLH-DSA, or any other algorithm ID.
 // Configuration is an initialization operation.  engine_busy locks the image;
-// runtime HASH_LAYOUT traffic can only perform bounded read lookups.
+// runtime HASH traffic can only perform bounded read lookups.
 module micro_hbs_layout_descriptor_store #(
     parameter integer LAYOUT_COUNT = 16,
     parameter logic [7:0] FORMAT_VERSION = 8'h01

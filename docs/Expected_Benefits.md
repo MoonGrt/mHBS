@@ -12,12 +12,12 @@
 | 标准 XMSS parent 联合切片 | RFC 8391 SHAKE256/n=32 Python oracle vs RTL | 一 Job，4 leaves、3 randomized-H parents，ADRS height/index 硬件派生，root/auth 一致 | TreeHash 不再仅依赖 `SHAKE(left||right)` 测试布局 |
 | WOTS+ leaf→TreeHash | RFC 8391 WOTS+/L-tree/TreeHash oracle vs RTL | 每叶 67 PRF_keygen、1,005 F、66 L-tree H；一 Job 生成 1,024 叶/1,023 parent；h=10 root 与 10 层 auth 一致；57,204,676 cycles | 叶不需 testbench 预装；当前是串行融合 leaf capability，尚非通用 composer/P2 性能点 |
 | FIPS 205 SLH parent | SLH-DSA-SHAKE-128f n=16 oracle vs RTL | `PK.seed||ADRS||left||right` 80 B；1 SHAKE/parent；3 向量及 fault/backpressure 通过；已接入 FORS 和 22 层 Hypertree | 标准 parent 与 XMSS randomized H 分离；完整 Sign 中 1,969 次 parent 已硬件计数 |
-| 数据表示 lowering | 现有逻辑槽/move vs 64-bit Scratchpad/v1-v2 descriptor | XMSS `R5+R7 -> R6+R3` 降为2条 binding，v2 RTL 以单 Job 完成 affine STORE→EMIT，缺失 binding/越界 fail-closed | 软件只在离线初始化生成镜像；尚未接完整 XMSS replay |
-| JSON layout→RTL composer | XMSS/SLH-DSA JSON vs 静态镜像 | 支持 16/32-byte slot、136-byte SHAKE 输出、仿射/移位表达式、ordered-pair、memory-range 和 relocation；无 DMA Job 完成整个 tc137 Sign，15,167,426 cycles | 无手写 SLH-DSA 算法 FSM；144-word JSON 微程序是唯一算法控制源 |
+| 数据表示 lowering | 现有逻辑槽/move vs 64-bit Scratchpad/v1-v2 descriptor | XMSS `R5+R7 -> R6+R3` 降为2条 binding，v2 RTL 以单 Job 完成 affine STORE→OUTPUT，缺失 binding/越界 fail-closed | 软件只在离线初始化生成镜像；尚未接完整 XMSS replay |
+| JSON layout→RTL composer | XMSS/SLH-DSA JSON vs 静态镜像 | 支持 16/32-byte slot、136-byte SHAKE 输出、仿射/移位表达式、ordered-pair、memory-range 和 relocation；无 DMA Job 完成整个 tc137 Sign；rate-wide + prefetch + feedback 后为 6,002,014 cycles | 无手写 SLH-DSA 算法 FSM；144-word JSON 微程序是唯一算法控制源 |
 | descriptor-selected TreeHash | 同一 RTL elaboration 中 h=2/h=3 MIN | 一次 start + descriptor ID，root/auth 精确匹配；SUBTREE/FULL 和非32-byte节点 fail-closed | 高度与 parent layout 已不是综合常数；cache 模式尚未接入 |
 | RFC 8554 LMS parent | 86-byte `I||u32(r)||0x8383||left||right` vs hashlib | 4 组独立向量及顺序/身份/背压通过，每 parent 两个 SHA-256 block | 真实 LMS parent primitive 已闭合；尚未接入完整 LMS TreeHash |
 | TreeHash transaction recovery | partial tree fault/cancel 后下一树 | 排空旧 scratch/parent response，无全局 reset 后 root/auth 仍一致 | 数字事务隔离成立；不代表掉电原子性或物理清零 |
-| 组合数据/TreeHash 路径 | descriptor+AGU+data/TreeHash/EMIT 共享单端口 Scratchpad | 一 Job 完成 13 指令；data/tree/emit 交易 32/16/1，root/auth/output 一致 | 固定仲裁与响应归属成立；尚不是完整 XMSS replay |
+| 组合数据/TreeHash 路径 | descriptor+AGU+data/TreeHash/OUTPUT 共享单端口 Scratchpad | 一 Job 完成 13 指令；data/tree/emit 交易 32/16/1，root/auth/output 一致 | 固定仲裁与响应归属成立；尚不是完整 XMSS replay |
 | TreeHash cache RTL | h=10 FULL vs SUBTREE(h≥4) cache store，同流程 post-route | 14 vs 4 RAMB36；3,778 vs 591 LUT；2,118 vs 198 FF | cache store BRAM 降 71.4%，但尚未测 cache-assisted Sign latency |
 | warm active-subtree cache | 127 upper-only vs 127 upper + 30 active lower，h=10/w=4 | BRAM 均为 4；warm 为 1,244 LUT/691 FF/WNS +0.556 ns；当前窗口 auth 10/10 hit | 用 653 LUT/493 FF 换取当前 16-leaf 窗口零 auth miss；未含 refill/Sign 延迟 |
 | 自主执行 | 3-step SHAKE chain | 1 Job、3 Hash、BUSY 期间 0 host writes | 不需软件逐 Hash 驱动 |
@@ -27,8 +27,8 @@
 | 真实 datapath PPA | P1/U2 randomized-F slice，Artix-7 post-route | 7,685 LUT、6,039 FF、2 RAMB36、WNS +0.568 ns @100 MHz | 可实现且当前路由满足 100 MHz；进入 P2 前仍需压缩宽寄存器并流水化 composer |
 | SLH-DSA 微码表达 | FIPS 205 SHAKE-128f Keygen vs NIST ACVP tc31 | 12 words/96 B；9,275 动态指令；4,495 SHAKE / 4,527 permutations；有序 trace 一致 | 最终标准 Keygen 可由通用循环/layout 表达，无逐 Hash 软件输入 |
 | SLH-DSA Sign 微码表达 | FIPS 205 SHAKE-128f deterministic Sign vs NIST ACVP tc137 | 144 words/1,152 B；221,811 动态指令；完整 17,088 B 签名一致；104,937 SHAKE / 105,641 permutations；逐 Hash trace 一致 | 完整 FORS + 22 层 Hypertree 已在同一 P1/U2 RTL 中从一条 Job 展开 |
-| SLH-DSA 完整 RTL 周期 | P1/U2、ACVP tc137、无 DMA | 15,167,426 cycles（151.67426 ms@100 MHz 归一化）；2,136 输出字逐字一致；硬件计数闭合 104,937 SHAKE / 105,641 permutations | 这是完整当前 RTL 路径，不是 P2 或论文 draft workload 比较点 |
-| SLH-DSA 完整 RTL PPA | xc7a200t-2、Vivado 2025.2、100 MHz OOC post-route | 34,185 LUT、23,289 FF、7 RAMB36、0 DSP；WNS −1.050 ns | BRAM 已低于论文 16.5 的 50% 门槛，但 LUT 和时序仍不优；需分段 bitfield adapter 并复用 TreeHash parent lane |
+| SLH-DSA 完整 RTL 周期 | P1/U2、ACVP tc137、无 DMA | 6,002,014 cycles（60.02014 ms@100 MHz 归一化）；2,136 输出字逐字一致；硬件计数闭合 104,937 SHAKE / 105,641 permutations | 较 14,333,951-cycle 基线减少 58.127%；component 预取 732,201/732,201 命中，Hash 反馈缓存命中 187,612 次；这是完整当前 RTL 路径，不是 P2 或论文 draft workload 比较点 |
+| SLH-DSA 完整 RTL PPA | xc7a200t-2、Vivado 2025.2、100 MHz OOC post-route | 34,874 LUT、23,903 FF、7 RAMB36、0 DSP、WNS −1.489 ns；约 87.04 MHz / 68.96 ms；LUT×cycles 与 timing-aware LUT×time 较原基线改善 57.032% / 52.560% | 读请求降 29.766%，但 Wave 3 的 35% 读/25% 写退出门槛尚未达到；100 MHz 时序、banked/coalesced Scratchpad 仍待闭合 |
 | layout 表达宽度 | 288-bit 通用栈 vs 32-bit ADRS/index 栈，同流程 post-route | 10,929 LUT/6,307 FF/WNS −7.749 ns vs 993/922/+0.253 ns | 拒绝全宽 barrel-shifter；LUT/FF 降 90.9%/85.4% |
 | digest digit unpack | ACVP tc137 33×6-bit FORS index 与 4-bit 模式 | 逐项一致；Vivado post-synthesis 0 LUT/0 FF | 宽摘要拆位用静态 wiring，不进入 layout ALU |
 | 静态 P2/U2 batch | 4-hash even 与 3-hash odd batch | 34 cycles；mask `11/11` 与 `11/01`；7 KAT 一致 | 固定双 lane 映射成立；理论窗口吞吐为单 lane 的 2.0×/1.5× |
@@ -45,8 +45,16 @@
 −1.050 ns。第二次分段只增加 205,936 cycles（较上一版 +1.376%），
 却把关键路径从 16.480 ns 降至 11.050 ns。按各自后布线关键路径估算，
 端到端时延从 246.57 ms 降至 167.60 ms，较上一版改善约 32.03%，
-较未分段的 259.35 ms 改善约 35.38%。这仍不是 100 MHz 时序收敛；
-新的最长路径已移到 bitfield adapter。
+较未分段的 259.35 ms 改善约 35.38%。在此基础上，将每个
+component 的 operand 捕获折叠进 RAM 响应周期，得到 14,332,257 cycles、
+34,001 LUT、23,228 FF 和 WNS −1.485 ns。周期较上一点减少 5.506%，
+LUT×cycle 改善 6.015%；路由 WNS 退化 0.435 ns，但按 11.485 ns 临界
+周期估算的端到端延迟仍由 167.60 ms 降至 164.61 ms（1.786%）。
+再将 bitfield adapter 的可变寄存器选择和仿射乘法分成两级，
+847 次 LOAD 共增加 1,694 cycles（0.0118%），但 WNS 改善到
+−0.406 ns，面积为 33,985 LUT/23,269 FF。按 10.406 ns 临界周期估算，
+延迟由 164.61 ms 降至 149.16 ms（9.384%）。这仍不是 100 MHz
+时序收敛；最长路径已移至 composer 目的地址到 block-buffer CE。
 
 ## 最可能形成的论文收益
 
@@ -179,10 +187,10 @@ SHAKE-128f 需要 104,937 次 SHAKE、105,641 次 Keccak permutation。
 报告 537,636 cycles。μHBS 的不可突破下界已高出 17.9%，而且尚未计入
 composer、微码、存储和输出开销。因此：
 
-完整 RTL replay 实测为 15,167,426 cycles；旧的 2,034,645
+完整 RTL replay 实测为 8,800,104 cycles；旧的 2,034,645
 只是未包含 composer/AGU/Scratchpad/TreeHash 的分析下界。实测与
-633,852 的理想 P2/U2 置换下界相差约 24×，显示当前主要问题
-是串行组合、Scratchpad 交易和单有效 lane，不是微程序静态大小。
+633,852 的理想 P2/U2 置换下界相差约 13.9×，显示当前主要问题
+已转为 component 控制、Scratchpad 交易和单有效 lane，不是微程序静态大小。
 
 - 不应把最终 FIPS 205 Sign 对论文 draft 数据宣称 cycle speedup；
 - 可比较的主指标应转为标准兼容下的静态程序压缩、共享硬件面积、BRAM
@@ -205,6 +213,6 @@ Hash 各保存一个 64-bit descriptor 的 839,496 B 展平表示，指令 word
 - 不能把 1-BRAM 存储宏当成完整 μHBS 的 BRAM 总量；
 - 不能把 4-BRAM SUBTREE cache-store 与其他 OOC 模块直接相加成整机面积；
 - 不能把静态 P2 batch 的 2×窗口吞吐当成完整 Keygen/Sign speedup；
-- 不能把 2,034,645 的历史分析下界称为 SLH-DSA 完整 RTL 总周期；完整实测为 15,167,426；
+- 不能把 2,034,645 的历史分析下界称为 SLH-DSA 完整 RTL 总周期；完整实测为 8,800,104；
 - 不能对论文 B0 的 14 个 cycle 点计算 speedup，因为它们当前都是 `NON_STRICT`；
 - 不能声称冻结后扩展性优越，直到 held-out flow 在冻结 RTL 上通过。

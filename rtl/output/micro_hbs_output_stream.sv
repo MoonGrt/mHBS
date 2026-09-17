@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Generic internal EMIT executor for a 64-bit Scratchpad and output stream.
+// Generic internal OUTPUT executor for a 64-bit Scratchpad and output stream.
 //
 // Command interpretation:
 //   first_slot = base_slot + (use_index ? index_value : 0)

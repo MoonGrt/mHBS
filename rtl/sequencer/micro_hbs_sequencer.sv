@@ -28,9 +28,17 @@ module micro_hbs_sequencer #(
     input  wire         hash_req_ready,
     output logic [15:0] hash_layout_id,
     output logic [1:0]  hash_lane_mask,
+    output logic        hash_defer_write,
     output logic [7:0]  hash_dest,
     output logic [7:0]  hash_index_reg,
     output logic [31:0] hash_index_value,
+    output logic        hash_repeat,
+    output logic [7:0]  hash_repeat_count,
+    output logic [7:0]  hash_repeat_counter_offset,
+    output logic [31:0] hash_repeat_start,
+    output logic        hash_capture,
+    output logic [7:0]  hash_capture_after0,
+    output logic [7:0]  hash_capture_after1,
     input  wire         hash_rsp_valid,
     input  wire         hash_rsp_error,
     input  wire  [15:0] hash_rsp_error_code,
@@ -42,7 +50,7 @@ module micro_hbs_sequencer #(
     input  wire         dynamic_bound_error,
     input  wire  [15:0] dynamic_bound_error_code,
 
-    // Internal command channel to the static load/move/XOR/output data path.
+    // Internal command channel to the static load/move/output data path.
     // This is not an external task ingress: one request is derived solely
     // from the currently executing instruction and its latched register.
     output logic        data_req_valid,
@@ -85,24 +93,18 @@ module micro_hbs_sequencer #(
     // sequencer and are captured by a command consumer at request acceptance.
     output wire [255:0] register_snapshot
 );
-    localparam logic [7:0] OP_NOP         = 8'h00;
-    localparam logic [7:0] OP_MOVI        = 8'h01;
-    localparam logic [7:0] OP_ADDI        = 8'h02;
-    localparam logic [7:0] OP_HASH_LAYOUT = 8'h03;
-    localparam logic [7:0] OP_LOOP_SETUP  = 8'h04;
+    localparam logic [7:0] OP_SET_REG     = 8'h01;
+    localparam logic [7:0] OP_ADD_IMM     = 8'h02;
+    localparam logic [7:0] OP_HASH        = 8'h03;
+    localparam logic [7:0] OP_LOOP_BEGIN  = 8'h04;
     localparam logic [7:0] OP_LOOP_END    = 8'h05;
     localparam logic [7:0] OP_CALL        = 8'h06;
-    localparam logic [7:0] OP_RET         = 8'h07;
-    localparam logic [7:0] OP_LOAD        = 8'h08;
-    localparam logic [7:0] OP_STORE       = 8'h09;
-    localparam logic [7:0] OP_XOR         = 8'h0a;
+    localparam logic [7:0] OP_RETURN      = 8'h07;
+    localparam logic [7:0] OP_DATA_LOAD   = 8'h08;
+    localparam logic [7:0] OP_DATA_MOVE   = 8'h09;
     localparam logic [7:0] OP_TREE_PUSH   = 8'h0b;
-    localparam logic [7:0] OP_EMIT        = 8'h0c;
+    localparam logic [7:0] OP_OUTPUT      = 8'h0c;
     localparam logic [7:0] OP_HALT        = 8'h0d;
-    localparam logic [7:0] OP_FAIL        = 8'h0e;
-    localparam logic [7:0] OP_WAIT        = 8'h0f;
-    localparam logic [7:0] OP_BARRIER     = 8'h10;
-    localparam logic [7:0] OP_JUMP        = 8'h11;
 
     localparam logic [15:0] ERR_NONE          = 16'h0000;
     localparam logic [15:0] ERR_IMAGE_LOCKED  = 16'h0001;
@@ -116,7 +118,6 @@ module micro_hbs_sequencer #(
     localparam logic [15:0] ERR_BRANCH_BOUNDS = 16'h0009;
     localparam logic [15:0] ERR_BAD_LOOP_BOUND= 16'h000a;
     localparam logic [15:0] ERR_DYNAMIC_BOUND = 16'h000b;
-    localparam logic [15:0] ERR_PROGRAM_FAIL  = 16'h8000;
 
     typedef enum logic [3:0] {S_IDLE, S_FETCH, S_RUN, S_HASH_REQ, S_HASH_WAIT,
                               S_BOUND_WAIT, S_DATA_REQ, S_DATA_WAIT,
@@ -193,9 +194,17 @@ module micro_hbs_sequencer #(
             error_code <= ERR_NONE;
             hash_layout_id <= '0;
             hash_lane_mask <= '0;
+            hash_defer_write <= 1'b0;
             hash_dest <= '0;
             hash_index_reg <= '0;
             hash_index_value <= '0;
+            hash_repeat <= 1'b0;
+            hash_repeat_count <= '0;
+            hash_repeat_counter_offset <= '0;
+            hash_repeat_start <= '0;
+            hash_capture <= 1'b0;
+            hash_capture_after0 <= '0;
+            hash_capture_after1 <= '0;
             data_req_opcode <= '0;
             data_req_flags <= '0;
             data_req_rd <= '0;
@@ -250,16 +259,11 @@ module micro_hbs_sequencer #(
                 S_RUN: begin
                     if (pc >= PROGRAM_WORDS)
                         fault(ERR_PC_BOUNDS);
-                    else if (flags[7:2] != 0)
+                    else if (flags[7:2] != 0 && opcode != OP_HASH)
                         fault(ERR_RESERVED);
                     else begin
                         case (opcode)
-                            OP_NOP: begin
-                                pc <= pc + 1'b1;
-                                state <= S_FETCH;
-                                retired_instructions <= retired_instructions + 1'b1;
-                            end
-                            OP_MOVI: begin
+                            OP_SET_REG: begin
                                 if (rd >= 8)
                                     fault(ERR_RESERVED);
                                 else begin
@@ -269,7 +273,7 @@ module micro_hbs_sequencer #(
                                     retired_instructions <= retired_instructions + 1'b1;
                                 end
                             end
-                            OP_ADDI: begin
+                            OP_ADD_IMM: begin
                                 if (rd >= 8 || rs >= 8 || add_result[32])
                                     fault(ERR_RESERVED);
                                 else begin
@@ -279,19 +283,37 @@ module micro_hbs_sequencer #(
                                     retired_instructions <= retired_instructions + 1'b1;
                                 end
                             end
-                            OP_HASH_LAYOUT: begin
-                                if (rs >= 8 || flags[1:0] == 0)
+                            OP_HASH: begin
+                                if (rs >= 8 || flags[1:0] == 0
+                                    || (flags[3]
+                                        && (rd >= 8 || rd == rs
+                                            || imm[23:16] == 0))
+                                    || (flags[4]
+                                        && (!flags[3]
+                                            || flags[7:5]
+                                               + (flags[1:0] == 2'b11) >= 8)))
                                     fault(ERR_RESERVED);
                                 else begin
                                     hash_layout_id <= imm[15:0];
                                     hash_lane_mask <= flags[1:0];
+                                    hash_defer_write <= flags[2];
                                     hash_dest <= rd;
                                     hash_index_reg <= rs;
                                     hash_index_value <= regs[rs[2:0]];
+                                    hash_repeat <= flags[3];
+                                    hash_repeat_count <= flags[3]
+                                        ? imm[23:16] : 8'd1;
+                                    hash_repeat_counter_offset <= imm[31:24];
+                                    hash_repeat_start <= flags[3]
+                                        ? regs[rd[2:0]] : 32'b0;
+                                    hash_capture <= flags[4];
+                                    hash_capture_after0 <= regs[flags[7:5]][7:0];
+                                    hash_capture_after1 <= regs[
+                                        flags[7:5] + 1'b1][7:0];
                                     state <= S_HASH_REQ;
                                 end
                             end
-                            OP_LOOP_SETUP: begin
+                            OP_LOOP_BEGIN: begin
                                 if (rs >= 8 || rd >= 8 || flags[1])
                                     fault(ERR_BAD_LOOP_BOUND);
                                 else if (flags[0]) begin
@@ -344,7 +366,7 @@ module micro_hbs_sequencer #(
                                     retired_instructions <= retired_instructions + 1'b1;
                                 end
                             end
-                            OP_RET: begin
+                            OP_RETURN: begin
                                 if (call_sp == 0)
                                     fault(ERR_CALL_UNDERFLOW);
                                 else begin
@@ -354,7 +376,7 @@ module micro_hbs_sequencer #(
                                     retired_instructions <= retired_instructions + 1'b1;
                                 end
                             end
-                            OP_LOAD, OP_STORE, OP_XOR: begin
+                            OP_DATA_LOAD, OP_DATA_MOVE: begin
                                 if (flags != 0 || rd >= 8 || rs >= 8)
                                     fault(ERR_RESERVED);
                                 else begin
@@ -379,7 +401,7 @@ module micro_hbs_sequencer #(
                                     state <= S_TREE_REQ;
                                 end
                             end
-                            OP_EMIT: begin
+                            OP_OUTPUT: begin
                                 if (flags[1] || rs >= 8)
                                     fault(ERR_RESERVED);
                                 else begin
@@ -392,20 +414,6 @@ module micro_hbs_sequencer #(
                                     state <= S_DATA_REQ;
                                 end
                             end
-                            OP_JUMP: begin
-                                if (imm >= PROGRAM_WORDS)
-                                    fault(ERR_BRANCH_BOUNDS);
-                                else begin
-                                    pc <= imm[8:0];
-                                    state <= S_FETCH;
-                                    retired_instructions <= retired_instructions + 1'b1;
-                                end
-                            end
-                            OP_WAIT, OP_BARRIER: begin
-                                pc <= pc + 1'b1;
-                                state <= S_FETCH;
-                                retired_instructions <= retired_instructions + 1'b1;
-                            end
                             OP_HALT: begin
                                 if (loop_sp != 0 || call_sp != 0)
                                     fault(ERR_RESERVED);
@@ -415,7 +423,6 @@ module micro_hbs_sequencer #(
                                     retired_instructions <= retired_instructions + 1'b1;
                                 end
                             end
-                            OP_FAIL: fault(ERR_PROGRAM_FAIL | imm[14:0]);
                             default: fault(ERR_OPCODE);
                         endcase
                     end
@@ -432,6 +439,9 @@ module micro_hbs_sequencer #(
                     if (hash_rsp_error) begin
                         fault(hash_rsp_error_code);
                     end else if (hash_rsp_valid) begin
+                        if (hash_repeat)
+                            regs[rd[2:0]] <= hash_repeat_start
+                                + hash_repeat_count;
                         pc <= pc + 1'b1;
                         retired_instructions <= retired_instructions + 1'b1;
                         state <= S_FETCH;

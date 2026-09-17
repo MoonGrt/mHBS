@@ -162,7 +162,8 @@ def main() -> int:
         "message": 261,
     }
     result = lower_layouts(
-        document, [0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 18, 19, 20],
+        document,
+        [0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 18, 19, 20, 21, 22, 23],
         slot_bytes=16,
         job_field_slots=field_slots,
         job_field_lengths={"message": message_bytes},
@@ -196,6 +197,14 @@ def main() -> int:
         _bitfield_descriptor(source=464, input_bytes=12, bit_offset=93,
                              bit_width=3, destination_is_reg=False,
                              destination=466, output_bytes=1),
+        _bitfield_descriptor(source=500, input_bytes=35, bit_offset=0,
+                             bit_width=8, destination_is_reg=True,
+                             destination_reg=2, use_index=True,
+                             index_reg=1, stride=16),
+        _bitfield_descriptor(source=500, input_bytes=35, bit_offset=8,
+                             bit_width=8, destination_is_reg=True,
+                             destination_reg=3, use_index=True,
+                             index_reg=1, stride=16),
     ]
     BITFIELD_HEX.write_text(
         "".join(f"{word:032x}\n" for word in bitfields), encoding="ascii"
@@ -249,7 +258,7 @@ def main() -> int:
         [descriptor_from_program_move(document, move_id, byte_count=16)
          for move_id in range(4)] + [
             LogicalDescriptor(
-                descriptor_id=4, operation="EMIT", byte_count=16,
+                descriptor_id=4, operation="OUTPUT", byte_count=16,
                 source_a=AddressExpression(base=0),
             )
         ],
@@ -381,7 +390,7 @@ def main() -> int:
             "path": str(BITFIELD_HEX.relative_to(ROOT)),
             "sha256": _sha256(BITFIELD_HEX),
             "line_count": len(bitfields),
-            "load_ids": [0, 1, 2, 3, 10, 12],
+            "load_ids": [0, 1, 2, 3, 10, 12, 14, 15],
         },
         "expression_descriptor_hex": {
             "path": str(EXPR_DESCRIPTOR_HEX.relative_to(ROOT)),

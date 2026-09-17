@@ -90,6 +90,31 @@ module tb_micro_hbs_dynamic_loop;
         end
     endtask
 
+    task automatic reject_removed_opcode(input [7:0] removed_opcode);
+        integer timeout;
+        begin
+            @(negedge clk);
+            rst_n = 1'b0;
+            repeat (2) @(posedge clk);
+            @(negedge clk);
+            rst_n = 1'b1;
+            write_program(0, enc(removed_opcode, 0, 0, 0, 0));
+            @(negedge clk);
+            if (!job_ready) $fatal(1, "sequencer not ready for removed opcode");
+            job_valid = 1'b1;
+            @(negedge clk);
+            job_valid = 1'b0;
+            timeout = 0;
+            while (!error && timeout < 10) begin
+                @(posedge clk);
+                timeout = timeout + 1;
+            end
+            if (!error || done || busy || error_code != 16'h0003)
+                $fatal(1, "removed opcode %h was not rejected error=%h",
+                       removed_opcode, error_code);
+        end
+    endtask
+
     initial begin
         repeat (3) @(posedge clk);
         rst_n = 1'b1;
@@ -97,7 +122,8 @@ module tb_micro_hbs_dynamic_loop;
         // R1=5; dynamic loop bound from Scratchpad[R1], zero exits to pc=4.
         write_program(0, enc(8'h01, 0, 1, 0, 32'd5));
         write_program(1, enc(8'h04, 1, 1, 2, 32'd4));
-        write_program(2, enc(8'h00, 0, 0, 0, 0));
+        // SET_REG R0,0 is an observable-safe loop body; NOP was removed in v0.2.
+        write_program(2, enc(8'h01, 0, 0, 0, 0));
         write_program(3, enc(8'h05, 0, 0, 0, 0));
         write_program(4, enc(8'h0d, 0, 0, 0, 0));
 
@@ -110,7 +136,14 @@ module tb_micro_hbs_dynamic_loop;
         run_and_check(3, 9);
 
         if (issued_hash_requests != 0) $fatal(1, "unexpected hash request");
-        $display("PASS dynamic bounded loop zero-skip and bound=3");
+        reject_removed_opcode(8'h00);
+        reject_removed_opcode(8'h0a);
+        reject_removed_opcode(8'h0e);
+        reject_removed_opcode(8'h0f);
+        reject_removed_opcode(8'h10);
+        reject_removed_opcode(8'h11);
+
+        $display("PASS dynamic bounded loop and removed-opcode rejection");
         $finish;
     end
 endmodule

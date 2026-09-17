@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Static component program for descriptor-driven HASH_LAYOUT composition.
+// Static component program for descriptor-driven HASH composition.
 //
 // Each 192-bit word is algorithm-independent:
 //   [191:184] format_version

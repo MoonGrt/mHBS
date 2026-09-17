@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Word-serial STORE/MOVE and XOR executor for the single-port Scratchpad.
+// Word-serial DATA_MOVE executor for the single-port Scratchpad.
 // Address generation and static descriptor lookup are intentionally separate.
 // A complete-range precheck occurs before the first write, so a malformed
 // command cannot leave a partially updated destination.
@@ -18,9 +18,7 @@ module micro_hbs_scratch_alu #(
 
     input  wire                     cmd_valid,
     output wire                     cmd_ready,
-    input  wire [7:0]               cmd_opcode,
     input  wire [ADDRESS_WIDTH-1:0] cmd_source_a,
-    input  wire [ADDRESS_WIDTH-1:0] cmd_source_b,
     input  wire [ADDRESS_WIDTH-1:0] cmd_destination,
     input  wire [15:0]              cmd_word_count,
 
@@ -44,50 +42,39 @@ module micro_hbs_scratch_alu #(
     output logic [31:0]             scratch_reads,
     output logic [31:0]             scratch_writes
 );
-    localparam logic [7:0] OP_STORE = 8'h09;
-    localparam logic [7:0] OP_XOR   = 8'h0a;
     localparam logic [15:0] ERR_NONE       = 16'h0000;
-    localparam logic [15:0] ERR_OPCODE     = 16'h0401;
     localparam logic [15:0] ERR_ZERO_WORDS = 16'h0402;
     localparam logic [15:0] ERR_BOUNDS     = 16'h0403;
 
     typedef enum logic [3:0] {
-        S_IDLE, S_READ_A_REQ, S_READ_A_WAIT, S_READ_B_REQ, S_READ_B_WAIT,
-        S_WRITE_REQ, S_WRITE_CHECK, S_RESPONSE
+        S_IDLE, S_READ_A_REQ, S_READ_A_WAIT, S_WRITE_REQ, S_WRITE_CHECK,
+        S_RESPONSE
     } state_t;
     state_t state;
 
-    logic [7:0] opcode_latched;
     logic [ADDRESS_WIDTH-1:0] source_a_latched;
-    logic [ADDRESS_WIDTH-1:0] source_b_latched;
     logic [ADDRESS_WIDTH-1:0] destination_latched;
     logic [15:0] word_count_latched;
     logic [15:0] word_offset;
-    logic [63:0] source_a_word;
     logic [63:0] write_word;
 
     logic [16:0] source_a_end;
-    logic [16:0] source_b_end;
     logic [16:0] destination_end;
     localparam logic [16:0] WORDS_EXT = WORDS;
 
     assign cmd_ready = (state == S_IDLE);
     assign rsp_valid = (state == S_RESPONSE);
     assign scratch_request_valid = (state == S_READ_A_REQ)
-        || (state == S_READ_B_REQ) || (state == S_WRITE_REQ);
+        || (state == S_WRITE_REQ);
     assign scratch_request_write = (state == S_WRITE_REQ);
     assign scratch_request_address = (state == S_READ_A_REQ)
         ? source_a_latched + word_offset[ADDRESS_WIDTH-1:0]
-        : (state == S_READ_B_REQ)
-            ? source_b_latched + word_offset[ADDRESS_WIDTH-1:0]
-            : destination_latched + word_offset[ADDRESS_WIDTH-1:0];
+        : destination_latched + word_offset[ADDRESS_WIDTH-1:0];
     assign scratch_request_write_data = write_word;
 
     // End is exclusive.  One extra bit prevents address wrap from passing.
     always_comb begin
         source_a_end = {{(17-ADDRESS_WIDTH){1'b0}}, cmd_source_a}
-            + {1'b0, cmd_word_count};
-        source_b_end = {{(17-ADDRESS_WIDTH){1'b0}}, cmd_source_b}
             + {1'b0, cmd_word_count};
         destination_end = {{(17-ADDRESS_WIDTH){1'b0}}, cmd_destination}
             + {1'b0, cmd_word_count};
@@ -112,13 +99,10 @@ module micro_hbs_scratch_alu #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             state <= S_IDLE;
-            opcode_latched <= '0;
             source_a_latched <= '0;
-            source_b_latched <= '0;
             destination_latched <= '0;
             word_count_latched <= '0;
             word_offset <= '0;
-            source_a_word <= '0;
             write_word <= '0;
             rsp_error <= 1'b0;
             rsp_error_code <= ERR_NONE;
@@ -135,19 +119,13 @@ module micro_hbs_scratch_alu #(
                         rsp_error <= 1'b0;
                         rsp_error_code <= ERR_NONE;
                         word_offset <= 16'b0;
-                        if (cmd_opcode != OP_STORE && cmd_opcode != OP_XOR) begin
-                            fail_response(ERR_OPCODE);
-                        end else if (cmd_word_count == 0) begin
+                        if (cmd_word_count == 0) begin
                             fail_response(ERR_ZERO_WORDS);
                         end else if (source_a_end > WORDS_EXT
-                                     || destination_end > WORDS_EXT
-                                     || (cmd_opcode == OP_XOR
-                                         && source_b_end > WORDS_EXT)) begin
+                                     || destination_end > WORDS_EXT) begin
                             fail_response(ERR_BOUNDS);
                         end else begin
-                            opcode_latched <= cmd_opcode;
                             source_a_latched <= cmd_source_a;
-                            source_b_latched <= cmd_source_b;
                             destination_latched <= cmd_destination;
                             word_count_latched <= cmd_word_count;
                             state <= S_READ_A_REQ;
@@ -166,28 +144,7 @@ module micro_hbs_scratch_alu #(
                     if (scratch_bounds_error) begin
                         fail_response(ERR_BOUNDS);
                     end else if (scratch_response_valid) begin
-                        source_a_word <= scratch_response_read_data;
-                        if (opcode_latched == OP_XOR)
-                            state <= S_READ_B_REQ;
-                        else begin
-                            write_word <= scratch_response_read_data;
-                            state <= S_WRITE_REQ;
-                        end
-                    end
-                end
-
-                S_READ_B_REQ: begin
-                    if (scratch_request_ready) begin
-                        scratch_reads <= scratch_reads + 1'b1;
-                        state <= S_READ_B_WAIT;
-                    end
-                end
-
-                S_READ_B_WAIT: begin
-                    if (scratch_bounds_error) begin
-                        fail_response(ERR_BOUNDS);
-                    end else if (scratch_response_valid) begin
-                        write_word <= source_a_word ^ scratch_response_read_data;
+                        write_word <= scratch_response_read_data;
                         state <= S_WRITE_REQ;
                     end
                 end
@@ -219,7 +176,7 @@ module micro_hbs_scratch_alu #(
                     end
                 end
 
-                default: fail_response(ERR_OPCODE);
+                default: fail_response(ERR_BOUNDS);
             endcase
         end
     end

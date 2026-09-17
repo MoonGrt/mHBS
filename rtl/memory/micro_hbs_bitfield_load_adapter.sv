@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Static descriptor adapter for generic bit-field LOAD operations.
+// Static descriptor adapter for generic bit-field DATA_LOAD operations.
 //
 // Descriptor format (128 bits):
 // [127:120] version=1, [119:112] capability=1
@@ -49,7 +49,7 @@ module micro_hbs_bitfield_load_adapter #(
     output wire                         busy,
     output logic [31:0]                 accepted_commands
 );
-    localparam logic [7:0] OP_LOAD = 8'h08;
+    localparam logic [7:0] OP_DATA_LOAD = 8'h08;
     localparam logic [15:0] ERR_CFG_BUSY = 16'h0e01;
     localparam logic [15:0] ERR_CFG_ID   = 16'h0e02;
     localparam logic [15:0] ERR_CFG_FMT  = 16'h0e03;
@@ -59,11 +59,15 @@ module micro_hbs_bitfield_load_adapter #(
     localparam integer INDEX_WIDTH = DESCRIPTOR_COUNT <= 2
         ? 1 : $clog2(DESCRIPTOR_COUNT);
 
-    typedef enum logic [1:0] {S_IDLE, S_LAUNCH, S_WAIT, S_ERROR} state_t;
+    typedef enum logic [2:0] {
+        S_IDLE, S_OPERANDS, S_PRODUCT, S_LAUNCH, S_WAIT, S_ERROR
+    } state_t;
     state_t state;
     logic [127:0] descriptors [0:DESCRIPTOR_COUNT-1];
     logic [DESCRIPTOR_COUNT-1:0] configured;
     logic [127:0] active;
+    logic [31:0] index_value_reg;
+    logic [47:0] offset_product_reg;
     logic error_valid;
     logic [15:0] error_code_latched;
 
@@ -78,11 +82,10 @@ module micro_hbs_bitfield_load_adapter #(
     wire [2:0] d_dest_reg = active[43:41];
     wire [15:0] d_destination = active[40:25];
     wire [4:0] d_output_bytes = active[24:20];
-    wire [31:0] index_value = cmd_registers[32*d_index_reg +: 32];
     (* use_dsp = "no" *) wire [47:0] offset_product
-        = index_value * d_stride;
+        = index_value_reg * d_stride;
     wire [47:0] offset_calc = d_base_offset
-        + (d_use_index ? offset_product : 48'b0);
+        + (d_use_index ? offset_product_reg : 48'b0);
 
     wire core_cmd_ready, core_rsp_valid, core_rsp_error, core_rsp_reg_write;
     wire [15:0] core_rsp_error_code;
@@ -91,7 +94,7 @@ module micro_hbs_bitfield_load_adapter #(
 
     assign cfg_ready = !engine_busy && state == S_IDLE;
     assign cmd_ready = state == S_IDLE;
-    assign cmd_match = cmd_opcode == OP_LOAD && cmd_imm < DESCRIPTOR_COUNT
+    assign cmd_match = cmd_opcode == OP_DATA_LOAD && cmd_imm < DESCRIPTOR_COUNT
         && configured[cmd_imm[INDEX_WIDTH-1:0]];
     assign busy = state != S_IDLE;
     assign rsp_valid = state == S_ERROR ? error_valid : core_rsp_valid;
@@ -131,6 +134,8 @@ module micro_hbs_bitfield_load_adapter #(
             state <= S_IDLE;
             configured <= '0;
             active <= '0;
+            index_value_reg <= '0;
+            offset_product_reg <= '0;
             cfg_error <= 1'b0;
             cfg_error_code <= '0;
             error_valid <= 1'b0;
@@ -164,7 +169,7 @@ module micro_hbs_bitfield_load_adapter #(
             case (state)
                 S_IDLE: if (cmd_valid) begin
                     accepted_commands <= accepted_commands + 1'b1;
-                    if (cmd_opcode != OP_LOAD) begin
+                    if (cmd_opcode != OP_DATA_LOAD) begin
                         error_code_latched <= ERR_OPCODE;
                         error_valid <= 1'b1;
                         state <= S_ERROR;
@@ -175,8 +180,20 @@ module micro_hbs_bitfield_load_adapter #(
                         state <= S_ERROR;
                     end else begin
                         active <= descriptors[cmd_imm[INDEX_WIDTH-1:0]];
-                        state <= S_LAUNCH;
+                        state <= S_OPERANDS;
                     end
+                end
+                // Isolate the variable sequencer-register select from the
+                // affine multiply and the core's command validation.  The
+                // sequencer keeps its register snapshot stable until the
+                // response retires this DATA_LOAD.
+                S_OPERANDS: begin
+                    index_value_reg <= cmd_registers[32*d_index_reg +: 32];
+                    state <= S_PRODUCT;
+                end
+                S_PRODUCT: begin
+                    offset_product_reg <= offset_product;
+                    state <= S_LAUNCH;
                 end
                 S_LAUNCH: if (core_cmd_ready)
                     state <= S_WAIT;

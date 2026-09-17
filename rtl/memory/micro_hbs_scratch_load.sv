@@ -1,11 +1,11 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Single-word Scratchpad LOAD executor for the sequencer control registers.
+// Single-word Scratchpad DATA_LOAD executor for the sequencer control registers.
 // A static descriptor supplies the word address and the instruction supplies
 // the destination register.  Only public/control data may be written to the
 // eight 32-bit sequencer registers; cryptographic byte strings remain in the
-// Scratchpad and use STORE/XOR/HASH_LAYOUT instead.
+// Scratchpad and use DATA_MOVE/HASH instead.
 module micro_hbs_scratch_load #(
     parameter integer SCRATCH_WORDS = 512,
     parameter integer ADDRESS_WIDTH = 16

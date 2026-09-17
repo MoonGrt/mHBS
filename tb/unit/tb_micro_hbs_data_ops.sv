@@ -37,11 +37,10 @@ module tb_micro_hbs_data_ops;
     wire [31:0] retired_instructions;
     integer timeout;
 
-    localparam logic [7:0] OP_MOVI  = 8'h01;
-    localparam logic [7:0] OP_LOAD  = 8'h08;
-    localparam logic [7:0] OP_STORE = 8'h09;
-    localparam logic [7:0] OP_XOR   = 8'h0a;
-    localparam logic [7:0] OP_EMIT  = 8'h0c;
+    localparam logic [7:0] OP_SET_REG  = 8'h01;
+    localparam logic [7:0] OP_DATA_LOAD  = 8'h08;
+    localparam logic [7:0] OP_DATA_MOVE = 8'h09;
+    localparam logic [7:0] OP_OUTPUT  = 8'h0c;
     localparam logic [7:0] OP_HALT  = 8'h0d;
 
     always #5 clk = ~clk;
@@ -232,32 +231,28 @@ module tb_micro_hbs_data_ops;
         repeat (3) @(posedge clk);
         rst_n = 1'b1;
 
-        // R2=9, followed by the four generic data-plane operations.
-        write_program(0, enc(OP_MOVI,  0, 2, 0, 32'd9));
-        write_program(1, enc(OP_LOAD,  0, 1, 2, 32'h00000100));
-        write_program(2, enc(OP_EMIT,  1, 5, 1, 32'd7));
-        write_program(3, enc(OP_STORE, 0, 3, 2, 32'h00000101));
-        write_program(4, enc(OP_XOR,   0, 4, 2, 32'h00000102));
-        write_program(5, enc(OP_HALT,  0, 0, 0, 32'd0));
+        // R2=9, followed by the three ISA-visible data-plane operations.
+        write_program(0, enc(OP_SET_REG,  0, 2, 0, 32'd9));
+        write_program(1, enc(OP_DATA_LOAD,  0, 1, 2, 32'h00000100));
+        write_program(2, enc(OP_OUTPUT,  1, 5, 1, 32'd7));
+        write_program(3, enc(OP_DATA_MOVE, 0, 3, 2, 32'h00000101));
+        write_program(4, enc(OP_HALT,  0, 0, 0, 32'd0));
 
         submit_job();
-        await_request(OP_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
+        await_request(OP_DATA_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
         accept_and_respond(1'b1, 8'd1, 32'hc001d00d);
-        await_request(OP_EMIT, 1, 5, 1, 32'd7, 32'hc001d00d);
+        await_request(OP_OUTPUT, 1, 5, 1, 32'd7, 32'hc001d00d);
         accept_and_respond(1'b0, 8'd0, 32'd0);
-        await_request(OP_STORE, 0, 3, 2, 32'h00000101, 32'd9);
+        await_request(OP_DATA_MOVE, 0, 3, 2, 32'h00000101, 32'd9);
         accept_and_respond(1'b0, 8'd0, 32'd0);
-        await_request(OP_XOR, 0, 4, 2, 32'h00000102, 32'd9);
-        accept_and_respond(1'b0, 8'd0, 32'd0);
-
         timeout = 0;
         while (!done && timeout < 30) begin
             @(negedge clk);
             timeout = timeout + 1;
         end
         if (!done || error) $fatal(1, "normal data-op program failed error=%h", error_code);
-        if (accepted_job_commands != 1 || issued_data_requests != 4 ||
-            issued_hash_requests != 0 || retired_instructions != 6)
+        if (accepted_job_commands != 1 || issued_data_requests != 3 ||
+            issued_hash_requests != 0 || retired_instructions != 5)
             $fatal(1, "normal counters job=%0d data=%0d hash=%0d retired=%0d",
                    accepted_job_commands, issued_data_requests,
                    issued_hash_requests, retired_instructions);
@@ -265,7 +260,7 @@ module tb_micro_hbs_data_ops;
         // A data-plane error is fail-closed and preserves the response code.
         reset_sequencer();
         submit_job();
-        await_request(OP_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
+        await_request(OP_DATA_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
         @(negedge clk);
         data_req_ready = 1'b1;
         @(negedge clk);
@@ -284,7 +279,7 @@ module tb_micro_hbs_data_ops;
         // rejected before either the write or instruction retirement.
         reset_sequencer();
         submit_job();
-        await_request(OP_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
+        await_request(OP_DATA_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
         @(negedge clk);
         data_req_ready = 1'b1;
         @(negedge clk);
@@ -306,7 +301,7 @@ module tb_micro_hbs_data_ops;
         // write must not reach program RAM, even if a response also arrives.
         reset_sequencer();
         submit_job();
-        await_request(OP_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
+        await_request(OP_DATA_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
         @(negedge clk);
         program_addr = 1;
         program_wdata = enc(OP_HALT, 0, 0, 0, 0);
@@ -326,9 +321,9 @@ module tb_micro_hbs_data_ops;
         // Reset and re-read pc=1 to prove the rejected write changed no image.
         reset_sequencer();
         submit_job();
-        await_request(OP_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
+        await_request(OP_DATA_LOAD, 0, 1, 2, 32'h00000100, 32'd9);
 
-        $display("PASS LOAD/STORE/XOR/EMIT request-response, backpressure, error, and image lock");
+        $display("PASS DATA_LOAD/DATA_MOVE/OUTPUT request-response, backpressure, error, and image lock");
         $finish;
     end
 endmodule

@@ -1,0 +1,1191 @@
+{
+  "schema_version": 1,
+  "micro_isa_version": "0.2",
+  "name": "fips205-slh-dsa-shake-128f-verify",
+  "entry": "entry",
+  "bounds": {
+    "scratch_slots": 128,
+    "max_loop_bound": 35,
+    "max_dynamic_instructions": 50000
+  },
+  "layouts": {
+    "0": {
+      "name": "message_digest",
+      "class": "h_msg",
+      "hash": "shake256",
+      "output_bytes": 34,
+      "max_input_bytes": 1056,
+      "destination": {
+        "base": 71
+      },
+      "components": [
+        {
+          "kind": "memory",
+          "base": 76
+        },
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "job_bytes",
+          "field": "public_root",
+          "length": 16
+        },
+        {
+          "kind": "job_bytes",
+          "field": "message"
+        }
+      ]
+    },
+    "1": {
+      "name": "fors_selected_leaf",
+      "class": "f",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 64,
+      "destination": {
+        "base": 70
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            3,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 5
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "op": "mul",
+                    "args": [
+                      {
+                        "kind": "reg",
+                        "reg": 0
+                      },
+                      {
+                        "kind": "literal_int",
+                        "value": 64
+                      }
+                    ]
+                  },
+                  {
+                    "kind": "reg",
+                    "reg": 1
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 77
+        }
+      ]
+    },
+    "2": {
+      "name": "fors_auth_path",
+      "class": "h",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 80,
+      "destination": {
+        "base": 70
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            3,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 5
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  },
+                  {
+                    "kind": "literal_int",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "shr",
+                "value": {
+                  "op": "add",
+                  "args": [
+                    {
+                      "op": "mul",
+                      "args": [
+                        {
+                          "kind": "reg",
+                          "reg": 0
+                        },
+                        {
+                          "kind": "literal_int",
+                          "value": 64
+                        }
+                      ]
+                    },
+                    {
+                      "kind": "reg",
+                      "reg": 1
+                    }
+                  ]
+                },
+                "shift": {
+                  "op": "add",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 2
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ordered_pair",
+          "condition": {
+            "op": "and",
+            "args": [
+              {
+                "op": "shr",
+                "value": {
+                  "kind": "reg",
+                  "reg": 1
+                },
+                "shift": {
+                  "kind": "reg",
+                  "reg": 2
+                }
+              },
+              {
+                "kind": "literal_int",
+                "value": 1
+              }
+            ]
+          },
+          "when_zero": [
+            {
+              "kind": "memory",
+              "base": 70
+            },
+            {
+              "kind": "memory",
+              "base": 74
+            }
+          ],
+          "when_nonzero": [
+            {
+              "kind": "memory",
+              "base": 74
+            },
+            {
+              "kind": "memory",
+              "base": 70
+            }
+          ]
+        }
+      ]
+    },
+    "3": {
+      "name": "fors_roots_compress",
+      "class": "t_l",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 576,
+      "destination": {
+        "base": 70
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            4,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 5
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory_range",
+          "base": 0,
+          "count": 33
+        }
+      ]
+    },
+    "4": {
+      "name": "wots_signature_recovery_f",
+      "class": "f",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 64,
+      "destination": {
+        "base": 0,
+        "index_reg": 1
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            0,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 5
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 1
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 7
+                  },
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 0,
+          "index_reg": 1
+        }
+      ]
+    },
+    "5": {
+      "name": "wots_public_key_compress",
+      "class": "t_l",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 608,
+      "destination": {
+        "base": 70
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            1,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 5
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory_range",
+          "base": 0,
+          "count": 35
+        }
+      ]
+    },
+    "6": {
+      "name": "xmss_auth_path",
+      "class": "h",
+      "hash": "shake256",
+      "output_bytes": 16,
+      "max_input_bytes": 80,
+      "destination": {
+        "base": 70
+      },
+      "components": [
+        {
+          "kind": "job_bytes",
+          "field": "pub_seed",
+          "length": 16
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "reg",
+                "reg": 4
+              }
+            }
+          ]
+        },
+        {
+          "kind": "memory",
+          "base": 72
+        },
+        {
+          "kind": "word_array",
+          "words": [
+            2,
+            {
+              "kind": "expr",
+              "expression": {
+                "kind": "literal_int",
+                "value": 0
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "add",
+                "args": [
+                  {
+                    "kind": "reg",
+                    "reg": 2
+                  },
+                  {
+                    "kind": "literal_int",
+                    "value": 1
+                  }
+                ]
+              }
+            },
+            {
+              "kind": "expr",
+              "expression": {
+                "op": "shr",
+                "value": {
+                  "kind": "reg",
+                  "reg": 5
+                },
+                "shift": {
+                  "op": "add",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 2
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 1
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "kind": "ordered_pair",
+          "condition": {
+            "op": "and",
+            "args": [
+              {
+                "op": "shr",
+                "value": {
+                  "kind": "reg",
+                  "reg": 5
+                },
+                "shift": {
+                  "kind": "reg",
+                  "reg": 2
+                }
+              },
+              {
+                "kind": "literal_int",
+                "value": 1
+              }
+            ]
+          },
+          "when_zero": [
+            {
+              "kind": "memory",
+              "base": 70
+            },
+            {
+              "kind": "memory",
+              "base": 74
+            }
+          ],
+          "when_nonzero": [
+            {
+              "kind": "memory",
+              "base": 74
+            },
+            {
+              "kind": "memory",
+              "base": 70
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "loads": {
+    "0": {
+      "name": "signature_randomizer",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "kind": "literal_int",
+          "value": 0
+        },
+        "length": 16
+      },
+      "destination": {
+        "base": 76
+      }
+    },
+    "1": {
+      "name": "digest_tree_address",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "and",
+        "args": [
+          {
+            "op": "shr",
+            "value": {
+              "kind": "memory_int",
+              "base": 71
+            },
+            "shift": {
+              "kind": "literal_int",
+              "value": 8
+            }
+          },
+          {
+            "kind": "literal_int",
+            "value": 9223372036854775807
+          }
+        ]
+      },
+      "bytes": 12,
+      "destination": {
+        "base": 72
+      }
+    },
+    "2": {
+      "name": "digest_leaf_index",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "and",
+        "args": [
+          {
+            "kind": "memory_int",
+            "base": 71
+          },
+          {
+            "kind": "literal_int",
+            "value": 7
+          }
+        ]
+      },
+      "bytes": 1,
+      "destination": {
+        "base": 73
+      }
+    },
+    "3": {
+      "name": "leaf_index_register",
+      "source": {
+        "kind": "memory",
+        "base": 73
+      },
+      "destination_reg": 5,
+      "endian": "big"
+    },
+    "4": {
+      "name": "fors_selected_index",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "and",
+        "args": [
+          {
+            "op": "shr",
+            "value": {
+              "kind": "memory_int",
+              "base": 71
+            },
+            "shift": {
+              "op": "sub",
+              "left": {
+                "kind": "literal_int",
+                "value": 272
+              },
+              "right": {
+                "op": "mul",
+                "args": [
+                  {
+                    "kind": "literal_int",
+                    "value": 6
+                  },
+                  {
+                    "op": "add",
+                    "args": [
+                      {
+                        "kind": "reg",
+                        "reg": 0
+                      },
+                      {
+                        "kind": "literal_int",
+                        "value": 1
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "kind": "literal_int",
+            "value": 63
+          }
+        ]
+      },
+      "destination_reg": 1
+    },
+    "5": {
+      "name": "fors_secret_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "kind": "literal_int",
+              "value": 16
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "kind": "reg",
+                  "reg": 0
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 112
+                }
+              ]
+            }
+          ]
+        },
+        "length": 16
+      },
+      "destination": {
+        "base": 77
+      }
+    },
+    "6": {
+      "name": "fors_auth_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "op": "add",
+              "args": [
+                {
+                  "kind": "literal_int",
+                  "value": 16
+                },
+                {
+                  "op": "mul",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 0
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 112
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "op": "add",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 2
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 1
+                    }
+                  ]
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 16
+                }
+              ]
+            }
+          ]
+        },
+        "length": 16
+      },
+      "destination": {
+        "base": 74
+      }
+    },
+    "7": {
+      "name": "wots_chain_lengths",
+      "source": {
+        "kind": "memory",
+        "base": 70
+      },
+      "transform": "base_w_checksum",
+      "log_w": 4,
+      "len1": 32,
+      "len2": 3,
+      "destination": {
+        "base": 35
+      }
+    },
+    "8": {
+      "name": "wots_value_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "op": "add",
+              "args": [
+                {
+                  "kind": "literal_int",
+                  "value": 3712
+                },
+                {
+                  "op": "mul",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 4
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 608
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "kind": "reg",
+                  "reg": 1
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 16
+                }
+              ]
+            }
+          ]
+        },
+        "length": 16
+      },
+      "destination": {
+        "base": 0,
+        "index_reg": 1
+      }
+    },
+    "9": {
+      "name": "wots_digit_register",
+      "source": {
+        "kind": "memory",
+        "base": 35,
+        "index_reg": 1
+      },
+      "destination_reg": 7,
+      "endian": "big"
+    },
+    "10": {
+      "name": "wots_recovery_bound",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "sub",
+        "left": {
+          "kind": "literal_int",
+          "value": 15
+        },
+        "right": {
+          "kind": "reg",
+          "reg": 7
+        }
+      },
+      "bytes": 1,
+      "destination": {
+        "base": 75
+      }
+    },
+    "11": {
+      "name": "xmss_auth_from_signature",
+      "source": {
+        "kind": "job_slice",
+        "field": "signature",
+        "offset": {
+          "op": "add",
+          "args": [
+            {
+              "op": "add",
+              "args": [
+                {
+                  "kind": "literal_int",
+                  "value": 3712
+                },
+                {
+                  "op": "mul",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 4
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 608
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "op": "mul",
+              "args": [
+                {
+                  "op": "add",
+                  "args": [
+                    {
+                      "kind": "reg",
+                      "reg": 2
+                    },
+                    {
+                      "kind": "literal_int",
+                      "value": 35
+                    }
+                  ]
+                },
+                {
+                  "kind": "literal_int",
+                  "value": 16
+                }
+              ]
+            }
+          ]
+        },
+        "length": 16
+      },
+      "destination": {
+        "base": 74
+      }
+    },
+    "12": {
+      "name": "next_xmss_leaf",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "and",
+        "args": [
+          {
+            "kind": "memory_int",
+            "base": 72
+          },
+          {
+            "kind": "literal_int",
+            "value": 7
+          }
+        ]
+      },
+      "bytes": 1,
+      "destination": {
+        "base": 73
+      }
+    },
+    "13": {
+      "name": "next_xmss_tree",
+      "transform": "integer_expression",
+      "expression": {
+        "op": "shr",
+        "value": {
+          "kind": "memory_int",
+          "base": 72
+        },
+        "shift": {
+          "kind": "literal_int",
+          "value": 3
+        }
+      },
+      "bytes": 12,
+      "destination": {
+        "base": 72
+      }
+    }
+  },
+  "moves": {
+    "0": {
+      "name": "save_fors_root",
+      "source": {
+        "base": 70
+      },
+      "destination": {
+        "base": 0,
+        "index_reg": 0
+      }
+    }
+  },
+  "program": [
+    {
+      "label": "entry"
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 0
+    },
+    {
+      "op": "HASH",
+      "imm": 0
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 1
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 2
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 3
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 0,
+      "imm": 33
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 4
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 5
+    },
+    {
+      "op": "HASH",
+      "imm": 1
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 2,
+      "imm": 6
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 6
+    },
+    {
+      "op": "HASH",
+      "imm": 2
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "DATA_MOVE",
+      "imm": 0
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "HASH",
+      "imm": 3
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 4,
+      "imm": 22
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 3
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 7
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 1,
+      "imm": 35
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 8
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 9
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 10
+    },
+    {
+      "op": "SET_REG",
+      "rd": 6,
+      "imm": 75
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "flags": 1,
+      "rd": 6,
+      "rs": 2,
+      "target": "after_wots_recovery_chain"
+    },
+    {
+      "op": "HASH",
+      "imm": 4
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "label": "after_wots_recovery_chain"
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "HASH",
+      "imm": 5
+    },
+    {
+      "op": "LOOP_BEGIN",
+      "rs": 2,
+      "imm": 3
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 11
+    },
+    {
+      "op": "HASH",
+      "imm": 6
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 12
+    },
+    {
+      "op": "DATA_LOAD",
+      "imm": 13
+    },
+    {
+      "op": "LOOP_END"
+    },
+    {
+      "op": "OUTPUT",
+      "rd": 70
+    },
+    {
+      "op": "HALT"
+    }
+  ]
+}

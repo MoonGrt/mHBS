@@ -21,6 +21,13 @@ module micro_hbs_slh_dsa_tree_adapter #(
     input wire [31:0] cmd_leaf_index,
     input wire [255:0] cmd_registers,
     input wire [127:0] public_seed,
+    output wire parent_hash_req_valid,
+    input  wire parent_hash_req_ready,
+    output wire [1087:0] parent_hash_message,
+    output wire [7:0] parent_hash_message_bytes,
+    input  wire parent_hash_rsp_valid,
+    input  wire [255:0] parent_hash_rsp_digest,
+    input  wire parent_hash_rsp_error,
     output wire rsp_valid, output logic rsp_error,
     output logic [15:0] rsp_error_code,
     output wire scratch_request_valid,
@@ -85,8 +92,9 @@ module micro_hbs_slh_dsa_tree_adapter #(
     wire [7:0] parent_req_height;
     wire [15:0] parent_req_start_leaf;
     wire [255:0] parent_req_left, parent_req_right;
-    wire parent_rsp_valid, parent_rsp_error;
-    wire [127:0] parent_rsp_value;
+    wire parent_rsp_valid = parent_hash_rsp_valid;
+    wire parent_rsp_error = parent_hash_rsp_error;
+    wire [127:0] parent_rsp_value = parent_hash_rsp_digest[127:0];
     wire auth_valid, root_valid;
     wire [7:0] auth_level;
     wire [255:0] auth_node, tree_root;
@@ -106,6 +114,13 @@ module micro_hbs_slh_dsa_tree_adapter #(
         pack_be32(parent_index), pack_be32({24'b0, parent_req_height}),
         pack_be32(keypair_value), pack_be32({24'b0, d_address_type}),
         tree_word1[31:0], tree_word0, pack_be32(layer_value)
+    };
+    assign parent_hash_req_valid = parent_req_valid;
+    assign parent_req_ready = parent_hash_req_ready;
+    assign parent_hash_message_bytes = 8'd80;
+    assign parent_hash_message = {
+        448'b0, parent_req_right[127:0], parent_req_left[127:0],
+        parent_address, public_seed
     };
 
     assign cfg_ready = !engine_busy && state == S_IDLE && !active_tree;
@@ -155,16 +170,6 @@ module micro_hbs_slh_dsa_tree_adapter #(
         .root(tree_root), .busy(tree_busy), .error(tree_error),
         .error_code(tree_error_code), .accepted_leaves, .parent_hashes,
         .peak_stack_nodes()
-    );
-
-    micro_hbs_slh_dsa_tree_parent #(.UNROLL(UNROLL)) parent (
-        .clk, .rst_n, .req_valid(parent_req_valid),
-        .req_ready(parent_req_ready), .req_public_seed(public_seed),
-        .req_address(parent_address),
-        .req_left_node(parent_req_left[127:0]),
-        .req_right_node(parent_req_right[127:0]),
-        .rsp_valid(parent_rsp_valid), .rsp_ready(1'b1),
-        .rsp_parent(parent_rsp_value), .rsp_error(parent_rsp_error)
     );
 
     always_ff @(posedge clk) begin

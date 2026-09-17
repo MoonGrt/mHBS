@@ -15,6 +15,16 @@ module tb_micro_hbs_shake256_stream_cycles;
     wire [1087:0] rate_output;
     wire digest_valid;
     wire error;
+    logic repeat_enable = 1'b0;
+    logic [7:0] repeat_count = 8'd1;
+    logic [7:0] repeat_counter_offset = '0;
+    logic [7:0] repeat_feedback_offset = '0;
+    logic [5:0] repeat_feedback_bytes = '0;
+    logic [31:0] repeat_counter_start = '0;
+    logic capture_enable = 1'b0;
+    logic [7:0] capture_after = '0;
+    wire [255:0] capture_digest;
+    wire capture_valid;
 
     integer cycle_counter = 0;
     integer latency_1;
