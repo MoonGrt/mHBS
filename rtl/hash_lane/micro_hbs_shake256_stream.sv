@@ -39,6 +39,17 @@ module micro_hbs_shake256_stream #(
     logic [1599:0] permutation_input;
     logic permutation_start;
     logic final_pending;
+    logic saved_repeat_enable;
+    logic saved_repeat_prefix;
+    logic saved_repeat_prefix_preserve_counter;
+    logic [2:0] saved_repeat_prefix_domain;
+    logic [7:0] saved_repeat_count;
+    logic [7:0] saved_repeat_counter_offset;
+    logic [7:0] saved_repeat_feedback_offset;
+    logic [5:0] saved_repeat_feedback_bytes;
+    logic [31:0] saved_repeat_counter_start;
+    logic saved_capture_enable;
+    logic [7:0] saved_capture_after;
     wire permutation_ready;
     wire [1599:0] permutation_result;
     wire permutation_done;
@@ -79,23 +90,30 @@ module micro_hbs_shake256_stream #(
         .start(permutation_start),
         .ready(permutation_ready),
         .state_in(permutation_input),
-        .chain_enable(repeat_enable && final_pending),
-        .chain_prefix(repeat_prefix && final_pending),
-        .chain_prefix_preserve_counter(repeat_prefix_preserve_counter),
-        .chain_prefix_domain(repeat_prefix_domain),
-        .chain_count(repeat_count),
-        .chain_counter_offset(repeat_counter_offset),
-        .chain_feedback_offset(repeat_feedback_offset),
-        .chain_feedback_bytes(repeat_feedback_bytes),
-        .chain_counter_start(repeat_counter_start),
-        .capture_enable(capture_enable && final_pending), .capture_after,
+        .chain_enable(saved_repeat_enable && final_pending),
+        .chain_prefix(saved_repeat_prefix && final_pending),
+        .chain_prefix_preserve_counter(
+            saved_repeat_prefix_preserve_counter),
+        .chain_prefix_domain(saved_repeat_prefix_domain),
+        .chain_count(saved_repeat_count),
+        .chain_counter_offset(saved_repeat_counter_offset),
+        .chain_feedback_offset(saved_repeat_feedback_offset),
+        .chain_feedback_bytes(saved_repeat_feedback_bytes),
+        .chain_counter_start(saved_repeat_counter_start),
+        .capture_enable(saved_capture_enable && final_pending),
+        .capture_after(saved_capture_after),
         .state_out(permutation_result),
         .done(permutation_done), .capture_digest, .capture_valid,
         .rounds_executed(permutation_rounds)
     );
 
     assign hash_ready = (state == S_IDLE) && permutation_ready;
-    assign block_ready = (state == S_ABSORB) && permutation_ready;
+    // A precomposed one-block request may present hash_start and its final
+    // block together.  This keeps the generic stream interface as cheap as a
+    // dedicated single-block wrapper while preserving the ordinary start ->
+    // absorb-block sequence used for long messages.
+    assign block_ready = permutation_ready
+        && ((state == S_ABSORB) || (state == S_IDLE && hash_start));
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -104,6 +122,17 @@ module micro_hbs_shake256_stream #(
             permutation_input <= '0;
             permutation_start <= 1'b0;
             final_pending <= 1'b0;
+            saved_repeat_enable <= 1'b0;
+            saved_repeat_prefix <= 1'b0;
+            saved_repeat_prefix_preserve_counter <= 1'b0;
+            saved_repeat_prefix_domain <= '0;
+            saved_repeat_count <= '0;
+            saved_repeat_counter_offset <= '0;
+            saved_repeat_feedback_offset <= '0;
+            saved_repeat_feedback_bytes <= '0;
+            saved_repeat_counter_start <= '0;
+            saved_capture_enable <= 1'b0;
+            saved_capture_after <= '0;
             digest <= '0;
             rate_output <= '0;
             digest_valid <= 1'b0;
@@ -114,8 +143,44 @@ module micro_hbs_shake256_stream #(
             error <= 1'b0;
             case (state)
                 S_IDLE: begin
-                    if (hash_start) begin
+                    if (hash_start && block_valid) begin
+                        saved_repeat_enable <= repeat_enable;
+                        saved_repeat_prefix <= repeat_prefix;
+                        saved_repeat_prefix_preserve_counter
+                            <= repeat_prefix_preserve_counter;
+                        saved_repeat_prefix_domain <= repeat_prefix_domain;
+                        saved_repeat_count <= repeat_count;
+                        saved_repeat_counter_offset <= repeat_counter_offset;
+                        saved_repeat_feedback_offset <= repeat_feedback_offset;
+                        saved_repeat_feedback_bytes <= repeat_feedback_bytes;
+                        saved_repeat_counter_start <= repeat_counter_start;
+                        saved_capture_enable <= capture_enable;
+                        saved_capture_after <= capture_after;
+                        if ((!block_last && block_bytes != 136)
+                            || (block_last && block_bytes > 135)) begin
+                            error <= 1'b1;
+                        end else begin
+                            permutation_input <= block_last
+                                ? absorb_final_block('0, block_data, block_bytes)
+                                : absorb_full_block('0, block_data);
+                            final_pending <= block_last;
+                            permutation_start <= 1'b1;
+                            state <= S_PERMUTE;
+                        end
+                    end else if (hash_start) begin
                         sponge_state <= '0;
+                        saved_repeat_enable <= repeat_enable;
+                        saved_repeat_prefix <= repeat_prefix;
+                        saved_repeat_prefix_preserve_counter
+                            <= repeat_prefix_preserve_counter;
+                        saved_repeat_prefix_domain <= repeat_prefix_domain;
+                        saved_repeat_count <= repeat_count;
+                        saved_repeat_counter_offset <= repeat_counter_offset;
+                        saved_repeat_feedback_offset <= repeat_feedback_offset;
+                        saved_repeat_feedback_bytes <= repeat_feedback_bytes;
+                        saved_repeat_counter_start <= repeat_counter_start;
+                        saved_capture_enable <= capture_enable;
+                        saved_capture_after <= capture_after;
                         state <= S_ABSORB;
                     end
                 end

@@ -315,13 +315,13 @@ module micro_hbs_descriptor_shake_composer #(
     wire [63:0] capture_word_calc = capture_slot_calc * SLOT_WORDS;
 
     wire lane0_ready, lane0_block_ready;
-    wire lane1_ready;
+    wire lane1_ready, lane1_block_ready;
     wire [255:0] lane0_digest, lane1_digest;
     wire [255:0] lane0_capture_digest, lane1_capture_digest;
     wire lane0_capture_valid, lane1_capture_valid;
     wire [1087:0] lane0_rate_output;
-    wire [1087:0] lane1_rate_output = {832'b0, lane1_digest};
-    wire lane0_digest_valid, lane1_digest_valid, lane1_done;
+    wire [1087:0] lane1_rate_output;
+    wire lane0_digest_valid, lane1_digest_valid;
     wire lane0_error, lane1_error;
     wire [7:0] lane0_capture_after
         = saved_capture_after0 + (desc_repeat_prefix ? 1'b1 : 1'b0);
@@ -333,15 +333,20 @@ module micro_hbs_descriptor_shake_composer #(
     wire ext_hash_accept = ext_hash_req_valid && ext_hash_req_ready;
     wire lane0_block_valid = state == S_BLOCK_SEND;
     wire lane1_pair_start = state == S_BLOCK_SEND && pair_mode
-        && block_is_last && lane0_block_ready && lane1_ready;
-    wire lane1_start = lane1_pair_start || ext_hash_accept;
+        && block_is_last && lane0_block_ready && lane1_block_ready;
+    wire lane1_start = ((state == S_HASH_START) && pair_mode
+        && both_lanes_ready
+        && (input_mode != INPUT_COMPONENT_PROGRAM || component_lookup_ready))
+        || ext_hash_accept;
     logic [1087:0] lane1_pair_message;
     wire [1087:0] lane1_block_data = ext_hash_accept
         ? ext_hash_message : lane1_pair_message;
     wire [7:0] lane1_block_bytes = ext_hash_accept
         ? ext_hash_message_bytes : block_bytes_target;
-    assign lane1_digest_valid = lane1_done;
-    wire shake_block_ready = lane0_block_ready && (!pair_mode || lane1_ready);
+    wire lane1_block_valid = (state == S_BLOCK_SEND && pair_mode)
+        || ext_hash_accept;
+    wire shake_block_ready = lane0_block_ready
+        && (!pair_mode || lane1_block_ready);
     wire shake_error = lane0_error || (pair_mode && lane1_error);
     wire lane0_result_now = lane0_result_valid || lane0_digest_valid;
     wire lane1_result_now = lane1_result_valid || lane1_digest_valid;
@@ -627,9 +632,11 @@ module micro_hbs_descriptor_shake_composer #(
         .digest_valid(lane0_digest_valid), .error(lane0_error)
     );
 
-    micro_hbs_shake256_single_block #(.UNROLL(UNROLL)) shake_lane1 (
-        .clk, .rst_n, .start(lane1_start), .ready(lane1_ready),
-        .message(lane1_block_data), .message_length(lane1_block_bytes),
+    micro_hbs_shake256_stream #(.UNROLL(UNROLL)) shake_lane1 (
+        .clk, .rst_n, .hash_start(lane1_start), .hash_ready(lane1_ready),
+        .block_valid(lane1_block_valid), .block_ready(lane1_block_ready),
+        .block_data(lane1_block_data), .block_bytes(lane1_block_bytes),
+        .block_last(1'b1),
         .repeat_enable(repeat_mode && !ext_hash_accept),
         .repeat_prefix(desc_repeat_prefix && !ext_hash_accept),
         .repeat_prefix_preserve_counter(desc_prefix_preserve_counter),
@@ -643,7 +650,8 @@ module micro_hbs_descriptor_shake_composer #(
         .capture_after(lane1_capture_after),
         .capture_digest(lane1_capture_digest),
         .capture_valid(lane1_capture_valid),
-        .digest(lane1_digest), .done(lane1_done), .error(lane1_error)
+        .digest(lane1_digest), .rate_output(lane1_rate_output),
+        .digest_valid(lane1_digest_valid), .error(lane1_error)
     );
 
     task automatic fail(input logic [15:0] code);

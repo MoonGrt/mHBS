@@ -78,6 +78,6 @@ puts $fp "maximum_message_bytes=1024"
 puts $fp "hash_lanes_effective=2"
 puts $fp "external_configuration_ports=false"
 puts $fp "image_integrity_xor=b93bccd63245d8aa"
-puts $fp "validated_sign_cycles=999340"
+puts $fp "validated_sign_cycles=1003278"
 puts $fp "measured_function=complete_deterministic_sign"
 close $fp

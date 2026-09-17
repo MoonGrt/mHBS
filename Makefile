@@ -4,6 +4,8 @@ JOBS ?= 8
 VERILATOR_JOBS ?= $(JOBS)
 VIVADO_TAG ?= slh_dsa_ratewide_v1
 SLH_DSA_UNROLL ?= 2
+HORIZONTAL_SIGN_TAG ?= horizontal_slh_dsa_sign
+HORIZONTAL_SIGN_PART ?= xc7a200tffg1156-2
 
 SLH_DSA_RTL := \
 	rtl/sequencer/micro_hbs_program_store.sv \
@@ -41,10 +43,16 @@ SLH_DSA_RTL := \
 	rtl/top/micro_hbs_slh_dsa_static_top.sv
 
 .PHONY: test lint sim-lms sim-xmss sim-slh-dsa sim-slh-dsa-cycles \
-	sim-slh-dsa-schedule \
+	sim-slh-dsa-schedule compile-horizontal-slh-dsa compile-horizontal-contexts \
 	test-state-recovery rtl-test rtl-unit-test rtl-keccak-test \
 	rtl-sha256-bounded-test rtl-shake-test rtl-shake-stream-test \
 	rtl-shake-stream-cycle-test rtl-state-manager-test rtl-scratchpad-test \
+	rtl-horizontal-sequencer-test \
+	rtl-horizontal-token-sequencer-test \
+	rtl-horizontal-hash-lanes-test \
+	rtl-horizontal-keccak-lanes-test \
+	rtl-horizontal-shake-context-test \
+	rtl-horizontal-slh-dsa-sign-test \
 	rtl-affine-agu-test rtl-address-binding-test rtl-scratch-load-test \
 	rtl-data-descriptor-test rtl-lms-tree-parent-test rtl-xmss-tree-parent-test \
 	rtl-slh-dsa-tree-parent-test rtl-slh-dsa-job-stream-test \
@@ -58,7 +66,9 @@ SLH_DSA_RTL := \
 	synth-keccak-u1 synth-keccak-u2 collect-keccak-ppa synth-layout-expr32 \
 	collect-layout-expr32-ppa synth-scratchpad-full synth-scratchpad-min \
 	collect-scratchpad-ppa synth-slh-dsa-full compare-unified-hbs-paper \
-	synth-slh-dsa-static-full \
+	synth-slh-dsa-static-full synth-horizontal-hash-core \
+	synth-horizontal-token-hash-core synth-horizontal-slh-dsa-sign \
+	post-route-horizontal-slh-dsa-sign \
 	check-standalone check-parallel-isolation ci-core ci reproduce artifact
 
 test:
@@ -85,6 +95,12 @@ sim-slh-dsa-schedule:
 	$(PYTHON) scripts/simulate_slh_dsa_hash_schedule.py \
 		--json-out manifests/experiments/slh_dsa_hash_schedule_v0.1.0.json \
 		--trace-dir build/schedules/slh_dsa_kxu
+
+compile-horizontal-slh-dsa:
+	$(PYTHON) scripts/compile_slh_dsa_horizontal_microcode.py
+
+compile-horizontal-contexts:
+	$(PYTHON) scripts/compile_slh_dsa_horizontal_contexts.py
 
 sim-slh-dsa-cycles:
 	$(PYTHON) scripts/measure_slh_dsa_cycles.py
@@ -116,6 +132,48 @@ rtl-shake-stream-cycle-test:
 	mkdir -p build/iverilog
 	iverilog -g2012 -Wall -s tb_micro_hbs_shake256_stream_cycles -o build/iverilog/shake256_stream_cycles.vvp rtl/hash_lane/micro_hbs_keccak_f1600.sv rtl/hash_lane/micro_hbs_shake256_stream.sv tb/unit/tb_micro_hbs_shake256_stream_cycles.sv
 	vvp build/iverilog/shake256_stream_cycles.vvp
+
+rtl-horizontal-sequencer-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_sequencer -o build/iverilog/horizontal_sequencer.vvp rtl/sequencer/micro_hbs_event_scoreboard.sv rtl/sequencer/micro_hbs_horizontal_program_store.sv rtl/sequencer/micro_hbs_horizontal_sequencer.sv tb/unit/tb_micro_hbs_horizontal_sequencer.sv
+	vvp build/iverilog/horizontal_sequencer.vvp
+
+rtl-horizontal-token-sequencer-test:
+	mkdir -p build/iverilog
+	$(PYTHON) scripts/compile_slh_dsa_horizontal_contexts.py > build/horizontal_context_compile.log
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_token_sequencer -o build/iverilog/horizontal_token_sequencer.vvp rtl/sequencer/micro_hbs_event_scoreboard.sv rtl/sequencer/micro_hbs_horizontal_token_store.sv rtl/sequencer/micro_hbs_horizontal_template_store.sv rtl/sequencer/micro_hbs_horizontal_token_sequencer.sv tb/unit/tb_micro_hbs_horizontal_token_sequencer.sv
+	vvp build/iverilog/horizontal_token_sequencer.vvp
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_token_loop -o build/iverilog/horizontal_token_loop.vvp rtl/sequencer/micro_hbs_event_scoreboard.sv rtl/sequencer/micro_hbs_horizontal_token_store.sv rtl/sequencer/micro_hbs_horizontal_template_store.sv rtl/sequencer/micro_hbs_horizontal_token_sequencer.sv tb/unit/tb_micro_hbs_horizontal_token_loop.sv
+	vvp build/iverilog/horizontal_token_loop.vvp
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_token_image -o build/iverilog/horizontal_token_image.vvp rtl/sequencer/micro_hbs_event_scoreboard.sv rtl/sequencer/micro_hbs_horizontal_token_store.sv rtl/sequencer/micro_hbs_horizontal_template_store.sv rtl/sequencer/micro_hbs_horizontal_token_sequencer.sv tb/unit/tb_micro_hbs_horizontal_token_image.sv
+	vvp build/iverilog/horizontal_token_image.vvp
+
+rtl-horizontal-hash-lanes-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -Wall -s tb_micro_hbs_hash_lane_service -o build/iverilog/horizontal_hash_lanes.vvp rtl/hash_lane/micro_hbs_keccak_f1600.sv rtl/hash_lane/micro_hbs_shake256_stream.sv rtl/hash_lane/micro_hbs_hash_lane_service.sv tb/unit/tb_micro_hbs_hash_lane_service.sv
+	vvp build/iverilog/horizontal_hash_lanes.vvp
+
+rtl-horizontal-keccak-lanes-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_keccak_lane -o build/iverilog/horizontal_keccak_lanes.vvp rtl/hash_lane/micro_hbs_keccak_f1600.sv rtl/hash_lane/micro_hbs_horizontal_keccak_lane.sv tb/unit/tb_micro_hbs_horizontal_keccak_lane.sv
+	vvp build/iverilog/horizontal_keccak_lanes.vvp
+
+rtl-horizontal-shake-context-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_shake_context_lane -o build/iverilog/horizontal_shake_context.vvp rtl/hash_lane/micro_hbs_keccak_f1600.sv rtl/hash_lane/micro_hbs_horizontal_shake_context_lane.sv tb/unit/tb_micro_hbs_horizontal_shake_context_lane.sv
+	vvp build/iverilog/horizontal_shake_context.vvp
+
+rtl-horizontal-slh-dsa-sign-test:
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_horizontal_slh_dsa_sign_top \
+		--Mdir build/verilator_horizontal_sign -o ../horizontal_sign_sim \
+		-j $(VERILATOR_JOBS) rtl/hash_lane/micro_hbs_keccak_f1600.sv \
+		rtl/hash_lane/micro_hbs_horizontal_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/memory/micro_hbs_signature_ram128_banked.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
+	build/horizontal_sign_sim
 
 rtl-state-manager-test:
 	mkdir -p build/iverilog
@@ -329,6 +387,29 @@ synth-slh-dsa-full:
 synth-slh-dsa-static-full:
 	mkdir -p build/vivado/$(VIVADO_TAG)
 	vivado -mode batch -nolog -nojournal -log build/vivado/$(VIVADO_TAG)/vivado.log -source experiments/synth_slh_dsa_static_top.tcl -tclargs $(VIVADO_TAG)
+
+synth-horizontal-hash-core:
+	mkdir -p build/vivado/horizontal_hash_core
+	vivado -mode batch -nolog -nojournal -log build/vivado/horizontal_hash_core/vivado.log -source experiments/synth_horizontal_hash_core.tcl
+
+synth-horizontal-token-hash-core:
+	mkdir -p build/vivado/horizontal_token_hash_core
+	vivado -mode batch -nolog -nojournal -log build/vivado/horizontal_token_hash_core/vivado.log -source experiments/synth_horizontal_token_hash_core.tcl
+
+synth-horizontal-slh-dsa-sign:
+	mkdir -p build/vivado/$(HORIZONTAL_SIGN_TAG)
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/$(HORIZONTAL_SIGN_TAG)_driver.log \
+		-source experiments/synth_horizontal_slh_dsa_sign_top.tcl \
+		-tclargs $(HORIZONTAL_SIGN_TAG) $(HORIZONTAL_SIGN_PART)
+
+post-route-horizontal-slh-dsa-sign:
+	mkdir -p build/vivado/horizontal_slh_dsa_sign_a200t_3_postphys
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/horizontal_slh_dsa_sign_a200t_3_postphys_driver.log \
+		-source experiments/post_route_horizontal_slh_dsa_sign.tcl \
+		-tclargs horizontal_slh_dsa_sign_a200t_3 \
+			horizontal_slh_dsa_sign_a200t_3_postphys
 
 compare-unified-hbs-paper:
 	$(PYTHON) experiments/audit_workload.py

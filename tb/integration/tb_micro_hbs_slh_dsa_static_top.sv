@@ -96,7 +96,7 @@ module tb_micro_hbs_slh_dsa_static_top;
         if (output_words_seen != 2136 || !output_last_seen)
             $fatal(1, "static top output length mismatch words=%0d last=%0d",
                    output_words_seen, output_last_seen);
-        if (cycles != 999340
+        if (cycles != 1003278
             || accepted_job_commands != 1 || admitted_message_words != 1
             || issued_hash_requests != 5016 || tree_parent_hashes != 1969
             || retired_instructions != 21134 || scratch_reads != 41518

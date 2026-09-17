@@ -15,6 +15,13 @@
 > LUT×time 改善 52.560%。Wave 3 因未达 35% 读及 25% 写的退出门槛仍为
 > 部分完成；100 MHz 时序留到数据路稳定后闭合。
 
+> 2026-09-17 水平微码双-lane 分支更新：新的独立 Sign 顶层已生成
+> tc137 完整 17,088-byte 签名，实测 704,060 cycles / 105,641
+> permutations，两 lane 平均利用率 90.94%。`xc7a200tffg1156-3`
+> OOC post-route 为 36,898 LUT / 15,809 FF / 13 RAMB18 / 0 DSP，
+> post-route phys-opt 后 WNS +0.035 ns。Wave 4 的功能和性能 Gate 已通过；
+> Wave 5 面积目标、微码到 materializer 直连以及产品 ROM top 仍未完成。
+
 ## 1. 已接受基线
 
 所有优化均与同一个已验证基线比较，不允许混用估算值、旧架构结果或不完整轨迹。
@@ -173,6 +180,14 @@ Scratchpad BRAM enable 路径。当前单项版只在 component validation 比�
 
 633,852 cycles 仅是按 105,641 次 permutation、双 lane、每次 12 cycles 得到的理想 Hash 下界，不是完整 Sign 的目标周期。最终总周期还必须包含 composer、TreeHash、存储和输出控制。
 
+当前实验进展：两条等价 U2 lane 已完成新的端到端 Sign 数据路径。tc137
+完整 17,088-byte 签名逐字一致，周期 704,060，保持 105,641 次 Keccak
+permutation；两 lane 平均有效利用率 90.94%，所以 Wave 4 的功能、周期和
+利用率门槛已通过。独立的压缩 sequencer 仍保持 189 个 64-bit token 与
+33 个模板，展开等价于 5,817 个水平调度字；当前端到端 materializer 先由
+静态 phase/counter 驱动，尚未直接消费压缩 token 的 context index。详见
+`docs/Horizontal_Microcode_Architecture.md`。
+
 ### Wave 5：面积合并
 
 在周期路径稳定后压缩面积，避免过早共享导致吞吐优化无法定位。
@@ -188,7 +203,10 @@ Scratchpad BRAM enable 路径。当前单项版只在 component validation 比�
 
 ### Wave 6：时序闭合
 
-当前 WNS 为 -0.406 ns。该阶段不再通过盲目增加每 component 固定周期来换时序。
+旧架构基线 WNS 为 -0.406 ns。新水平双-lane Sign 顶层在
+`xc7a200tffg1156-3` 上的 OOC post-route WNS 为 +0.035 ns，TNS 为 0，
+且 tc137 周期未回退，因此该器件上的内部 100 MHz Gate 已通过。
+当前不再通过盲目增加每 component 固定周期来换时序。
 
 任务：
 
@@ -198,6 +216,9 @@ Scratchpad BRAM enable 路径。当前单项版只在 component validation 比�
 4. 至少跑两个实现 seed，报告最佳值和离散程度，避免单 seed 结论。
 
 退出条件：100 MHz post-route WNS >= 0，tc137 实测周期不回退，DSP 为 0。
+当前状态：`xc7a200tffg1156-3` OOC 内部时序已满足；板卡顶层需要在
+设置 `HD.CLK_SRC` 和实际 IO 约束后再做最终 signoff。另外仍需要第二个
+implementation seed 来完成离散性报告。
 
 ### Wave 7：静态 ROM 顶层与接口收敛
 

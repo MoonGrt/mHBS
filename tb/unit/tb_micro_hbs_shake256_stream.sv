@@ -94,6 +94,25 @@ module tb_micro_hbs_shake256_stream;
         send_block(35, 1'b1);
         wait_digest(256'h17f0641acdefdc80493c36b9281bd7c205147618c4d169a8164be4b435612aff);
 
+        // The horizontal scheduler presents a complete one-block job in a
+        // single transfer.  It must be bit-identical to the split handshake.
+        while (!hash_ready) @(negedge clk);
+        block_data = '0;
+        block_data[31:0] = 32'hefbeadde;
+        block_data[8*7 +: 32] = 32'h04030201;
+        for (i = 0; i < 13; i = i + 1)
+            block_data[8*(11+i) +: 8] = 8'h20 + i;
+        for (i = 0; i < 11; i = i + 1)
+            block_data[8*(24+i) +: 8] = 8'hc0;
+        block_bytes = 35;
+        block_last = 1'b1;
+        hash_start = 1'b1;
+        block_valid = 1'b1;
+        @(posedge clk);
+        #1 hash_start = 1'b0;
+        block_valid = 1'b0;
+        wait_digest(256'h17f0641acdefdc80493c36b9281bd7c205147618c4d169a8164be4b435612aff);
+
         // Exactly one full rate block requires a following empty final block.
         begin_hash();
         block_data = '0;

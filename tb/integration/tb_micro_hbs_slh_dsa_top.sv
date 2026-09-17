@@ -630,7 +630,7 @@ module tb_micro_hbs_slh_dsa_top #(
                    dut.issued_tree_requests, dut.issued_data_requests,
                    retired_instructions, scratch_reads, scratch_writes,
                    absorbed_blocks, retired_components);
-        if (DUT_UNROLL == 2 && cycles != 999340)
+        if (DUT_UNROLL == 2 && cycles != 1003278)
             $fatal(1, "K2U2 complete Sign cycle mismatch cycles=%0d", cycles);
         if (profile_feedback_read_hits != 1064
             || scratch_reads + profile_feedback_read_hits != 42582
@@ -645,9 +645,9 @@ module tb_micro_hbs_slh_dsa_top #(
                    absorbed_blocks + tree_parent_hashes);
         if (DUT_UNROLL == 2
             && (profile_pair_command_cycles != 745106
-                || profile_pair_overlap_cycles != 599750
+                || profile_pair_overlap_cycles != 607746
                 || dut.composer.dual_service_cycles != 607746
-                || dut.composer.lane1_active_cycles != 599750))
+                || dut.composer.lane1_active_cycles != 607746))
             $fatal(1, "dual lane overlap mismatch command=%0d overlap=%0d service=%0d lane1=%0d",
                    profile_pair_command_cycles, profile_pair_overlap_cycles,
                    dut.composer.dual_service_cycles,
