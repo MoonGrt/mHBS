@@ -15,6 +15,8 @@ file mkdir $outdir
 set_param general.maxThreads 24
 
 foreach source {
+    rtl/sequencer/micro_hbs_event_scoreboard.sv
+    rtl/sequencer/micro_hbs_static_task_sequencer.sv
     rtl/hash_lane/micro_hbs_keccak_round_explicit.sv
     rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv
     rtl/memory/micro_hbs_local_value_memories.sv

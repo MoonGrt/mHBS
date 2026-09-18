@@ -15,7 +15,8 @@
 module micro_hbs_horizontal_slh_dsa_sign_top #(
     parameter integer UNROLL = 2,
     parameter integer MAX_MESSAGE_BYTES = 87,
-    parameter bit PROFILE_ENABLE = 1'b0
+    parameter bit PROFILE_ENABLE = 1'b0,
+    parameter bit SWAP_PHYSICAL_LANES = 1'b0
 ) (
     input  wire         clk,
     input  wire         rst_n,
@@ -80,6 +81,25 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
     localparam logic [4:0] S_DONE = 5'd19;
     localparam logic [4:0] S_TL_BUILD = 5'd20;
     localparam logic [4:0] S_ERROR = 5'd21;
+    localparam logic [4:0] S_UCODE = 5'd22;
+
+    localparam logic [7:0] RECIPE_MSG_PRF = 8'd1;
+    localparam logic [7:0] RECIPE_MSG_DIGEST = 8'd2;
+    localparam logic [7:0] RECIPE_ADDR_CHAIN = 8'd3;
+    localparam logic [7:0] RECIPE_ADDR_PARENT = 8'd4;
+    localparam logic [7:0] RECIPE_LIST = 8'd5;
+    localparam logic [7:0] RECIPE_EMIT_AUTH = 8'd6;
+    localparam logic [3:0] MODE_FORS = 4'd0;
+    localparam logic [3:0] MODE_WOTS_XMSS = 4'd1;
+    localparam logic [11:0] COMMIT_R = 12'd1;
+    localparam logic [11:0] COMMIT_HMSG = 12'd2;
+    localparam logic [11:0] COMMIT_FORS_LEAF = 12'd3;
+    localparam logic [11:0] COMMIT_FORS_PARENT = 12'd4;
+    localparam logic [11:0] COMMIT_FORS_ROOT = 12'd5;
+    localparam logic [11:0] COMMIT_WOTS_CHAIN = 12'd6;
+    localparam logic [11:0] COMMIT_WOTS_LEAF = 12'd7;
+    localparam logic [11:0] COMMIT_XMSS_PARENT = 12'd8;
+    localparam logic [11:0] COMMIT_EMIT_AUTH = 12'd9;
 
     localparam logic [3:0] RC_R = 4'd0;
     localparam logic [3:0] RC_HMSG = 4'd1;
@@ -126,6 +146,7 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
     logic [4:0] task_chain_count [0:1];
     logic task_capture [0:1];
     logic [4:0] task_capture_after [0:1];
+    logic [5:0] task_store_address [0:1];
     logic [2:0] block_index;
     logic [3:0] append_beat;
     logic [4:0] tl_block_word;
@@ -149,6 +170,33 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
     logic emit_two_words;
     logic [1:0] emit_beat;
     logic [4:0] emit_return_state;
+
+    logic ucode_start;
+    logic ucode_task_done;
+    wire ucode_job_ready, ucode_done, ucode_busy, ucode_error;
+    wire [7:0] ucode_error_code;
+    wire ucode_lane0_valid, ucode_lane1_valid;
+    wire [47:0] ucode_lane0_command, ucode_lane1_command;
+    wire [2:0] ucode_lane0_event, ucode_lane1_event;
+    wire ucode_lane_ready = state == S_UCODE;
+    wire ucode_issue = ucode_lane0_valid && ucode_lane_ready
+        && (!ucode_lane1_valid || ucode_lane_ready);
+    wire [7:0] ucode_recipe = ucode_lane0_command[47:40];
+    wire [11:0] ucode_commit = ucode_lane0_command[39:28];
+    wire [3:0] ucode_mode = ucode_lane0_command[27:24];
+    wire [23:0] ucode_coord0 = ucode_lane0_command[23:0];
+    wire [23:0] ucode_coord1 = ucode_lane1_command[23:0];
+    wire [4:0] ucode_layer = ucode_coord0[23:19];
+    wire [5:0] ucode_group = ucode_coord0[18:13];
+    wire [2:0] ucode_height = ucode_coord0[12:10];
+    wire [5:0] ucode_item0 = ucode_coord0[9:4];
+    wire [5:0] ucode_item1 = ucode_coord1[9:4];
+    wire ucode_skip0 = ucode_recipe == RECIPE_ADDR_PARENT
+        && ucode_mode == MODE_WOTS_XMSS && ucode_layer == 21
+        && ucode_item0 == (leaf_index >> ucode_height);
+    wire ucode_skip1 = ucode_recipe == RECIPE_ADDR_PARENT
+        && ucode_mode == MODE_WOTS_XMSS && ucode_layer == 21
+        && ucode_item1 == (leaf_index >> ucode_height);
 
     wire [4:0] fors_leaf_return_state =
         leaf_base + active_mask[0] + active_mask[1] >= 64
@@ -183,6 +231,23 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
     logic [5:0] selected_calc;
     logic [11:0] wots_checksum;
     logic [3:0] checksum_byte;
+
+    function automatic [5:0] fors_selected_index(
+        input [5:0] tree_number
+    );
+        integer selected_bit;
+        integer selected_value;
+        begin
+            selected_value = 0;
+            for (selected_bit = 0; selected_bit < 6;
+                 selected_bit = selected_bit + 1)
+                selected_value = (selected_value << 1)
+                    | message_digest[
+                        8*(((tree_number*6)+selected_bit)>>3)
+                        + 7-(((tree_number*6)+selected_bit)&7)];
+            fors_selected_index = selected_value[5:0];
+        end
+    endfunction
 
     function automatic [7:0] key_byte(
         input [127:0] value, input integer index
@@ -366,32 +431,51 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                     compose_lane, append_beat);
     end
 
+    micro_hbs_static_task_sequencer static_microcode (
+        .clk, .rst_n, .job_valid(ucode_start), .job_ready(ucode_job_ready),
+        .done(ucode_done), .busy(ucode_busy), .error(ucode_error),
+        .error_code(ucode_error_code),
+        .lane0_valid(ucode_lane0_valid), .lane0_ready(ucode_lane_ready),
+        .lane0_command(ucode_lane0_command),
+        .lane0_event(ucode_lane0_event),
+        .lane1_valid(ucode_lane1_valid), .lane1_ready(ucode_lane_ready),
+        .lane1_command(ucode_lane1_command),
+        .lane1_event(ucode_lane1_event),
+        .lane0_done_valid(ucode_task_done),
+        .lane0_done_event(3'd0), .lane1_done_valid(1'b0),
+        .lane1_done_event(3'd0), .program_counter(), .pending_events(),
+        .retired_words(), .retired_tokens()
+    );
+
     genvar lane;
     generate for (lane = 0; lane < 2; lane = lane + 1) begin : hash_lanes
+        localparam integer LOGICAL_LANE = SWAP_PHYSICAL_LANES
+            ? 1-lane : lane;
         (* keep_hierarchy = "yes" *)
         micro_hbs_compact_shake_context_lane #(.UNROLL(UNROLL)) hash_lane (
             .clk, .rst_n,
-            .context_valid(state == S_CONTEXT && active_mask[lane]),
-            .context_ready(lane_context_ready[lane]),
+            .context_valid(state == S_CONTEXT
+                && active_mask[LOGICAL_LANE]),
+            .context_ready(lane_context_ready[LOGICAL_LANE]),
             .chain_enable(task_kind == TK_FORS_LEAF
                 || task_kind == TK_WOTS_CHAIN),
             .chain_prefix(task_kind == TK_FORS_LEAF
                 || task_kind == TK_WOTS_CHAIN),
             .chain_prefix_preserve_counter(task_kind == TK_FORS_LEAF),
             .chain_prefix_domain(task_kind == TK_FORS_LEAF ? 3'd3 : 3'd0),
-            .chain_count(task_chain_count[lane][4:0]),
-            .capture_enable(task_capture[lane]),
-            .capture_after(task_capture_after[lane][4:0]),
-            .block_valid(state == S_BLOCK && active_mask[lane]),
-            .block_ready(lane_block_ready[lane]),
-            .block_data(lane_block_data[lane]),
+            .chain_count(task_chain_count[LOGICAL_LANE][4:0]),
+            .capture_enable(task_capture[LOGICAL_LANE]),
+            .capture_after(task_capture_after[LOGICAL_LANE][4:0]),
+            .block_valid(state == S_BLOCK && active_mask[LOGICAL_LANE]),
+            .block_ready(lane_block_ready[LOGICAL_LANE]),
+            .block_data(lane_block_data[LOGICAL_LANE]),
             .block_last(block_index == 4
                 || (task_kind != TK_TL_FORS && task_kind != TK_TL_WOTS)),
-            .response_valid(lane_response_valid[lane]),
-            .response_digest(lane_response_digest[lane]),
-            .capture_digest(lane_capture_digest[lane]),
-            .capture_valid(lane_capture_valid[lane]),
-            .error(lane_error[lane])
+            .response_valid(lane_response_valid[LOGICAL_LANE]),
+            .response_digest(lane_response_digest[LOGICAL_LANE]),
+            .capture_digest(lane_capture_digest[LOGICAL_LANE]),
+            .capture_valid(lane_capture_valid[LOGICAL_LANE]),
+            .error(lane_error[LOGICAL_LANE])
         );
     end endgenerate
 
@@ -468,45 +552,45 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
             case (return_code)
                 RC_R: begin end
                 RC_FORS_LEAF: begin
-                    node_write0_valid = 1'b1;
-                    node_write0_address = leaf_base[5:0];
+                    node_write0_valid = active_mask[0];
+                    node_write0_address = task_store_address[0];
                     node_write0_data = result_digest[0];
                     node_write1_valid = active_mask[1];
-                    node_write1_address = leaf_base[5:0] + 1'b1;
+                    node_write1_address = task_store_address[1];
                     node_write1_data = result_digest[1];
                 end
                 RC_FORS_PARENT: begin
-                    node_write0_valid = 1'b1;
-                    node_write0_address = parent_base;
+                    node_write0_valid = active_mask[0];
+                    node_write0_address = task_store_address[0];
                     node_write0_data = result_digest[0];
                     node_write1_valid = active_mask[1];
-                    node_write1_address = parent_base + 1'b1;
+                    node_write1_address = task_store_address[1];
                     node_write1_data = result_digest[1];
                     if (tree_height == 6) begin
-                        endpoint_write0_valid = 1'b1;
+                        endpoint_write0_valid = active_mask[0];
                         endpoint_write0_address = fors_tree;
                         endpoint_write0_data = result_digest[0];
                     end
                 end
                 RC_WOTS_CHAIN: begin
-                    endpoint_write0_valid = 1'b1;
-                    endpoint_write0_address = chain_base;
+                    endpoint_write0_valid = active_mask[0];
+                    endpoint_write0_address = task_store_address[0];
                     endpoint_write0_data = result_digest[0];
                     endpoint_write1_valid = active_mask[1];
-                    endpoint_write1_address = chain_base + 1'b1;
+                    endpoint_write1_address = task_store_address[1];
                     endpoint_write1_data = result_digest[1];
                 end
                 RC_WOTS_TL: begin
-                    node_write0_valid = 1'b1;
-                    node_write0_address = xmss_leaf;
+                    node_write0_valid = active_mask[0];
+                    node_write0_address = task_store_address[0];
                     node_write0_data = result_digest[0];
                 end
                 RC_XMSS_PARENT: begin
-                    node_write0_valid = 1'b1;
-                    node_write0_address = parent_base;
+                    node_write0_valid = active_mask[0];
+                    node_write0_address = task_store_address[0];
                     node_write0_data = result_digest[0];
                     node_write1_valid = active_mask[1];
-                    node_write1_address = parent_base + 1'b1;
+                    node_write1_address = task_store_address[1];
                     node_write1_data = result_digest[1];
                 end
                 default: begin end
@@ -575,6 +659,7 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
             result_capture[0] <= 0; result_capture[1] <= 0;
             output_address <= 0;
             emit_two_words <= 0; emit_beat <= 0; emit_return_state <= S_IDLE;
+            ucode_start <= 0; ucode_task_done <= 0;
             done <= 0; error <= 0; error_code <= 0;
             hash_contexts <= 0; keccak_permutations <= 0;
             lane0_active_cycles <= 0; lane1_active_cycles <= 0;
@@ -584,16 +669,21 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                 task_right[lane_index] <= 0; task_chain_count[lane_index] <= 0;
                 task_capture[lane_index] <= 0;
                 task_capture_after[lane_index] <= 0;
+                task_store_address[lane_index] <= 0;
             end
             task_kind <= 0; task_layer <= 0; task_tree <= 0;
             task_type <= 0; task_keypair <= 0;
         end else begin
             done <= 1'b0;
+            ucode_start <= 1'b0;
+            ucode_task_done <= 1'b0;
             if (PROFILE_ENABLE && state == S_WAIT) begin
                 if (pending_mask[0]) lane0_active_cycles <= lane0_active_cycles + 1'b1;
                 if (pending_mask[1]) lane1_active_cycles <= lane1_active_cycles + 1'b1;
             end
-            if (lane_error != 0)
+            if (ucode_error)
+                fail({8'h12, ucode_error_code});
+            else if (lane_error != 0)
                 fail(ERR_LANE);
             else case (state)
                 S_IDLE: begin
@@ -637,7 +727,84 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                             + message_keep[3] + message_keep[4] + message_keep[5]
                             + message_keep[6] + message_keep[7] != message_length)
                             fail(ERR_MESSAGE);
-                        else state <= S_PREP_R;
+                        else begin
+                            ucode_start <= 1'b1;
+                            state <= S_UCODE;
+                        end
+                    end
+                end
+                S_UCODE: begin
+                    if (ucode_done) begin
+                        state <= S_DONE;
+                    end else if (ucode_issue) begin
+                        layer <= ucode_layer;
+                        fors_tree <= ucode_group;
+                        fors_selected <= fors_selected_index(ucode_group);
+                        tree_height <= ucode_height;
+                        xmss_leaf <= ucode_group[3:0];
+                        leaf_base <= {1'b0, ucode_item0};
+                        parent_base <= ucode_item0;
+                        chain_base <= ucode_item0;
+                        task_store_address[0] <= ucode_item0;
+                        task_store_address[1] <= ucode_item1;
+                        if (ucode_recipe == RECIPE_MSG_PRF
+                                && ucode_commit == COMMIT_R) begin
+                            state <= S_PREP_R;
+                        end else if (ucode_recipe == RECIPE_MSG_DIGEST
+                                && ucode_commit == COMMIT_HMSG) begin
+                            state <= S_PREP_HMSG;
+                        end else if (ucode_recipe == RECIPE_ADDR_CHAIN
+                                && ucode_commit == COMMIT_FORS_LEAF
+                                && ucode_mode == MODE_FORS) begin
+                            active_mask <= {ucode_lane1_valid, 1'b1};
+                            state <= S_PREP_FORS_LEAF;
+                        end else if (ucode_recipe == RECIPE_ADDR_PARENT
+                                && ucode_commit == COMMIT_FORS_PARENT
+                                && ucode_mode == MODE_FORS) begin
+                            active_mask <= {ucode_lane1_valid, 1'b1};
+                            state <= S_PREP_FORS_PARENT;
+                        end else if (ucode_recipe == RECIPE_LIST
+                                && ucode_commit == COMMIT_FORS_ROOT
+                                && ucode_mode == MODE_FORS) begin
+                            state <= S_PREP_FORS_TL;
+                        end else if (ucode_recipe == RECIPE_ADDR_CHAIN
+                                && ucode_commit == COMMIT_WOTS_CHAIN
+                                && ucode_mode == MODE_WOTS_XMSS) begin
+                            active_mask <= {ucode_lane1_valid, 1'b1};
+                            state <= S_PREP_WOTS_CHAIN;
+                        end else if (ucode_recipe == RECIPE_LIST
+                                && ucode_commit == COMMIT_WOTS_LEAF
+                                && ucode_mode == MODE_WOTS_XMSS) begin
+                            task_store_address[0] <= ucode_group;
+                            if (ucode_layer == 21
+                                    && ucode_group[2:0] == leaf_index) begin
+                                ucode_task_done <= 1'b1;
+                                state <= S_UCODE;
+                            end else begin
+                                state <= S_PREP_WOTS_TL;
+                            end
+                        end else if (ucode_recipe == RECIPE_ADDR_PARENT
+                                && ucode_commit == COMMIT_XMSS_PARENT
+                                && ucode_mode == MODE_WOTS_XMSS) begin
+                            active_mask[0] <= !ucode_skip0;
+                            active_mask[1] <= ucode_lane1_valid
+                                && !ucode_skip1;
+                            if (ucode_skip0
+                                    && (!ucode_lane1_valid || ucode_skip1)) begin
+                                ucode_task_done <= 1'b1;
+                                state <= S_UCODE;
+                            end else begin
+                                state <= S_PREP_XMSS_PARENT;
+                            end
+                        end else if (ucode_recipe == RECIPE_EMIT_AUTH
+                                && ucode_commit == COMMIT_EMIT_AUTH) begin
+                            if (ucode_mode == MODE_FORS)
+                                state <= S_FORS_AUTH;
+                            else
+                                state <= S_XMSS_AUTH;
+                        end else begin
+                            fail(ERR_LANE);
+                        end
                     end
                 end
                 S_PREP_R: begin
@@ -677,10 +844,8 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                     state <= S_CONTEXT;
                 end
                 S_FORS_AUTH: begin
-                    parent_base <= 0;
-                    parent_count <= 64 >> tree_height;
                     start_emit(node_read0_data, 128'd0, 1'b0,
-                        S_PREP_FORS_PARENT);
+                        S_UCODE);
                 end
                 S_PREP_FORS_PARENT: begin
                     for (lane_index = 0; lane_index < 2; lane_index = lane_index + 1) begin
@@ -698,8 +863,6 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                         task_right[lane_index] <= lane_index == 0
                             ? node_read1_data : node_read3_data;
                     end
-                    active_mask <= parent_base + 1 < parent_count
-                        ? 2'b11 : 2'b01;
                     return_code <= RC_FORS_PARENT;
                     block_index <= 0;
                     state <= S_CONTEXT;
@@ -751,51 +914,27 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                     state <= S_CONTEXT;
                 end
                 S_XMSS_AUTH: begin
-                    parent_base <= 0;
-                    parent_count <= 8 >> tree_height;
                     start_emit(node_read0_data, 128'd0, 1'b0,
-                        S_PREP_XMSS_PARENT);
+                        S_UCODE);
                 end
                 S_PREP_XMSS_PARENT: begin
-                    // On the final hypertree layer the root is not consumed.
-                    // Skip the one parent on the selected path at each level;
-                    // all sibling-subtree nodes needed by the signature remain.
-                    if (layer == 21
-                        && parent_base == (leaf_index >> tree_height)) begin
-                        if (parent_base + 1 >= parent_count) begin
-                            if (tree_height == 3) begin
-                                state <= S_DONE;
-                            end else begin
-                                tree_height <= tree_height + 1'b1;
-                                state <= S_XMSS_AUTH;
-                            end
-                        end else begin
-                            parent_base <= parent_base + 1'b1;
-                        end
-                    end else begin
-                        for (lane_index = 0; lane_index < 2; lane_index = lane_index + 1) begin
-                            set_common_task(lane_index);
-                            task_kind <= TK_H;
-                            task_layer <= layer;
-                            task_tree <= tree_index;
-                            task_type <= 2;
-                            task_keypair <= 0;
-                            task_word6[lane_index] <= tree_height;
-                            task_word7[lane_index] <= parent_base + lane_index;
-                            task_left[lane_index] <= lane_index == 0
-                                ? node_read0_data : node_read2_data;
-                            task_right[lane_index] <= lane_index == 0
-                                ? node_read1_data : node_read3_data;
-                        end
-                        // Do not pair across the skipped selected-path parent.
-                        active_mask <= (parent_base + 1 < parent_count
-                            && !(layer == 21 && parent_base + 1
-                                 == (leaf_index >> tree_height)))
-                            ? 2'b11 : 2'b01;
-                        return_code <= RC_XMSS_PARENT;
-                        block_index <= 0;
-                        state <= S_CONTEXT;
+                    for (lane_index = 0; lane_index < 2; lane_index = lane_index + 1) begin
+                        set_common_task(lane_index);
+                        task_kind <= TK_H;
+                        task_layer <= layer;
+                        task_tree <= tree_index;
+                        task_type <= 2;
+                        task_keypair <= 0;
+                        task_word6[lane_index] <= tree_height;
+                        task_word7[lane_index] <= parent_base + lane_index;
+                        task_left[lane_index] <= lane_index == 0
+                            ? node_read0_data : node_read2_data;
+                        task_right[lane_index] <= lane_index == 0
+                            ? node_read1_data : node_read3_data;
                     end
+                    return_code <= RC_XMSS_PARENT;
+                    block_index <= 0;
+                    state <= S_CONTEXT;
                 end
                 S_CONTEXT: if (contexts_fire) begin
                     pending_mask <= active_mask;
@@ -877,7 +1016,7 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                     RC_R: begin
                         randomizer <= result_digest[0];
                         start_emit(result_digest[0][127:0], 128'd0, 1'b0,
-                            S_PREP_HMSG);
+                            S_UCODE);
                     end
                     RC_HMSG: begin
                         message_digest <= result_digest[0][199:0];
@@ -899,119 +1038,57 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                                 | result_digest[0][8*(bit_position>>3)
                                     + 7-(bit_position&7)];
                         fors_selected <= selected_calc;
-                        leaf_base <= 0;
-                        state <= S_PREP_FORS_LEAF;
+                        ucode_task_done <= 1'b1;
+                        state <= S_UCODE;
                     end
                     RC_FORS_LEAF: begin
-                        if (leaf_base + active_mask[0] + active_mask[1] >= 64) begin
-                            tree_height <= 1;
-                            state <= S_FORS_AUTH;
-                        end else begin
-                            leaf_base <= leaf_base + active_mask[0] + active_mask[1];
-                            state <= S_PREP_FORS_LEAF;
-                        end
-                        if (leaf_base == fors_selected)
+                        if (active_mask[0]
+                                && task_store_address[0] == fors_selected)
                             start_emit(result_capture[0], 128'd0, 1'b0,
-                                fors_leaf_return_state);
+                                S_UCODE);
                         else if (active_mask[1]
-                                 && leaf_base + 1'b1 == fors_selected)
+                                 && task_store_address[1] == fors_selected)
                             start_emit(result_capture[1], 128'd0, 1'b0,
-                                fors_leaf_return_state);
+                                S_UCODE);
+                        else begin
+                            ucode_task_done <= 1'b1;
+                            state <= S_UCODE;
+                        end
                     end
                     RC_FORS_PARENT: begin
-                        if (parent_base + active_mask[0] + active_mask[1]
-                            >= parent_count) begin
-                            if (tree_height == 6) begin
-                                if (fors_tree == 32)
-                                    state <= S_PREP_FORS_TL;
-                                else begin
-                                    fors_tree <= fors_tree + 1'b1;
-                                    selected_calc = 0;
-                                    for (bit_position = 0; bit_position < 6;
-                                         bit_position = bit_position + 1)
-                                        selected_calc = (selected_calc << 1)
-                                            | message_digest[
-                                                8*((((fors_tree+1)*6)+bit_position)>>3)
-                                                + 7-((((fors_tree+1)*6)+bit_position)&7)];
-                                    fors_selected <= selected_calc;
-                                    leaf_base <= 0;
-                                    state <= S_PREP_FORS_LEAF;
-                                end
-                            end else begin
-                                tree_height <= tree_height + 1'b1;
-                                state <= S_FORS_AUTH;
-                            end
-                        end else begin
-                            parent_base <= parent_base + active_mask[0]
-                                + active_mask[1];
-                            state <= S_PREP_FORS_PARENT;
-                        end
+                        ucode_task_done <= 1'b1;
+                        state <= S_UCODE;
                     end
                     RC_FORS_TL: begin
                         current_message <= result_digest[0];
-                        layer <= 0;
-                        xmss_leaf <= 0;
-                        chain_base <= 0;
                         wots_checksum <= 0;
                         checksum_byte <= 0;
                         state <= S_WOTS_CHECKSUM;
                     end
                     RC_WOTS_CHAIN: begin
-                        if (chain_base + active_mask[0] + active_mask[1] >= 35) begin
-                            if (layer == 21 && xmss_leaf == leaf_index) begin
-                                if (xmss_leaf == 7) begin
-                                    tree_height <= 1;
-                                    state <= S_XMSS_AUTH;
-                                end else begin
-                                    xmss_leaf <= xmss_leaf + 1'b1;
-                                    chain_base <= 0;
-                                    state <= S_PREP_WOTS_CHAIN;
-                                end
-                            end else state <= S_PREP_WOTS_TL;
-                        end else begin
-                            chain_base <= chain_base + active_mask[0]
-                                + active_mask[1];
-                            state <= S_PREP_WOTS_CHAIN;
-                        end
-                        if (xmss_leaf == leaf_index)
+                        if (xmss_leaf[2:0] == leaf_index)
                             start_emit(result_capture[0], result_capture[1],
-                                active_mask[1], wots_chain_return_state);
+                                active_mask[1], S_UCODE);
+                        else begin
+                            ucode_task_done <= 1'b1;
+                            state <= S_UCODE;
+                        end
                     end
                     RC_WOTS_TL: begin
-                        if (xmss_leaf == 7) begin
-                            tree_height <= 1;
-                            state <= S_XMSS_AUTH;
-                        end else begin
-                            xmss_leaf <= xmss_leaf + 1'b1;
-                            chain_base <= 0;
-                            state <= S_PREP_WOTS_CHAIN;
-                        end
+                        ucode_task_done <= 1'b1;
+                        state <= S_UCODE;
                     end
                     RC_XMSS_PARENT: begin
-                        if (parent_base + active_mask[0] + active_mask[1]
-                            >= parent_count) begin
-                            if (tree_height == 3) begin
-                                current_message <= result_digest[0];
-                                if (layer == 21) begin
-                                    state <= S_DONE;
-                                end else begin
-                                    leaf_index <= tree_index[2:0];
-                                    tree_index <= tree_index >> 3;
-                                    layer <= layer + 1'b1;
-                                    xmss_leaf <= 0;
-                                    chain_base <= 0;
-                                    wots_checksum <= 0;
-                                    checksum_byte <= 0;
-                                    state <= S_WOTS_CHECKSUM;
-                                end
-                            end else begin
-                                tree_height <= tree_height + 1'b1;
-                                state <= S_XMSS_AUTH;
-                            end
+                        if (tree_height == 3 && layer < 21) begin
+                            current_message <= result_digest[0];
+                            leaf_index <= tree_index[2:0];
+                            tree_index <= tree_index >> 3;
+                            wots_checksum <= 0;
+                            checksum_byte <= 0;
+                            state <= S_WOTS_CHECKSUM;
                         end else begin
-                            parent_base <= parent_base + active_mask[0]
-                                + active_mask[1];
-                            state <= S_PREP_XMSS_PARENT;
+                            ucode_task_done <= 1'b1;
+                            state <= S_UCODE;
                         end
                     end
                     default: fail(ERR_LANE);
@@ -1021,16 +1098,21 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
                         - current_message[checksum_byte*8 +: 4]
                         - current_message[checksum_byte*8+4 +: 4];
                     if (checksum_byte == 15)
-                        state <= S_PREP_WOTS_CHAIN;
+                        begin
+                            ucode_task_done <= 1'b1;
+                            state <= S_UCODE;
+                        end
                     else
                         checksum_byte <= checksum_byte + 1'b1;
                 end
                 S_OUTPUT: if (out_ready) begin
                     output_address <= output_address + 1'b1;
                     if ((!emit_two_words && emit_beat == 1)
-                        || (emit_two_words && emit_beat == 3))
+                        || (emit_two_words && emit_beat == 3)) begin
+                        if (emit_return_state == S_UCODE)
+                            ucode_task_done <= 1'b1;
                         state <= emit_return_state;
-                    else
+                    end else
                         emit_beat <= emit_beat + 1'b1;
                 end
                 S_DONE: begin

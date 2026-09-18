@@ -340,3 +340,24 @@ error。post-route 物理优化跨层级合并了一个 LUT，因而层级报告
 `7,166 / 7,167 LUT`，不改变两 lane 的 RTL 能力或调度等价性。post-synth
 同时满足 `LUT < 24,184` 和 `Equivalent Slice < 11,587.98`。最终
 `LUT×cycles = 16,810,137,855`，100 MHz 签名 latency 为 `7.51627 ms`。
+
+## 9. 2026-09-18 静态微码 K2/U2 落地
+
+固定顶层算法调度已替换为数据无关的静态水平微码：29个128-bit
+token、13个template，展开为5,811个任务字。微码决定FORS、WOTS、
+XMSS任务顺序；materializer仅负责recipe执行、动态链长、结果写回和
+有序流输出。旧tc137轨迹生成的189-token镜像不再用于产品top。
+
+| 项目 | 结果 |
+|---|---:|
+| tc137 cycles | **757,448** |
+| tc137签名 | **2,136 beat逐字一致** |
+| 其他消息长度 | **1/8/31/64/87 bytes全部通过** |
+| post-synth | **22,923 LUT / 8,319 FF / 0 BRAM / 0 DSP** |
+| post-route | **22,647 LUT / 8,315 FF / 0 BRAM / 0 DSP** |
+| post-route WNS @100 MHz | **+0.422 ns** |
+| post-route routing | **26,928/26,928，0 error** |
+
+这一点同时满足`LUT < 24,184`、`Equivalent Slice < 11,587.98`、
+`cycles < 1,000,000`和100 MHz时序闭合。post-route Equivalent Slice为
+`22,647/4 + 8,315/8 = 6,701.13`。

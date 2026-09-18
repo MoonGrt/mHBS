@@ -178,12 +178,41 @@ rtl-horizontal-slh-dsa-sign-test:
 	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
 		--top-module tb_micro_hbs_horizontal_slh_dsa_sign_top \
 		--Mdir build/verilator_horizontal_sign -o ../horizontal_sign_sim \
-		-j $(VERILATOR_JOBS) rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
 		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 		rtl/memory/micro_hbs_local_value_memories.sv \
 		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
 		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
 	build/horizontal_sign_sim
+
+rtl-static-microcode-messages-test:
+	$(PYTHON) scripts/build_static_microcode_message_vectors.py
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_static_microcode_messages \
+		--Mdir build/verilator_static_messages -o ../static_messages_sim \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		tb/integration/tb_micro_hbs_static_microcode_messages.sv
+	build/static_messages_sim
+
+rtl-static-microcode-lane-swap-test:
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_horizontal_slh_dsa_sign_top -GSWAP=1 \
+		--Mdir build/verilator_horizontal_sign_swap -o ../horizontal_sign_swap_sim \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
+	build/horizontal_sign_swap_sim
 
 rtl-state-manager-test:
 	mkdir -p build/iverilog

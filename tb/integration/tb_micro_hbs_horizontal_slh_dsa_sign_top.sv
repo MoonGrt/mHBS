@@ -1,7 +1,9 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-module tb_micro_hbs_horizontal_slh_dsa_sign_top;
+module tb_micro_hbs_horizontal_slh_dsa_sign_top #(
+    parameter bit SWAP = 1'b0
+);
     logic clk = 1'b0;
     logic rst_n = 1'b0;
     logic job_valid = 1'b0;
@@ -32,7 +34,9 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top;
 
     always #5 clk = ~clk;
 
-    micro_hbs_horizontal_slh_dsa_sign_top #(.PROFILE_ENABLE(1'b1)) dut (.*);
+    micro_hbs_horizontal_slh_dsa_sign_top #(
+        .PROFILE_ENABLE(1'b1), .SWAP_PHYSICAL_LANES(SWAP)
+    ) dut (.*);
 
     always @(posedge clk) begin
         cycles <= cycles + 1;

@@ -53,7 +53,7 @@ make rtl-keccak-test rtl-shake-test rtl-shake-stream-test \
 
 ## 尚未证明
 
-目前已证明 microsequencer–动态循环–单端口 Scratchpad–layout composer–randomized F–SHAKE lane–写回的最小端到端连接，并单独验证 randomized H、base-w/checksum、32-bit layout expression、静态 digest unpack 和 static P2/U2 capability。3 步链从一条 Job 自主展开，读取 36 个、写入 12 个 64-bit word，并完成 9 次内部 SHAKE。另有固定分层控制的完整 SLH-DSA RTL 通过 Keygen/Sign/Verify 与完整签名检查，但它不是微码路径。最终 banked/OTS-wide composer 和完整微码 RTL 逐 Hash trace 仍未闭合，因此 Gate 2 仍为 `PARTIAL`。
+目前已证明 microsequencer–动态循环–单端口 Scratchpad–layout composer–randomized F–SHAKE lane–写回的最小端到端连接，并单独验证 randomized H、base-w/checksum、32-bit layout expression、静态 digest unpack 和 static P2/U2 capability。3 步链从一条 Job 自主展开，读取 36 个、写入 12 个 64-bit word，并完成 9 次内部 SHAKE。2026-09-18后，完整SLH-DSA-128f Sign也已改为29-token静态水平微码路径，tc137及5组非tc137消息全部通过；Keygen/Verify、XMSS/LMS仍属后续扩展。
 
 该功能切片的 `START` 到 `DONE` 为 260 cycles，而 9 次 U2 Keccak
 permutation 的理想 active-round 下界是 108 cycles。差额来自 SHAKE 状态

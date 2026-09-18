@@ -1,6 +1,30 @@
 # 静态水平微码与等价双 Hash lane
 
-## 当前结论
+## 2026-09-18 产品微码实现
+
+当前生产 top 已不再由22状态算法FSM决定任务顺序。静态微码ROM通过
+`micro_hbs_static_task_sequencer` 发出两个48-bit lane command，任务
+materializer只执行当前recipe、结果写回和流输出。产品镜像为29个
+128-bit token和13个128-bit template，展开为5,811个水平任务字。
+
+该镜像按SLH-DSA-128f参数结构编译，不含消息、密钥或tc137实际
+Hash时长。WOTS链长、FORS选中叶和最终XMSS层的选中路径均由
+RTL在运行时解析。旧189-token镜像仅保留为tc137 Hash调度投影，
+不再作为产品控制镜像。
+
+| 指标 | 实测 |
+|---|---:|
+| tc137完整签名周期 | **757,448** |
+| Hash context / Keccak permutation | **10,680 / 105,641** |
+| post-synth | **22,923 LUT / 8,319 FF / 0 BRAM / 0 DSP** |
+| post-route | **22,647 LUT / 8,315 FF / 0 BRAM / 0 DSP** |
+| post-route 100 MHz | **WNS +0.422 ns / TNS 0** |
+| post-route Equivalent Slice | **6,701.13** |
+
+同一ROM已通过1、8、31、64和87-byte消息的完整签名对比；两条
+物理lane互换后tc137的结果、周期和计数不变。
+
+## 历史：tc137 Hash调度投影
 
 SLH-DSA-SHAKE-128f Sign 的现有完整微码执行轨迹可拆成 6,105 个通用
 Hash context，并静态调度到两条完全等价的 U2 Keccak lane。调度保持
