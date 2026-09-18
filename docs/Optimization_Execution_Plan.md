@@ -249,7 +249,8 @@ implementation seed 来完成离散性报告。
 运行规则：
 
 - 每个仿真/编译任务最多使用 8 核；Make 使用 `-j8`，Verilator 构建使用 8 个 build jobs。
-- Vivado Tcl 显式设置 `set_param general.maxThreads 8`；工具或许可证实际少用线程时如实记录。
+- Vivado Tcl 显式设置 `set_param general.maxThreads 24`；本机综合实际最多使用
+  7 个 helper process，timing update 使用 24 线程。
 - 每个 Vivado 候选使用独立目录，例如 `build/vivado/<revision>-<variant>/`，禁止共享 `.Xil`、run 或 report 目录。
 - 默认最多同时运行一个完整 Vivado implementation；仅当可用内存、许可证和磁盘空间满足时并行两个。每个任务仍最多 8 核。
 - 同一阶段可并行跑单元仿真、完整 tc137 仿真和已冻结候选的综合，但只有功能回归通过的结果可进入论文表格。
@@ -259,7 +260,7 @@ implementation seed 来完成离散性报告。
 
 ```text
 SIM_JOBS=8
-VIVADO_THREADS=8
+VIVADO_THREADS=24
 BUILD_TAG=<git-short-sha>-<variant>
 ```
 
@@ -310,3 +311,32 @@ BUILD_TAG=<git-short-sha>-<variant>
 7. 清除 HashFlow/SLH-Flow 依赖后，干净环境仍能完成仿真和综合。
 
 执行顺序固定为：**rate-wide composer → component 预取 → Scratchpad/反馈 → 双 lane → 面积合并 → 时序闭合**。静态 ROM 产品 wrapper、profiler 和报告工具作为独立 Track 并行推进。
+
+## 8. 2026-09-17 双 U2 面积优化执行结果
+
+本轮保持两条 RTL 完全相同的 U2 Hash lane，完成了直接签名流输出、单一
+sponge/permutation state、384-bit chain template、128-bit append、全局紧凑
+descriptor、顺序 WOTS checksum、默认关闭 profiler，以及 FORS root/endpoint
+存储复用。产品输出在计算期间产生，要求 `out_ready=1`。
+
+| 候选 | cycles | LUT | FF | RAMB18 | Equivalent Slice |
+|---|---:|---:|---:|---:|---:|
+| 原始水平架构 | 704,060 | 37,133 | 15,809 | 13 | 12,769.98 |
+| 直接输出，无 Signature RAM | 699,788 | 36,185 | 15,423 | 1 | 11,090.33 |
+| 紧凑单状态 Hash lane | 694,243 | 31,031 | 9,344 | 1 | 9,041.95 |
+| 128-bit append | 751,275 | 30,280 | 8,422 | 1 | 8,738.95 |
+| direct-beat composer | 751,275 | 27,878 | 8,343 | 1 | 8,128.58 |
+| 紧凑控制与 profiler-off | 751,627 | 27,148 | 8,189 | 0 | 7,810.63 |
+| 合并 descriptor/store + 显式 U2 | 751,627 | 26,151 | 8,142 | 0 | 7,555.50 |
+| 最终等价-lane AreaOptimized-high post-synth | 751,627 | **22,660** | **8,128** | **0** | **6,681.00** |
+| 最终等价-lane post-route | 751,627 | **22,365** | **8,124** | **0** | **6,606.75** |
+
+最终 tc137 的 2,136 个 64-bit beat 逐字一致，计数保持
+`10,680 contexts / 105,641 permutations`。post-synth 保留两个 Hash lane
+层级，两者均为 `7,256 LUT / 2,194 FF`；它们使用相同 RTL 和 U2
+数据路。`xc7a200tffg1156-3` 在 100 MHz 完整布局布线后 WNS 为
+`+0.085 ns`、TNS 为 0，26,604 条可路由网络全部完成，无 routing
+error。post-route 物理优化跨层级合并了一个 LUT，因而层级报告为
+`7,166 / 7,167 LUT`，不改变两 lane 的 RTL 能力或调度等价性。post-synth
+同时满足 `LUT < 24,184` 和 `Equivalent Slice < 11,587.98`。最终
+`LUT×cycles = 16,810,137,855`，100 MHz 签名 latency 为 `7.51627 ms`。

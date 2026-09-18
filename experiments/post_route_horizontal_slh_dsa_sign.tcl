@@ -10,15 +10,19 @@ foreach variant [list $source_variant $result_variant] {
     }
 }
 
-set source_dcp [file normalize [file join $root build vivado $source_variant routed.dcp]]
+set source_dcp [file normalize [file join $root build vivado $source_variant post_synth.dcp]]
 set outdir [file normalize [file join $root build vivado $result_variant]]
 if {![file exists $source_dcp]} {
-    error "routed checkpoint not found: $source_dcp"
+    error "post-synth checkpoint not found: $source_dcp"
 }
 file mkdir $outdir
-set_param general.maxThreads 8
+set_param general.maxThreads 24
 
 open_checkpoint $source_dcp
+opt_design
+place_design
+phys_opt_design
+route_design
 phys_opt_design -directive AggressiveExplore
 report_route_status -file [file join $outdir route_status.rpt]
 report_utilization -hierarchical \

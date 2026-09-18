@@ -5,7 +5,8 @@ VERILATOR_JOBS ?= $(JOBS)
 VIVADO_TAG ?= slh_dsa_ratewide_v1
 SLH_DSA_UNROLL ?= 2
 HORIZONTAL_SIGN_TAG ?= horizontal_slh_dsa_sign
-HORIZONTAL_SIGN_PART ?= xc7a200tffg1156-2
+HORIZONTAL_SIGN_PART ?= xc7a200tffg1156-3
+HORIZONTAL_SIGN_POSTROUTE_TAG ?= $(HORIZONTAL_SIGN_TAG)_postroute
 
 SLH_DSA_RTL := \
 	rtl/sequencer/micro_hbs_program_store.sv \
@@ -52,6 +53,7 @@ SLH_DSA_RTL := \
 	rtl-horizontal-hash-lanes-test \
 	rtl-horizontal-keccak-lanes-test \
 	rtl-horizontal-shake-context-test \
+	rtl-compact-shake-context-test \
 	rtl-horizontal-slh-dsa-sign-test \
 	rtl-affine-agu-test rtl-address-binding-test rtl-scratch-load-test \
 	rtl-data-descriptor-test rtl-lms-tree-parent-test rtl-xmss-tree-parent-test \
@@ -163,14 +165,22 @@ rtl-horizontal-shake-context-test:
 	iverilog -g2012 -Wall -s tb_micro_hbs_horizontal_shake_context_lane -o build/iverilog/horizontal_shake_context.vvp rtl/hash_lane/micro_hbs_keccak_f1600.sv rtl/hash_lane/micro_hbs_horizontal_shake_context_lane.sv tb/unit/tb_micro_hbs_horizontal_shake_context_lane.sv
 	vvp build/iverilog/horizontal_shake_context.vvp
 
+rtl-compact-shake-context-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -Wall -s tb_micro_hbs_compact_shake_context_lane \
+		-o build/iverilog/compact_shake_context.vvp \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		tb/unit/tb_micro_hbs_compact_shake_context_lane.sv
+	vvp build/iverilog/compact_shake_context.vvp
+
 rtl-horizontal-slh-dsa-sign-test:
 	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
 		--top-module tb_micro_hbs_horizontal_slh_dsa_sign_top \
 		--Mdir build/verilator_horizontal_sign -o ../horizontal_sign_sim \
-		-j $(VERILATOR_JOBS) rtl/hash_lane/micro_hbs_keccak_f1600.sv \
-		rtl/hash_lane/micro_hbs_horizontal_shake_context_lane.sv \
+		-j $(VERILATOR_JOBS) rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 		rtl/memory/micro_hbs_local_value_memories.sv \
-		rtl/memory/micro_hbs_signature_ram128_banked.sv \
 		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
 		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
 	build/horizontal_sign_sim
@@ -404,12 +414,11 @@ synth-horizontal-slh-dsa-sign:
 		-tclargs $(HORIZONTAL_SIGN_TAG) $(HORIZONTAL_SIGN_PART)
 
 post-route-horizontal-slh-dsa-sign:
-	mkdir -p build/vivado/horizontal_slh_dsa_sign_a200t_3_postphys
+	mkdir -p build/vivado/$(HORIZONTAL_SIGN_POSTROUTE_TAG)
 	vivado -mode batch -nolog -nojournal \
-		-log build/vivado/horizontal_slh_dsa_sign_a200t_3_postphys_driver.log \
+		-log build/vivado/$(HORIZONTAL_SIGN_POSTROUTE_TAG)_driver.log \
 		-source experiments/post_route_horizontal_slh_dsa_sign.tcl \
-		-tclargs horizontal_slh_dsa_sign_a200t_3 \
-			horizontal_slh_dsa_sign_a200t_3_postphys
+		-tclargs $(HORIZONTAL_SIGN_TAG) $(HORIZONTAL_SIGN_POSTROUTE_TAG)
 
 compare-unified-hbs-paper:
 	$(PYTHON) experiments/audit_workload.py

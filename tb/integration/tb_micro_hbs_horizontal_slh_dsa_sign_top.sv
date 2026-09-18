@@ -32,7 +32,7 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top;
 
     always #5 clk = ~clk;
 
-    micro_hbs_horizontal_slh_dsa_sign_top dut (.*);
+    micro_hbs_horizontal_slh_dsa_sign_top #(.PROFILE_ENABLE(1'b1)) dut (.*);
 
     always @(posedge clk) begin
         cycles <= cycles + 1;
@@ -41,12 +41,12 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top;
                    dut.state, dut.return_code, dut.pending_mask, dut.layer,
                    dut.xmss_leaf, dut.chain_base, dut.parent_base,
                    dut.parent_count,
-                   dut.hash_lanes[0].hash_lane.state,
-                   dut.hash_lanes[1].hash_lane.state,
-                   dut.hash_lanes[0].hash_lane.permutation.round_index,
-                   dut.hash_lanes[1].hash_lane.permutation.round_index,
-                   dut.hash_lanes[0].hash_lane.permutation.chains_remaining,
-                   dut.hash_lanes[1].hash_lane.permutation.chains_remaining);
+                   dut.hash_lanes[0].hash_lane.lane_state,
+                   dut.hash_lanes[1].hash_lane.lane_state,
+                   dut.hash_lanes[0].hash_lane.round_index,
+                   dut.hash_lanes[1].hash_lane.round_index,
+                   dut.hash_lanes[0].hash_lane.chains_remaining,
+                   dut.hash_lanes[1].hash_lane.chains_remaining);
         if (out_valid && out_ready) begin
             if (out_keep !== 8'hff
                 || out_data !== expected_signature_words[output_words])
@@ -83,6 +83,10 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top;
                    error_code, dut.state);
         if (output_words != 2136)
             $fatal(1, "signature length mismatch words=%0d", output_words);
+        if (cycles > 1000000)
+            $fatal(1, "cycle target missed got=%0d", cycles);
+        if (hash_contexts != 10680)
+            $fatal(1, "context count mismatch got=%0d", hash_contexts);
         if (keccak_permutations != 105641)
             $fatal(1, "permutation count mismatch got=%0d", keccak_permutations);
         $display("HORIZONTAL_SLH_DSA_SIGN_PASS cycles=%0d contexts=%0d permutations=%0d lane_cycles=%0d/%0d",
