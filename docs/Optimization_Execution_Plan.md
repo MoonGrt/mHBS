@@ -4,6 +4,15 @@
 > 对象：独立、无 runtime、无需软件逐步喂任务的 μHBS SLH-DSA-SHAKE-128f Sign RTL
 > 原则：先消除确定的周期瓶颈，再提高 Hash 并行度，最后压面积和闭合时序。
 
+> 2026-09-18 最终更新：生产 Sign 顶层已替换为通用
+> `HASH/CHAIN/TREE/TRANSFORM/EMIT` 静态宏微码核心，并用同一核心、不同
+> ROM 完成 Keygen。tc137 为 851,378 cycles / 105,641 permutations；
+> Keygen tc31 为 32,355 cycles / 4,527 permutations。最终 post-synth 为
+> 22,778 LUT / 9,177 FF / 0 BRAM / 0 DSP，Equivalent Slice 6,841.63，
+> WNS +0.068 ns；post-route 为 22,446 LUT / 9,175 FF，Equivalent Slice
+> 6,758.38，100 MHz WNS +0.024 ns、TNS 0。详见
+> [Generic_HBS_Macrocode_Implementation.md](Generic_HBS_Macrocode_Implementation.md)。
+
 > 当前执行状态：Wave 1、Wave 2 功能 Gate 已通过；Wave 3 已完成连续
 > 源字 request 重叠和单项 128-bit lane-local Hash 反馈缓存。NIST ACVP
 > tc137 实测为 6,002,014 cycles，较 14,333,951-cycle 基线累计减少

@@ -2,7 +2,8 @@
 `default_nettype none
 
 module tb_micro_hbs_horizontal_slh_dsa_sign_top #(
-    parameter bit SWAP = 1'b0
+    parameter bit SWAP = 1'b0,
+    parameter bit BACKPRESSURE = 1'b0
 );
     logic clk = 1'b0;
     logic rst_n = 1'b0;
@@ -31,8 +32,22 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top #(
     logic [63:0] expected_signature_words [0:2135];
     integer cycles = 0;
     integer output_words = 0;
+    logic [7:0] ready_lfsr = 8'ha5;
 
     always #5 clk = ~clk;
+
+    always @(posedge clk) begin
+        if (!rst_n) begin
+            ready_lfsr <= 8'ha5;
+            out_ready <= 1'b1;
+        end else if (BACKPRESSURE) begin
+            ready_lfsr <= {ready_lfsr[6:0],
+                           ready_lfsr[7] ^ ready_lfsr[5]};
+            out_ready <= ready_lfsr[0] | ready_lfsr[2];
+        end else begin
+            out_ready <= 1'b1;
+        end
+    end
 
     micro_hbs_horizontal_slh_dsa_sign_top #(
         .PROFILE_ENABLE(1'b1), .SWAP_PHYSICAL_LANES(SWAP)
@@ -41,23 +56,16 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top #(
     always @(posedge clk) begin
         cycles <= cycles + 1;
         if (cycles > 2000000)
-            $fatal(1, "horizontal signer timeout state=%0d rc=%0d pending=%b layer=%0d leaf=%0d chain=%0d parent=%0d/%0d lane_state=%0d/%0d round=%0d/%0d remain=%0d/%0d",
-                   dut.state, dut.return_code, dut.pending_mask, dut.layer,
-                   dut.xmss_leaf, dut.chain_base, dut.parent_base,
-                   dut.parent_count,
-                   dut.hash_lanes[0].hash_lane.lane_state,
-                   dut.hash_lanes[1].hash_lane.lane_state,
-                   dut.hash_lanes[0].hash_lane.round_index,
-                   dut.hash_lanes[1].hash_lane.round_index,
-                   dut.hash_lanes[0].hash_lane.chains_remaining,
-                   dut.hash_lanes[1].hash_lane.chains_remaining);
+            $fatal(1, "horizontal signer timeout state=%0d layer=%0d leaf=%0d level=%0d",
+                   dut.engine.state, dut.engine.coordinate_layer,
+                   dut.engine.tree_leaf_cursor, dut.engine.tree_level);
         if (out_valid && out_ready) begin
             if (out_keep !== 8'hff
                 || out_data !== expected_signature_words[output_words])
                 $fatal(1, "signature mismatch word=%0d got=%h expected=%h state=%0d layer=%0d",
                        output_words, out_data,
-                       expected_signature_words[output_words], dut.state,
-                       dut.layer);
+                       expected_signature_words[output_words],
+                       dut.engine.state, dut.engine.coordinate_layer);
             if (out_last !== (output_words == 2135))
                 $fatal(1, "out_last mismatch word=%0d", output_words);
             output_words <= output_words + 1;
@@ -84,7 +92,7 @@ module tb_micro_hbs_horizontal_slh_dsa_sign_top #(
         while (!done && !error) tick();
         if (error)
             $fatal(1, "horizontal signer error code=%h state=%0d",
-                   error_code, dut.state);
+                   error_code, dut.engine.state);
         if (output_words != 2136)
             $fatal(1, "signature length mismatch words=%0d", output_words);
         if (cycles > 1000000)

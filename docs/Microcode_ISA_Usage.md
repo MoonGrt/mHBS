@@ -1,5 +1,11 @@
 # μHBS 微指令使用清单
 
+> 当前生产 Sign/Keygen 已使用新的五宏指令 ISA：`HASH`、`CHAIN`、
+> `TREE`、`TRANSFORM`、`EMIT`；外层仍由 `SINGLE/RUN/LOOP/HALT`
+> token 压缩。详细编码与使用见
+> [Generic_HBS_Macrocode_Implementation.md](Generic_HBS_Macrocode_Implementation.md)。
+> 下方 12-op 表是旧 scratchpad Micro-ISA 的编译覆盖记录。
+
 > 当前架构为 12-op 通用 Micro-ISA v0.2。8 类算法宏指令尝试仅作为已归档对照，未进入 ISA 或 RTL。
 
 ## 编译覆盖

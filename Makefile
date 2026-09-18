@@ -45,6 +45,7 @@ SLH_DSA_RTL := \
 
 .PHONY: test lint sim-lms sim-xmss sim-slh-dsa sim-slh-dsa-cycles \
 	sim-slh-dsa-schedule compile-horizontal-slh-dsa compile-horizontal-contexts \
+	compile-generic-hbs-macrocode \
 	test-state-recovery rtl-test rtl-unit-test rtl-keccak-test \
 	rtl-sha256-bounded-test rtl-shake-test rtl-shake-stream-test \
 	rtl-shake-stream-cycle-test rtl-state-manager-test rtl-scratchpad-test \
@@ -54,7 +55,9 @@ SLH_DSA_RTL := \
 	rtl-horizontal-keccak-lanes-test \
 	rtl-horizontal-shake-context-test \
 	rtl-compact-shake-context-test \
-	rtl-horizontal-slh-dsa-sign-test \
+	rtl-horizontal-slh-dsa-sign-test rtl-static-microcode-messages-test \
+	rtl-static-microcode-lane-swap-test rtl-static-microcode-backpressure-test \
+	rtl-generic-slh-dsa-keygen-test rtl-generic-chain-macro-test \
 	rtl-affine-agu-test rtl-address-binding-test rtl-scratch-load-test \
 	rtl-data-descriptor-test rtl-lms-tree-parent-test rtl-xmss-tree-parent-test \
 	rtl-slh-dsa-tree-parent-test rtl-slh-dsa-job-stream-test \
@@ -100,6 +103,9 @@ sim-slh-dsa-schedule:
 
 compile-horizontal-slh-dsa:
 	$(PYTHON) scripts/compile_slh_dsa_horizontal_microcode.py
+
+compile-generic-hbs-macrocode:
+	$(PYTHON) scripts/compile_generic_hbs_macrocode.py
 
 compile-horizontal-contexts:
 	$(PYTHON) scripts/compile_slh_dsa_horizontal_contexts.py
@@ -183,7 +189,8 @@ rtl-horizontal-slh-dsa-sign-test:
 		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
 		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 		rtl/memory/micro_hbs_local_value_memories.sv \
-		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv \
 		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
 	build/horizontal_sign_sim
 
@@ -197,7 +204,8 @@ rtl-static-microcode-messages-test:
 		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
 		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 		rtl/memory/micro_hbs_local_value_memories.sv \
-		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv \
 		tb/integration/tb_micro_hbs_static_microcode_messages.sv
 	build/static_messages_sim
 
@@ -210,9 +218,52 @@ rtl-static-microcode-lane-swap-test:
 		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
 		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 		rtl/memory/micro_hbs_local_value_memories.sv \
-		rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv \
 		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
 	build/horizontal_sign_swap_sim
+
+rtl-static-microcode-backpressure-test:
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_horizontal_slh_dsa_sign_top -GBACKPRESSURE=1 \
+		--Mdir build/verilator_horizontal_sign_backpressure \
+		-o ../horizontal_sign_backpressure_sim \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv \
+		tb/integration/tb_micro_hbs_horizontal_slh_dsa_sign_top.sv
+	build/horizontal_sign_backpressure_sim
+
+rtl-generic-slh-dsa-keygen-test:
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_generic_keygen_top \
+		--Mdir build/verilator_generic_keygen -o ../generic_keygen_sim \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv \
+		tb/integration/tb_micro_hbs_generic_keygen_top.sv
+	build/generic_keygen_sim
+
+rtl-generic-chain-macro-test:
+	$(VERILATOR) --binary --timing -Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -O3 \
+		--top-module tb_micro_hbs_generic_chain_macro \
+		--Mdir build/verilator_generic_chain -o ../generic_chain_sim \
+		-j $(VERILATOR_JOBS) rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/memory/micro_hbs_local_value_memories.sv \
+		rtl/top/micro_hbs_horizontal_hbs_top.sv \
+		tb/unit/tb_micro_hbs_generic_chain_macro.sv
+	build/generic_chain_sim
 
 rtl-state-manager-test:
 	mkdir -p build/iverilog

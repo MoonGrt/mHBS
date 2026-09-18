@@ -1,8 +1,13 @@
 # 静态水平微码与等价双 Hash lane
 
-## 2026-09-18 产品微码实现
+> 当前通用 `HASH/CHAIN/TREE/TRANSFORM/EMIT` 宏微码实现、Sign/Keygen
+> 镜像以及最终验证/PPA 见
+> [Generic_HBS_Macrocode_Implementation.md](Generic_HBS_Macrocode_Implementation.md)。
+> 本文其余章节保留旧水平微码阶段的历史测量，不代表当前生产 top。
 
-当前生产 top 已不再由22状态算法FSM决定任务顺序。静态微码ROM通过
+## 历史：2026-09-18 静态任务微码实现
+
+该阶段的生产 top 已不再由22状态算法FSM决定任务顺序。静态微码ROM通过
 `micro_hbs_static_task_sequencer` 发出两个48-bit lane command，任务
 materializer只执行当前recipe、结果写回和流输出。产品镜像为29个
 128-bit token和13个128-bit template，展开为5,811个水平任务字。
@@ -23,6 +28,10 @@ RTL在运行时解析。旧189-token镜像仅保留为tc137 Hash调度投影，
 
 同一ROM已通过1、8、31、64和87-byte消息的完整签名对比；两条
 物理lane互换后tc137的结果、周期和计数不变。
+
+将当前专用 materializer 演进为通用 HBS 微码执行器的两种候选方案、
+对比及推荐的混合架构见
+[`Generic_HBS_Microcode_Options.md`](Generic_HBS_Microcode_Options.md)。
 
 ## 历史：tc137 Hash调度投影
 

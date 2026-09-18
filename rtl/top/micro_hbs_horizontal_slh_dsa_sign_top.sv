@@ -12,7 +12,7 @@
 // This first product slice accepts messages up to 87 bytes, which keeps
 // PRF_msg and H_msg in one SHAKE rate block.  The core algorithm, including
 // every FORS tree and all 22 XMSS layers, is complete.
-module micro_hbs_horizontal_slh_dsa_sign_top #(
+module micro_hbs_horizontal_slh_dsa_sign_reference_top #(
     parameter integer UNROLL = 2,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter bit PROFILE_ENABLE = 1'b0,

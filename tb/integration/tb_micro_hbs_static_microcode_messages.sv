@@ -41,8 +41,8 @@ module tb_micro_hbs_static_microcode_messages;
         cycles <= cycles + 1;
         if (cycles > 1000000)
             $fatal(1, "message-vector timeout job=%0d state=%0d pc=%0d",
-                   job_index, dut.state,
-                   dut.static_microcode.program_counter);
+                   job_index, dut.engine.state,
+                   dut.engine.macro_sequencer.program_counter);
         if (out_valid && out_ready) begin
             if (out_keep !== 8'hff
                     || out_data !== signatures[

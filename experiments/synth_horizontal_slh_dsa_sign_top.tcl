@@ -20,7 +20,8 @@ foreach source {
     rtl/hash_lane/micro_hbs_keccak_round_explicit.sv
     rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv
     rtl/memory/micro_hbs_local_value_memories.sv
-    rtl/top/micro_hbs_horizontal_slh_dsa_sign_top.sv
+    rtl/top/micro_hbs_horizontal_hbs_top.sv
+    rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv
 } {
     read_verilog -sv [file join $root $source]
 }
