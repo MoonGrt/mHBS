@@ -3,20 +3,16 @@ module tb_micro_hbs_stateful_products;
     parameter integer PROFILE = 0;
     parameter integer SWAP = 0;
     parameter integer BACKPRESSURE = 0;
-    parameter integer UNIFIED = 0;
     localparam integer MESSAGE_LENGTH = PROFILE == 0 ? 21 : 20;
     localparam integer KEYGEN_BYTES = PROFILE == 0 ? 196 : 140;
     localparam integer SIGN_BYTES = PROFILE == 0 ? 2500 : 2508;
 
     logic clk = 0, rst_n = 0;
-    logic job_valid = 0;
-    logic [1:0] job_operation = 0;
-    wire [1:0] job_algorithm = PROFILE == 0 ? 2'd1 : 2'd2;
+    logic job_valid = 0, job_operation = 0;
     logic [31:0] job_message_length = 0;
     logic [10:0] job_initial_q = 5;
     logic [255:0] job_secret_seed = 0, job_secret_prf = 0;
     logic [255:0] job_public_seed = 0, job_randomizer = 0;
-    logic [255:0] job_public_root = 0;
     logic [127:0] job_identifier = 0;
     logic message_valid = 0, message_last = 0;
     logic [63:0] message_data = 0;
@@ -30,26 +26,6 @@ module tb_micro_hbs_stateful_products;
     wire [15:0] error_code;
     wire [31:0] hash_contexts, keccak_permutations;
     wire [31:0] lane0_active_cycles, lane1_active_cycles;
-    wire [1:0] external_context_valid, external_fast_block_valid;
-    wire [2175:0] external_fast_block_data;
-    wire [1:0] external_block_valid, external_block_last;
-    wire [255:0] external_block_data;
-    logic [1:0] external_context_ready = 0;
-    logic [1:0] external_fast_block_ready = 0;
-    logic [1:0] external_block_ready = 0;
-    logic [1:0] external_response_valid = 0;
-    logic [543:0] external_response_digest = 0;
-    logic [1:0] external_finish_valid = 0;
-    logic [543:0] external_finish_digest = 0;
-    logic [1:0] external_shake_error = 0;
-    wire external_program_start, external_command_ready;
-    wire external_task_done;
-    wire [2:0] external_task_event;
-    logic external_program_ready = 0, external_program_done = 0;
-    logic external_program_error = 0, external_command_valid = 0;
-    logic [7:0] external_program_error_code = 0;
-    logic [47:0] external_command = 0;
-    logic [2:0] external_command_event = 0;
 
     logic [7:0] expected_keygen [0:KEYGEN_BYTES-1];
     logic [7:0] expected_sign [0:SIGN_BYTES-1];
@@ -78,31 +54,19 @@ module tb_micro_hbs_stateful_products;
         end
     end
 
-    generate if (UNIFIED == 0) begin : reference_dut
-        micro_hbs_horizontal_stateful_hbs_top #(
-            .UNROLL(2), .PROFILE_ENABLE(1'b1),
-            .SWAP_PHYSICAL_LANES(SWAP != 0),
-            .TOKEN_INIT_FILE("rtl/microcode/stateful_hbs_unified_tokens.mem"),
-            .TEMPLATE_INIT_FILE(
-                "rtl/microcode/stateful_hbs_unified_templates.mem"),
-            .DESCRIPTOR_INIT_FILE(
-                "rtl/microcode/stateful_hbs_unified_descriptors.mem")
-        ) dut (
-            .job_family(PROFILE != 0), .job_operation(job_operation[0]),
-            .invalidate_state(1'b0),
-            .external_descriptor_request_valid(),
-            .external_descriptor_request_ready(1'b0),
-            .external_descriptor_request_index(),
-            .external_descriptor_response_valid(1'b0),
-            .external_descriptor_response_data(64'b0),
-            .external_command_descriptor(64'b0), .*
-        );
-    end else begin : unified_dut
-        micro_hbs_unified_top #(
-            .UNROLL(2), .PROFILE_ENABLE(1'b1),
-            .SWAP_PHYSICAL_LANES(SWAP != 0)
-        ) dut (.*);
-    end endgenerate
+    micro_hbs_horizontal_stateful_hbs_top #(
+        .UNROLL(2), .PROFILE_ENABLE(1'b1),
+        .SWAP_PHYSICAL_LANES(SWAP != 0),
+        .TOKEN_INIT_FILE(PROFILE == 0
+            ? "rtl/microcode/xmss_shake256_h10_w4_tokens.mem"
+            : "rtl/microcode/lms_shake256_h10_w4_research_tokens.mem"),
+        .TEMPLATE_INIT_FILE(PROFILE == 0
+            ? "rtl/microcode/xmss_shake256_h10_w4_templates.mem"
+            : "rtl/microcode/lms_shake256_h10_w4_research_templates.mem"),
+        .DESCRIPTOR_INIT_FILE(PROFILE == 0
+            ? "rtl/microcode/xmss_shake256_h10_w4_descriptors.mem"
+            : "rtl/microcode/lms_shake256_h10_w4_research_descriptors.mem")
+    ) dut (.*);
 
     always @(posedge clk) begin
         if (rst_n && state_commit_valid && state_commit_ready)
@@ -114,11 +78,9 @@ module tb_micro_hbs_stateful_products;
                         if (output_index >= KEYGEN_BYTES
                             || out_data[byte_index*8 +: 8]
                                !== expected_keygen[output_index])
-                            $fatal(1, "Keygen byte %0d mismatch got=%02h expected=%02h contexts=%0d permutations=%0d lane=%0d/%0d",
+                            $fatal(1, "Keygen byte %0d mismatch got=%02h expected=%02h root=%h",
                                    output_index, out_data[byte_index*8 +: 8],
-                                   expected_keygen[output_index], hash_contexts,
-                                   keccak_permutations, lane0_active_cycles,
-                                   lane1_active_cycles);
+                                   expected_keygen[output_index], dut.root_value);
                     end else if (operation_phase == 1) begin
                         if (output_index >= SIGN_BYTES
                             || out_data[byte_index*8 +: 8]
@@ -138,8 +100,9 @@ module tb_micro_hbs_stateful_products;
                 $fatal(1, "out_last position mismatch");
         end
         if (rst_n && operation_phase >= 1 && out_valid && !commit_ack_seen)
-            $fatal(1, "output preceded durable q commit phase=%0d byte=%0d",
-                   operation_phase, output_index);
+            $fatal(1, "output preceded durable q commit phase=%0d byte=%0d front=%0d macro=%0d",
+                   operation_phase, output_index, dut.front_state,
+                   dut.macro_state);
     end
 
     task tick; begin @(posedge clk); #1; end endtask
@@ -270,6 +233,19 @@ module tb_micro_hbs_stateful_products;
         while (!done && !error) begin
             tick();
             if (cycles > 80_000_000) begin
+                $display("DEBUG front=%0d macro=%0d pc=%0d pending=%h leaf=%0d chain=%0d reducer=%0d writes=%0d queued=%0d",
+                    dut.front_state, dut.macro_state,
+                    dut.macro_sequencer.program_counter,
+                    dut.macro_sequencer.pending_events,
+                    dut.leaf_cursor, dut.chain_cursor,
+                    dut.tree_reducer.state, dut.cache_tree_writes,
+                    dut.cache_queued_writes);
+                $display("DEBUG lane_state=%0d/%0d shake=%0d/%0d launch=%b response=%b valid=%b",
+                    dut.lanes[0].lane.state, dut.lanes[1].lane.state,
+                    dut.lanes[0].lane.shake.lane_state,
+                    dut.lanes[1].lane.shake.lane_state,
+                    dut.launch_pending, dut.response_pending,
+                    dut.lane_response_valid);
                 $fatal(1, "Keygen timeout");
             end
         end

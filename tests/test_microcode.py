@@ -234,8 +234,8 @@ class MicrocodeTests(unittest.TestCase):
     def test_slh_dsa_sign_image_is_bounded_without_algorithm_opcode(self) -> None:
         image = load_and_assemble(SLH_SIGN_PROGRAM)
         verification = verify_image(image)
-        self.assertEqual(verification["word_count"], 165)
-        self.assertEqual(verification["image_bytes"], 1320)
+        self.assertEqual(verification["word_count"], 160)
+        self.assertEqual(verification["image_bytes"], 1280)
         self.assertLessEqual(verification["max_loop_depth"], 4)
         opcode_names = {instruction.opcode.name for instruction in image["instructions"]}
         self.assertNotIn("SLH_DSA", opcode_names)

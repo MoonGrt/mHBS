@@ -28,15 +28,7 @@ module tb_micro_hbs_stateful_recipe_lane;
     always_ff @(posedge clk)
         endpoint_read_data <= endpoint_test_memory[endpoint_read_index];
 
-    micro_hbs_stateful_recipe_lane #(.UNROLL(2)) dut (
-        .external_context_valid(), .external_context_ready(1'b0),
-        .external_fast_block_valid(), .external_fast_block_ready(1'b0),
-        .external_fast_block_data(), .external_block_valid(),
-        .external_block_ready(1'b0), .external_block_data(),
-        .external_block_last(), .external_response_valid(1'b0),
-        .external_response_digest(272'b0), .external_finish_valid(1'b0),
-        .external_finish_digest(272'b0), .external_error(1'b0), .*
-    );
+    micro_hbs_stateful_recipe_lane #(.UNROLL(2)) dut (.*);
     task tick; begin @(posedge clk); #1; end endtask
     task start_request;
         begin

@@ -17,7 +17,6 @@ from model.static_task_microcode import (
     StaticTaskToken,
     TOKEN_HALT,
     TOKEN_LOOP,
-    TOKEN_RUN,
     TOKEN_SINGLE,
     expand,
     issue_word,
@@ -39,19 +38,6 @@ class StatefulDescriptorKind(IntEnum):
     IMAGE_V2 = 10
     PROFILE = 11
     RECIPE = 12
-
-
-class EmitSource(IntEnum):
-    Q = 0
-    SECRET_SEED = 1
-    SECRET_PRF = 2
-    ROOT = 3
-    PUBLIC_SEED = 4
-    IDENTIFIER = 5
-    CONSTANT_0 = 6
-    CONSTANT_1 = 7
-    RANDOMIZER = 8
-    CACHE_AUTH = 9
 
 
 class RecipeShape(IntEnum):
@@ -112,7 +98,6 @@ def _profile_descriptor(family: StatefulFamily) -> int:
         | (10 << 43)
         | (4 << 39)
         | (67 << 31)
-        | (int(family == StatefulFamily.XMSS) << 30)
         | (1 << 29)
         | (chain_shape << 25)
         | (parent_shape << 21)
@@ -120,50 +105,26 @@ def _profile_descriptor(family: StatefulFamily) -> int:
         | (hash_b_shape << 13)
         | (list_reduce << 12)
         | (auth_prefix << 11)
-        | (62 << 5)
+        | (52 << 5)
     )
     return _descriptor(StatefulDescriptorKind.PROFILE, payload)
 
 
 def _recipe_descriptor(
     recipe: RecipeShape, *, stages: int, max_blocks: int,
-    output_bytes: int = 32, result_target: int = 0,
+    output_bytes: int = 32,
 ) -> int:
     if not 1 <= stages <= 4:
         raise ValueError("compound recipe must contain one to four stages")
     if not 1 <= max_blocks <= 16:
         raise ValueError("stateful recipe block bound must be in 1..16")
-    if not 0 <= result_target < 16:
-        raise ValueError("stateful recipe result target exceeds four bits")
     payload = (
         (int(recipe) << 52)
         | (stages << 49)
         | ((max_blocks - 1) << 44)
         | (output_bytes << 36)
-        | (result_target << 32)
     )
     return _descriptor(StatefulDescriptorKind.RECIPE, payload)
-
-
-def _emit_descriptor(*, segment_base: int, segment_count: int,
-                     output_bytes: int) -> int:
-    return _descriptor(
-        StatefulDescriptorKind.EMIT,
-        (segment_base << 52) | (segment_count << 48) | output_bytes,
-    )
-
-
-def _emit_segment(source: EmitSource, length: int, *, repeat: int = 1,
-                  last: bool = False) -> int:
-    if not 1 <= length <= 32:
-        raise ValueError("emit segment length must be in 1..32")
-    if not 1 <= repeat <= 64:
-        raise ValueError("emit segment repeat must be in 1..64")
-    return _descriptor(
-        StatefulDescriptorKind.CONSTANT,
-        (int(source) << 56) | (length << 48) | (int(last) << 47)
-        | ((repeat - 1) << 40),
-    )
 
 
 @dataclass(frozen=True)
@@ -191,70 +152,40 @@ def _compile(
     sign_bytes: int,
     recipe_words: Sequence[int],
 ) -> StatefulMacroImage:
-    # Descriptor IDs are shared ABI, while the control stream is profile
-    # specific.  In particular, the XMSS L-tree and LMS list reduction are
-    # now expressed by microcode rather than a family branch in the RTL.
-    if family == StatefulFamily.XMSS:
-        keygen_templates = (
-            _template(macro_command(Macro.TREE_PUSH, 31, 0), first=True),
-            _template(macro_command(Macro.CHAIN, 42, 0)),
-            _template(macro_command(Macro.TREE_PUSH, 34, 0)),
-            _template(macro_command(Macro.TREE_PUSH, 35, 0)),
-            _template(macro_command(Macro.EMIT, 50, 0)),
-        )
-        keygen_tokens = (
-            StaticTaskToken(TOKEN_SINGLE, template=0),
-            StaticTaskToken(TOKEN_SINGLE, template=1),
-            # Push all 67 endpoints into reducer context zero.  Two RUNs are
-            # used because the storage encoding limits a RUN to 64 words.
-            StaticTaskToken(TOKEN_RUN, template=2, repeat=64,
-                            stride0=1 << 10),
-            StaticTaskToken(TOKEN_RUN, template=2, coord0=64 << 10,
-                            repeat=3, stride0=1 << 10),
-            StaticTaskToken(TOKEN_SINGLE, template=3),
-            StaticTaskToken(TOKEN_LOOP, back_count=4, loop_repeats=31,
-                            delta0=1),
-            StaticTaskToken(TOKEN_LOOP, back_count=5, loop_repeats=31,
-                            delta0=32),
-            StaticTaskToken(TOKEN_SINGLE, template=4),
-            StaticTaskToken(TOKEN_HALT),
-        )
-    else:
-        keygen_templates = (
-            _template(macro_command(Macro.TREE_PUSH, 31, 0), first=True),
-            _template(macro_command(Macro.CHAIN, 42, 0)),
-            _template(macro_command(Macro.HASH, 43, 0)),
-            _template(macro_command(Macro.HASH, 44, 0)),
-            _template(macro_command(Macro.TREE_PUSH, 35, 0)),
-            _template(macro_command(Macro.EMIT, 50, 0)),
-        )
-        keygen_tokens = (
-            StaticTaskToken(TOKEN_SINGLE, template=0),
-            StaticTaskToken(TOKEN_SINGLE, template=1),
-            StaticTaskToken(TOKEN_SINGLE, template=2),
-            StaticTaskToken(TOKEN_SINGLE, template=3),
-            StaticTaskToken(TOKEN_SINGLE, template=4),
-            StaticTaskToken(TOKEN_LOOP, back_count=4, loop_repeats=31,
-                            delta0=1),
-            StaticTaskToken(TOKEN_LOOP, back_count=5, loop_repeats=31,
-                            delta0=32),
-            StaticTaskToken(TOKEN_SINGLE, template=5),
-            StaticTaskToken(TOKEN_HALT),
-        )
-    sign_templates = (
+    # Descriptor IDs are an ABI shared by the two family wrappers.
+    # 32=TREE build, 33=TREE auth lookup, 40=message HASH,
+    # 41=OTS CHAIN, 48=base-w/checksum, 50/51=output layouts.
+    templates = (
+        _template(macro_command(Macro.TREE_PUSH, 31, 0), first=True),
+        _template(macro_command(Macro.CHAIN, 42, 0)),
+        _template(macro_command(Macro.TREE_PUSH, 32, 0)),
+        _template(macro_command(Macro.EMIT, 50, 0)),
         _template(macro_command(Macro.HASH, 40, 0), first=True),
         _template(macro_command(Macro.TRANSFORM, 48, 0)),
-        _template(macro_command(Macro.EMIT, 51, 0)),
         _template(macro_command(Macro.CHAIN, 41, 0)),
-        _template(macro_command(Macro.EMIT, 52, 0)),
+        _template(macro_command(Macro.TREE_PUSH, 33, 0)),
+        _template(macro_command(Macro.EMIT, 51, 0)),
     )
-    templates = keygen_templates + sign_templates
+    keygen_tokens = (
+        StaticTaskToken(TOKEN_SINGLE, template=0),
+        StaticTaskToken(TOKEN_SINGLE, template=1),
+        StaticTaskToken(TOKEN_SINGLE, template=2),
+        # 32 leaves per inner loop and 32 inner-loop groups.  The two affine
+        # LOOP tokens encode all 1024 leaf constructions without a hardwired
+        # leaf counter in the macro executor.
+        StaticTaskToken(TOKEN_LOOP, back_count=2, loop_repeats=31,
+                        delta0=1),
+        StaticTaskToken(TOKEN_LOOP, back_count=3, loop_repeats=31,
+                        delta0=32),
+        StaticTaskToken(TOKEN_SINGLE, template=3),
+        StaticTaskToken(TOKEN_HALT),
+    )
     sign_tokens = (
-        StaticTaskToken(TOKEN_SINGLE, template=len(keygen_templates)),
-        StaticTaskToken(TOKEN_SINGLE, template=len(keygen_templates) + 1),
-        StaticTaskToken(TOKEN_SINGLE, template=len(keygen_templates) + 2),
-        StaticTaskToken(TOKEN_SINGLE, template=len(keygen_templates) + 3),
-        StaticTaskToken(TOKEN_SINGLE, template=len(keygen_templates) + 4),
+        StaticTaskToken(TOKEN_SINGLE, template=4),
+        StaticTaskToken(TOKEN_SINGLE, template=5),
+        StaticTaskToken(TOKEN_SINGLE, template=6),
+        StaticTaskToken(TOKEN_SINGLE, template=7),
+        StaticTaskToken(TOKEN_SINGLE, template=8),
         StaticTaskToken(TOKEN_HALT),
     )
     keygen_entry = 0
@@ -283,28 +214,8 @@ def _compile(
         StatefulDescriptorKind.TREE_PUSH,
         (10 << 52) | (1 << 39),
     )
-    # TREE_PUSH 34 consumes one endpoint selected by coordinate[16:10] and
-    # feeds reducer context zero.  TREE_PUSH 35 feeds the completed leaf into
-    # context one and caches the complete outer tree.
-    records[34] = _descriptor(
-        StatefulDescriptorKind.TREE_PUSH,
-        (7 << 52) | (67 << 44) | (1 << 38),
-    )
-    records[35] = _descriptor(
-        StatefulDescriptorKind.TREE_PUSH,
-        (10 << 52) | (1 << 40),
-    )
-    records[40] = _recipe_descriptor(
-        RecipeShape.KEYED_INDEX if family == StatefulFamily.XMSS
-        else RecipeShape.PREFIX_MESSAGE,
-        stages=2 if family == StatefulFamily.XMSS else 1,
-        max_blocks=2, result_target=1)
-    records[43] = _recipe_descriptor(
-        RecipeShape.PREFIX_LIST, stages=1, max_blocks=16,
-        result_target=2)
-    records[44] = _recipe_descriptor(
-        RecipeShape.PREFIX_VALUE, stages=1, max_blocks=1,
-        result_target=3)
+    records[40] = _descriptor(
+        StatefulDescriptorKind.RECIPE, (1 << 52) | (1 << 49))
     records[41] = _descriptor(
         StatefulDescriptorKind.CHAIN,
         (67 << 48) | (15 << 40),
@@ -317,67 +228,20 @@ def _compile(
         StatefulDescriptorKind.TRANSFORM,
         (4 << 52) | (64 << 44) | (3 << 36),
     )
-    if family == StatefulFamily.XMSS:
-        emit_sources = (
-            (EmitSource.Q, 4),
-            (EmitSource.SECRET_SEED, 32),
-            (EmitSource.SECRET_PRF, 32),
-            (EmitSource.ROOT, 32),
-            (EmitSource.PUBLIC_SEED, 32),
-            (EmitSource.ROOT, 32),
-            (EmitSource.PUBLIC_SEED, 32),
-        )
-    else:
-        emit_sources = (
-            (EmitSource.Q, 4),
-            (EmitSource.IDENTIFIER, 16),
-            (EmitSource.SECRET_SEED, 32),
-            (EmitSource.ROOT, 32),
-            (EmitSource.CONSTANT_0, 4),
-            (EmitSource.CONSTANT_1, 4),
-            (EmitSource.IDENTIFIER, 16),
-            (EmitSource.ROOT, 32),
-        )
-    records[50] = _emit_descriptor(
-        segment_base=10, segment_count=len(emit_sources),
-        output_bytes=keygen_bytes)
-    if family == StatefulFamily.XMSS:
-        header_sources = (
-            (EmitSource.Q, 4, 1),
-            (EmitSource.RANDOMIZER, 32, 1),
-        )
-        auth_sources = ((EmitSource.CACHE_AUTH, 32, 10),)
-    else:
-        header_sources = (
-            (EmitSource.Q, 4, 1),
-            (EmitSource.CONSTANT_1, 4, 1),
-            (EmitSource.RANDOMIZER, 32, 1),
-        )
-        auth_sources = (
-            (EmitSource.CONSTANT_0, 4, 1),
-            (EmitSource.CACHE_AUTH, 32, 10),
-        )
-    header_base = 10 + len(emit_sources)
-    auth_base = header_base + len(header_sources)
-    records[51] = _emit_descriptor(
-        segment_base=header_base, segment_count=len(header_sources),
-        output_bytes=sign_bytes)
-    records[52] = _emit_descriptor(
-        segment_base=auth_base, segment_count=len(auth_sources),
-        output_bytes=sign_bytes)
-    for index, (source, length) in enumerate(emit_sources):
-        records[10 + index] = _emit_segment(
-            source, length, last=index + 1 == len(emit_sources))
-    for index, (source, length, repeat) in enumerate(header_sources):
-        records[header_base + index] = _emit_segment(
-            source, length, repeat=repeat, last=False)
-    for index, (source, length, repeat) in enumerate(auth_sources):
-        records[auth_base + index] = _emit_segment(
-            source, length, repeat=repeat,
-            last=index + 1 == len(auth_sources))
-
-    records[62] = _descriptor(StatefulDescriptorKind.CONSTANT, 0x80000006)
-    records[63] = _descriptor(StatefulDescriptorKind.CONSTANT, 0x80000003)
+    output_layout = int(family)
+    records[50] = _descriptor(
+        StatefulDescriptorKind.EMIT,
+        (output_layout << 52) | (1 << 51) | keygen_bytes)
+    records[51] = _descriptor(
+        StatefulDescriptorKind.EMIT,
+        (output_layout << 52) | (1 << 50) | sign_bytes)
+    # Generic EMIT constants.  The XMSS layout does not reference them.
+    records[52] = _descriptor(
+        StatefulDescriptorKind.CONSTANT,
+        0x80000006 if family == StatefulFamily.LMS_SHAKE_RESEARCH else 0)
+    records[53] = _descriptor(
+        StatefulDescriptorKind.CONSTANT,
+        0x80000003 if family == StatefulFamily.LMS_SHAKE_RESEARCH else 0)
 
     return StatefulMacroImage(
         name=("xmss-shake256-h10-w4" if family == StatefulFamily.XMSS
@@ -475,32 +339,15 @@ def validate_stateful_image(image: StatefulMacroImage) -> None:
                 != expected_kind:
             raise ValueError("macro/descriptor kind mismatch")
 
-    keygen_macros = [
-        ((word >> 96) & 0xF, (word >> 88) & 0xFF,
-         (word >> 52) & 0xFFFFFF)
-        for word in image.expanded_keygen[:-1]
-    ]
-    chain_coordinates = [coord for macro, _descriptor_id, coord
-                         in keygen_macros if macro == Macro.CHAIN]
-    outer_coordinates = [coord for macro, descriptor_id, coord
-                         in keygen_macros
-                         if macro == Macro.TREE_PUSH
-                         and descriptor_id == 35]
+    keygen_macros = [((word >> 96) & 0xF, (word >> 52) & 0xFFFFFF)
+                     for word in image.expanded_keygen[:-1]]
+    chain_coordinates = [coord for macro, coord in keygen_macros
+                         if macro == Macro.CHAIN]
+    push_coordinates = [coord for macro, coord in keygen_macros
+                        if macro == Macro.TREE_PUSH][1:]
     if chain_coordinates != list(range(1024)) \
-            or outer_coordinates != list(range(1024)):
+            or push_coordinates != list(range(1024)):
         raise ValueError("Keygen leaf schedule is not a complete affine range")
-    inner_coordinates = [coord for macro, descriptor_id, coord
-                         in keygen_macros
-                         if macro == Macro.TREE_PUSH
-                         and descriptor_id == 34]
-    if image.family == StatefulFamily.XMSS:
-        expected_inner = [leaf | (item << 10)
-                          for leaf in range(1024)
-                          for item in range(67)]
-        if inner_coordinates != expected_inner:
-            raise ValueError("XMSS L-tree pushes are not microcode complete")
-    elif inner_coordinates:
-        raise ValueError("LMS image unexpectedly contains L-tree pushes")
 
     for record in image.descriptors:
         if record >> 60 == StatefulDescriptorKind.RECIPE:

@@ -41,7 +41,7 @@ module tb_micro_hbs_generic_chain_macro;
         .DESCRIPTOR_INIT_FILE(
             "rtl/microcode/slh_dsa_128f_sign_macro_descriptors.mem")
     ) dut (
-        .clk, .rst_n, .job_valid, .job_ready, .job_operation(1'b1),
+        .clk, .rst_n, .job_valid, .job_ready,
         .job_message_length(0),
         .job_sk_seed(128'hd1d06dcbb9181a55aabce64467d6b81d),
         .job_sk_prf(0),

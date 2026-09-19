@@ -2,16 +2,13 @@
 
 (Microcoded Hash-Based Signature Engine)
 
-> 2026 stateful extension: two independent product wrappers now implement
-> RFC 8391 XMSS-SHAKE256_10_256 Keygen/Sign and the explicitly non-standard
-> SHAKE256 LMS research profile Keygen/Sign.  They share the five-macro
-> static-microcode core, two equivalent U2 Keccak lanes, durable `q` commit
-> handshake, full height-10 tree cache and streaming output.  See
-> [Stateful HBS Microcode Extension](docs/Stateful_HBS_Microcode_Extension.md).
+> The former product cores are retained only as reference/oracle material.
+> Active development targets the independent Unified V2 core.
 
 面向 LMS、XMSS 与 SLH-DSA 的循环压缩、微码驱动共享加速器。
 
-> 当前状态：实施中。除旧参考顶层外，已有三个可独立运行的水平微码产品顶层：SLH-DSA-SHAKE-128f Keygen/Sign、RFC 8391 XMSS-SHAKE256_10_256 Keygen/Sign，以及非标准 SHAKE-LMS 研究 profile Keygen/Sign。XMSS/LMS 使用同一 RTL 核，仅替换静态 token/template/descriptor 镜像；KAT、精确 Hash 计数、连续签名状态、lane 交换和输出背压均已回归。SLH-DSA 仍使用独立的 n=16 通用核，因此目前共享的是五宏指令 ISA 和 descriptor ABI，尚不是三算法共用同一个物理 core。最新 stateful PPA 与未通过的面积/时序 gate 见 [Stateful HBS Microcode Extension](docs/Stateful_HBS_Microcode_Extension.md)。
+> 当前状态：V2 重构中。正式目标为一个 512×128-bit ROM、单 Sequencer、
+> 五宏执行器和两条等价 U2 Keccak lane；旧顶层不属于生产综合闭包。
 
 > 分阶段实施、独立性契约和论文 Gate 见 [Execution Plan](Execution_Plan.md)；当前局部实测与收益边界见 [Expected Benefits](docs/Expected_Benefits.md)。两项已固定的架构取舍见 [Layout Expression Tradeoff](docs/Layout_Expression_Tradeoff.md) 与 [Static P2 Tradeoff](docs/Static_P2_Tradeoff.md)。
 > SLH-DSA 周期的已计入范围和未计入边界见 [SLH-DSA Cycle Measurement](docs/SLH_DSA_Cycle_Measurement.md)。

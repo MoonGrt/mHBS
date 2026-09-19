@@ -11,11 +11,8 @@ module micro_hbs_horizontal_hbs_top #(
     parameter integer PROGRAM_TOKENS = 384,
     parameter integer OUTPUT_BYTES = 17088,
     parameter bit REQUIRE_MESSAGE = 1'b1,
-    parameter bit DUAL_OPERATION = 1'b0,
     parameter bit PROFILE_ENABLE = 1'b0,
     parameter bit SWAP_PHYSICAL_LANES = 1'b0,
-    parameter bit EXTERNAL_SHAKE = 1'b0,
-    parameter bit EXTERNAL_PROGRAM = 1'b0,
     parameter TOKEN_INIT_FILE =
         "rtl/microcode/slh_dsa_128f_sign_macro_tokens.mem",
     parameter TEMPLATE_INIT_FILE =
@@ -27,7 +24,6 @@ module micro_hbs_horizontal_hbs_top #(
     input  wire         rst_n,
     input  wire         job_valid,
     output wire         job_ready,
-    input  wire         job_operation,
     input  wire [31:0]  job_message_length,
     input  wire [127:0] job_sk_seed,
     input  wire [127:0] job_sk_prf,
@@ -51,46 +47,9 @@ module micro_hbs_horizontal_hbs_top #(
     output logic [31:0] hash_contexts,
     output logic [31:0] keccak_permutations,
     output logic [31:0] lane0_active_cycles,
-    output logic [31:0] lane1_active_cycles,
-    output wire [1:0]   external_context_valid,
-    input  wire [1:0]   external_context_ready,
-    output wire         external_chain_enable,
-    output wire         external_chain_prefix,
-    output wire         external_chain_prefix_preserve_counter,
-    output wire [2:0]   external_chain_prefix_domain,
-    output wire [9:0]   external_chain_count,
-    output wire [1:0]   external_capture_enable,
-    output wire [9:0]   external_capture_after,
-    output wire [1:0]   external_block_valid,
-    input  wire [1:0]   external_block_ready,
-    output wire [255:0] external_block_data,
-    output wire [1:0]   external_block_last,
-    input  wire [1:0]   external_response_valid,
-    input  wire [543:0] external_response_digest,
-    input  wire [255:0] external_capture_digest,
-    input  wire [1:0]   external_capture_valid,
-    input  wire [1:0]   external_shake_error,
-    output wire         external_program_start,
-    input  wire         external_program_ready,
-    input  wire         external_program_done,
-    input  wire         external_program_error,
-    input  wire [7:0]   external_program_error_code,
-    input  wire         external_command0_valid,
-    output wire         external_command0_ready,
-    input  wire [47:0]  external_command0,
-    input  wire [2:0]   external_command0_event,
-    input  wire         external_command1_valid,
-    output wire         external_command1_ready,
-    input  wire [47:0]  external_command1,
-    input  wire [2:0]   external_command1_event,
-    output wire         external_task_done,
-    output wire [2:0]   external_task_event
+    output logic [31:0] lane1_active_cycles
 );
     localparam integer OUTPUT_BEATS = OUTPUT_BYTES / 8;
-    localparam integer SIGN_OUTPUT_BEATS = 17088 / 8;
-    localparam integer KEYGEN_OUTPUT_BEATS = 96 / 8;
-    localparam logic OP_KEYGEN = 1'b0;
-    localparam logic OP_SIGN = 1'b1;
     localparam logic [15:0] ERR_MESSAGE    = 16'h2101;
     localparam logic [15:0] ERR_MACRO      = 16'h2102;
     localparam logic [15:0] ERR_DESCRIPTOR = 16'h2103;
@@ -155,9 +114,6 @@ module micro_hbs_horizontal_hbs_top #(
     initial $readmemh(DESCRIPTOR_INIT_FILE, descriptor_memory);
 
     logic [31:0] message_length;
-    logic active_operation;
-    wire effective_job_operation = DUAL_OPERATION ? job_operation
-        : (REQUIRE_MESSAGE ? OP_SIGN : OP_KEYGEN);
     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
     logic [7:0] message_received;
     logic [127:0] sk_seed, sk_prf, pk_seed, pk_root, opt_rand;
@@ -237,15 +193,17 @@ module micro_hbs_horizontal_hbs_top #(
     logic [1:0] emit_beat;
     logic [11:0] output_address;
 
-    logic node_write0_valid;
-    logic [5:0] node_write0_address;
-    logic [127:0] node_write0_data;
-    logic [5:0] node_read_address;
+    logic node_write0_valid, node_write1_valid;
+    logic [5:0] node_write0_address, node_write1_address;
+    logic [127:0] node_write0_data, node_write1_data;
+    logic [5:0] node_read0_address, node_read1_address;
+    logic [5:0] node_read2_address, node_read3_address;
     wire [127:0] node_read0_data, node_read1_data;
+    wire [127:0] node_read2_data, node_read3_data;
     logic endpoint_write0_valid, endpoint_write1_valid;
     logic [5:0] endpoint_write0_address, endpoint_write1_address;
     logic [127:0] endpoint_write0_data, endpoint_write1_data;
-    logic [5:0] endpoint_read_address;
+    logic [5:0] endpoint_read_address, endpoint_read1_address;
     wire [127:0] endpoint_read_data, endpoint_read1_data;
 
     wire [1:0] hash_context_ready, hash_block_ready;
@@ -501,6 +459,7 @@ module micro_hbs_horizontal_hbs_top #(
 
         endpoint_read_address = compose_segment0[59:56] == SEG_ENDPOINTS
             ? (absolute_byte-compose_segment0_start) >> 4 : 0;
+        endpoint_read1_address = endpoint_read_address + 1'b1;
     end
 
     always_comb begin
@@ -513,152 +472,72 @@ module micro_hbs_horizontal_hbs_top #(
             hash_block_data[1] = hash_block_data[0];
     end
 
-    wire local_sequencer_job_ready, local_sequencer_done;
-    wire local_sequencer_busy, local_sequencer_error;
-    wire [7:0] local_sequencer_error_code;
-    wire local_lane0_valid, local_lane1_valid;
-    wire [47:0] local_lane0_command, local_lane1_command;
-    wire [2:0] local_lane0_event, local_lane1_event;
-    generate if (!EXTERNAL_PROGRAM) begin : local_program
     micro_hbs_static_task_sequencer #(
         .PROGRAM_TOKENS(PROGRAM_TOKENS),
         .TOKEN_INIT_FILE(TOKEN_INIT_FILE),
         .TEMPLATE_INIT_FILE(TEMPLATE_INIT_FILE)
     ) macro_sequencer (
-        .clk, .rst_n, .job_valid(sequencer_start),
-        .job_entry(DUAL_OPERATION && active_operation == OP_KEYGEN
-            ? 9'd11 : 9'd0),
-        .job_ready(local_sequencer_job_ready), .done(local_sequencer_done),
-        .busy(local_sequencer_busy), .error(local_sequencer_error),
-        .error_code(local_sequencer_error_code),
-        .lane0_valid(local_lane0_valid), .lane0_ready(command_ready),
-        .lane0_command(local_lane0_command), .lane0_event(local_lane0_event),
-        .lane1_valid(local_lane1_valid), .lane1_ready(command_ready),
-        .lane1_command(local_lane1_command), .lane1_event(local_lane1_event),
+        .clk, .rst_n, .job_valid(sequencer_start), .job_entry(9'd0),
+        .job_ready(sequencer_job_ready), .done(sequencer_done),
+        .busy(sequencer_busy), .error(sequencer_error),
+        .error_code(sequencer_error_code),
+        .lane0_valid(lane0_command_valid), .lane0_ready(command_ready),
+        .lane0_command, .lane0_event,
+        .lane1_valid(lane1_command_valid), .lane1_ready(command_ready),
+        .lane1_command, .lane1_event,
         .lane0_done_valid(sequencer_task_done), .lane0_done_event(3'd0),
         .lane1_done_valid(1'b0), .lane1_done_event(3'd0),
         .program_counter(), .pending_events(),
         .retired_words(), .retired_tokens()
     );
-    end else begin : no_local_program
-        assign local_sequencer_job_ready = 1'b0;
-        assign local_sequencer_done = 1'b0;
-        assign local_sequencer_busy = 1'b0;
-        assign local_sequencer_error = 1'b0;
-        assign local_sequencer_error_code = 8'b0;
-        assign local_lane0_valid = 1'b0;
-        assign local_lane1_valid = 1'b0;
-        assign local_lane0_command = 48'b0;
-        assign local_lane1_command = 48'b0;
-        assign local_lane0_event = 3'b0;
-        assign local_lane1_event = 3'b0;
-    end endgenerate
-
-    assign sequencer_job_ready = EXTERNAL_PROGRAM
-        ? external_program_ready : local_sequencer_job_ready;
-    assign sequencer_done = EXTERNAL_PROGRAM
-        ? external_program_done : local_sequencer_done;
-    assign sequencer_busy = EXTERNAL_PROGRAM
-        ? !external_program_ready : local_sequencer_busy;
-    assign sequencer_error = EXTERNAL_PROGRAM
-        ? external_program_error : local_sequencer_error;
-    assign sequencer_error_code = EXTERNAL_PROGRAM
-        ? external_program_error_code : local_sequencer_error_code;
-    assign lane0_command_valid = EXTERNAL_PROGRAM
-        ? external_command0_valid : local_lane0_valid;
-    assign lane1_command_valid = EXTERNAL_PROGRAM
-        ? external_command1_valid : local_lane1_valid;
-    assign lane0_command = EXTERNAL_PROGRAM
-        ? external_command0 : local_lane0_command;
-    assign lane1_command = EXTERNAL_PROGRAM
-        ? external_command1 : local_lane1_command;
-    assign lane0_event = EXTERNAL_PROGRAM
-        ? external_command0_event : local_lane0_event;
-    assign lane1_event = EXTERNAL_PROGRAM
-        ? external_command1_event : local_lane1_event;
-    assign external_program_start = EXTERNAL_PROGRAM && sequencer_start;
-    assign external_command0_ready = EXTERNAL_PROGRAM && command_ready;
-    assign external_command1_ready = EXTERNAL_PROGRAM && command_ready;
-    assign external_task_done = EXTERNAL_PROGRAM && sequencer_task_done;
-    assign external_task_event = 3'd0;
-
-    assign external_context_valid = {2{state == S_HASH_CONTEXT}}
-        & active_mask;
-    assign external_chain_enable = task_chain_enable;
-    assign external_chain_prefix = task_chain_prefix;
-    assign external_chain_prefix_preserve_counter = task_chain_preserve;
-    assign external_chain_prefix_domain = task_chain_domain;
-    assign external_chain_count = {task_chain_count[1], task_chain_count[0]};
-    assign external_capture_enable = {task_capture[1], task_capture[0]};
-    assign external_capture_after = {
-        task_capture_after[1], task_capture_after[0]};
-    assign external_block_valid = {2{state == S_HASH_BLOCK}} & active_mask;
-    assign external_block_data = {
-        prepared_block_data[1], prepared_block_data[0]};
-    assign external_block_last = {2{block_index == task_blocks-1}};
 
     genvar physical_lane;
-    generate if (!EXTERNAL_SHAKE) begin : local_shake_service
-        for (physical_lane = 0; physical_lane < 2;
-             physical_lane = physical_lane + 1) begin : lanes
-            localparam integer LOGICAL_LANE = SWAP_PHYSICAL_LANES
-                ? 1-physical_lane : physical_lane;
-            (* keep_hierarchy = "yes" *)
-            micro_hbs_compact_shake_context_lane #(.UNROLL(UNROLL)) lane (
-                .clk, .rst_n,
-                .context_valid(state == S_HASH_CONTEXT
-                    && active_mask[LOGICAL_LANE]),
-                .context_ready(hash_context_ready[LOGICAL_LANE]),
-                .fast_block_valid(1'b0), .fast_block_ready(),
-                .fast_block_data(1088'b0),
-                .chain_enable(task_chain_enable),
-                .chain_prefix(task_chain_prefix),
-                .chain_prefix_preserve_counter(task_chain_preserve),
-                .chain_prefix_domain(task_chain_domain),
-                .chain_count(task_chain_count[LOGICAL_LANE]),
-                .capture_enable(task_capture[LOGICAL_LANE]),
-                .capture_after(task_capture_after[LOGICAL_LANE]),
-                .block_valid(state == S_HASH_BLOCK
-                    && active_mask[LOGICAL_LANE]),
-                .block_ready(hash_block_ready[LOGICAL_LANE]),
-                .block_data(prepared_block_data[LOGICAL_LANE]),
-                .block_last(block_index == task_blocks-1),
-                .response_valid(hash_response_valid[LOGICAL_LANE]),
-                .response_digest(hash_response_digest[LOGICAL_LANE]),
-                .finish_valid(), .finish_digest(),
-                .capture_digest(hash_capture_digest[LOGICAL_LANE]),
-                .capture_valid(hash_capture_valid[LOGICAL_LANE]),
-                .error(hash_error[LOGICAL_LANE])
-            );
-        end
-    end else begin : shared_shake_service
-        for (physical_lane = 0; physical_lane < 2;
-             physical_lane = physical_lane + 1) begin : lanes
-            assign hash_context_ready[physical_lane]
-                = external_context_ready[physical_lane];
-            assign hash_block_ready[physical_lane]
-                = external_block_ready[physical_lane];
-            assign hash_response_valid[physical_lane]
-                = external_response_valid[physical_lane];
-            assign hash_response_digest[physical_lane]
-                = external_response_digest[physical_lane*272 +: 272];
-            assign hash_capture_digest[physical_lane]
-                = external_capture_digest[physical_lane*128 +: 128];
-            assign hash_capture_valid[physical_lane]
-                = external_capture_valid[physical_lane];
-            assign hash_error[physical_lane]
-                = external_shake_error[physical_lane];
-        end
+    generate for (physical_lane = 0; physical_lane < 2;
+                  physical_lane = physical_lane + 1) begin : lanes
+        localparam integer LOGICAL_LANE = SWAP_PHYSICAL_LANES
+            ? 1-physical_lane : physical_lane;
+        (* keep_hierarchy = "yes" *)
+        micro_hbs_compact_shake_context_lane #(.UNROLL(UNROLL)) lane (
+            .clk, .rst_n,
+            .context_valid(state == S_HASH_CONTEXT
+                && active_mask[LOGICAL_LANE]),
+            .context_ready(hash_context_ready[LOGICAL_LANE]),
+            .fast_block_valid(1'b0), .fast_block_ready(),
+            .fast_block_data(1088'b0),
+            .chain_enable(task_chain_enable),
+            .chain_prefix(task_chain_prefix),
+            .chain_prefix_preserve_counter(task_chain_preserve),
+            .chain_prefix_domain(task_chain_domain),
+            .chain_count(task_chain_count[LOGICAL_LANE]),
+            .capture_enable(task_capture[LOGICAL_LANE]),
+            .capture_after(task_capture_after[LOGICAL_LANE]),
+            .block_valid(state == S_HASH_BLOCK
+                && active_mask[LOGICAL_LANE]),
+            .block_ready(hash_block_ready[LOGICAL_LANE]),
+            .block_data(prepared_block_data[LOGICAL_LANE]),
+            .block_last(block_index == task_blocks-1),
+            .response_valid(hash_response_valid[LOGICAL_LANE]),
+            .response_digest(hash_response_digest[LOGICAL_LANE]),
+            .finish_valid(), .finish_digest(),
+            .capture_digest(hash_capture_digest[LOGICAL_LANE]),
+            .capture_valid(hash_capture_valid[LOGICAL_LANE]),
+            .error(hash_error[LOGICAL_LANE])
+        );
     end endgenerate
 
-    micro_hbs_local_array128_serial_tree node_store (
-        .clk, .write_valid(node_write0_valid),
-        .write_address(node_write0_address), .write_data(node_write0_data),
-        .read_address(node_read_address), .read0_data(node_read0_data),
-        .read1_data(node_read1_data)
+    micro_hbs_local_array128_4r node_store (
+        .clk,
+        .write0_valid(node_write0_valid),
+        .write0_address(node_write0_address), .write0_data(node_write0_data),
+        .write1_valid(node_write1_valid),
+        .write1_address(node_write1_address), .write1_data(node_write1_data),
+        .read0_address(node_read0_address), .read0_data(node_read0_data),
+        .read1_address(node_read1_address), .read1_data(node_read1_data),
+        .read2_address(node_read2_address), .read2_data(node_read2_data),
+        .read3_address(node_read3_address), .read3_data(node_read3_data)
     );
 
-    micro_hbs_local_array128_pair_read endpoint_store (
+    micro_hbs_local_array128_4r endpoint_store (
         .clk,
         .write0_valid(endpoint_write0_valid),
         .write0_address(endpoint_write0_address),
@@ -666,17 +545,15 @@ module micro_hbs_horizontal_hbs_top #(
         .write1_valid(endpoint_write1_valid),
         .write1_address(endpoint_write1_address),
         .write1_data(endpoint_write1_data),
-        .read_address(endpoint_read_address), .read0_data(endpoint_read_data),
-        .read1_data(endpoint_read1_data)
+        .read0_address(endpoint_read_address), .read0_data(endpoint_read_data),
+        .read1_address(endpoint_read1_address),
+        .read1_data(endpoint_read1_data),
+        .read2_address(6'd0), .read2_data(),
+        .read3_address(6'd0), .read3_data()
     );
 
     assign job_ready = state == S_IDLE;
-    wire operation_requires_message = active_operation == OP_SIGN;
-    wire [11:0] active_output_beats = DUAL_OPERATION
-        ? (active_operation == OP_SIGN
-            ? SIGN_OUTPUT_BEATS : KEYGEN_OUTPUT_BEATS)
-        : OUTPUT_BEATS;
-    assign message_ready = operation_requires_message && state == S_MESSAGE
+    assign message_ready = REQUIRE_MESSAGE && state == S_MESSAGE
         && message_received < message_length;
     assign busy = state != S_IDLE;
     assign out_valid = state == S_OUTPUT;
@@ -684,19 +561,28 @@ module micro_hbs_horizontal_hbs_top #(
         : emit_beat == 1 ? emit_word0[127:64]
         : emit_beat == 2 ? emit_word1[63:0] : emit_word1[127:64];
     assign out_keep = 8'hff;
-    assign out_last = output_address == active_output_beats-1;
+    assign out_last = output_address == OUTPUT_BEATS-1;
 
     always_comb begin
-        node_read_address = 0;
+        node_read0_address = 0;
+        node_read1_address = 1;
+        node_read2_address = 2;
+        node_read3_address = 3;
         if (state == S_TREE_PARENT_SETUP) begin
-            node_read_address = tree_parent_cursor << 1;
+            node_read0_address = tree_parent_cursor << 1;
+            node_read1_address = (tree_parent_cursor << 1) + 1'b1;
+            node_read2_address = (tree_parent_cursor << 1) + 2;
+            node_read3_address = (tree_parent_cursor << 1) + 3;
         end else if (state == S_TREE_AUTH) begin
-            node_read_address = (tree_target >> (tree_level-1)) ^ 1'b1;
+            node_read0_address = (tree_target >> (tree_level-1)) ^ 1'b1;
         end
 
         node_write0_valid = 0;
+        node_write1_valid = 0;
         node_write0_address = task_store_address[0];
+        node_write1_address = task_store_address[1];
         node_write0_data = result_digest[0][127:0];
+        node_write1_data = result_digest[1][127:0];
         endpoint_write0_valid = 0;
         endpoint_write1_valid = 0;
         endpoint_write0_address = task_store_address[0];
@@ -719,6 +605,7 @@ module micro_hbs_horizontal_hbs_top #(
                 node_write0_address = tree_leaf_cursor[5:0];
             end else if (task_destination == DEST_PARENT) begin
                 node_write0_valid = active_mask[0];
+                node_write1_valid = active_mask[1];
             end
         end
         if (state == S_ROUTE && action_work[59:56] == ACT_STORE_VALUE) begin
@@ -802,7 +689,6 @@ module micro_hbs_horizontal_hbs_top #(
             sequencer_start <= 0;
             sequencer_task_done <= 0;
             message_length <= 0;
-            active_operation <= OP_SIGN;
             message_received <= 0;
             scalar_tree <= 0;
             scalar_leaf <= 0;
@@ -863,7 +749,16 @@ module micro_hbs_horizontal_hbs_top #(
                 task_capture[lane_index] <= 0;
                 task_capture_after[lane_index] <= 0;
                 task_keypair[lane_index] <= 0;
+                task_word6[lane_index] <= 0;
+                task_word7[lane_index] <= 0;
                 task_store_address[lane_index] <= 0;
+                result_digest[lane_index] <= 0;
+                result_capture[lane_index] <= 0;
+            end
+            for (segment_index = 0; segment_index < 4;
+                 segment_index = segment_index + 1) begin
+                task_segment[segment_index] <= 0;
+                task_segment_start[segment_index] <= 0;
             end
         end else begin
             done <= 0;
@@ -881,13 +776,11 @@ module micro_hbs_horizontal_hbs_top #(
                 fail({8'h22, sequencer_error_code});
             else case (state)
                 S_IDLE: if (job_valid) begin
-                    if (effective_job_operation == OP_SIGN
-                            && (job_message_length == 0
+                    if (REQUIRE_MESSAGE && (job_message_length == 0
                             || job_message_length > MAX_MESSAGE_BYTES))
                         fail(ERR_MESSAGE);
                     else begin
-                        active_operation <= effective_job_operation;
-                        message_length <= effective_job_operation == OP_SIGN
+                        message_length <= REQUIRE_MESSAGE
                             ? job_message_length : 0;
                         message_received <= 0;
                         sk_seed <= job_sk_seed;
@@ -902,7 +795,7 @@ module micro_hbs_horizontal_hbs_top #(
                         keccak_permutations <= 0;
                         lane0_active_cycles <= 0;
                         lane1_active_cycles <= 0;
-                        if (effective_job_operation == OP_SIGN)
+                        if (REQUIRE_MESSAGE)
                             state <= S_MESSAGE;
                         else begin
                             sequencer_start <= 1'b1;
@@ -937,7 +830,7 @@ module micro_hbs_horizontal_hbs_top #(
                 end
                 S_FETCH: begin
                     if (sequencer_done) begin
-                        if (output_address != active_output_beats)
+                        if (output_address != OUTPUT_BEATS)
                             fail(ERR_OUTPUT);
                         else state <= S_DONE;
                     end else if (lane0_command_valid && command_ready) begin
@@ -1178,10 +1071,16 @@ module micro_hbs_horizontal_hbs_top #(
                     active_mask[0] <= !((tree_flags & FLAG_EXTERNAL_ROOT) != 0
                         && tree_parent_cursor
                             == (tree_target >> tree_level));
-                    active_mask[1] <= 1'b0;
+                    active_mask[1] <= tree_parent_cursor+1 < tree_parent_count
+                        && !((tree_flags & FLAG_EXTERNAL_ROOT) != 0
+                            && tree_parent_cursor+1
+                                == (tree_target >> tree_level));
                     if (((tree_flags & FLAG_EXTERNAL_ROOT) != 0)
                             && tree_parent_cursor
-                                == (tree_target >> tree_level)) begin
+                                == (tree_target >> tree_level)
+                            && (tree_parent_cursor+1 >= tree_parent_count
+                                || tree_parent_cursor+1
+                                    == (tree_target >> tree_level))) begin
                         state <= S_TREE_PARENT_ADVANCE;
                     end else begin
                         task_recipe <= tree_parent_recipe;
@@ -1207,29 +1106,29 @@ module micro_hbs_horizontal_hbs_top #(
                         task_input_length <= setup_input_length;
                         task_blocks <= setup_hash_work[30:28];
                         task_address_type <= setup_address_work[19:12];
-                        task_keypair[0] <= tree_keypair_mode == 1
-                            ? scalar_leaf : 0;
-                        task_keypair[1] <= 0;
-                        task_word6[0] <= tree_level;
-                        task_word6[1] <= tree_level;
-                        task_word7[0] <= tree_leaf_mode == 1
-                            ? ((coordinate_group*64) >> tree_level)
-                                + tree_parent_cursor
-                            : tree_parent_cursor;
-                        task_word7[1] <= 0;
-                        task_left[0] <= node_read0_data;
-                        task_right[0] <= node_read1_data;
-                        task_left[1] <= 0;
-                        task_right[1] <= 0;
-                        task_store_address[0] <= tree_parent_cursor;
-                        task_store_address[1] <= 0;
+                        for (lane_index = 0; lane_index < 2;
+                             lane_index = lane_index + 1) begin
+                            task_keypair[lane_index] <= tree_keypair_mode == 1
+                                ? scalar_leaf : 0;
+                            task_word6[lane_index] <= tree_level;
+                            task_word7[lane_index] <= tree_leaf_mode == 1
+                                ? ((coordinate_group*64) >> tree_level)
+                                    + tree_parent_cursor + lane_index
+                                : tree_parent_cursor + lane_index;
+                            task_left[lane_index] <= lane_index == 0
+                                ? node_read0_data : node_read2_data;
+                            task_right[lane_index] <= lane_index == 0
+                                ? node_read1_data : node_read3_data;
+                            task_store_address[lane_index]
+                                <= tree_parent_cursor + lane_index;
+                        end
                         block_index <= 0;
                         state <= S_HASH_CONTEXT;
                     end
                 end
                 S_TREE_PARENT_ADVANCE: begin
-                    if (tree_parent_cursor + 1 < tree_parent_count) begin
-                        tree_parent_cursor <= tree_parent_cursor + 1'b1;
+                    if (tree_parent_cursor + 2 < tree_parent_count) begin
+                        tree_parent_cursor <= tree_parent_cursor + 2;
                         state <= S_TREE_PARENT_SETUP;
                     end else if (tree_level < tree_height) begin
                         tree_level <= tree_level + 1'b1;

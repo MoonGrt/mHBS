@@ -49,44 +49,12 @@ class StatefulHbsMacrocodeTests(unittest.TestCase):
             self.assertIn(parent, allowed)
             self.assertIn(hash_a, allowed)
             self.assertTrue(hash_b == 0 or hash_b in allowed)
-            emit_base = (image.descriptors[50] >> 52) & 0xFF
-            emit_count = (image.descriptors[50] >> 48) & 0xF
-            self.assertEqual(emit_base, 10)
-            self.assertEqual(emit_count, 7 if image.family
-                             == StatefulFamily.XMSS else 8)
+            self.assertEqual((image.descriptors[50] >> 52) & 0xFF,
+                             int(image.family))
             if image.family == StatefulFamily.XMSS:
                 self.assertEqual((profile >> 12) & 1, 0)
             else:
                 self.assertEqual((profile >> 12) & 1, 1)
-
-    def test_tree_and_emit_control_are_in_profile_microcode(self) -> None:
-        images = {image.family: image for image in all_stateful_images()}
-        xmss = images[StatefulFamily.XMSS]
-        lms = images[StatefulFamily.LMS_SHAKE_RESEARCH]
-
-        def commands(image, operation):
-            words = (image.expanded_keygen if operation == "keygen"
-                     else image.expanded_sign)
-            return [((word >> 96) & 0xF, (word >> 88) & 0xFF)
-                    for word in words[:-1]]
-
-        xmss_keygen = commands(xmss, "keygen")
-        lms_keygen = commands(lms, "keygen")
-        self.assertEqual(xmss_keygen.count((Macro.TREE_PUSH, 34)),
-                         1024 * 67)
-        self.assertNotIn((Macro.TREE_PUSH, 34), lms_keygen)
-        self.assertEqual(lms_keygen.count((Macro.HASH, 43)), 1024)
-        self.assertEqual(lms_keygen.count((Macro.HASH, 44)), 1024)
-
-        expected_sign = [
-            (Macro.HASH, 40),
-            (Macro.TRANSFORM, 48),
-            (Macro.EMIT, 51),
-            (Macro.CHAIN, 41),
-            (Macro.EMIT, 52),
-        ]
-        self.assertEqual(commands(xmss, "sign"), expected_sign)
-        self.assertEqual(commands(lms, "sign"), expected_sign)
 
 
 if __name__ == "__main__":

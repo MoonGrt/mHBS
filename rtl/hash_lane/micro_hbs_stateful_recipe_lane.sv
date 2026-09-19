@@ -6,8 +6,7 @@
 // execute every operation required by both stateful profiles.
 module micro_hbs_stateful_recipe_lane #(
     parameter integer UNROLL = 2,
-    parameter integer MAX_MESSAGE_BYTES = 87,
-    parameter bit EXTERNAL_SHAKE = 1'b0
+    parameter integer MAX_MESSAGE_BYTES = 87
 ) (
     input  wire         clk,
     input  wire         rst_n,
@@ -36,24 +35,7 @@ module micro_hbs_stateful_recipe_lane #(
     output logic        error,
     output logic [31:0] hash_contexts,
     output logic [31:0] permutations,
-    output logic [31:0] active_cycles,
-
-    // Primitive SHAKE service.  In the unified product these ports connect
-    // both recipe frontends to the same two physical U2 lanes used by SLH.
-    output wire         external_context_valid,
-    input  wire         external_context_ready,
-    output wire         external_fast_block_valid,
-    input  wire         external_fast_block_ready,
-    output wire [1087:0] external_fast_block_data,
-    output wire         external_block_valid,
-    input  wire         external_block_ready,
-    output wire [127:0] external_block_data,
-    output wire         external_block_last,
-    input  wire         external_response_valid,
-    input  wire [271:0] external_response_digest,
-    input  wire         external_finish_valid,
-    input  wire [271:0] external_finish_digest,
-    input  wire         external_error
+    output logic [31:0] active_cycles
 );
     // Public recipe ABI used by descriptor image v2.
     localparam logic [3:0] R_PRF_INDEX       = 4'd1;
@@ -124,7 +106,6 @@ module micro_hbs_stateful_recipe_lane #(
         ? finish_digest_wide[255:0] : digest;
     logic hash_start, block_valid;
     logic [127:0] block_data;
-    logic [127:0] source_beat;
     logic [1087:0] fast_block_data;
     logic block_last;
     // 136 = 128 + 8.  Spell this as shifts so synthesis cannot consume a DSP
@@ -182,24 +163,156 @@ module micro_hbs_stateful_recipe_lane #(
         end
     endfunction
 
-    function automatic [7:0] list_prefix_byte(input integer absolute_index);
+    function automatic [7:0] source_byte(
+        input [3:0] kind, input integer absolute_index
+    );
         begin
-            list_prefix_byte = 8'b0;
-            if (absolute_index < 16)
-                list_prefix_byte = vec128_byte(identifier, absolute_index);
-            else if (absolute_index < 20)
-                list_prefix_byte = u32_q_byte(absolute_index-16);
-            else if (absolute_index < 22)
-                list_prefix_byte = 8'h80;
+            source_byte = 8'b0;
+            case (kind)
+                P_PRF_INDEX: begin
+                    if (absolute_index == 31) source_byte = 8'd3;
+                    else if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(secret_prf, absolute_index-32);
+                    else if (absolute_index >= 92 && absolute_index < 96)
+                        source_byte = u32_q_byte(absolute_index-92);
+                end
+                P_MESSAGE_ROOT: begin
+                    if (absolute_index == 31) source_byte = 8'd2;
+                    else if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(randomizer, absolute_index-32);
+                    else if (absolute_index >= 64 && absolute_index < 96)
+                        source_byte = vec256_byte(root, absolute_index-64);
+                    else if (absolute_index >= 124 && absolute_index < 128)
+                        source_byte = u32_q_byte(absolute_index-124);
+                    else if (absolute_index >= 128
+                             && absolute_index < 128+message_length)
+                        source_byte = message[(absolute_index-128)*8 +: 8];
+                end
+                P_SEED_ADDRESS: begin
+                    if (absolute_index == 31) source_byte = 8'd4;
+                    else if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(secret_seed, absolute_index-32);
+                    else if (absolute_index >= 64 && absolute_index < 96)
+                        source_byte = vec256_byte(public_seed, absolute_index-64);
+                    else if (absolute_index >= 96 && absolute_index < 128)
+                        source_byte = address_byte(
+                            absolute_index-96, 8'd0, 8'd0);
+                end
+                P_ADDRESS_PRF: begin
+                    if (absolute_index == 31) source_byte = 8'd3;
+                    else if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(public_seed, absolute_index-32);
+                    else if (absolute_index >= 64 && absolute_index < 96)
+                        source_byte = address_byte(
+                            absolute_index-64,
+                            {6'b0, compound_stage}, {3'b0, chain_step});
+                end
+                P_MASKED_F: begin
+                    if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(temporary_key,
+                                                  absolute_index-32);
+                    else if (absolute_index >= 64 && absolute_index < 96)
+                        source_byte = vec256_byte(current_value,
+                                                  absolute_index-64)
+                            ^ vec256_byte(mask0, absolute_index-64);
+                end
+                P_MASKED_H: begin
+                    if (absolute_index == 31) source_byte = 8'd1;
+                    else if (absolute_index >= 32 && absolute_index < 64)
+                        source_byte = vec256_byte(temporary_key,
+                                                  absolute_index-32);
+                    else if (absolute_index >= 64 && absolute_index < 96)
+                        source_byte = vec256_byte(left_value,
+                                                  absolute_index-64)
+                            ^ vec256_byte(mask0, absolute_index-64);
+                    else if (absolute_index >= 96 && absolute_index < 128)
+                        source_byte = vec256_byte(right_value,
+                                                  absolute_index-96)
+                            ^ vec256_byte(mask1, absolute_index-96);
+                end
+                P_PREFIX_MESSAGE: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20)
+                        source_byte = u32_q_byte(absolute_index-16);
+                    else if (absolute_index < 22) source_byte = 8'h81;
+                    else if (absolute_index < 54)
+                        source_byte = vec256_byte(randomizer,
+                                                  absolute_index-22);
+                    else if (absolute_index < 54+message_length)
+                        source_byte = message[(absolute_index-54)*8 +: 8];
+                end
+                P_PREFIX_PRIVATE: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20)
+                        source_byte = u32_q_byte(absolute_index-16);
+                    else if (absolute_index < 22)
+                        source_byte = absolute_index == 20 ? 8'b0 : item;
+                    else if (absolute_index == 22) source_byte = 8'hff;
+                    else if (absolute_index < 55)
+                        source_byte = vec256_byte(secret_seed,
+                                                  absolute_index-23);
+                end
+                P_PREFIX_CHAIN: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20)
+                        source_byte = u32_q_byte(absolute_index-16);
+                    else if (absolute_index < 22)
+                        source_byte = absolute_index == 20 ? 8'b0 : item;
+                    else if (absolute_index == 22)
+                        source_byte = {3'b0, chain_step};
+                    else if (absolute_index < 55)
+                        source_byte = vec256_byte(current_value,
+                                                  absolute_index-23);
+                end
+                P_PREFIX_LIST: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20)
+                        source_byte = u32_q_byte(absolute_index-16);
+                    else if (absolute_index < 22) source_byte = 8'h80;
+                end
+                P_PREFIX_LEAF: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20) begin
+                        // Heap leaf number is 1024+q.
+                        case (absolute_index-16)
+                            0, 1: source_byte = 8'b0;
+                            2: source_byte = 8'd4 + {6'b0, q[9:8]};
+                            3: source_byte = q[7:0];
+                        endcase
+                    end else if (absolute_index < 22) source_byte = 8'h82;
+                    else if (absolute_index < 54)
+                        source_byte = vec256_byte(current_value,
+                                                  absolute_index-22);
+                end
+                P_PREFIX_PARENT: begin
+                    if (absolute_index < 16)
+                        source_byte = vec128_byte(identifier, absolute_index);
+                    else if (absolute_index < 20)
+                        source_byte = address[8*(absolute_index-16) +: 8];
+                    else if (absolute_index < 22) source_byte = 8'h83;
+                    else if (absolute_index < 54)
+                        source_byte = vec256_byte(left_value,
+                                                  absolute_index-22);
+                    else if (absolute_index < 86)
+                        source_byte = vec256_byte(right_value,
+                                                  absolute_index-54);
+                end
+                default: source_byte = 8'b0;
+            endcase
         end
     endfunction
 
     integer compose_byte;
-    logic [11:0] compose_absolute;
-    logic [7:0] compose_rate_byte;
-    logic [4:0] list_target_bytes;
-    logic [4:0] list_available_bytes;
-    logic [4:0] list_fill_bytes;
+    integer compose_absolute;
+    integer compose_rate_byte;
+    integer list_target_bytes;
+    integer list_available_bytes;
+    integer list_fill_bytes;
     integer list_copy_byte;
     wire fast_eligible = primitive_kind != P_MESSAGE_ROOT
         && primitive_kind != P_PREFIX_MESSAGE
@@ -284,67 +397,6 @@ module micro_hbs_stateful_recipe_lane #(
         endcase
         fast_block_data[1087] = 1'b1;
     end
-    // The two variable-length message recipes have fixed prefixes and at
-    // most two rate blocks.  Map whole 128-bit beats explicitly instead of
-    // instantiating sixteen independent variable byte selectors per beat.
-    always_comb begin
-        source_beat = '0;
-        case (primitive_kind)
-            P_MESSAGE_ROOT: begin
-                if (block_index == 0) begin
-                    case (append_index)
-                        1: source_beat[15*8 +: 8] = 8'd2;
-                        2: source_beat = randomizer[0 +: 128];
-                        3: source_beat = randomizer[128 +: 128];
-                        4: source_beat = root[0 +: 128];
-                        5: source_beat = root[128 +: 128];
-                        7: begin
-                            source_beat[14*8 +: 8] = {6'b0, q[9:8]};
-                            source_beat[15*8 +: 8] = q[7:0];
-                        end
-                        8: source_beat[0 +: 64] = message[0 +: 64];
-                        default: source_beat = '0;
-                    endcase
-                end else begin
-                    case (append_index)
-                        0: source_beat = message[8*8 +: 128];
-                        1: source_beat = message[24*8 +: 128];
-                        2: source_beat = message[40*8 +: 128];
-                        3: source_beat = message[56*8 +: 128];
-                        4: source_beat[0 +: 120] = message[72*8 +: 120];
-                        default: source_beat = '0;
-                    endcase
-                end
-            end
-            P_PREFIX_MESSAGE: begin
-                if (block_index == 0) begin
-                    case (append_index)
-                        0: source_beat = identifier;
-                        1: begin
-                            source_beat[2*8 +: 8] = {6'b0, q[9:8]};
-                            source_beat[3*8 +: 8] = q[7:0];
-                            source_beat[4*8 +: 16] = 16'h8181;
-                            source_beat[6*8 +: 80] = randomizer[0 +: 80];
-                        end
-                        2: source_beat = randomizer[10*8 +: 128];
-                        3: begin
-                            source_beat[0 +: 48] = randomizer[26*8 +: 48];
-                            source_beat[6*8 +: 80] = message[0 +: 80];
-                        end
-                        4: source_beat = message[10*8 +: 128];
-                        5: source_beat = message[26*8 +: 128];
-                        6: source_beat = message[42*8 +: 128];
-                        7: source_beat = message[58*8 +: 128];
-                        8: source_beat[0 +: 64] = message[74*8 +: 64];
-                        default: source_beat = '0;
-                    endcase
-                end else if (append_index == 0)
-                    source_beat[0 +: 40] = message[82*8 +: 40];
-            end
-            default: source_beat = '0;
-        endcase
-    end
-
     always_comb begin
         block_data = '0;
         compose_absolute = 0;
@@ -376,7 +428,7 @@ module micro_hbs_stateful_recipe_lane #(
                         = list_beat_buffer[compose_byte*8 +: 8];
                 else if (compose_absolute < primitive_length)
                     block_data[compose_byte*8 +: 8]
-                        = source_beat[compose_byte*8 +: 8];
+                        = source_byte(primitive_kind, compose_absolute);
                 if (block_last && compose_absolute == primitive_length)
                     block_data[compose_byte*8 +: 8]
                         = block_data[compose_byte*8 +: 8] ^ 8'h1f;
@@ -394,39 +446,21 @@ module micro_hbs_stateful_recipe_lane #(
         block_valid = state == S_BLOCK;
     end
 
-    assign external_context_valid = hash_start;
-    assign external_fast_block_valid = state == S_START && fast_eligible;
-    assign external_fast_block_data = fast_block_data;
-    assign external_block_valid = block_valid;
-    assign external_block_data = block_data;
-    assign external_block_last = block_last;
-
-    generate if (!EXTERNAL_SHAKE) begin : local_shake_service
-        micro_hbs_compact_shake_context_lane #(.UNROLL(UNROLL)) shake (
-            .clk, .rst_n, .context_valid(hash_start),
-            .context_ready(hash_ready),
-            .fast_block_valid(state == S_START && fast_eligible),
-            .fast_block_ready,
-            .fast_block_data(fast_block_data),
-            .chain_enable(1'b0), .chain_prefix(1'b0),
-            .chain_prefix_preserve_counter(1'b0),
-            .chain_prefix_domain(3'b0), .chain_count(5'd1),
-            .capture_enable(1'b0), .capture_after(5'b0),
-            .block_valid, .block_ready, .block_data, .block_last,
-            .response_valid(digest_valid), .response_digest(digest_wide),
-            .finish_valid, .finish_digest(finish_digest_wide),
-            .capture_digest(), .capture_valid(), .error(hash_error)
-        );
-    end else begin : shared_shake_service
-        assign hash_ready = external_context_ready;
-        assign fast_block_ready = external_fast_block_ready;
-        assign block_ready = external_block_ready;
-        assign digest_valid = external_response_valid;
-        assign digest_wide = external_response_digest;
-        assign finish_valid = external_finish_valid;
-        assign finish_digest_wide = external_finish_digest;
-        assign hash_error = external_error;
-    end endgenerate
+    micro_hbs_compact_shake_context_lane #(.UNROLL(UNROLL)) shake (
+        .clk, .rst_n, .context_valid(hash_start),
+        .context_ready(hash_ready),
+        .fast_block_valid(state == S_START && fast_eligible),
+        .fast_block_ready,
+        .fast_block_data(fast_block_data),
+        .chain_enable(1'b0), .chain_prefix(1'b0),
+        .chain_prefix_preserve_counter(1'b0),
+        .chain_prefix_domain(3'b0), .chain_count(5'd1),
+        .capture_enable(1'b0), .capture_after(5'b0),
+        .block_valid, .block_ready, .block_data, .block_last,
+        .response_valid(digest_valid), .response_digest(digest_wide),
+        .finish_valid, .finish_digest(finish_digest_wide),
+        .capture_digest(), .capture_valid(), .error(hash_error)
+    );
 
     task automatic set_primitive(
         input logic [3:0] next_primitive,
@@ -462,15 +496,13 @@ module micro_hbs_stateful_recipe_lane #(
                         compound_stage <= '0;
                         error <= 1'b0;
                         case (request_recipe)
-                            R_PRF_INDEX: begin
+                            R_PRF_INDEX:
                                 set_primitive(P_PRF_INDEX, 12'd96);
-                            end
                             R_MESSAGE_ROOT:
                                 set_primitive(P_MESSAGE_ROOT,
                                               12'd128+request_message_length);
-                            R_MASKED_CHAIN: begin
+                            R_MASKED_CHAIN:
                                 set_primitive(P_SEED_ADDRESS, 12'd128);
-                            end
                             R_MASKED_PARENT: begin
                                 compound_stage <= 0;
                                 set_primitive(P_ADDRESS_PRF, 12'd96);
@@ -478,18 +510,16 @@ module micro_hbs_stateful_recipe_lane #(
                             R_PREFIX_MESSAGE:
                                 set_primitive(P_PREFIX_MESSAGE,
                                               12'd54+request_message_length);
-                            R_PREFIX_CHAIN: begin
+                            R_PREFIX_CHAIN:
                                 set_primitive(P_PREFIX_PRIVATE, 12'd55);
-                            end
                             R_PREFIX_LIST:
                                 set_primitive(P_PREFIX_LIST, 12'd2166);
                             R_PREFIX_LEAF: begin
                                 current_value <= request_left;
                                 set_primitive(P_PREFIX_LEAF, 12'd54);
                             end
-                            R_PREFIX_PARENT: begin
+                            R_PREFIX_PARENT:
                                 set_primitive(P_PREFIX_PARENT, 12'd86);
-                            end
                             default: begin
                                 error <= 1'b1;
                                 state <= S_ERROR;
@@ -544,7 +574,7 @@ module micro_hbs_stateful_recipe_lane #(
                                      + list_copy_byte
                                      < 22)
                                 list_beat_buffer[list_copy_byte*8 +: 8]
-                                    <= list_prefix_byte(
+                                    <= source_byte(P_PREFIX_LIST,
                                         block_offset + append_offset
                                         + list_copy_byte);
                             else
@@ -626,9 +656,8 @@ module micro_hbs_stateful_recipe_lane #(
                                     if (requested_steps == 0) begin
                                         response_value <= completed_digest;
                                         state <= S_RESPONSE;
-                                    end else begin
+                                    end else
                                         set_primitive(P_PREFIX_CHAIN, 12'd55);
-                                    end
                                 end else if (chain_step + 1'b1 >= requested_steps) begin
                                     response_value <= completed_digest;
                                     state <= S_RESPONSE;
