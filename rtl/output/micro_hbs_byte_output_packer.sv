@@ -31,15 +31,9 @@ module micro_hbs_byte_output_packer (
         if (!rst_n) begin
             byte_count <= '0;
             output_valid <= 1'b0;
-            out_data <= '0;
-            out_keep <= '0;
-            out_last <= 1'b0;
         end else if (clear) begin
             byte_count <= '0;
             output_valid <= 1'b0;
-            out_data <= '0;
-            out_keep <= '0;
-            out_last <= 1'b0;
         end else begin
             if (accept_output)
                 output_valid <= 1'b0;

@@ -17,12 +17,22 @@ STATEFUL_RTL := \
 	rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
 	rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
 	rtl/hash_lane/micro_hbs_stateful_recipe_lane.sv \
+	rtl/hash_lane/micro_hbs_recipe_lane_controller.sv \
+	rtl/hash_lane/micro_hbs_shared_recipe_fabric.sv \
 	rtl/control/micro_hbs_stateful_index_guard.sv \
 	rtl/memory/micro_hbs_endpoint_scratch256.sv \
 	rtl/memory/micro_hbs_full_tree_cache256.sv \
 	rtl/treehash/micro_hbs_tree_push_reducer.sv \
 	rtl/output/micro_hbs_byte_output_packer.sv \
 	rtl/top/micro_hbs_horizontal_stateful_hbs_top.sv
+
+UNIFIED_RTL := \
+	$(STATEFUL_RTL) \
+	rtl/sequencer/micro_hbs_unified_program_rom.sv \
+	rtl/sequencer/micro_hbs_unified_task_sequencer.sv \
+	rtl/memory/micro_hbs_local_value_memories.sv \
+	rtl/top/micro_hbs_horizontal_hbs_top.sv \
+	rtl/top/micro_hbs_unified_top.sv
 
 SLH_DSA_RTL := \
 	rtl/sequencer/micro_hbs_program_store.sv \
@@ -62,7 +72,8 @@ SLH_DSA_RTL := \
 .PHONY: test lint sim-lms sim-xmss sim-slh-dsa sim-slh-dsa-cycles \
 	sim-slh-dsa-schedule compile-horizontal-slh-dsa compile-horizontal-contexts \
 	compile-generic-hbs-macrocode \
-	compile-stateful-hbs-macrocode generate-stateful-rtl-vectors \
+	compile-stateful-hbs-macrocode compile-unified-hbs-microcode \
+	generate-stateful-rtl-vectors \
 	analyze-hbs-kernel-commonality \
 	test-state-recovery rtl-test rtl-unit-test rtl-keccak-test \
 	rtl-sha256-bounded-test rtl-shake-test rtl-shake-stream-test \
@@ -93,6 +104,10 @@ SLH_DSA_RTL := \
 	synth-horizontal-token-hash-core synth-horizontal-slh-dsa-sign \
 	post-route-horizontal-slh-dsa-sign \
 	rtl-stateful-unit-test rtl-xmss-stateful-test rtl-lms-stateful-test \
+	rtl-unified-program-rom-test rtl-unified-dispatch-test synth-unified-hbs \
+	rtl-unified-task-sequencer-test \
+	rtl-unified-xmss-test rtl-unified-lms-test \
+	rtl-unified-slh-sign-test \
 	rtl-xmss-stateful-robustness-test rtl-lms-stateful-robustness-test \
 	synth-stateful-xmss synth-stateful-lms post-route-stateful-xmss \
 	synth-keccak-round synth-compact-lane \
@@ -131,6 +146,25 @@ compile-generic-hbs-macrocode:
 
 compile-stateful-hbs-macrocode:
 	$(PYTHON) scripts/compile_stateful_hbs_macrocode.py
+
+compile-unified-hbs-microcode: compile-generic-hbs-macrocode compile-stateful-hbs-macrocode
+	$(PYTHON) scripts/compile_unified_hbs_microcode.py
+
+rtl-unified-program-rom-test: compile-unified-hbs-microcode
+	mkdir -p build/iverilog
+	iverilog -g2012 -o build/iverilog/unified_program_rom.vvp \
+		rtl/sequencer/micro_hbs_unified_program_rom.sv \
+		tb/unit/tb_micro_hbs_unified_program_rom.sv
+	vvp build/iverilog/unified_program_rom.vvp
+
+rtl-unified-task-sequencer-test: compile-unified-hbs-microcode
+	mkdir -p build/iverilog
+	iverilog -g2012 -o build/iverilog/unified_task_sequencer.vvp \
+		rtl/sequencer/micro_hbs_event_scoreboard.sv \
+		rtl/sequencer/micro_hbs_unified_program_rom.sv \
+		rtl/sequencer/micro_hbs_unified_task_sequencer.sv \
+		tb/unit/tb_micro_hbs_unified_task_sequencer.sv
+	vvp build/iverilog/unified_task_sequencer.vvp
 
 generate-stateful-rtl-vectors:
 	$(PYTHON) scripts/generate_stateful_rtl_vectors.py
@@ -179,6 +213,38 @@ rtl-lms-stateful-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vect
 		-GPROFILE=1 --Mdir build/verilator-lms-stateful \
 		$(STATEFUL_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
 	build/verilator-lms-stateful/Vtb_micro_hbs_stateful_products
+
+rtl-unified-dispatch-test: compile-unified-hbs-microcode
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_unified_top \
+		--Mdir build/verilator-unified-dispatch \
+		$(UNIFIED_RTL) tb/integration/tb_micro_hbs_unified_top.sv
+	build/verilator-unified-dispatch/Vtb_micro_hbs_unified_top
+
+rtl-unified-slh-sign-test: compile-unified-hbs-microcode
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_unified_slh_sign \
+		--Mdir build/verilator-unified-slh-sign \
+		$(UNIFIED_RTL) tb/integration/tb_micro_hbs_unified_slh_sign.sv
+	build/verilator-unified-slh-sign/Vtb_micro_hbs_unified_slh_sign
+
+rtl-unified-xmss-test: compile-unified-hbs-microcode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=0 -GUNIFIED=1 --Mdir build/verilator-unified-xmss \
+		$(UNIFIED_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-unified-xmss/Vtb_micro_hbs_stateful_products
+
+rtl-unified-lms-test: compile-unified-hbs-microcode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=1 -GUNIFIED=1 --Mdir build/verilator-unified-lms \
+		$(UNIFIED_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-unified-lms/Vtb_micro_hbs_stateful_products
 
 rtl-xmss-stateful-robustness-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vectors
 	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
@@ -616,6 +682,13 @@ synth-stateful-lms:
 		-log build/vivado/$(STATEFUL_LMS_TAG)_driver.log \
 		-source experiments/synth_stateful_hbs_top.tcl \
 		-tclargs lms $(STATEFUL_LMS_TAG) $(STATEFUL_PART)
+
+synth-unified-hbs: compile-unified-hbs-microcode
+	mkdir -p build/vivado/unified_hbs_single_rom_a200t_3
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/unified_hbs_single_rom_a200t_3_driver.log \
+		-source experiments/synth_unified_hbs_top.tcl \
+		-tclargs unified_hbs_single_rom_a200t_3 $(STATEFUL_PART)
 
 post-route-stateful-xmss:
 	mkdir -p build/vivado/$(STATEFUL_XMSS_TAG)_postroute

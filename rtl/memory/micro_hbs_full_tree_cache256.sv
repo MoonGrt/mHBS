@@ -105,7 +105,6 @@ module micro_hbs_full_tree_cache256 #(
             read_authorized <= 1'b0;
             lookup_rsp_valid <= 1'b0;
             lookup_hit <= 1'b0;
-            lookup_data <= '0;
             error <= 1'b0;
             error_code <= '0;
             tree_writes <= '0;

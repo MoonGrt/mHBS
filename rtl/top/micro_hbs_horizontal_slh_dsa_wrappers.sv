@@ -41,18 +41,33 @@ module micro_hbs_horizontal_slh_dsa_sign_top #(
     micro_hbs_horizontal_hbs_top #(
         .UNROLL(UNROLL),
         .MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
-        .PROGRAM_TOKENS(11),
+        .PROGRAM_TOKENS(14),
         .OUTPUT_BYTES(17088),
         .REQUIRE_MESSAGE(1'b1),
+        .DUAL_OPERATION(1'b1),
         .PROFILE_ENABLE(PROFILE_ENABLE),
         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),
         .TOKEN_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_sign_macro_tokens.mem"),
+            "rtl/microcode/slh_dsa_128f_unified_tokens.mem"),
         .TEMPLATE_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_sign_macro_templates.mem"),
+            "rtl/microcode/slh_dsa_128f_unified_templates.mem"),
         .DESCRIPTOR_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_sign_macro_descriptors.mem")
-    ) engine (.*);
+            "rtl/microcode/slh_dsa_128f_unified_descriptors.mem")
+    ) engine (
+        .job_operation(1'b1),
+        .external_context_valid(), .external_context_ready(2'b0),
+        .external_chain_enable(), .external_chain_prefix(),
+        .external_chain_prefix_preserve_counter(),
+        .external_chain_prefix_domain(), .external_chain_count(),
+        .external_capture_enable(), .external_capture_after(),
+        .external_block_valid(), .external_block_ready(2'b0),
+        .external_block_data(), .external_block_last(),
+        .external_response_valid(2'b0),
+        .external_response_digest(544'b0),
+        .external_capture_digest(256'b0),
+        .external_capture_valid(2'b0), .external_shake_error(2'b0),
+        .*
+    );
 endmodule
 
 // Keygen emits SK || PK (96 bytes) and shares the complete execution
@@ -86,19 +101,20 @@ module micro_hbs_horizontal_slh_dsa_keygen_top #(
     wire unused_message_ready;
     micro_hbs_horizontal_hbs_top #(
         .UNROLL(UNROLL),
-        .PROGRAM_TOKENS(3),
+        .PROGRAM_TOKENS(14),
         .OUTPUT_BYTES(96),
         .REQUIRE_MESSAGE(1'b0),
+        .DUAL_OPERATION(1'b1),
         .PROFILE_ENABLE(PROFILE_ENABLE),
         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),
         .TOKEN_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_keygen_macro_tokens.mem"),
+            "rtl/microcode/slh_dsa_128f_unified_tokens.mem"),
         .TEMPLATE_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_keygen_macro_templates.mem"),
+            "rtl/microcode/slh_dsa_128f_unified_templates.mem"),
         .DESCRIPTOR_INIT_FILE(
-            "rtl/microcode/slh_dsa_128f_keygen_macro_descriptors.mem")
+            "rtl/microcode/slh_dsa_128f_unified_descriptors.mem")
     ) engine (
-        .clk, .rst_n, .job_valid, .job_ready,
+        .clk, .rst_n, .job_valid, .job_ready, .job_operation(1'b0),
         .job_message_length(32'd0),
         .job_sk_seed, .job_sk_prf, .job_pk_seed,
         .job_pk_root(128'd0), .job_opt_rand(128'd0),
@@ -108,7 +124,18 @@ module micro_hbs_horizontal_slh_dsa_keygen_top #(
         .out_valid, .out_ready, .out_data, .out_keep, .out_last,
         .busy, .done, .error, .error_code,
         .hash_contexts, .keccak_permutations,
-        .lane0_active_cycles, .lane1_active_cycles
+        .lane0_active_cycles, .lane1_active_cycles,
+        .external_context_valid(), .external_context_ready(2'b0),
+        .external_chain_enable(), .external_chain_prefix(),
+        .external_chain_prefix_preserve_counter(),
+        .external_chain_prefix_domain(), .external_chain_count(),
+        .external_capture_enable(), .external_capture_after(),
+        .external_block_valid(), .external_block_ready(2'b0),
+        .external_block_data(), .external_block_last(),
+        .external_response_valid(2'b0),
+        .external_response_digest(544'b0),
+        .external_capture_digest(256'b0),
+        .external_capture_valid(2'b0), .external_shake_error(2'b0)
     );
 endmodule
 

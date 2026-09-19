@@ -35,11 +35,12 @@ module micro_hbs_horizontal_xmss_top #(
     micro_hbs_horizontal_stateful_hbs_top #(
         .UNROLL(UNROLL), .PROFILE_ENABLE(PROFILE_ENABLE),
         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),
-        .TOKEN_INIT_FILE("rtl/microcode/xmss_shake256_h10_w4_tokens.mem"),
-        .TEMPLATE_INIT_FILE("rtl/microcode/xmss_shake256_h10_w4_templates.mem"),
-        .DESCRIPTOR_INIT_FILE("rtl/microcode/xmss_shake256_h10_w4_descriptors.mem")
+        .TOKEN_INIT_FILE("rtl/microcode/stateful_hbs_unified_tokens.mem"),
+        .TEMPLATE_INIT_FILE("rtl/microcode/stateful_hbs_unified_templates.mem"),
+        .DESCRIPTOR_INIT_FILE("rtl/microcode/stateful_hbs_unified_descriptors.mem")
     ) core (
-        .clk, .rst_n, .job_valid, .job_ready, .job_operation,
+        .clk, .rst_n, .job_valid, .job_ready, .invalidate_state(1'b0),
+        .job_family(1'b0), .job_operation,
         .job_message_length, .job_initial_q, .job_secret_seed,
         .job_secret_prf, .job_public_seed, .job_identifier(128'b0),
         .job_randomizer, .message_valid, .message_ready, .message_data,
@@ -47,7 +48,13 @@ module micro_hbs_horizontal_xmss_top #(
         .state_commit_ready, .state_next_q, .out_valid, .out_ready,
         .out_data, .out_keep, .out_last, .busy, .done, .error,
         .error_code, .hash_contexts, .keccak_permutations,
-        .lane0_active_cycles, .lane1_active_cycles, .tree_cache_valid
+        .lane0_active_cycles, .lane1_active_cycles, .tree_cache_valid,
+        .external_descriptor_request_valid(),
+        .external_descriptor_request_ready(1'b0),
+        .external_descriptor_request_index(),
+        .external_descriptor_response_valid(1'b0),
+        .external_descriptor_response_data(64'b0),
+        .external_command_descriptor(64'b0)
     );
 endmodule
 
