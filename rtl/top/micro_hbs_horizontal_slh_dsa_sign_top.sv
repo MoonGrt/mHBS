@@ -432,7 +432,8 @@ module micro_hbs_horizontal_slh_dsa_sign_reference_top #(
     end
 
     micro_hbs_static_task_sequencer static_microcode (
-        .clk, .rst_n, .job_valid(ucode_start), .job_ready(ucode_job_ready),
+        .clk, .rst_n, .job_valid(ucode_start), .job_entry(9'd0),
+        .job_ready(ucode_job_ready),
         .done(ucode_done), .busy(ucode_busy), .error(ucode_error),
         .error_code(ucode_error_code),
         .lane0_valid(ucode_lane0_valid), .lane0_ready(ucode_lane_ready),
@@ -457,6 +458,8 @@ module micro_hbs_horizontal_slh_dsa_sign_reference_top #(
             .context_valid(state == S_CONTEXT
                 && active_mask[LOGICAL_LANE]),
             .context_ready(lane_context_ready[LOGICAL_LANE]),
+            .fast_block_valid(1'b0), .fast_block_ready(),
+            .fast_block_data(1088'b0),
             .chain_enable(task_kind == TK_FORS_LEAF
                 || task_kind == TK_WOTS_CHAIN),
             .chain_prefix(task_kind == TK_FORS_LEAF
@@ -473,6 +476,7 @@ module micro_hbs_horizontal_slh_dsa_sign_reference_top #(
                 || (task_kind != TK_TL_FORS && task_kind != TK_TL_WOTS)),
             .response_valid(lane_response_valid[LOGICAL_LANE]),
             .response_digest(lane_response_digest[LOGICAL_LANE]),
+            .finish_valid(), .finish_digest(),
             .capture_digest(lane_capture_digest[LOGICAL_LANE]),
             .capture_valid(lane_capture_valid[LOGICAL_LANE]),
             .error(lane_error[LOGICAL_LANE])

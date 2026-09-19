@@ -7,6 +7,7 @@
 // sufficient for layer -> WOTS leaf traversal.
 module micro_hbs_static_task_sequencer #(
     parameter integer PROGRAM_TOKENS = 384,
+    parameter integer PROGRAM_TEMPLATES = 64,
     parameter TOKEN_INIT_FILE = "rtl/microcode/slh_dsa_128f_sign_tokens.mem",
     parameter TEMPLATE_INIT_FILE = "rtl/microcode/slh_dsa_128f_sign_templates.mem"
 ) (
@@ -14,6 +15,7 @@ module micro_hbs_static_task_sequencer #(
     input  wire         rst_n,
     input  wire         job_valid,
     output wire         job_ready,
+    input  wire [8:0]   job_entry,
     output logic        done,
     output wire         busy,
     output logic        error,
@@ -52,7 +54,7 @@ module micro_hbs_static_task_sequencer #(
     state_t state;
     logic [8:0] pc;
     logic [127:0] token_memory [0:PROGRAM_TOKENS-1];
-    logic [127:0] template_memory [0:63];
+    logic [127:0] template_memory [0:PROGRAM_TEMPLATES-1];
 
     initial begin
         $readmemh(TOKEN_INIT_FILE, token_memory);
@@ -92,7 +94,9 @@ module micro_hbs_static_task_sequencer #(
     logic [5:0] repeats_remaining;
     wire [24:0] initial_coord0 = {1'b0, token_coord0} + total_bias0;
     wire [24:0] initial_coord1 = {1'b0, token_coord1} + total_bias1;
-    wire [127:0] template_data = template_memory[token_template];
+    wire template_in_range = token_template < PROGRAM_TEMPLATES;
+    wire [127:0] template_data = template_in_range
+        ? template_memory[token_template] : 128'b0;
     logic [127:0] instruction;
     always_comb begin
         instruction = template_data;
@@ -175,7 +179,7 @@ module micro_hbs_static_task_sequencer #(
                 state <= S_IDLE;
             end else case (state)
                 S_IDLE: if (job_valid && job_ready) begin
-                    pc <= 0;
+                    pc <= job_entry;
                     loop_sp <= 0;
                     loop_bias0[0] <= 0;
                     loop_bias0[1] <= 0;
@@ -235,6 +239,8 @@ module micro_hbs_static_task_sequencer #(
                                     || token_stride1 != 0))
                             || (token_kind == TOKEN_RUN
                                 && token_repeat_minus_one == 0)
+                            || (token_kind != TOKEN_HALT
+                                && !template_in_range)
                             || (token_kind != TOKEN_HALT
                                 && template_data[127:124] != OP_ISSUE)
                             || initial_coord0[24] || initial_coord1[24]) begin

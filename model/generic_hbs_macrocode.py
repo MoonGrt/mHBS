@@ -28,7 +28,10 @@ from model.static_task_microcode import (
 class Macro(IntEnum):
     HASH = 1
     CHAIN = 2
-    TREE = 3
+    TREE_PUSH = 3
+    # Source compatibility for the v2 whole-tree compiler.  New images must
+    # use TREE_PUSH semantics; the numeric command encoding is unchanged.
+    TREE = TREE_PUSH
     TRANSFORM = 4
     EMIT = 5
 
@@ -44,6 +47,8 @@ class DescriptorKind(IntEnum):
     TRANSFORM = 8
     EMIT = 9
     IMAGE = 10
+    PROFILE = 11
+    RECIPE = 12
 
 
 class SegmentKind(IntEnum):

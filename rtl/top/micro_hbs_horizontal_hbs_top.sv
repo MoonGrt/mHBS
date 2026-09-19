@@ -477,7 +477,7 @@ module micro_hbs_horizontal_hbs_top #(
         .TOKEN_INIT_FILE(TOKEN_INIT_FILE),
         .TEMPLATE_INIT_FILE(TEMPLATE_INIT_FILE)
     ) macro_sequencer (
-        .clk, .rst_n, .job_valid(sequencer_start),
+        .clk, .rst_n, .job_valid(sequencer_start), .job_entry(9'd0),
         .job_ready(sequencer_job_ready), .done(sequencer_done),
         .busy(sequencer_busy), .error(sequencer_error),
         .error_code(sequencer_error_code),
@@ -502,6 +502,8 @@ module micro_hbs_horizontal_hbs_top #(
             .context_valid(state == S_HASH_CONTEXT
                 && active_mask[LOGICAL_LANE]),
             .context_ready(hash_context_ready[LOGICAL_LANE]),
+            .fast_block_valid(1'b0), .fast_block_ready(),
+            .fast_block_data(1088'b0),
             .chain_enable(task_chain_enable),
             .chain_prefix(task_chain_prefix),
             .chain_prefix_preserve_counter(task_chain_preserve),
@@ -516,6 +518,7 @@ module micro_hbs_horizontal_hbs_top #(
             .block_last(block_index == task_blocks-1),
             .response_valid(hash_response_valid[LOGICAL_LANE]),
             .response_digest(hash_response_digest[LOGICAL_LANE]),
+            .finish_valid(), .finish_digest(),
             .capture_digest(hash_capture_digest[LOGICAL_LANE]),
             .capture_valid(hash_capture_valid[LOGICAL_LANE]),
             .error(hash_error[LOGICAL_LANE])

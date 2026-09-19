@@ -7,6 +7,22 @@ SLH_DSA_UNROLL ?= 2
 HORIZONTAL_SIGN_TAG ?= horizontal_slh_dsa_sign
 HORIZONTAL_SIGN_PART ?= xc7a200tffg1156-3
 HORIZONTAL_SIGN_POSTROUTE_TAG ?= $(HORIZONTAL_SIGN_TAG)_postroute
+STATEFUL_PART ?= xc7a200tffg1156-3
+STATEFUL_XMSS_TAG ?= stateful_xmss_a200t_3
+STATEFUL_LMS_TAG ?= stateful_lms_a200t_3
+
+STATEFUL_RTL := \
+	rtl/sequencer/micro_hbs_event_scoreboard.sv \
+	rtl/sequencer/micro_hbs_static_task_sequencer.sv \
+	rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+	rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+	rtl/hash_lane/micro_hbs_stateful_recipe_lane.sv \
+	rtl/control/micro_hbs_stateful_index_guard.sv \
+	rtl/memory/micro_hbs_endpoint_scratch256.sv \
+	rtl/memory/micro_hbs_full_tree_cache256.sv \
+	rtl/treehash/micro_hbs_tree_push_reducer.sv \
+	rtl/output/micro_hbs_byte_output_packer.sv \
+	rtl/top/micro_hbs_horizontal_stateful_hbs_top.sv
 
 SLH_DSA_RTL := \
 	rtl/sequencer/micro_hbs_program_store.sv \
@@ -46,6 +62,8 @@ SLH_DSA_RTL := \
 .PHONY: test lint sim-lms sim-xmss sim-slh-dsa sim-slh-dsa-cycles \
 	sim-slh-dsa-schedule compile-horizontal-slh-dsa compile-horizontal-contexts \
 	compile-generic-hbs-macrocode \
+	compile-stateful-hbs-macrocode generate-stateful-rtl-vectors \
+	analyze-hbs-kernel-commonality \
 	test-state-recovery rtl-test rtl-unit-test rtl-keccak-test \
 	rtl-sha256-bounded-test rtl-shake-test rtl-shake-stream-test \
 	rtl-shake-stream-cycle-test rtl-state-manager-test rtl-scratchpad-test \
@@ -74,6 +92,10 @@ SLH_DSA_RTL := \
 	synth-slh-dsa-static-full synth-horizontal-hash-core \
 	synth-horizontal-token-hash-core synth-horizontal-slh-dsa-sign \
 	post-route-horizontal-slh-dsa-sign \
+	rtl-stateful-unit-test rtl-xmss-stateful-test rtl-lms-stateful-test \
+	rtl-xmss-stateful-robustness-test rtl-lms-stateful-robustness-test \
+	synth-stateful-xmss synth-stateful-lms post-route-stateful-xmss \
+	synth-keccak-round synth-compact-lane \
 	check-standalone check-parallel-isolation ci-core ci reproduce artifact
 
 test:
@@ -106,6 +128,75 @@ compile-horizontal-slh-dsa:
 
 compile-generic-hbs-macrocode:
 	$(PYTHON) scripts/compile_generic_hbs_macrocode.py
+
+compile-stateful-hbs-macrocode:
+	$(PYTHON) scripts/compile_stateful_hbs_macrocode.py
+
+generate-stateful-rtl-vectors:
+	$(PYTHON) scripts/generate_stateful_rtl_vectors.py
+
+analyze-hbs-kernel-commonality:
+	$(PYTHON) scripts/analyze_hbs_kernel_commonality.py \
+		--json-out manifests/experiments/hbs_kernel_commonality_v0.2.0.json
+
+rtl-stateful-unit-test:
+	mkdir -p build/iverilog
+	iverilog -g2012 -o build/iverilog/tree_push_reducer.vvp \
+		rtl/treehash/micro_hbs_tree_push_reducer.sv \
+		tb/unit/tb_micro_hbs_tree_push_reducer.sv
+	vvp build/iverilog/tree_push_reducer.vvp
+	iverilog -g2012 -o build/iverilog/stateful_cache.vvp \
+		rtl/memory/micro_hbs_full_tree_cache256.sv \
+		tb/unit/tb_micro_hbs_full_tree_cache256.sv
+	vvp build/iverilog/stateful_cache.vvp
+	iverilog -g2012 -o build/iverilog/stateful_guard.vvp \
+		rtl/control/micro_hbs_stateful_index_guard.sv \
+		tb/unit/tb_micro_hbs_stateful_index_guard.sv
+	vvp build/iverilog/stateful_guard.vvp
+	iverilog -g2012 -o build/iverilog/stateful_recipe.vvp \
+		rtl/hash_lane/micro_hbs_keccak_round_explicit.sv \
+		rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv \
+		rtl/hash_lane/micro_hbs_stateful_recipe_lane.sv \
+		tb/unit/tb_micro_hbs_stateful_recipe_lane.sv
+	vvp build/iverilog/stateful_recipe.vvp
+	iverilog -g2012 -o build/iverilog/stateful_packer.vvp \
+		rtl/output/micro_hbs_byte_output_packer.sv \
+		tb/unit/tb_micro_hbs_byte_output_packer.sv
+	vvp build/iverilog/stateful_packer.vvp
+
+rtl-xmss-stateful-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=0 --Mdir build/verilator-xmss-stateful \
+		$(STATEFUL_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-xmss-stateful/Vtb_micro_hbs_stateful_products
+
+rtl-lms-stateful-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=1 --Mdir build/verilator-lms-stateful \
+		$(STATEFUL_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-lms-stateful/Vtb_micro_hbs_stateful_products
+
+rtl-xmss-stateful-robustness-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=0 -GSWAP=1 -GBACKPRESSURE=1 \
+		--Mdir build/verilator-xmss-stateful-robust \
+		$(STATEFUL_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-xmss-stateful-robust/Vtb_micro_hbs_stateful_products
+
+rtl-lms-stateful-robustness-test: compile-stateful-hbs-macrocode generate-stateful-rtl-vectors
+	+$(VERILATOR) --binary --timing -O3 -j $(VERILATOR_JOBS) \
+		-Wno-fatal -Wno-WIDTH -Wno-LITENDIAN -Wno-PINCONNECTEMPTY \
+		-Wno-UNOPTFLAT --top-module tb_micro_hbs_stateful_products \
+		-GPROFILE=1 -GSWAP=1 -GBACKPRESSURE=1 \
+		--Mdir build/verilator-lms-stateful-robust \
+		$(STATEFUL_RTL) tb/integration/tb_micro_hbs_stateful_products.sv
+	build/verilator-lms-stateful-robust/Vtb_micro_hbs_stateful_products
 
 compile-horizontal-contexts:
 	$(PYTHON) scripts/compile_slh_dsa_horizontal_contexts.py
@@ -452,6 +543,18 @@ synth-keccak-u2:
 collect-keccak-ppa:
 	$(PYTHON) experiments/collect_keccak_ppa.py
 
+synth-keccak-round:
+	mkdir -p build/vivado/keccak_round_a200t_3
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/keccak_round_driver.log \
+		-source experiments/synth_keccak_round.tcl
+
+synth-compact-lane:
+	mkdir -p build/vivado/compact_lane_a200t_3
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/compact_lane_driver.log \
+		-source experiments/synth_compact_lane.tcl
+
 synth-layout-expr32:
 	mkdir -p build/vivado/layout_expr32
 	vivado -mode batch -nolog -nojournal -log build/vivado/layout_expr32/vivado.log -source experiments/synth_layout_expr32.tcl
@@ -499,6 +602,27 @@ post-route-horizontal-slh-dsa-sign:
 		-log build/vivado/$(HORIZONTAL_SIGN_POSTROUTE_TAG)_driver.log \
 		-source experiments/post_route_horizontal_slh_dsa_sign.tcl \
 		-tclargs $(HORIZONTAL_SIGN_TAG) $(HORIZONTAL_SIGN_POSTROUTE_TAG)
+
+synth-stateful-xmss:
+	mkdir -p build/vivado/$(STATEFUL_XMSS_TAG)
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/$(STATEFUL_XMSS_TAG)_driver.log \
+		-source experiments/synth_stateful_hbs_top.tcl \
+		-tclargs xmss $(STATEFUL_XMSS_TAG) $(STATEFUL_PART)
+
+synth-stateful-lms:
+	mkdir -p build/vivado/$(STATEFUL_LMS_TAG)
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/$(STATEFUL_LMS_TAG)_driver.log \
+		-source experiments/synth_stateful_hbs_top.tcl \
+		-tclargs lms $(STATEFUL_LMS_TAG) $(STATEFUL_PART)
+
+post-route-stateful-xmss:
+	mkdir -p build/vivado/$(STATEFUL_XMSS_TAG)_postroute
+	vivado -mode batch -nolog -nojournal \
+		-log build/vivado/$(STATEFUL_XMSS_TAG)_postroute_driver.log \
+		-source experiments/post_route_stateful_hbs_top.tcl \
+		-tclargs $(STATEFUL_XMSS_TAG) $(STATEFUL_XMSS_TAG)_postroute
 
 compare-unified-hbs-paper:
 	$(PYTHON) experiments/audit_workload.py

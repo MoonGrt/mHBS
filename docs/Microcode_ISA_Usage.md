@@ -1,12 +1,27 @@
 # μHBS 微指令使用清单
 
 > 当前生产 Sign/Keygen 已使用新的五宏指令 ISA：`HASH`、`CHAIN`、
-> `TREE`、`TRANSFORM`、`EMIT`；外层仍由 `SINGLE/RUN/LOOP/HALT`
+> `TREE_PUSH`、`TRANSFORM`、`EMIT`；外层仍由 `SINGLE/RUN/LOOP/HALT`
 > token 压缩。详细编码与使用见
 > [Generic_HBS_Macrocode_Implementation.md](Generic_HBS_Macrocode_Implementation.md)。
 > 下方 12-op 表是旧 scratchpad Micro-ISA 的编译覆盖记录。
 
-> 当前架构为 12-op 通用 Micro-ISA v0.2。8 类算法宏指令尝试仅作为已归档对照，未进入 ISA 或 RTL。
+> 12-op 通用 Micro-ISA v0.2 是编译覆盖基线；8 类算法宏指令尝试仅作为已归档对照，未进入产品 ISA 或 RTL。
+
+## 当前产品微码架构
+
+| 层 | 编码 | 作用 |
+|---|---|---|
+| token | `SINGLE/RUN/LOOP/HALT` | 压缩静态控制流、仿射坐标和循环 |
+| command | `macro/descriptor/route/flags/coordinate` | 一个 48-bit lane 命令 |
+| macro | `HASH/CHAIN/TREE_PUSH/TRANSFORM/EMIT` | 启动通用执行内循环 |
+| descriptor | recipe、segment、route、profile | 定义 Hash 字节流、结果去向和算法参数 |
+
+XMSS 与 LMS 每个静态镜像均为 13 个 token、9 个 command template 和
+64 个 descriptor 槽；Keygen 的两级 `LOOP` 动态展开为 2,051 个宏操作。
+两者使用同一 stateful RTL，算法差异来自不可写 `.mem` 镜像。SLH-DSA
+共享上述五宏指令语义和 descriptor kind 编号，但当前仍由独立 n=16 core
+执行。下面的 12-op 清单仅是旧 scratchpad ISA 的编译覆盖基线。
 
 ## 编译覆盖
 

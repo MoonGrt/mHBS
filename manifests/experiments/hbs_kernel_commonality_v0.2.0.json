@@ -1,0 +1,502 @@
+{
+  "classification": "HASH_GRAIN_SYMBOLIC_EXECUTION_WITH_RTL_AUDIT",
+  "common_kernel_shapes": [
+    "chain_steps",
+    "flat_compress",
+    "leaf_wrap",
+    "pair_reduce",
+    "prehash",
+    "seed_hash"
+  ],
+  "control_flow_skeletons": {
+    "lms.keygen": [
+      "LOOP 1024 leaves",
+      "MAP 67 prefix chains",
+      "FLAT_COMPRESS 67 endpoints",
+      "HASH leaf wrapper",
+      "TREE_PUSH leaf",
+      "CACHE tree",
+      "EMIT key"
+    ],
+    "lms.sign": [
+      "STATE_COMMIT",
+      "PREHASH",
+      "DIGITIZE",
+      "MAP 67 prefix chains",
+      "FETCH 10 cached auth nodes",
+      "EMIT signature"
+    ],
+    "lms.verify": [
+      "PREHASH",
+      "DIGITIZE",
+      "MAP 67 chain suffixes",
+      "FLAT_COMPRESS 67 endpoints",
+      "HASH leaf wrapper",
+      "FOLD 10 auth nodes",
+      "COMPARE root"
+    ],
+    "slh_dsa.keygen": [
+      "LOOP leaves",
+      "MAP chains",
+      "FLAT_COMPRESS endpoints",
+      "TREE_PUSH leaf",
+      "EMIT root"
+    ],
+    "slh_dsa.sign": [
+      "PREHASH",
+      "DIGEST_SPLIT",
+      "LOOP 33 FORS trees",
+      "FLAT_COMPRESS FORS roots",
+      "LOOP 22 hypertree layers",
+      "MAP WOTS chains",
+      "TREE_PUSH leaves/auth",
+      "EMIT segments"
+    ],
+    "slh_dsa.verify": [
+      "PREHASH",
+      "DIGEST_SPLIT",
+      "MAP chain suffixes",
+      "FLAT_COMPRESS endpoints",
+      "FOLD authentication paths",
+      "COMPARE root"
+    ],
+    "xmss.keygen": [
+      "LOOP 1024 leaves",
+      "MAP 67 randomized chains",
+      "PAIR_REDUCE 67 endpoints",
+      "TREE_PUSH leaf",
+      "CACHE tree",
+      "EMIT key"
+    ],
+    "xmss.sign": [
+      "STATE_COMMIT",
+      "PREHASH",
+      "DIGITIZE",
+      "MAP 67 randomized chains",
+      "FETCH 10 cached auth nodes",
+      "EMIT signature"
+    ],
+    "xmss.verify": [
+      "PREHASH",
+      "DIGITIZE",
+      "MAP 67 randomized chain suffixes",
+      "PAIR_REDUCE 67 endpoints",
+      "FOLD 10 auth nodes",
+      "COMPARE root"
+    ]
+  },
+  "current_rtl_audit": {
+    "descriptor_abi_is_shared": true,
+    "evidence": [
+      "HASH/CHAIN/TREE_PUSH/TRANSFORM/EMIT kind numbers match",
+      "stateful RTL has no compile-time XMSS/LMS PROFILE branch",
+      "recipe, output-layout and auth behavior come from profile descriptors",
+      "stateful RTL has no literal command_descriptor ID branch"
+    ],
+    "slh_generic_named_fsm_states": 27,
+    "stateful_compile_time_profile_conditionals": 0,
+    "stateful_descriptor_profile_references": 32,
+    "stateful_literal_descriptor_branches": 0,
+    "stateful_named_fsm_states": 43
+  },
+  "findings": {
+    "algorithm_named_hash_datapath_required": false,
+    "all_hash_work_expressible_by_common_shapes": true,
+    "lms_only_recipe_feature": "flat 67-endpoint long-input compression",
+    "message_dependent_chain_lengths": {
+      "lms.sign.q5_cached": 480,
+      "lms.sign.q6_cached": 480,
+      "xmss.sign.q5_cached": 495,
+      "xmss.sign.q6_cached": 540
+    },
+    "slh_only_schedule_feature": "33 FORS trees plus 22 hypertree layers",
+    "xmss_only_recipe_feature": "2/3 PRF-derived key/mask stages before F/H"
+  },
+  "high_frequency_control": {
+    "lms.keygen": {
+      "chain_jobs": 68608,
+      "chain_step_share": 0.93488457020764,
+      "chain_steps": 1029120,
+      "flat_compressions": 1024
+    },
+    "slh_dsa.sign": {
+      "chain_jobs": 8272,
+      "chain_step_share": 0.8982246490751594,
+      "chain_steps": 94257
+    },
+    "xmss.keygen": {
+      "chain_jobs": 68608,
+      "chain_step_share": 0.8823536976940587,
+      "chain_steps": 1029120,
+      "pair_reductions": 68607
+    }
+  },
+  "microcode": {
+    "legacy_generic_isa_union": [
+      "ADD_IMM",
+      "CALL",
+      "DATA_LOAD",
+      "DATA_MOVE",
+      "HALT",
+      "HASH",
+      "LOOP_BEGIN",
+      "LOOP_END",
+      "OUTPUT",
+      "RETURN",
+      "SET_REG",
+      "TREE_PUSH"
+    ],
+    "legacy_generic_isa_union_count": 12,
+    "operations": {
+      "lms.keygen": {
+        "opcode_types": 6,
+        "opcodes": {
+          "HALT": 1,
+          "HASH": 4,
+          "LOOP_BEGIN": 3,
+          "LOOP_END": 3,
+          "OUTPUT": 1,
+          "TREE_PUSH": 1
+        },
+        "static_words": 13
+      },
+      "lms.sign": {
+        "opcode_types": 8,
+        "opcodes": {
+          "DATA_LOAD": 7,
+          "HALT": 1,
+          "HASH": 7,
+          "LOOP_BEGIN": 6,
+          "LOOP_END": 6,
+          "OUTPUT": 6,
+          "SET_REG": 1,
+          "TREE_PUSH": 1
+        },
+        "static_words": 35
+      },
+      "lms.verify": {
+        "opcode_types": 8,
+        "opcodes": {
+          "ADD_IMM": 1,
+          "DATA_LOAD": 9,
+          "HALT": 1,
+          "HASH": 5,
+          "LOOP_BEGIN": 3,
+          "LOOP_END": 3,
+          "OUTPUT": 1,
+          "SET_REG": 1
+        },
+        "static_words": 24
+      },
+      "slh_dsa.keygen": {
+        "opcode_types": 6,
+        "opcodes": {
+          "HALT": 1,
+          "HASH": 3,
+          "LOOP_BEGIN": 3,
+          "LOOP_END": 3,
+          "OUTPUT": 1,
+          "TREE_PUSH": 1
+        },
+        "static_words": 12
+      },
+      "slh_dsa.sign": {
+        "opcode_types": 12,
+        "opcodes": {
+          "ADD_IMM": 3,
+          "CALL": 7,
+          "DATA_LOAD": 32,
+          "DATA_MOVE": 11,
+          "HALT": 1,
+          "HASH": 21,
+          "LOOP_BEGIN": 17,
+          "LOOP_END": 17,
+          "OUTPUT": 16,
+          "RETURN": 4,
+          "SET_REG": 19,
+          "TREE_PUSH": 12
+        },
+        "static_words": 160
+      },
+      "slh_dsa.verify": {
+        "opcode_types": 8,
+        "opcodes": {
+          "DATA_LOAD": 15,
+          "DATA_MOVE": 1,
+          "HALT": 1,
+          "HASH": 7,
+          "LOOP_BEGIN": 6,
+          "LOOP_END": 6,
+          "OUTPUT": 1,
+          "SET_REG": 1
+        },
+        "static_words": 38
+      },
+      "xmss.keygen": {
+        "opcode_types": 8,
+        "opcodes": {
+          "DATA_MOVE": 5,
+          "HALT": 1,
+          "HASH": 32,
+          "LOOP_BEGIN": 11,
+          "LOOP_END": 11,
+          "OUTPUT": 1,
+          "SET_REG": 31,
+          "TREE_PUSH": 1
+        },
+        "static_words": 93
+      },
+      "xmss.sign": {
+        "opcode_types": 10,
+        "opcodes": {
+          "ADD_IMM": 1,
+          "DATA_LOAD": 3,
+          "DATA_MOVE": 5,
+          "HALT": 1,
+          "HASH": 38,
+          "LOOP_BEGIN": 15,
+          "LOOP_END": 15,
+          "OUTPUT": 4,
+          "SET_REG": 31,
+          "TREE_PUSH": 1
+        },
+        "static_words": 114
+      },
+      "xmss.verify": {
+        "opcode_types": 8,
+        "opcodes": {
+          "DATA_LOAD": 82,
+          "DATA_MOVE": 5,
+          "HALT": 1,
+          "HASH": 36,
+          "LOOP_BEGIN": 10,
+          "LOOP_END": 10,
+          "OUTPUT": 1,
+          "SET_REG": 32
+        },
+        "static_words": 177
+      }
+    }
+  },
+  "profiles": [
+    "SLH-DSA-SHAKE-128f",
+    "XMSS-SHAKE256_10_256",
+    "LMS-SHAKE256-M32-H10 research profile"
+  ],
+  "recommended_kernel_isa": {
+    "change": "replace whole-tree TREE with descriptor-driven TREE_PUSH/reducer",
+    "execution_ops": [
+      "HASH",
+      "CHAIN",
+      "TREE_PUSH",
+      "TRANSFORM",
+      "EMIT"
+    ],
+    "hash_recipe": "small per-lane stage program: SPONGE, XOR, FEEDBACK, CAPTURE",
+    "routing": "result routes perform value/node/cache writes without MOVE opcode",
+    "storage_control": [
+      "SINGLE",
+      "RUN",
+      "LOOP",
+      "HALT"
+    ]
+  },
+  "schema_version": 1,
+  "workloads": {
+    "lms.keygen": {
+      "active_shapes": [
+        "seed_hash",
+        "chain_steps",
+        "flat_compress",
+        "leaf_wrap",
+        "pair_reduce"
+      ],
+      "chain_steps": 1029120,
+      "flat_compress": 1024,
+      "leaf_wrap": 1024,
+      "logical_kernels": 1100799,
+      "notes": "flat 67-endpoint compression, then leaf wrapper and Merkle tree",
+      "pair_reduce": 1023,
+      "permutations": 1116159,
+      "prehash": 0,
+      "seed_hash": 68608,
+      "sponge_contexts": 1100799
+    },
+    "lms.sign.q5_cached": {
+      "active_shapes": [
+        "prehash",
+        "seed_hash",
+        "chain_steps"
+      ],
+      "chain_steps": 480,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 548,
+      "notes": "cached authentication path; q=5",
+      "pair_reduce": 0,
+      "permutations": 548,
+      "prehash": 1,
+      "seed_hash": 67,
+      "sponge_contexts": 548
+    },
+    "lms.sign.q6_cached": {
+      "active_shapes": [
+        "prehash",
+        "seed_hash",
+        "chain_steps"
+      ],
+      "chain_steps": 480,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 548,
+      "notes": "cached authentication path; q=6",
+      "pair_reduce": 0,
+      "permutations": 548,
+      "prehash": 1,
+      "seed_hash": 67,
+      "sponge_contexts": 548
+    },
+    "lms.verify": {
+      "active_shapes": [
+        "prehash",
+        "chain_steps",
+        "flat_compress",
+        "leaf_wrap",
+        "pair_reduce"
+      ],
+      "chain_steps": 525,
+      "flat_compress": 1,
+      "leaf_wrap": 1,
+      "logical_kernels": 538,
+      "notes": "reconstruct LMOTS public key and 10-node authentication path",
+      "pair_reduce": 10,
+      "permutations": 553,
+      "prehash": 1,
+      "seed_hash": 0,
+      "sponge_contexts": 538
+    },
+    "slh_dsa.keygen": {
+      "active_shapes": [
+        "seed_hash",
+        "chain_steps",
+        "flat_compress",
+        "pair_reduce"
+      ],
+      "chain_steps": 4200,
+      "flat_compress": 8,
+      "leaf_wrap": 0,
+      "logical_kernels": 4495,
+      "notes": "n=16; simple address-prefixed SHAKE recipes",
+      "pair_reduce": 7,
+      "permutations": 4527,
+      "prehash": 0,
+      "seed_hash": 280,
+      "sponge_contexts": 4495
+    },
+    "slh_dsa.sign": {
+      "active_shapes": [
+        "prehash",
+        "seed_hash",
+        "chain_steps",
+        "flat_compress",
+        "pair_reduce"
+      ],
+      "chain_steps": 94257,
+      "flat_compress": 176,
+      "leaf_wrap": 0,
+      "logical_kernels": 104937,
+      "notes": "n=16; simple address-prefixed SHAKE recipes",
+      "pair_reduce": 2230,
+      "permutations": 105641,
+      "prehash": 2,
+      "seed_hash": 8272,
+      "sponge_contexts": 104937
+    },
+    "slh_dsa.verify": {
+      "active_shapes": [
+        "prehash",
+        "chain_steps",
+        "flat_compress",
+        "pair_reduce"
+      ],
+      "chain_steps": 6153,
+      "flat_compress": 23,
+      "leaf_wrap": 0,
+      "logical_kernels": 6441,
+      "notes": "n=16; simple address-prefixed SHAKE recipes",
+      "pair_reduce": 264,
+      "permutations": 6533,
+      "prehash": 1,
+      "seed_hash": 0,
+      "sponge_contexts": 6441
+    },
+    "xmss.keygen": {
+      "active_shapes": [
+        "seed_hash",
+        "chain_steps",
+        "pair_reduce"
+      ],
+      "chain_steps": 1029120,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 1166335,
+      "notes": "67-chain WOTS+ leaf; randomized F/H are 3/4-stage recipes",
+      "pair_reduce": 68607,
+      "permutations": 3430396,
+      "prehash": 0,
+      "seed_hash": 68608,
+      "sponge_contexts": 3430396
+    },
+    "xmss.sign.q5_cached": {
+      "active_shapes": [
+        "prehash",
+        "seed_hash",
+        "chain_steps"
+      ],
+      "chain_steps": 495,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 564,
+      "notes": "cached authentication path; q=5",
+      "pair_reduce": 0,
+      "permutations": 1555,
+      "prehash": 2,
+      "seed_hash": 67,
+      "sponge_contexts": 1554
+    },
+    "xmss.sign.q6_cached": {
+      "active_shapes": [
+        "prehash",
+        "seed_hash",
+        "chain_steps"
+      ],
+      "chain_steps": 540,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 609,
+      "notes": "cached authentication path; q=6",
+      "pair_reduce": 0,
+      "permutations": 1690,
+      "prehash": 2,
+      "seed_hash": 67,
+      "sponge_contexts": 1689
+    },
+    "xmss.verify": {
+      "active_shapes": [
+        "prehash",
+        "chain_steps",
+        "pair_reduce"
+      ],
+      "chain_steps": 510,
+      "flat_compress": 0,
+      "leaf_wrap": 0,
+      "logical_kernels": 587,
+      "notes": "66 L-tree pairs + 10 authentication-path parents",
+      "pair_reduce": 76,
+      "permutations": 1835,
+      "prehash": 1,
+      "seed_hash": 0,
+      "sponge_contexts": 1835
+    }
+  }
+}

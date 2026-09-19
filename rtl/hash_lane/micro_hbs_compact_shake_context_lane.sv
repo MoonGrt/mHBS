@@ -10,6 +10,9 @@ module micro_hbs_compact_shake_context_lane #(
     input  wire          rst_n,
     input  wire          context_valid,
     output wire          context_ready,
+    input  wire          fast_block_valid,
+    output wire          fast_block_ready,
+    input  wire [1087:0] fast_block_data,
     input  wire          chain_enable,
     input  wire          chain_prefix,
     input  wire          chain_prefix_preserve_counter,
@@ -23,6 +26,8 @@ module micro_hbs_compact_shake_context_lane #(
     input  wire          block_last,
     output logic         response_valid,
     output wire [271:0]  response_digest,
+    output wire          finish_valid,
+    output wire [271:0]  finish_digest,
     output wire [127:0]  capture_digest,
     output logic         capture_valid,
     output logic         error
@@ -191,7 +196,14 @@ module micro_hbs_compact_shake_context_lane #(
 
     assign context_ready = lane_state == IDLE;
     assign block_ready = lane_state == WAIT_BLOCK;
+    assign fast_block_ready = (lane_state == IDLE && context_valid)
+        || (lane_state == WAIT_BLOCK && first_block && append_index == 0);
     assign response_digest = sponge_state[271:0];
+    assign finish_valid = lane_state == RUN
+        && round_index + UNROLL >= 24
+        && (!saved_chain_enable || chains_remaining <= 1)
+        && running_last;
+    assign finish_digest = advanced_state[271:0];
     assign capture_digest = captured_value;
 
     initial begin
@@ -235,9 +247,31 @@ module micro_hbs_compact_shake_context_lane #(
                     saved_capture_after <= capture_after;
                     first_block <= 1'b1;
                     append_index <= 0;
-                    lane_state <= WAIT_BLOCK;
+                    if (fast_block_valid) begin
+                        sponge_state <= {{512{1'b0}}, fast_block_data};
+                        running_last <= 1'b1;
+                        chains_remaining <= chain_enable
+                            ? chain_count : 5'd1;
+                        chain_counter <= 0;
+                        chain_iteration <= 1;
+                        round_index <= 0;
+                        lane_state <= RUN;
+                    end else
+                        lane_state <= WAIT_BLOCK;
                 end
-                WAIT_BLOCK: if (block_valid) begin
+                WAIT_BLOCK: if (fast_block_valid && fast_block_ready) begin
+                    // Generic pre-padded one-rate-block path.  The recipe
+                    // executor builds fixed-format blocks while this lane is
+                    // idle, avoiding nine serial append cycles per context.
+                    sponge_state <= {{512{1'b0}}, fast_block_data};
+                    running_last <= 1'b1;
+                    chains_remaining <= saved_chain_enable
+                        ? saved_chain_count : 5'd1;
+                    chain_counter <= 0;
+                    chain_iteration <= 1;
+                    round_index <= 0;
+                    lane_state <= RUN;
+                end else if (block_valid) begin
                     if (append_index == 0) begin
                         if (first_block)
                             sponge_state <= {{1472{1'b0}}, block_data};
