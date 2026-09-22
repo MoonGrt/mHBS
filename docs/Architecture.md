@@ -45,9 +45,9 @@ single Job -> Job stream loader -> Microsequencer
 - `output/`：签名字节流输出；
 - `top/`：Job loader 和唯一完整顶层。
 
-综合源文件的权威清单是 Makefile 中的 `SLH_DSA_RTL`。Vivado 入口为
-`experiments/synth_slh_dsa_top.tcl`；仿真入口为
-`tb/integration/tb_micro_hbs_slh_dsa_top.sv`。
+综合源文件的权威清单是 Makefile 中的 `STATELESS_RTL`。Vivado 入口为
+`experiments/synth_horizontal_slh_dsa_sign_top.tcl`；仿真入口为
+`tb/integration/tb_uhbs_slh_dsa_sign_top.sv`。
 
 ## 保留的跨算法基础模块
 

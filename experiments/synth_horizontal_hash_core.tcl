@@ -2,7 +2,7 @@ set root [file normalize [file join [file dirname [info script]] ..]]
 set out_dir [file join $root build vivado horizontal_hash_core]
 file mkdir $out_dir
 
-read_verilog -sv [file join $root rtl sequencer micro_hbs_event_scoreboard.sv]
+read_verilog -sv [file join $root rtl sequencer uhbs_event_scoreboard.sv]
 read_verilog -sv [file join $root rtl sequencer micro_hbs_horizontal_program_store.sv]
 read_verilog -sv [file join $root rtl sequencer micro_hbs_horizontal_sequencer.sv]
 read_verilog -sv [file join $root rtl hash_lane micro_hbs_keccak_f1600.sv]

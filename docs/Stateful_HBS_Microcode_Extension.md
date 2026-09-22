@@ -5,9 +5,9 @@
 The stateful extension supplies two separately synthesized product wrappers
 over the same dual-lane execution core:
 
-- `micro_hbs_horizontal_xmss_top`: RFC 8391
+- `uhbs_xmss_top`: RFC 8391
   `XMSS-SHAKE256_10_256` (`h=10`, `w=16`, `len=67`).
-- `micro_hbs_horizontal_lms_top`: RFC 8554-shaped `h=10`, `w=4`,
+- `uhbs_lms_top`: RFC 8554-shaped `h=10`, `w=4`,
   `len=67` research profile in which every SHA-256 invocation is replaced by
   SHAKE256/256.  This profile is deliberately not described as RFC 8554
   interoperable.  Its private LMS and LMOTS typecodes are `0x80000006` and
@@ -20,7 +20,7 @@ than fixed in RTL.  Both use the public `HASH`, `CHAIN`, `TREE_PUSH`,
 sequencer.  Algorithm and key material are not runtime-writable microcode.
 
 The two physical Keccak lanes instantiate exactly the same
-`micro_hbs_stateful_recipe_lane` module.  A build-time lane-swap parameter is
+`uhbs_stateful_recipe_lane` module.  A build-time lane-swap parameter is
 used only for verification.  The recipe lane supports 256-bit results, up to
 16 SHAKE rate blocks, local chain feedback, and streamed 2166-byte endpoint
 lists.  Fixed-format single-block recipes use a pre-padded fast-block path;
@@ -147,12 +147,10 @@ the n-specific composer/store interfaces, not merely renaming FSM states.
 ```bash
 python3 -m unittest tests.test_lms_shake_oracle \
   tests.test_stateful_hbs_macrocode tests.test_xmss_oracle
-make rtl-stateful-unit-test
-make -j2 VERILATOR_JOBS=12 rtl-xmss-stateful-test rtl-lms-stateful-test
-make -j2 VERILATOR_JOBS=12 rtl-xmss-stateful-robustness-test \
-  rtl-lms-stateful-robustness-test
-make JOBS=24 synth-stateful-xmss
-make JOBS=24 synth-stateful-lms
+make rtl-unit-test
+make -j2 VERILATOR_JOBS=12 rtl-xmss-test rtl-lms-test
+make JOBS=24 synth-xmss
+make JOBS=24 synth-lms
 ```
 
 The synthesis scripts target `xc7a200tffg1156-3`, cap Vivado at 24 host

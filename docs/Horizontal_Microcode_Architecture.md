@@ -8,7 +8,7 @@
 ## 历史：2026-09-18 静态任务微码实现
 
 该阶段的生产 top 已不再由22状态算法FSM决定任务顺序。静态微码ROM通过
-`micro_hbs_static_task_sequencer` 发出两个48-bit lane command，任务
+`uhbs_static_task_sequencer` 发出两个48-bit lane command，任务
 materializer只执行当前recipe、结果写回和流输出。产品镜像为29个
 128-bit token和13个128-bit template，展开为5,811个水平任务字。
 
@@ -81,7 +81,7 @@ Hash lane 接口与能力完全相同；RTL 中没有 TreeHash 专用 lane。
 
 ## 完整 Sign RTL
 
-`micro_hbs_horizontal_slh_dsa_sign_top` 已接入两条完全等价的 U2 lane、
+`uhbs_slh_dsa_sign_top` 已接入两条完全等价的 U2 lane、
 多 block SHAKE context、本地树值存储和完整签名 RAM。tc137 的 2,136 个
 64-bit 输出字全部逐字比对通过：
 

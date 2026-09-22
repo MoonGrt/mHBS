@@ -3,7 +3,7 @@
 ## 实现状态
 
 当前生产 Sign 顶层已经切换到通用宏微码核心
-`micro_hbs_horizontal_hbs_top`。同一核心通过不同的只读镜像完成：
+`uhbs_stateless_hbs`。同一核心通过不同的只读镜像完成：
 
 - SLH-DSA-SHAKE-128f Sign；
 - SLH-DSA-SHAKE-128f Keygen，并输出完整 96-byte `SK || PK`。

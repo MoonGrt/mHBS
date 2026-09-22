@@ -44,8 +44,8 @@ chain length、树决策、task 或 Hash descriptor。
 
 早期 capability slice、被否决的宽表达式/P2 实验和测试 stub 已从
 `rtl/` 删除；历史结论仍保留在文档与 Git 历史中。XMSS/LMS 当前产品顶层
-分别为 `micro_hbs_horizontal_xmss_top` 与
-`micro_hbs_horizontal_lms_top`。
+分别为 `uhbs_xmss_top` 与
+`uhbs_lms_top`。
 
 ## 1. 项目背景
 

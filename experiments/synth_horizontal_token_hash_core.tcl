@@ -2,7 +2,7 @@ set root [file normalize [file join [file dirname [info script]] ..]]
 set out_dir [file join $root build vivado horizontal_token_hash_core]
 file mkdir $out_dir
 
-read_verilog -sv [file join $root rtl sequencer micro_hbs_event_scoreboard.sv]
+read_verilog -sv [file join $root rtl sequencer uhbs_event_scoreboard.sv]
 read_verilog -sv [file join $root rtl sequencer micro_hbs_horizontal_token_store.sv]
 read_verilog -sv [file join $root rtl sequencer micro_hbs_horizontal_template_store.sv]
 read_verilog -sv [file join $root rtl sequencer micro_hbs_horizontal_token_sequencer.sv]

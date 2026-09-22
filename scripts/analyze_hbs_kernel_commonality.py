@@ -268,10 +268,10 @@ def _microcode_report() -> dict[str, Any]:
 
 def _rtl_audit() -> dict[str, Any]:
     stateful = (
-        ROOT / "rtl/top/micro_hbs_horizontal_stateful_hbs_top.sv"
+        ROOT / "rtl/top/uhbs_stateful_hbs.sv"
     ).read_text(encoding="utf-8")
     generic = (
-        ROOT / "rtl/top/micro_hbs_horizontal_hbs_top.sv"
+        ROOT / "rtl/top/uhbs_stateless_hbs.sv"
     ).read_text(encoding="utf-8")
     state_names = set(re.findall(r"\bM_[A-Z0-9_]+\b", stateful))
     generic_states = set(re.findall(r"\bS_[A-Z0-9_]+\b", generic))

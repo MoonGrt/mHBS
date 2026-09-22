@@ -15,18 +15,18 @@ file mkdir $outdir
 set_param general.maxThreads 24
 
 foreach source {
-    rtl/sequencer/micro_hbs_event_scoreboard.sv
-    rtl/sequencer/micro_hbs_static_task_sequencer.sv
-    rtl/hash_lane/micro_hbs_keccak_round_explicit.sv
-    rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv
-    rtl/memory/micro_hbs_local_value_memories.sv
-    rtl/top/micro_hbs_horizontal_hbs_top.sv
-    rtl/top/micro_hbs_horizontal_slh_dsa_wrappers.sv
+    rtl/sequencer/uhbs_event_scoreboard.sv
+    rtl/sequencer/uhbs_static_task_sequencer.sv
+    rtl/hash_lane/uhbs_keccak.sv
+    rtl/hash_lane/uhbs_compact_shake_context_lane.sv
+    rtl/memory/uhbs_local_value_memories.sv
+    rtl/top/uhbs_stateless_hbs.sv
+    rtl/top/uhbs_slh_dsa_top.sv
 } {
     read_verilog -sv [file join $root $source]
 }
 
-synth_design -top micro_hbs_horizontal_slh_dsa_sign_top \
+synth_design -top uhbs_slh_dsa_sign_top \
     -part $part -mode out_of_context -flatten_hierarchy rebuilt \
     -directive AreaOptimized_high -generic UNROLL=2
 create_clock -name clk -period 10.000 [get_ports clk]

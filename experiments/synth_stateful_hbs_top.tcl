@@ -18,25 +18,25 @@ file mkdir $outdir
 set_param general.maxThreads 24
 
 foreach source {
-    rtl/sequencer/micro_hbs_event_scoreboard.sv
-    rtl/sequencer/micro_hbs_static_task_sequencer.sv
-    rtl/hash_lane/micro_hbs_keccak_round_explicit.sv
-    rtl/hash_lane/micro_hbs_compact_shake_context_lane.sv
-    rtl/hash_lane/micro_hbs_stateful_recipe_lane.sv
-    rtl/control/micro_hbs_stateful_index_guard.sv
-    rtl/memory/micro_hbs_endpoint_scratch256.sv
-    rtl/memory/micro_hbs_full_tree_cache256.sv
-    rtl/treehash/micro_hbs_tree_push_reducer.sv
-    rtl/output/micro_hbs_byte_output_packer.sv
-    rtl/top/micro_hbs_horizontal_stateful_hbs_top.sv
-    rtl/top/micro_hbs_horizontal_xmss_top.sv
-    rtl/top/micro_hbs_horizontal_lms_top.sv
+    rtl/sequencer/uhbs_event_scoreboard.sv
+    rtl/sequencer/uhbs_static_task_sequencer.sv
+    rtl/hash_lane/uhbs_keccak.sv
+    rtl/hash_lane/uhbs_compact_shake_context_lane.sv
+    rtl/hash_lane/uhbs_stateful_recipe_lane.sv
+    rtl/control/uhbs_stateful_index_guard.sv
+    rtl/memory/uhbs_endpoint_scratch256.sv
+    rtl/memory/uhbs_full_tree_cache256.sv
+    rtl/treehash/uhbs_tree_push_reducer.sv
+    rtl/output/uhbs_byte_output_packer.sv
+    rtl/top/uhbs_stateful_hbs.sv
+    rtl/top/uhbs_xmss_top.sv
+    rtl/top/uhbs_lms_top.sv
 } {
     read_verilog -sv [file join $root $source]
 }
 
 set top [expr {$family eq "xmss"
-    ? "micro_hbs_horizontal_xmss_top" : "micro_hbs_horizontal_lms_top"}]
+    ? "uhbs_xmss_top" : "uhbs_lms_top"}]
 synth_design -top $top -part $part -mode out_of_context \
     -flatten_hierarchy rebuilt -directive AreaOptimized_high \
     -generic UNROLL=2 -generic PROFILE_ENABLE=0
