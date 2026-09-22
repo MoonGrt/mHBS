@@ -50,6 +50,6 @@ operations is reported separately from these operation counters.
 - Route only retained candidates with `experiments/route_unified_hbs.tcl`.
 
 See `Unified_HBS_ABI.md` for the executable image contract and ATP formula.
-The old `uhbs_stateless_hbs`/`uhbs_stateful_hbs` implementations and historical
-experiments are retained as reference sources, excluded from production builds.
-Their old standalone benches are not the current integration entry points.
+The old `uhbs_stateless_hbs`/`uhbs_stateful_hbs` implementations and their
+standalone benches were removed from the working tree. Git history preserves
+them; `manifests/unified_sources.txt` is the current synthesis source list.

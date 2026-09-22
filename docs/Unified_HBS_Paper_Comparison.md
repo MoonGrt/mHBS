@@ -334,6 +334,7 @@ task 数从 11 变为 5，不能直接解释为控制电路减少 6/11。两者�
 当前完整软件与 RTL 验证记录不能替代论文同向量重测。另一方面，论文未提供的错误路径或提交接口细节，也不能被推断为“没有实现”或“不安全”。
 
 当前历史 Python 全集存在 7 个失败、1 个错误，均在原 HEAD 复现；本次新增统一核 gate 通过。完整结果报告保留该事实，不声称整个历史测试集全部通过。
+清理后的 `make test` 只运行当前统一核 gate；历史测试已从工作树移除，原始失败记录仍在验证清单中。
 
 | 当前产品 | 周期 ns | Setup slack ns | Hold slack ns | 路由错误 |
 |---|---|---|---|---|
@@ -424,4 +425,5 @@ task 数从 11 变为 5，不能直接解释为控制电路减少 6/11。两者�
 - 当前三个产品资源、时序、布线报告：[SLH-DSA](../manifests/experiments/unified_hbs_v3/slh_u2/ppa.json)、[XMSS](../manifests/experiments/unified_hbs_v3/xmss_u2/ppa.json)、[LMS](../manifests/experiments/unified_hbs_v3/lms_u2/ppa.json)。
 - 软件 Hash 计数、输出摘要和镜像元数据：[模型 gate](../manifests/experiments/unified_hbs_model_gate.json)。
 - 本报告所有派生量：[JSON](../manifests/experiments/unified_hbs_paper_comparison.json)、[CSV](../manifests/experiments/unified_hbs_paper_comparison.csv)。
+- 复算命令：`make reproduce-paper-comparison`，从论文表格、原始 U2 资源报告和仿真周期日志逐项核对 JSON/CSV 及报告主表。U4 未完成记录保留，但不参与最终排名。
 - 微码与静态裁剪的具体解释：[微码为何影响硬件面积](Why_Microcode_Affects_Hardware.md)。

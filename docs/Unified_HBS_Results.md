@@ -17,9 +17,9 @@ SLH-DSA and one lane for XMSS/LMS after lane-count screening. Icarus 12.0 units 
 physical lane exchange, errors and durable-index acknowledgment.
 
 Verification summaries and inherited historical-test failures are archived in
-`manifests/experiments/unified_hbs_v3/`. `make test-unified` passes. The historical
-full Python suite has 7 failures and 1 error; the same eight outcomes were
-reproduced in a clean HEAD archive. They are not claimed as passing tests.
+`manifests/experiments/unified_hbs_v3/`. `make test-unified` passes. The retired
+historical suite had 7 failures and 1 error, reproduced in its original HEAD.
+It was removed during project cleanup; `make test` now runs the current unified gate.
 
 ## Measurement contract
 
@@ -118,6 +118,13 @@ The `_core_route/post_route_final_clock.dcp` checkpoint and `constraints.xdc`
 retain the rechecked clock. Reviewable JSON, source hashes, utilization,
 hierarchical utilization, timing, coverage and route-status reports are archived
 under `manifests/experiments/unified_hbs_v3/{slh,xmss,lms}_u2/`.
+`make reproduce-paper-comparison` recalculates the comparison from those raw
+reports, the U2 cycle logs, and the paper reader's Tables 5/7. It checks source
+digests, derived JSON/CSV and report numbers. The retained U4 archives are
+checked for presence but are not ranked.
+The route script digest in each synthesis-time `inputs.json` predates the final
+route script revision. The actual routed flow is recorded separately in
+`route_inputs.json`; the reproduction check uses that digest for the route flow.
 
 ### Optimization decisions
 

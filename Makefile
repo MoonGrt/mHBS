@@ -19,12 +19,11 @@ UHBS_RTL := $(shell cat manifests/unified_sources.txt)
 
 .PHONY: all test test-unified lint compile-microcode generate-vectors \
 	rtl-unit-test rtl-slh-dsa-test rtl-xmss-test rtl-lms-test rtl-test \
-	synth-keccak synth-lane synth-slh-dsa synth-xmss synth-lms
+	synth-slh-dsa synth-xmss synth-lms reproduce-paper-comparison
 
 all: rtl-test
 
-test:
-	$(PYTHON) -m unittest discover -s tests -p 'test_*.py' -v
+test: test-unified
 
 test-unified:
 	$(PYTHON) -m unittest tests.test_unified_hbs tests.test_unified_rtl_contract -v
@@ -59,28 +58,10 @@ rtl-unit-test:
 		rtl/hash_lane/uhbs_compact_shake_context_lane.sv rtl/hash_lane/uhbs_recipe_lane.sv \
 		tb/unit/tb_uhbs_recipe_lane.sv && vvp build/iverilog/unified_recipe_$$profile.vvp || exit 1; \
 	done
-	iverilog -g2012 -o build/iverilog/uhbs_tree_push_reducer.vvp \
-		rtl/treehash/uhbs_tree_push_reducer.sv \
-		tb/unit/tb_uhbs_tree_push_reducer.sv
-	vvp build/iverilog/uhbs_tree_push_reducer.vvp
-	iverilog -g2012 -o build/iverilog/uhbs_full_tree_cache256.vvp \
-		rtl/memory/uhbs_full_tree_cache256.sv \
-		tb/unit/tb_uhbs_full_tree_cache256.sv
-	vvp build/iverilog/uhbs_full_tree_cache256.vvp
 	iverilog -g2012 -o build/iverilog/uhbs_stateful_index_guard.vvp \
 		rtl/control/uhbs_stateful_index_guard.sv \
 		tb/unit/tb_uhbs_stateful_index_guard.sv
 	vvp build/iverilog/uhbs_stateful_index_guard.vvp
-	iverilog -g2012 -o build/iverilog/uhbs_stateful_recipe_lane.vvp \
-		rtl/hash_lane/uhbs_keccak.sv \
-		rtl/hash_lane/uhbs_compact_shake_context_lane.sv \
-		rtl/hash_lane/uhbs_stateful_recipe_lane.sv \
-		tb/unit/tb_uhbs_stateful_recipe_lane.sv
-	vvp build/iverilog/uhbs_stateful_recipe_lane.vvp
-	iverilog -g2012 -o build/iverilog/uhbs_byte_output_packer.vvp \
-		rtl/output/uhbs_byte_output_packer.sv \
-		tb/unit/tb_uhbs_byte_output_packer.sv
-	vvp build/iverilog/uhbs_byte_output_packer.vvp
 	iverilog -g2012 -o build/iverilog/uhbs_compact_shake_context_lane.vvp \
 		rtl/hash_lane/uhbs_keccak.sv \
 		rtl/hash_lane/uhbs_compact_shake_context_lane.sv \
@@ -112,18 +93,6 @@ rtl-lms-test:
 
 rtl-test: rtl-unit-test rtl-slh-dsa-test rtl-xmss-test rtl-lms-test
 
-synth-keccak:
-	mkdir -p build/vivado/uhbs_keccak
-	vivado -mode batch -nolog -nojournal \
-		-log build/vivado/uhbs_keccak_driver.log \
-		-source experiments/synth_keccak_round.tcl
-
-synth-lane:
-	mkdir -p build/vivado/uhbs_compact_lane
-	vivado -mode batch -nolog -nojournal \
-		-log build/vivado/uhbs_compact_lane_driver.log \
-		-source experiments/synth_compact_lane.tcl
-
 synth-slh-dsa:
 	mkdir -p build/vivado/$(SLH_DSA_TAG)
 	vivado -mode batch -nolog -nojournal \
@@ -144,3 +113,6 @@ synth-lms:
 		-log build/vivado/$(LMS_TAG)_driver.log \
 		-source experiments/synth_unified_hbs.tcl \
 		-tclargs lms $(LMS_TAG) $(UNROLL) $(LMS_LANES)
+
+reproduce-paper-comparison:
+	$(PYTHON) scripts/reproduce_paper_comparison.py
