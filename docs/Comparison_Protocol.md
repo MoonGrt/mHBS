@@ -1,3 +1,7 @@
+> ABI 3 当前验收采用用户指定的固定 Job、分别静态综合、post-route 签名 ATP 数值门槛。
+> 结果见 [Unified HBS Results](Unified_HBS_Results.md)，全部外部论文比较标记 NON_STRICT。
+> 下文保留较早的严格同工作量比较协议，不是本次固定 Job 数值验收的附加条件。
+
 # 与 Unified HBS Architecture 的比较协议
 
 版本：v0.1.0（测量前冻结）

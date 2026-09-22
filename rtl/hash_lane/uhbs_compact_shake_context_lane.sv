@@ -249,6 +249,7 @@ module uhbs_compact_shake_context_lane #(
                     append_index <= 0;
                     if (fast_block_valid) begin
                         sponge_state <= {{512{1'b0}}, fast_block_data};
+                        chain_template <= fast_block_data[383:0];
                         running_last <= 1'b1;
                         chains_remaining <= chain_enable
                             ? chain_count : 5'd1;
@@ -264,6 +265,7 @@ module uhbs_compact_shake_context_lane #(
                     // executor builds fixed-format blocks while this lane is
                     // idle, avoiding nine serial append cycles per context.
                     sponge_state <= {{512{1'b0}}, fast_block_data};
+                    chain_template <= fast_block_data[383:0];
                     running_last <= 1'b1;
                     chains_remaining <= saved_chain_enable
                         ? saved_chain_count : 5'd1;

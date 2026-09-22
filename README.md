@@ -1,3 +1,39 @@
+# μHBS：统一 token / template / descriptor 执行核
+
+当前生产实现为 **ABI 3**。SLH-DSA、XMSS、LMS 的固定 Job 顶层均直接实例化
+`uhbs_hbs`，一次 `start` 完成 Keygen、接收一条消息、执行一次 Sign。
+三种算法使用同一核源码，各自静态综合。软件微码完整执行通过后才迁移 RTL。
+
+- [架构与验证流程](docs/Architecture.md)
+- [版本化镜像 ABI](docs/Unified_HBS_ABI.md)
+- [微码、静态裁剪与面积的关系](docs/Why_Microcode_Affects_Hardware.md)
+- [固定 Job 和流接口](docs/Job_Interface.md)
+- [ATP 实测与复现](docs/Unified_HBS_Results.md)
+- [与 Unified HBS 论文的全面对比](docs/Unified_HBS_Paper_Comparison.md)
+
+```bash
+make compile-microcode            # 软件 gate → 镜像/向量 → 固定 Job 顶层
+make test-unified                 # 软件模型和镜像/顶层契约
+make rtl-unit-test                # Icarus Verilog 12.0
+make rtl-slh-dsa-test UNROLL=2 LANES=2
+make rtl-xmss-test UNROLL=2 LANES=1
+make rtl-lms-test UNROLL=2 LANES=1
+# 在上述完整仿真命令后增加 SWAP=1 BACKPRESSURE=1 可运行压力场景。
+```
+
+完整算法仿真使用 Verilator 5.008 `--binary --timing`。面积优化先看 post-synth，
+最终由 Vivado 2025.2 在 `xc7a200tffg1156-3` 上做 post-route 验收。
+已选实现的签名 ATP 为 **48,225.754 / 888.939 / 373.916 Slice·ms**
+（SLH-DSA / XMSS / LMS），三项均低于指定门槛。这是内部寄存器路径通过
+时序检查的 OOC 结果；论文对比标记为 NON_STRICT，详见结果报告。
+
+`make test` 仍执行历史测试全集；其中 7 个 failure 和 1 个 error 已在未修改的
+HEAD 中复现，涉及历史报告/镜像哈希与已移除的旧顶层。当前 gate 为上面的
+`test-unified`、Icarus 单元和三算法完整正常/背压仿真。
+
+<details>
+<summary>历史设计记录（命令、接口与 PPA 不代表当前 ABI 3 实现）</summary>
+
 # μHBS: Loop-Compressed Microcoded HBS Engine
 
 (Microcoded Hash-Based Signature Engine)
@@ -620,3 +656,5 @@ Area Saving = 1 - A_unified / (A_LMS + A_XMSS + A_SLH-DSA)
 2. 模板驱动的 Hash 输入构造和结构化地址生成；
 3. 面向 TreeHash 和 OTS 链的数据转发与中间值生命周期管理；
 4. 相对 task-FSM 与 RISC-V + Hash 的统一、同平台实验评估。
+
+</details>

@@ -1,36 +1,45 @@
-# μHBS Job Interface v0.1
+# μHBS ABI 3 fixed Job interface
 
-## 初始化接口
+## Product wrapper
 
-程序和 layout 只能在 `idle=1` 时写入；每幅镜像由 version、word count、entry table、resource bounds 和 SHA-256 digest 标识。开始 Job 后写使能必须被拒绝并置 `ERR_IMAGE_LOCKED`。
+SLH-DSA、XMSS、LMS 顶层均直接实例化 `uhbs_hbs`。Job 数据来自综合参数：
+`SECRET`、`PRF`、`PUBLIC`、`RANDOM`、`IDENTIFIER`、`INITIAL_Q`、
+`MESSAGE_BYTES`；默认值由通过软件仿真的现有 KAT 生成。顶层没有 Job 数据端口，
+镜像 ROM 在运行时不可写。
 
-## 每操作唯一命令
+`start && ready` 启动一次 Keygen → 消息接收 → Sign；每次启动只签一次。
+`keygen_done` 和 `done` 是单周期脉冲，分别伴随锁存的 `keygen_cycles` 和
+`sign_cycles`。计数包含消息等待、输出背压和索引提交等待。
 
-逻辑 Job Descriptor：
+| 接口 | 语义 |
+|---|---|
+| `message_valid/ready` | 64 位消息流，只在 Keygen 完成后接收 |
+| `message_keep` | 从 bit 0 开始连续有效的字节掩码，不接受零或空洞 |
+| `message_last` | 必须恰好落在综合时指定的消息长度 |
+| `out_valid/ready` | 64 位结果流；背压期间 data/keep/last/kind 保持 |
+| `result_kind` | 0 为 SK\|\|PK，1 为签名；各自有 `out_last` |
+| `state_commit_valid/ready` | XMSS/LMS 的下一索引持久化确认 |
+| `state_next_q` | 外部应持久化的 q+1，允许终值 1024 |
+| `error/error_code` | 错误保持到下一次内部 Job 接受，错误操作不发 done |
+| `hash_count/permutation_count` | PROFILE_ENABLE 验证构建的操作计数 |
 
-```text
-program_entry      u16
-operation          u8   (KEYGEN=1, SIGN=2, VERIFY=3)
-parameter_set      u16
-message_base       u32
-message_length     u32
-secret_key_base    u32
-public_key_base    u32
-output_base        u32
-state_handle       u32
-flags              u16
-```
+## Stateful 索引与缓存
 
-描述符不含 task 序列、单次 Hash 输入、动态地址、树节点或 lane 决策。RTL 集成可将字段映射为寄存器或 DMA 请求，但语义保持一条原子 Job。
+Keygen 计算完整 h=10 树，只缓存当前 q 所需的认证路径和根。
+Sign 在获得 q+1 的提交确认之前不会输出签名字节。已确认的索引在执行失败后
+仍然烧毁；重新启动 Keygen 使用保留的下一索引。q=1023 是最后可签索引，
+下一索引 1024 拒绝继续 Keygen/Sign。未确认提交时可以持续等待。
 
-## 握手
+再次 `start` 将重建下一 q 的路径，因此这里没有跨多个签名复用完整树缓存的
+吞吐量承诺。reset 清除易失状态和缓存；固定 Job 顶层用于完整流程和 PPA 测量，
+不是掉电恢复接口。外部持久化服务不计入本核面积。
 
-- `job_valid && job_ready` 只允许在 IDLE 接受一次。
-- 接受后 `job_ready=0`，直到 `done || error`。
-- `done` 与 `error` 互斥，均为单次完成 token。
-- 输出遵循 valid/ready；背压不允许主机注入控制信息。
-- reset/cancel 进入清零流程；状态式索引按状态安全协议烧毁。
+## 内部核接口
 
-## 自主性计数器
+`uhbs_hbs` 的 `job_valid/ready`、`job_operation` 和 Job 数据仅连接到固定参数
+与 `uhbs_job_sequence`。`job_operation=0/1` 选择同一镜像的 Keygen/Sign 入口。
+算法顶层不需要理解宏操作、Hash 输入、树节点或 lane 调度。
 
-验证构建暴露只读计数器：`accepted_job_commands`、`host_control_writes_during_busy`、`external_task_descriptors`、`external_hash_descriptors`。后两项在顶层接口中无输入端口，常量为零。
+错误码：3001 镜像/profile；3002 消息；3003 缓存/索引不匹配；
+3004 初始索引/耗尽；3005 输出长度；3006 宏操作/descriptor；
+3007 Hash lane；31xx sequencer；25xx stateful guard。
