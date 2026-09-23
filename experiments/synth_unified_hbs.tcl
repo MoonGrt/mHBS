@@ -1,8 +1,8 @@
 set root [file normalize [file join [file dirname [info script]] ..]]
 set family [lindex $argv 0]
-if {$family ni {slh xmss lms}} {error "family must be slh/xmss/lms"}
+if {$family ni {slh_128f slh_192f slh_256f xmss_omega2 xmss_omega4 lms_omega2 lms_omega4}} {error "unknown profile"}
 set tag [lindex $argv 1]
-if {$tag eq ""} {set tag "unified_${family}_v3"}
+if {$tag eq ""} {set tag "unified_${family}_v4"}
 if {![regexp {^[A-Za-z0-9_.-]+$} $tag]} {error "invalid output tag"}
 set part "xc7a200tffg1156-3"
 set unroll 2
@@ -18,9 +18,9 @@ set source_list [split [string trim [read $source_manifest]] "\n"]
 close $source_manifest
 foreach source $source_list {read_verilog -sv [file join $root $source]}
 
-set top [expr {$family eq "slh" ? "uhbs_slh_dsa_top" : "uhbs_${family}_top"}]
+set top "uhbs_${family}_top"
 synth_design -top $top -part $part -mode out_of_context -flatten_hierarchy rebuilt \
-    -directive AreaOptimized_high -generic UNROLL=$unroll -generic LANES=$lanes -generic PROFILE_ENABLE=0
+    -directive AreaOptimized_high -max_dsp 0 -generic UNROLL=$unroll -generic LANES=$lanes -generic PROFILE_ENABLE=0
 set abort_registers [get_cells -hierarchical -filter {NAME =~ *abort_execution_reg}]
 if {[llength $abort_registers] != 1 || ![regexp {^FD} [get_property REF_NAME $abort_registers]]} {
     error "execution abort must remain a dedicated register"

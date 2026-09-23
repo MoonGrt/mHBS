@@ -1,11 +1,11 @@
-# μHBS ABI 3 fixed Job interface
+# μHBS ABI 4 fixed Job interface
 
 ## Product wrapper
 
 SLH-DSA、XMSS、LMS 顶层均直接实例化 `uhbs_hbs`。Job 数据来自综合参数：
 `SECRET`、`PRF`、`PUBLIC`、`RANDOM`、`IDENTIFIER`、`INITIAL_Q`、
 `MESSAGE_BYTES`；默认值由通过软件仿真的现有 KAT 生成。顶层没有 Job 数据端口，
-镜像 ROM 在运行时不可写。
+镜像 ROM 在运行时不可写。七点分别静态综合，顶层命名为 `uhbs_<profile>_top`。
 
 `start && ready` 启动一次 Keygen → 消息接收 → Sign；每次启动只签一次。
 `keygen_done` 和 `done` 是单周期脉冲，分别伴随锁存的 `keygen_cycles` 和
@@ -16,7 +16,8 @@ SLH-DSA、XMSS、LMS 顶层均直接实例化 `uhbs_hbs`。Job 数据来自综�
 | `message_valid/ready` | 64 位消息流，只在 Keygen 完成后接收 |
 | `message_keep` | 从 bit 0 开始连续有效的字节掩码，不接受零或空洞 |
 | `message_last` | 必须恰好落在综合时指定的消息长度 |
-| `out_valid/ready` | 64 位结果流；背压期间 data/keep/last/kind 保持 |
+| `out_valid/ready` | 64 位结果流直接输出片段；背压期间 data/keep/last/kind 保持 |
+| `out_keep` | 从低字节开始的有效掩码；非末拍也允许不足 8 字节，接收方依掩码串接 |
 | `result_kind` | 0 为 SK\|\|PK，1 为签名；各自有 `out_last` |
 | `state_commit_valid/ready` | XMSS/LMS 的下一索引持久化确认 |
 | `state_next_q` | 外部应持久化的 q+1，允许终值 1024 |

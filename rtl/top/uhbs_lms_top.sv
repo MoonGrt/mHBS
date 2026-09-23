@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
 `default_nettype none
 // Generated fixed-job demonstration wrapper. Regenerate with generate_unified_tops.py.
-// Algorithm control is supplied solely by the ABI 3 immutable image.
+// Algorithm control is supplied solely by the ABI 4 immutable image.
 module uhbs_lms_top #(
-    parameter integer UNROLL=2, LANES=2, MESSAGE_BYTES=20, INITIAL_Q=5,
+    parameter integer UNROLL=2, LANES=1, MESSAGE_BYTES=20, INITIAL_Q=5,
     parameter [255:0] SECRET = 256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120,
     parameter [255:0] PRF = 256'h0000000000000000000000000000000000000000000000000000000000000000,
     parameter [255:0] PUBLIC = 256'h0000000000000000000000000000000000000000000000000000000000000000,
@@ -31,14 +31,16 @@ module uhbs_lms_top #(
         .clk,.rst_n,.start,.ready,.busy,.job_valid,.job_ready,.job_operation(operation),
         .core_done,.core_error(error),.core_cycles,.keygen_done,.done,.keygen_cycles,.sign_cycles
     );
-    uhbs_hbs #(.N(32),.STATEFUL(1'b1),.UNROLL(UNROLL),.LANES(LANES),
+    uhbs_hbs #(.N(32),.STATEFUL(1'b1),
+        .OMEGA(4),.CHAIN_COUNT(67),.DIGEST_BYTES(32),
+        .FORS_A(0),.FORS_K(0),.TREE_BITS(0),.HP(10),.UNROLL(UNROLL),.LANES(LANES),
         .RECIPE_MASK(16'hee00),
         .CHAIN_RECIPE_MASK(16'h0600),.MAX_MESSAGE_BYTES(MESSAGE_BYTES),
         .PROGRAM_TOKENS(10),.PROGRAM_TEMPLATES(8),
         .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),
-        .TOKEN_INIT_FILE("rtl/microcode/uhbs_lms_tokens.mem"),
-        .TEMPLATE_INIT_FILE("rtl/microcode/uhbs_lms_templates.mem"),
-        .DESCRIPTOR_INIT_FILE("rtl/microcode/uhbs_lms_descriptors.mem")
+        .TOKEN_INIT_FILE("rtl/microcode/uhbs_lms_omega4_tokens.mem"),
+        .TEMPLATE_INIT_FILE("rtl/microcode/uhbs_lms_omega4_templates.mem"),
+        .DESCRIPTOR_INIT_FILE("rtl/microcode/uhbs_lms_omega4_descriptors.mem")
     ) core (
         .clk,.rst_n,.job_valid,.job_ready,.job_operation(operation),
         .job_message_length(7'(MESSAGE_BYTES)),.job_initial_q(11'(INITIAL_Q)),

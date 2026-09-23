@@ -7,15 +7,19 @@ from dataclasses import replace
 
 from model.unified_hbs import Image, Job, Machine, compile_image, validate
 from model.reference import slh_dsa, xmss, lms_shake
+from model.profiles import get_profile
 
 KAT = Path(__file__).parent / "kat"
 
 
 def default_job(name):
+    p = get_profile(name)
+    name = p.family
     if name == "slh":
-        v = json.loads((KAT / "slh_dsa_shake_128f_siggen_acvp_tc137.json").read_text())
-        sk = bytes.fromhex(v["sk"])
-        return Job(sk[:16], sk[16:32], sk[32:48], sk[32:48]), bytes.fromhex(v["message"])
+        path = next(KAT.glob(f"slh_dsa_shake_{p.n*8}f_siggen_acvp_tc*.json"))
+        v = json.loads(path.read_text())
+        sk, n = bytes.fromhex(v["sk"]), p.n
+        return Job(sk[:n], sk[n:2*n], sk[2*n:3*n], sk[2*n:3*n]), bytes.fromhex(v["message"])
     if name == "xmss":
         v = json.loads((KAT / "xmss_shake256_10_256_idx5.json").read_text())
         seed = bytes.fromhex(v["seed"])

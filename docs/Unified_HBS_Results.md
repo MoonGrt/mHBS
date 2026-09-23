@@ -1,4 +1,22 @@
-# Unified μHBS ABI 3 implementation and ATP
+# 七参数点结果与复现入口
+
+当前 ABI 4 七点结果以 [论文对比报告](Unified_HBS_Paper_Comparison.md) 和
+[机器可读结果](../manifests/experiments/unified_hbs_v4/final.json) 为准。
+完整 Keygen/Sign 时间、ATP、论文原始毫秒与 108 MHz 重算数据见
+[comparison.csv](../manifests/experiments/unified_hbs_v4/comparison.csv)。
+
+```bash
+make reproduce-paper-comparison
+python3 scripts/replay_profile.py slh_256f --run rtl-profile-test
+```
+
+重建硬件可将 `--run` 改为 `route-profile`，会依次执行仿真、综合与布线。
+复现目录必须为空，避免覆盖工作文件。重新布线的资源和时序可能随工具
+实现发生变化；归档报告的核验与重新运行实现是两个独立步骤。
+
+以下保留历史 ABI 3 三点基线；历史构建命令必须在固定源码版本运行。
+
+# Historical μHBS ABI 3 implementation and ATP
 
 ## Scope and evidence
 
@@ -17,7 +35,7 @@ SLH-DSA and one lane for XMSS/LMS after lane-count screening. Icarus 12.0 units 
 physical lane exchange, errors and durable-index acknowledgment.
 
 Verification summaries and inherited historical-test failures are archived in
-`manifests/experiments/unified_hbs_v3/`. `make test-unified` passes. The retired
+`manifests/experiments/unified_hbs_V3/`. `make test-unified` passes. The retired
 historical suite had 7 failures and 1 error, reproduced in its original HEAD.
 It was removed during project cleanup; `make test` now runs the current unified gate.
 
@@ -117,7 +135,7 @@ place/route is not guaranteed to produce identical timing on another machine.
 The `_core_route/post_route_final_clock.dcp` checkpoint and `constraints.xdc`
 retain the rechecked clock. Reviewable JSON, source hashes, utilization,
 hierarchical utilization, timing, coverage and route-status reports are archived
-under `manifests/experiments/unified_hbs_v3/{slh,xmss,lms}_u2/`.
+under `manifests/experiments/unified_hbs_V3/{slh,xmss,lms}_u2/`.
 `make reproduce-paper-comparison` recalculates the comparison from those raw
 reports, the U2 cycle logs, and the paper reader's Tables 5/7. It checks source
 digests, derived JSON/CSV and report numbers. The retained U4 archives are

@@ -9,6 +9,7 @@ if {![regexp {^[A-Za-z0-9_.-]+$} $route_tag]} {error "invalid route tag"}
 set outdir [file join $root build vivado $route_tag]
 file mkdir $outdir
 file copy -force [file join $root build vivado $tag inputs.json] [file join $outdir inputs.json]
+file copy -force [file join $root build vivado $tag source_snapshot.tar.gz] [file join $outdir source_snapshot.tar.gz]
 exec python3 -c {import hashlib,json,pathlib,sys; p=pathlib.Path(sys.argv[1]); pathlib.Path(sys.argv[2]).write_text(json.dumps({"script_sha256":hashlib.sha256(p.read_bytes()).hexdigest(),"period_ns":float(sys.argv[3]),"timing_scope":"OOC_INTERNAL_REGISTER_PATHS"},indent=2)+"\n")} [info script] [file join $outdir route_inputs.json] $period
 set_param general.maxThreads 16
 open_checkpoint [file join $root build vivado $tag post_synth.dcp]

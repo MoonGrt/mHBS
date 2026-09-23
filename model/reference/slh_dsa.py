@@ -58,6 +58,10 @@ SLH_DSA_SHAKE_128F = SlhDsaParams(
 )
 
 
+SLH_DSA_SHAKE_192F = SlhDsaParams("SLH-DSA-SHAKE-192f",24,66,22,3,8,33,4,16,48,3,51,42)
+SLH_DSA_SHAKE_256F = SlhDsaParams("SLH-DSA-SHAKE-256f",32,68,17,4,9,35,4,16,64,3,67,49)
+
+
 def _to_bytes(value: int, length: int) -> bytes:
     return value.to_bytes(length, "big", signed=False)
 

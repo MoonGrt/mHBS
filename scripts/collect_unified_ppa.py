@@ -6,32 +6,58 @@ import hashlib
 import json
 import re
 import subprocess
+import sys
+import tarfile
 
 ROOT=Path(__file__).resolve().parents[1]
-LIMITS={"slh":57360.476,"xmss":1506.437,"lms":579.399}
+sys.path.insert(0,str(ROOT))
+from model.profiles import PROFILES, get_profile
+from run_unified_sim import logic_hashes
+LIMITS={name:p.target for name,p in PROFILES.items()}
+BASELINE=json.loads((ROOT/"manifests/experiments/unified_hbs_final.json").read_text())["profiles"]
+REGRESSION={"slh_128f":BASELINE["slh"]["sign_atp"],"xmss_omega4":BASELINE["xmss"]["sign_atp"],"lms_omega4":BASELINE["lms"]["sign_atp"]}
 
 
 def capture(tag, family, unroll, lanes):
+    family=get_profile(family).name
     sources=(ROOT/"manifests/unified_sources.txt").read_text().splitlines()
     sources += [f"rtl/microcode/uhbs_{family}_{kind}.mem" for kind in ("tokens","templates","descriptors")]
-    sources += ["model/unified_hbs.py","manifests/experiments/unified_hbs_model_gate.json",
+    sources += ["model/unified_hbs.py","manifests/experiments/unified_hbs_v4/model_gate.json", "manifests/experiments/unified_hbs_v4/software_gate.json",
                 "tb/integration/tb_uhbs_unified.sv", "tests/test_unified_hbs.py",
                 "tests/test_unified_rtl_contract.py", "experiments/synth_unified_hbs.tcl",
                 "experiments/route_unified_hbs.tcl", "manifests/unified_sources.txt"]
+    sources += [str(p.relative_to(ROOT)) for folder in ("model","scripts","tests","tb") for p in (ROOT/folder).rglob("*") if p.is_file() and (p.suffix in (".py",".json",".mem",".sv",".svh"))]
+    sources += ["manifests/experiments/unified_hbs_final.json", "Makefile","experiments/finalize_unified_clock.tcl","tb/vectors/uhbs_profile_constants.svh"]
+    sources=sorted(set(sources))
     hashes={p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sources}
     data=dict(family=family,unroll=unroll,lanes=lanes,part="xc7a200tffg1156-3",period_ns=10.0,
               tool="Vivado 2025.2",stage="post_synth",source_sha256=hashes,
               git_head=subprocess.check_output(["git","rev-parse","HEAD"],cwd=ROOT,text=True).strip(),
               source_set_sha256=hashlib.sha256(json.dumps(hashes,sort_keys=True).encode()).hexdigest(),
-              cache_policy="selected_authentication_path" if family!="slh" else "transient_tree",
+              cache_policy="selected_authentication_path" if get_profile(family).stateful else "transient_tree",
               comparison="NON_STRICT_FIXED_JOB_PROFILE_AND_CACHE")
     out=ROOT/"build/vivado"/tag
     out.mkdir(parents=True,exist_ok=True)
+    snapshot=out/"source_snapshot.tar.gz"
+    with tarfile.open(snapshot,"w:gz") as tar:
+        for path in sources:tar.add(ROOT/path,arcname=path)
+    data["snapshot_sha256"]=hashlib.sha256(snapshot.read_bytes()).hexdigest()
+    data["logic_sha256"]=logic_hashes(family)
     (out/"inputs.json").write_text(json.dumps(data,indent=2)+"\n")
 
 
-def collect(tag, family, cycles, route, period, keygen_cycles=None):
+def collect(tag, family, cycles, route, period, keygen_cycles=None, simulation=None):
+    family=get_profile(family).name
     out=ROOT/"build/vivado"/tag
+    if route and period is None:period=json.loads((out/"final_clock.json").read_text())["period_ns"]
+    if period is None:period=10.0
+    if not simulation:raise ValueError("--simulation is required to bind cycles to verified RTL")
+    sim_path=ROOT/"build/sim"/(simulation+".json")
+    sim=json.loads(sim_path.read_text())
+    sim_log=sim_path.with_suffix(".log")
+    if not sim["passed"] or sim["profile"]!=family or hashlib.sha256(sim_log.read_bytes()).hexdigest()!=sim["log_sha256"]:
+        raise ValueError("simulation evidence mismatch")
+    cycles,keygen_cycles=sim["sign_cycles"],sim["keygen_cycles"]
     util=(out/"utilization.rpt").read_text()
     timing=(out/"timing_summary.rpt").read_text()
     def amount(label):
@@ -51,14 +77,18 @@ def collect(tag, family, cycles, route, period, keygen_cycles=None):
     if not clock or abs(float(clock[1])-period)>0.0001:
         raise ValueError("requested period disagrees with reported clock")
     inputs=json.loads((out/"inputs.json").read_text())
-    matches=all(hashlib.sha256((ROOT/p).read_bytes()).hexdigest()==h
-                for p,h in inputs["source_sha256"].items() if not p.startswith("experiments/"))
+    snapshot=out/"source_snapshot.tar.gz"
+    matches=hashlib.sha256(snapshot.read_bytes()).hexdigest()==inputs["snapshot_sha256"]
+    with tarfile.open(snapshot,"r:gz") as tar:
+        matches &= all(hashlib.sha256(tar.extractfile(path).read()).hexdigest()==digest for path,digest in inputs["source_sha256"].items())
+    matches &= sim["logic_sha256"]==inputs["logic_sha256"] and sim["unroll"]==inputs["unroll"] and sim["lanes"]==inputs["lanes"]
+    if not matches:raise ValueError("snapshot/simulation identity mismatch")
     area=lut/4+ff/8+bram*232.4+dsp*102.4
     atp=area*cycles*period/1e6
     data=dict(family=family,stage="post_route" if route else "post_synth",lut=int(lut),ff=int(ff),
               bram36_equivalent=bram,dsp=int(dsp),equivalent_slice=area,
               keygen_cycles=keygen_cycles,sign_cycles=cycles,period_ns=period,frequency_mhz=1000/period,
-              source_set_sha256=inputs["source_set_sha256"],source_matches_worktree=matches,
+              source_set_sha256=inputs["source_set_sha256"],source_snapshot_verified=matches,simulation=simulation,simulation_sha256=hashlib.sha256(sim_path.read_bytes()).hexdigest(),
               unroll=inputs["unroll"],lanes=inputs.get("lanes",2),
               wns_ns=wns,tns_ns=tns,sign_ms=cycles*period/1e6,sign_atp=atp,
               whs_ns=whs,ths_ns=ths,wpws_ns=wpws,tpws_ns=tpws,
@@ -68,6 +98,9 @@ def collect(tag, family, cycles, route, period, keygen_cycles=None):
                               and has_hold and whs>=0 and ths==0
                               and wpws>=0 and tpws==0 and atp<LIMITS[family]),
               comparison="NON_STRICT_FIXED_JOB_PROFILE_AND_CACHE")
+    data["regression_limit"]=REGRESSION.get(family)
+    data["regression_pass"]=family not in REGRESSION or atp<=REGRESSION[family]
+    data["final_pass"] &= data["regression_pass"]
     if route:
         flow=json.loads((out/"route_inputs.json").read_text())
         flow_matches=flow["script_sha256"]==hashlib.sha256((ROOT/"experiments/route_unified_hbs.tcl").read_bytes()).hexdigest()
@@ -109,9 +142,10 @@ if __name__=="__main__":
     p.add_argument("--lanes",type=int,default=2)
     p.add_argument("--cycles",type=int);p.add_argument("--route",action="store_true")
     p.add_argument("--keygen-cycles",type=int)
-    p.add_argument("--period",type=float,default=10.0)
+    p.add_argument("--period",type=float)
+    p.add_argument("--simulation")
     a=p.parse_args()
     if a.capture: capture(a.tag,a.family,a.unroll,a.lanes)
     else:
-        if a.cycles is None: p.error("--cycles required for collection")
-        collect(a.tag,a.family,a.cycles,a.route,a.period,a.keygen_cycles)
+        if not a.simulation: p.error("--simulation required for collection")
+        collect(a.tag,a.family,a.cycles,a.route,a.period,a.keygen_cycles,a.simulation)

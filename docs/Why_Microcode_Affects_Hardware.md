@@ -361,9 +361,9 @@ LUTRAM 是总 LUT 的子集，不应再重复加到总 LUT 上。
 
 原始报告：
 
-- [SLH-DSA 层次资源](../manifests/experiments/unified_hbs_v3/slh_u2/utilization_hierarchical.rpt)
-- [XMSS 层次资源](../manifests/experiments/unified_hbs_v3/xmss_u2/utilization_hierarchical.rpt)
-- [LMS 层次资源](../manifests/experiments/unified_hbs_v3/lms_u2/utilization_hierarchical.rpt)
+- [SLH-DSA 层次资源](../manifests/experiments/unified_hbs_V3/slh_u2/utilization_hierarchical.rpt)
+- [XMSS 层次资源](../manifests/experiments/unified_hbs_V3/xmss_u2/utilization_hierarchical.rpt)
+- [LMS 层次资源](../manifests/experiments/unified_hbs_V3/lms_u2/utilization_hierarchical.rpt)
 
 这些报告能证明当前面积及层次分布，但不能独立量化“微码裁剪究竟节省了多少 LUT”。要得到这个因果数字，必须固定 lane 数、N、消息容量、Job 和综合流程，只改变某一项掩码或 ROM，做受控对照。
 

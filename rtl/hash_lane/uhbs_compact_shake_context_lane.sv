@@ -2,9 +2,10 @@
 `default_nettype none
 
 // Signer-specialized SHAKE lane: one sponge/permutation state and a compact
-// 48-byte chain template.  The two top-level instances remain identical.
+// statically sized chain template.  The two top-level instances remain identical.
 module uhbs_compact_shake_context_lane #(
-    parameter integer UNROLL = 2
+    parameter integer UNROLL = 2, N = 16, DIGEST_BYTES = 34,
+    parameter bit STREAM_CHAIN_ENABLE = 1
 ) (
     input  wire          clk,
     input  wire          rst_n,
@@ -25,10 +26,10 @@ module uhbs_compact_shake_context_lane #(
     input  wire [127:0]  block_data,
     input  wire          block_last,
     output logic         response_valid,
-    output wire [271:0]  response_digest,
+    output wire [DIGEST_BYTES*8-1:0]  response_digest,
     output wire          finish_valid,
-    output wire [271:0]  finish_digest,
-    output wire [127:0]  capture_digest,
+    output wire [DIGEST_BYTES*8-1:0]  finish_digest,
+    output wire [N*8-1:0]  capture_digest,
     output logic         capture_valid,
     output logic         error
 );
@@ -49,11 +50,11 @@ module uhbs_compact_shake_context_lane #(
     logic [3:0] append_index;
 
     logic [1599:0] sponge_state;
-    logic [383:0] chain_template;
+    logic [(N+32)*8-1:0] chain_template;
     logic [4:0] chains_remaining;
     logic [3:0] chain_counter;
     logic [4:0] chain_iteration;
-    logic [127:0] captured_value;
+    logic [N*8-1:0] captured_value;
     logic [4:0] round_index;
     wire [1599:0] round_state [0:UNROLL];
     wire [1599:0] advanced_state = round_state[UNROLL];
@@ -182,15 +183,15 @@ module uhbs_compact_shake_context_lane #(
 
     always_comb begin
         next_chain_state = '0;
-        next_chain_state[383:0] = chain_template;
+        next_chain_state[(N+32)*8-1:0] = chain_template;
         if (saved_chain_prefix)
-            next_chain_state[8*32 +: 32] =
+            next_chain_state[8*(N+16) +: 32] =
                 {5'b0, saved_chain_prefix_domain, 24'b0};
         if (!saved_chain_prefix_preserve_counter)
-            next_chain_state[8*44 +: 32] =
+            next_chain_state[8*(N+28) +: 32] =
                 {4'b0, transition_counter, 24'b0};
-        next_chain_state[8*48 +: 128] = advanced_state[127:0];
-        next_chain_state[8*64 +: 8] = 8'h1f;
+        next_chain_state[8*(N+32) +: N*8] = advanced_state[N*8-1:0];
+        next_chain_state[8*(2*N+32) +: 8] = 8'h1f;
         next_chain_state[1087] = 1'b1;
     end
 
@@ -198,12 +199,12 @@ module uhbs_compact_shake_context_lane #(
     assign block_ready = lane_state == WAIT_BLOCK;
     assign fast_block_ready = (lane_state == IDLE && context_valid)
         || (lane_state == WAIT_BLOCK && first_block && append_index == 0);
-    assign response_digest = sponge_state[271:0];
+    assign response_digest = sponge_state[DIGEST_BYTES*8-1:0];
     assign finish_valid = lane_state == RUN
         && round_index + UNROLL >= 24
         && (!saved_chain_enable || chains_remaining <= 1)
         && running_last;
-    assign finish_digest = advanced_state[271:0];
+    assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
     assign capture_digest = captured_value;
 
     initial begin
@@ -249,7 +250,7 @@ module uhbs_compact_shake_context_lane #(
                     append_index <= 0;
                     if (fast_block_valid) begin
                         sponge_state <= {{512{1'b0}}, fast_block_data};
-                        chain_template <= fast_block_data[383:0];
+                        chain_template <= fast_block_data[(N+32)*8-1:0];
                         running_last <= 1'b1;
                         chains_remaining <= chain_enable
                             ? chain_count : 5'd1;
@@ -265,7 +266,7 @@ module uhbs_compact_shake_context_lane #(
                     // executor builds fixed-format blocks while this lane is
                     // idle, avoiding nine serial append cycles per context.
                     sponge_state <= {{512{1'b0}}, fast_block_data};
-                    chain_template <= fast_block_data[383:0];
+                    chain_template <= fast_block_data[(N+32)*8-1:0];
                     running_last <= 1'b1;
                     chains_remaining <= saved_chain_enable
                         ? saved_chain_count : 5'd1;
@@ -280,18 +281,18 @@ module uhbs_compact_shake_context_lane #(
                         else
                             sponge_state[127:0]
                                 <= sponge_state[127:0] ^ block_data;
-                        chain_template[127:0] <= block_data;
+                        if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[127:0] <= block_data;
                     end else begin
                         case (append_index)
                             1: begin
                                 sponge_state[255:128]
                                     <= sponge_state[255:128] ^ block_data;
-                                chain_template[255:128] <= block_data;
+                                if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[255:128] <= block_data;
                             end
                             2: begin
                                 sponge_state[383:256]
                                     <= sponge_state[383:256] ^ block_data;
-                                chain_template[383:256] <= block_data;
+                                if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[383:256] <= block_data;
                             end
                             3: sponge_state[511:384]
                                 <= sponge_state[511:384] ^ block_data;
@@ -330,10 +331,10 @@ module uhbs_compact_shake_context_lane #(
                     if (round_index + UNROLL >= 24) begin
                         if (saved_capture_enable
                             && saved_capture_after == chain_iteration)
-                            captured_value <= advanced_state[127:0];
+                            captured_value <= advanced_state[N*8-1:0];
                         if (saved_chain_enable && chains_remaining > 1) begin
                             sponge_state <= next_chain_state;
-                            chain_template <= next_chain_state[383:0];
+                            chain_template <= next_chain_state[(N+32)*8-1:0];
                             chains_remaining <= chains_remaining - 1'b1;
                             if (!saved_chain_prefix_preserve_counter
                                 && !(saved_chain_prefix

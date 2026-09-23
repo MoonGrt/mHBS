@@ -1,6 +1,82 @@
-# 当前 μHBS 与 Unified HBS 论文的全面对比报告
+<!-- SEVEN_PROFILE_RESULTS_BEGIN -->
+# ABI 4 七参数点 post-route 结果
 
-日期：2026-09-24。对象：当前 ABI 3、已完成 post-route 的 U2 实现。
+七点均使用同一份 RTL 核源码，按表中 U（每周期 Keccak 轮数）/lane 数分别静态综合。器件为 xc7a200tffg1156-3，工具为 Vivado 2025.2。最终频率通过完整布线及 OOC 内部 setup、hold、pulse-width 和覆盖检查；外部引脚时序不属于该测量边界。
+
+| Profile | U/lane | LUT | FF | BRAM36等效 | DSP | 等效 Slice | Keygen cycles | Sign cycles | MHz | Sign ATP | 论文 ATP 门槛 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| slh_128f | 2/2 | 18,074 | 7,968 | 0 | 0 | 5,514.500 | 29,718 | 728,544 | 103.093 | 38,970.292 | 57,360.476 |
+| slh_192f | 2/2 | 20,717 | 9,490 | 0 | 0 | 6,365.500 | 43,300 | 1,248,393 | 103.093 | 77,082.463 | 98,729.547 |
+| slh_256f | 2/2 | 25,204 | 10,897 | 0 | 0 | 7,663.125 | 114,402 | 2,569,205 | 96.154 | 204,756.646 | 205,686.556 |
+| xmss_omega2 | 2/1 | 15,003 | 6,027 | 0 | 0 | 4,504.125 | 26,021,886 | 10,126 | 101.010 | 451.527 | 811.158 |
+| xmss_omega4 | 2/1 | 13,010 | 6,018 | 0 | 0 | 4,004.750 | 45,220,862 | 21,063 | 105.263 | 801.344 | 1,506.437 |
+| lms_omega2 | 2/1 | 16,388 | 5,268 | 0 | 0 | 4,755.500 | 8,493,089 | 5,804 | 94.340 | 292.570 | 347.639 |
+| lms_omega4 | 2/1 | 14,095 | 5,255 | 0 | 0 | 4,180.625 | 14,999,585 | 7,966 | 101.010 | 329.698 | 579.399 |
+
+七点签名 ATP 均低于对应论文门槛，三个旧参数点也通过历史未舍入 ATP 的不退化检查。计时使用固定向量、无背压及立即提交确认；压力与边界测试的等待周期不混入基准。192f/256f 使用固定 NIST ACVP 提交中的 tc148/tc154；XMSS/LMS omega=2 沿用 omega=4 的输入材料。omega 表示每个 Winternitz 数字的位数。
+
+等效 Slice = LUT/4 + FF/8 + BRAM36等效数×232.4 + DSP×102.4。Sign ATP = 等效 Slice×Sign cycles×最终周期(ns)/1e6。门槛仍按论文报告毫秒值计算，不能与按 108 MHz 重算的时间混用。
+
+结果流直接输出计算完成的片段，out_keep 指明有效字节；认证路径缓存和索引提交保护继续保留。双 lane 同时计算 FORS 的相邻叶节点，随后由统一树栈归约。完整软件、单/双 lane、交换、背压及 q=0/1023 验证记录随结果保存。
+
+本比较继续标记 NON_STRICT：最终 SLH-DSA 与论文 SPHINCS+ 版本不同；LMS 是项目 SHAKE 研究 profile；论文共享多算法硬件、缓存策略和签名样本与当前分别静态综合的固定输入实现不同。Keygen 与生命周期数据应单独审视，签名 ATP 达标不代表所有操作都更快。
+
+[七点原始结果](../manifests/experiments/unified_hbs_v4/final.json) · [验证矩阵](../manifests/experiments/unified_hbs_v4/verification.json) · [完整数据表](../manifests/experiments/unified_hbs_v4/comparison.csv)。运行 `make reproduce-paper-comparison` 核对历史及当前结果。
+<!-- SEVEN_PROFILE_RESULTS_END -->
+
+
+
+
+
+<!-- SEVEN_PROFILE_TIMES_BEGIN -->
+## 七点 Keygen、Sign 与论文计时口径
+
+| Profile | Keygen ms | Keygen ATP | Sign ms | 论文 Keygen ms | 论文 Keygen ATP | 论文 Sign ms | Sign ATP 降幅 |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| slh_128f | 0.288265 | 1,589.635 | 7.066877 | 0.22 | 2,549.354 | 4.95 | 32.06% |
+| slh_192f | 0.420010 | 2,673.574 | 12.109412 | 0.32 | 3,708.152 | 8.52 | 21.93% |
+| slh_256f | 1.189781 | 9,117.439 | 26.719732 | 0.84 | 9,733.899 | 17.75 | 0.45% |
+| xmss_omega2 | 257.616671 | 1,160,337.690 | 0.100247 | 72.03 | 834,681.839 | 0.07 | 44.34% |
+| xmss_omega4 | 429.598189 | 1,720,433.347 | 0.200099 | 144.28 | 1,671,913.033 | 0.13 | 46.81% |
+| lms_omega2 | 90.026743 | 428,122.178 | 0.061522 | 35.04 | 406,042.644 | 0.03 | 15.84% |
+| lms_omega4 | 148.495891 | 620,805.636 | 0.078863 | 53.76 | 622,969.536 | 0.05 | 43.10% |
+
+论文表 5 的毫秒值是报告值，和表中周期按 108 MHz 相除的结果有差异。下表单独列出重算口径；验收门槛仍使用上表报告值。
+
+| Profile | 论文 Keygen cycles | 论文 Sign cycles | Keygen ms @108 MHz | Sign ms @108 MHz | Sign ATP @108 MHz |
+|---|---:|---:|---:|---:|---:|
+| slh_128f | 23,688 | 537,636 | 0.219333 | 4.978111 | 57,686.227 |
+| slh_192f | 34,687 | 926,398 | 0.321176 | 8.577759 | 99,398.860 |
+| slh_256f | 91,510 | 1,929,154 | 0.847315 | 17.862537 | 206,990.633 |
+| xmss_omega2 | 7,829,494 | 7,334 | 72.495315 | 0.067907 | 786.909 |
+| xmss_omega4 | 15,682,342 | 14,549 | 145.206870 | 0.134713 | 1,561.050 |
+| lms_omega2 | 3,808,440 | 3,572 | 35.263333 | 0.033074 | 383.262 |
+| lms_omega4 | 5,843,438 | 5,429 | 54.105907 | 0.050269 | 582.510 |
+
+有状态四点在 Keygen 遍历完整 h=10 树时缓存指定 q 的十个认证节点和根，Sign 不再构树。缓存仅服务该次签名；下一次 start 会为下一个索引重算树。因此 Sign ATP 改善不能直接外推为多次签名吞吐率，Keygen+Sign 的生命周期 ATP 已单列在 CSV 中。索引持久化确认的外部延迟在基准中取零等待，实际等待会增加 Sign 周期。
+
+### 输入、工作量与优化证据
+
+| Profile | 消息字节 | 签名字节 | Sign Hash | Keccak 置换 | HASH_WAIT 占 Sign 周期 | LUTRAM（已含于 LUT） |
+|---|---:|---:|---:|---:|---:|---:|
+| slh_128f | 1 | 17,088 | 104,937 | 105,641 | 95.47% | 902 |
+| slh_192f | 1 | 35,664 | 168,881 | 170,462 | 93.10% | 1,344 |
+| slh_256f | 1 | 49,856 | 345,414 | 349,758 | 93.24% | 2,484 |
+| xmss_omega2 | 21 | 4,612 | 657 | 658 | 85.99% | 3,164 |
+| xmss_omega4 | 21 | 2,500 | 1,554 | 1,555 | 96.39% | 1,796 |
+| lms_omega2 | 20 | 4,620 | 326 | 326 | 75.50% | 3,164 |
+| lms_omega4 | 20 | 2,508 | 548 | 548 | 90.41% | 1,796 |
+
+当前采用 U2、SLH 双 lane、有状态单 lane。候选 A→B→D 依次验证静态配方裁剪、直接结果输出、FORS 相邻叶并行，以及吸收输入流水和静态前缀选择。192f 的常量长度乘法曾映射为 6 个 DSP，禁止 DSP 推断后面积与时序均改善。U1 对照显示减少 Keccak 展开并未消除旧版输入选择路径瓶颈，故保留 U2。详细资源层次、候选关键路径和状态驻留日志随 [筛选表](../manifests/experiments/unified_hbs_v4/screening.csv) 归档。
+
+256f 的签名 ATP 接近门槛；周期与 setup 裕量可在 `final.json` 中核对。修改 RTL、工具或实现设置后须重新验收，不能直接沿用归档数值。
+<!-- SEVEN_PROFILE_TIMES_END -->
+
+## 历史 ABI 3 三点基线（固定源码复现）
+
+# 历史 ABI 3 与 Unified HBS 论文的对比记录
+
+日期：2026-09-24。对象：历史 ABI 3、已完成 post-route 的 U2 实现。以下“当前”和“本轮”均指该历史基线。
 
 ## 1. 结论摘要
 
@@ -49,7 +125,7 @@
 ### 2.2 当前实现
 
 - [最终结果清单](../manifests/experiments/unified_hbs_final.json)：资源、周期、频率、时序、源文件摘要与 checkpoint。
-- [验证清单](../manifests/experiments/unified_hbs_v3/verification.json)：软件、单元和完整算法仿真证据。
+- [验证清单](../manifests/experiments/unified_hbs_V3/verification.json)：软件、单元和完整算法仿真证据。
 - [本报告计算数据 JSON](../manifests/experiments/unified_hbs_paper_comparison.json) / [CSV](../manifests/experiments/unified_hbs_paper_comparison.csv)。
 - [完整实现与 PPA 说明](Unified_HBS_Results.md)。
 
@@ -422,7 +498,7 @@ task 数从 11 变为 5，不能直接解释为控制电路减少 6/11。两者�
 ## 附录 B：结果文件索引
 
 - 当前源文件、镜像、构建配置及 checkpoint 摘要：[最终清单](../manifests/experiments/unified_hbs_final.json)。
-- 当前三个产品资源、时序、布线报告：[SLH-DSA](../manifests/experiments/unified_hbs_v3/slh_u2/ppa.json)、[XMSS](../manifests/experiments/unified_hbs_v3/xmss_u2/ppa.json)、[LMS](../manifests/experiments/unified_hbs_v3/lms_u2/ppa.json)。
+- 当前三个产品资源、时序、布线报告：[SLH-DSA](../manifests/experiments/unified_hbs_V3/slh_u2/ppa.json)、[XMSS](../manifests/experiments/unified_hbs_V3/xmss_u2/ppa.json)、[LMS](../manifests/experiments/unified_hbs_V3/lms_u2/ppa.json)。
 - 软件 Hash 计数、输出摘要和镜像元数据：[模型 gate](../manifests/experiments/unified_hbs_model_gate.json)。
 - 本报告所有派生量：[JSON](../manifests/experiments/unified_hbs_paper_comparison.json)、[CSV](../manifests/experiments/unified_hbs_paper_comparison.csv)。
 - 复算命令：`make reproduce-paper-comparison`，从论文表格、原始 U2 资源报告和仿真周期日志逐项核对 JSON/CSV 及报告主表。U4 未完成记录保留，但不参与最终排名。

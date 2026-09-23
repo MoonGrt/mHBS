@@ -19,6 +19,7 @@ from model.reference.lms import (
     D_MESG,
     D_PBLC,
     LMOTS_SHA256_N32_W4,
+    LMOTS_SHA256_N32_W2,
     LmotsParams,
     u16,
     u32,
@@ -53,6 +54,8 @@ class LmsShakeParams:
 
 
 LMS_SHAKE_H10_W4 = LmsShakeParams()
+LMOTS_SHAKE256_N32_W2 = 0x80000002
+LMS_SHAKE_H10_W2 = LmsShakeParams(lmots=LMOTS_SHA256_N32_W2, lmots_typecode=LMOTS_SHAKE256_N32_W2)
 
 
 def shake256(data: bytes) -> bytes:
@@ -107,9 +110,12 @@ def _chain(
     start: int,
     steps: int,
     observe: Observe | None,
+    omega: int,
 ) -> bytes:
     result = value
-    stop = min(start + steps, 1 << LMS_SHAKE_H10_W4.lmots.w)
+    if start < 0 or steps < 0 or start+steps > (1 << omega)-1:
+        raise ValueError("invalid chain interval")
+    stop = start + steps
     for iteration in range(start, stop):
         preimage = identifier + u32(q) + u16(chain) + bytes([iteration]) + result
         result = _hash("ots_chain", preimage, observe)
@@ -134,7 +140,7 @@ def lmots_public_key(
                 chain,
                 0,
                 (1 << params.lmots.w) - 1,
-                observe,
+                observe, params.lmots.w,
             )
         )
     preimage = identifier + u32(q) + D_PBLC + b"".join(endpoints)
@@ -162,7 +168,7 @@ def lmots_sign(
     for chain, steps in enumerate(coefficients):
         value = private_element(identifier, q, chain, seed, observe)
         values.append(
-            _chain(value, identifier, q, chain, 0, steps, observe)
+            _chain(value, identifier, q, chain, 0, steps, observe, params.lmots.w)
         )
     return u32(params.lmots_typecode) + randomizer + b"".join(values)
 
@@ -201,7 +207,7 @@ def lmots_public_key_from_signature(
                 chain,
                 start,
                 (1 << params.lmots.w) - 1 - start,
-                observe,
+                observe, params.lmots.w,
             )
         )
     return _hash(

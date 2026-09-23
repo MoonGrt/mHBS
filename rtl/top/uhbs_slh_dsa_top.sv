@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 // Generated fixed-job demonstration wrapper. Regenerate with generate_unified_tops.py.
-// Algorithm control is supplied solely by the ABI 3 immutable image.
+// Algorithm control is supplied solely by the ABI 4 immutable image.
 module uhbs_slh_dsa_top #(
     parameter integer UNROLL=2, LANES=2, MESSAGE_BYTES=1, INITIAL_Q=0,
     parameter [127:0] SECRET = 128'hd1d06dcbb9181a55aabce64467d6b81d,
@@ -31,14 +31,16 @@ module uhbs_slh_dsa_top #(
         .clk,.rst_n,.start,.ready,.busy,.job_valid,.job_ready,.job_operation(operation),
         .core_done,.core_error(error),.core_cycles,.keygen_done,.done,.keygen_cycles,.sign_cycles
     );
-    uhbs_hbs #(.N(16),.STATEFUL(1'b0),.UNROLL(UNROLL),.LANES(LANES),
+    uhbs_hbs #(.N(16),.STATEFUL(1'b0),
+        .OMEGA(4),.CHAIN_COUNT(35),.DIGEST_BYTES(34),
+        .FORS_A(6),.FORS_K(33),.TREE_BITS(63),.HP(3),.UNROLL(UNROLL),.LANES(LANES),
         .RECIPE_MASK(16'h101e),
         .CHAIN_RECIPE_MASK(16'h0006),.MAX_MESSAGE_BYTES(MESSAGE_BYTES),
         .PROGRAM_TOKENS(14),.PROGRAM_TEMPLATES(11),
         .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),
-        .TOKEN_INIT_FILE("rtl/microcode/uhbs_slh_tokens.mem"),
-        .TEMPLATE_INIT_FILE("rtl/microcode/uhbs_slh_templates.mem"),
-        .DESCRIPTOR_INIT_FILE("rtl/microcode/uhbs_slh_descriptors.mem")
+        .TOKEN_INIT_FILE("rtl/microcode/uhbs_slh_128f_tokens.mem"),
+        .TEMPLATE_INIT_FILE("rtl/microcode/uhbs_slh_128f_templates.mem"),
+        .DESCRIPTOR_INIT_FILE("rtl/microcode/uhbs_slh_128f_descriptors.mem")
     ) core (
         .clk,.rst_n,.job_valid,.job_ready,.job_operation(operation),
         .job_message_length(7'(MESSAGE_BYTES)),.job_initial_q(11'(INITIAL_Q)),

@@ -1,9 +1,10 @@
 `timescale 1ns/1ps
 `default_nettype none
-// ABI 3 byte recipes and local chain feedback. Both physical lanes use this
+// ABI 4 byte recipes and local chain feedback. Both physical lanes use this
 // module. The dispatcher keeps all request fields stable through response.
 module uhbs_recipe_lane #(
     parameter integer N = 16,
+    parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
     parameter integer UNROLL = 2,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter [15:0] RECIPE_MASK = 16'hffff,
@@ -22,13 +23,13 @@ module uhbs_recipe_lane #(
     input wire [4:0] request_layer,
     input wire [63:0] request_tree,
     input wire [9:0] request_leaf,
-    input wire [6:0] request_a,
+    input wire [INDEX_BITS-1:0] request_a,
     input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
-    output wire [6:0] list_index0, list_index1,
+    output wire [INDEX_BITS-1:0] list_index0, list_index1,
     input wire [N*8-1:0] list_data0, list_data1,
     output wire response_valid, input wire response_ready,
-    output logic [271:0] response_value,
+    output logic [DIGEST_BYTES*8-1:0] response_value,
     output logic [N*8-1:0] response_capture,
     output logic error,
     output logic [31:0] hash_count, permutation_count
@@ -50,34 +51,42 @@ module uhbs_recipe_lane #(
     wire [3:0] shape = recipe[59:56];
     wire [7:0] domain = recipe[55:48];
     wire [7:0] arity = recipe[47:40];
-    wire compact_chain = N == 16 && request_chain;
+    wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
     wire [31:0] a = request_a;
     wire [31:0] b = request_chain && !seed_phase
-        ? (request_step_recipe[55:48] == 3 && N == 16
+        ? (request_step_recipe[55:48] == 3 && request_step_recipe[59:56] == ADDRESS_VALUE
             ? request_b : {27'd0, iteration}) : request_b;
-    wire [N*8-1:0] left_value = N==32 && request_chain ? current_value : request_left;
+    wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
     wire [31:0] leaf = {22'd0, request_leaf};
-    logic [11:0] input_length;
+    logic [12:0] input_length;
     logic [1087:0] fast_block;
     logic [127:0] stream_data;
     logic [255:0] address, masked_address;
-    wire fixed_block = shape == ADDRESS_SEED || shape == ADDRESS_VALUE
+    wire fixed_block = (RECIPE_MASK & 16'h3858)==0 || shape == ADDRESS_SEED || shape == ADDRESS_VALUE
         || shape == INDEX_PRF || shape == MASKED_SEED || shape == MASKED_VALUE
         || shape == PREFIX_SEED || shape == PREFIX_VALUE
         || shape == PREFIX_LEAF || shape == PREFIX_PARENT;
-    wire [11:0] rate_offset = ({7'd0,rate_block} << 7)+({7'd0,rate_block} << 3);
-    wire [11:0] recipe_limit = ({7'd0,recipe[28:24]} << 7)+({7'd0,recipe[28:24]} << 3);
-    wire stream_last = rate_offset+12'd136 > input_length;
+    wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
+    wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
+    wire stream_last = rate_offset+13'd136 > input_length;
     wire hash_ready, block_ready, fast_ready, digest_valid, finish_valid;
-    wire [271:0] digest, finish_digest;
-    wire [127:0] compact_capture;
+    wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
+    wire [N*8-1:0] compact_capture;
     wire compact_capture_valid, hash_error;
     wire completed = compact_chain ? digest_valid : finish_valid;
-    wire [271:0] completed_value = compact_chain ? digest : finish_digest;
-    wire [7:0] prefix_bytes = shape == ADDRESS_LIST ? N+32 : 22;
-    wire [11:0] position = rate_offset+{4'd0,beat,4'd0};
-    wire [11:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
-    assign list_index0 = list_offset / N;
+    wire [DIGEST_BYTES*8-1:0] completed_value = compact_chain ? digest : finish_digest;
+    wire [7:0] prefix_bytes = !RECIPE_MASK[PREFIX_LIST] ? N+32
+        : !RECIPE_MASK[ADDRESS_LIST] ? 22 : shape == ADDRESS_LIST ? N+32 : 22;
+    logic staged_valid, staged_last;
+    logic [127:0] staged_data;
+    wire stream_accept = !staged_valid || block_ready;
+    wire [12:0] position = rate_offset+{5'd0,beat,4'd0};
+    wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
+    logic [INDEX_BITS-1:0] list_cursor;
+    logic [5:0] list_remainder;
+    wire [4:0] stream_advance = beat==8 ? 5'd8 : 5'd16;
+    wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
+    assign list_index0 = N==24 ? list_cursor : list_offset / N;
     assign list_index1 = list_index0+1'b1;
     assign request_ready = state == IDLE;
     assign response_valid = state == RESPONSE;
@@ -90,7 +99,7 @@ module uhbs_recipe_lane #(
     localparam integer STREAM_BITS=(MAX_MESSAGE_BYTES+4*N>3*N+32
         ? MAX_MESSAGE_BYTES+4*N : 3*N+32)*8;
     logic [STREAM_BITS-1:0] stream_source;
-    logic [11:0] stream_offset;
+    logic [12:0] stream_offset;
     always @* begin
         stream_source=0;
         stream_offset=position;
@@ -134,7 +143,7 @@ module uhbs_recipe_lane #(
                     end
                 end else begin
                     stream_source[0 +: 2*N*8]={list_data1,list_data0};
-                    stream_offset=list_offset % N;
+                    stream_offset=N==24 ? list_remainder : list_offset % N;
                 end
             end
             default: begin end
@@ -207,7 +216,7 @@ module uhbs_recipe_lane #(
             PREFIX_SEED, PREFIX_VALUE: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
                 fast_block[0 +: 128] = identifier;
                 fast_block[128 +: 32] = be32(leaf);
-                fast_block[20*8 +: 16] = {1'b0,request_a,8'd0};
+                fast_block[20*8 +: 16] = {8'(request_a),8'd0};
                 fast_block[22*8 +: 8] = shape == PREFIX_SEED ? 8'hff : b[7:0];
                 fast_block[23*8 +: N*8] = shape == PREFIX_SEED ? secret_seed : left_value;
                 fast_block[(23+N)*8 +: 8] = 8'h1f;
@@ -239,7 +248,7 @@ module uhbs_recipe_lane #(
         end
     end
 
-    uhbs_compact_shake_context_lane #(.UNROLL(UNROLL)) sponge (
+    uhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0)) sponge (
         .clk, .rst_n, .context_valid(state == START), .context_ready(hash_ready),
         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
         .fast_block_data(fast_block), .chain_enable(compact_chain),
@@ -249,20 +258,25 @@ module uhbs_recipe_lane #(
         .chain_count(request_steps+5'd1),
         .capture_enable(compact_chain && request_capture),
         .capture_after(request_capture_after+5'd1),
-        .block_valid(state == STREAM), .block_ready, .block_data(stream_data),
-        .block_last(stream_last), .response_valid(digest_valid), .response_digest(digest),
+        .block_valid(staged_valid), .block_ready, .block_data(staged_data),
+        .block_last(staged_last), .response_valid(digest_valid), .response_digest(digest),
         .finish_valid, .finish_digest, .capture_digest(compact_capture),
         .capture_valid(compact_capture_valid), .error(hash_error)
     );
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
+            staged_valid<=0; staged_last<=0; staged_data<=0;
+            list_cursor<=0; list_remainder<=0;
             state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
             seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0;
         end else begin
+            if(staged_valid && block_ready) staged_valid<=0;
             if (hash_error) begin error <= 1; state <= RESPONSE; end
             else case (state)
                 IDLE: if (request_valid) begin
+                    staged_valid<=0;
+                    list_cursor<=0; list_remainder<=0;
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
                     current_value <= request_left;
                     rate_block <= 0; beat <= 0;
@@ -276,11 +290,21 @@ module uhbs_recipe_lane #(
                         hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
                         if (fixed_block) permutation_count <= permutation_count+(compact_chain ? request_steps+1 : 1);
                     end
-                    if (input_length >= recipe_limit || recipe[28:24] == 0) begin
+                    if (input_length >= recipe_limit || recipe[29:24] == 0) begin
                         error <= 1; state <= RESPONSE;
                     end else state <= fixed_block ? WAIT_HASH : STREAM;
                 end
-                STREAM: if (block_ready) begin
+                STREAM: if (stream_accept) begin
+                    staged_valid<=1; staged_data<=stream_data; staged_last<=stream_last;
+                    if(N==24) begin
+                        if(position < prefix_bytes) begin
+                            if(position+stream_advance >= prefix_bytes)
+                                list_remainder <= position+stream_advance-prefix_bytes;
+                        end else if(next_remainder >= N) begin
+                            list_remainder <= next_remainder-N;
+                            list_cursor <= list_cursor+1'b1;
+                        end else list_remainder <= next_remainder;
+                    end
                     if (beat == 8) begin
                         beat <= 0;
                         if (PROFILE_ENABLE) permutation_count <= permutation_count+1;

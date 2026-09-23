@@ -1,16 +1,17 @@
-# μHBS ABI 3 architecture
+# μHBS ABI 4 architecture
 
-The three production wrappers `uhbs_slh_dsa_top`, `uhbs_xmss_top`, and
-`uhbs_lms_top` all instantiate `uhbs_hbs`. The authoritative production source
-closure is `manifests/unified_sources.txt`, consumed by Make and Vivado. Each product selects an immutable ABI 3
-image and is synthesized separately; it is not a runtime three-algorithm
+The seven `uhbs_<profile>_top` wrappers all instantiate `uhbs_hbs`.
+Legacy `uhbs_slh_dsa_top`, `uhbs_xmss_top`, and `uhbs_lms_top` aliases
+retain the 128f / omega4 configurations. The authoritative production source
+closure is `manifests/unified_sources.txt`, consumed by Make and Vivado. Each product selects an immutable ABI 4
+image and is synthesized separately; it is not a runtime multi-profile
 bitstream.
 
 The shared core contains one token sequencer, one five-macro dispatcher, one or two
 recipe/SHAKE lanes from common source (static `LANES`), a common chain iterator, stack-based tree
-reduction, value stores, and a 64-bit output packer. n=16/n=32 is an elaboration
-width. Recipes, tree addressing, chain reductions, output layouts, and entry
-points come from image data. There is no algorithm selector in the core.
+reduction, value stores, and a direct 64-bit result stream with byte enables. n=16/24/32 is an
+elaboration width; storage depths are specialized to each profile. Recipes, tree addressing, chain reductions, output layouts, and entry
+points come from image data. Family and stateful identity are explicit ABI fields; n=32 does not imply stateful.
 The second logical lane retains only the chain recipes present in the image;
 physical lane exchange preserves these logical capabilities.
 
@@ -41,9 +42,9 @@ operations is reported separately from these operation counters.
 - `make rtl-unit-test`: Icarus Verilog 12.0 (`iverilog -g2012` and `vvp`).
 - `make rtl-slh-dsa-test rtl-xmss-test rtl-lms-test`: Verilator 5.008
   (`--binary --timing`), complete Keygen then Sign, every output byte checked.
-- Set `UNROLL=2` or `4`, and `LANES=1` or `2`, for synthesis and simulation.
+- Set `UNROLL=1`, `2` or `4`, and `LANES=1` or `2`, for synthesis and simulation.
   Make defaults to two lanes for SLH-DSA and one for XMSS/LMS; an explicit
-  `LANES` overrides all three. Direct RTL wrapper defaults remain two lanes.
+  `LANES` overrides all profiles. Direct RTL wrappers use their profile defaults.
 - Add `SWAP=1 BACKPRESSURE=1` to exercise physical-lane exchange, stream stalls,
   and delayed state persistence.
 - `make synth-slh-dsa synth-xmss synth-lms`: post-synthesis candidate screening.
@@ -53,3 +54,31 @@ See `Unified_HBS_ABI.md` for the executable image contract and ATP formula.
 The old `uhbs_stateless_hbs`/`uhbs_stateful_hbs` implementations and their
 standalone benches were removed from the working tree. Git history preserves
 them; `manifests/unified_sources.txt` is the current synthesis source list.
+
+## Seven-profile build and replay
+
+`PROFILE` accepts `slh_128f`, `slh_192f`, `slh_256f`, `xmss_omega2`,
+`xmss_omega4`, `lms_omega2`, and `lms_omega4`. Omega is bits per digit,
+so omega2 means Winternitz base 4.
+
+```bash
+make rtl-profile-test PROFILE=slh_192f
+make rtl-verification
+make synth-profile PROFILE=slh_192f
+make route-profile PROFILE=slh_192f
+make archive-seven-profiles
+make reproduce-paper-comparison
+python3 scripts/replay_profile.py slh_192f --run rtl-profile-test
+```
+
+The seven-profile matrix checks normal flow, physical lane exchange, randomized
+backpressure, both lane counts, and q=0/1023 for all stateful profiles.
+`rtl-all-profiles`, `synth-all-profiles`, and `route-all-profiles` are batch entries.
+A routed candidate must match its simulation's complete RTL/image hashes.
+Historical ABI 3 reproduction uses the pinned c8dedf8 source, not the ABI 4 tree.
+
+FORS leaf pairs execute concurrently on two lanes and use the same tree stack.
+Absorption input is registered between the endpoint memory mux and SHAKE state.
+SLH feedback is statically omitted from stateful lanes. The 24-byte stream
+cursor advances with counters rather than runtime division. Synthesis disables
+DSP inference for constant length arithmetic.

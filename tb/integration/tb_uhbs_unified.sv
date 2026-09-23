@@ -1,9 +1,7 @@
 `timescale 1ns/1ps
 module tb_uhbs_unified;
-    parameter integer PROFILE=0, SWAP=0, BACKPRESSURE=0, LANES=2, UNROLL=2;
-    localparam integer KG_BYTES=PROFILE==0 ? 96 : PROFILE==1 ? 196 : 140;
-    localparam integer SG_BYTES=PROFILE==0 ? 17088 : PROFILE==1 ? 2500 : 2508;
-    localparam integer MSG_BYTES=PROFILE==0 ? 1 : PROFILE==1 ? 21 : 20;
+    parameter integer PROFILE=0, SWAP=0, BACKPRESSURE=0, LANES=2, UNROLL=2, Q=5;
+    `include "tb/vectors/uhbs_profile_constants.svh"
     logic clk=0, rst_n=0, start=0;
     wire ready,busy,keygen_done,done,error;
     wire [15:0] error_code;
@@ -26,14 +24,26 @@ module tb_uhbs_unified;
     integer residency[0:63];
     logic stalled=0;
     logic [73:0] stalled_word;
-    generate if(PROFILE==0) begin: g_slh
-        uhbs_slh_dsa_top #(.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+    generate if(PROFILE==0) begin: g_slh_128f
+        uhbs_slh_128f_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
         assign core_state=dut.core.state;
-    end else if(PROFILE==1) begin: g_xmss
-        uhbs_xmss_top #(.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+    end else if(PROFILE==1) begin: g_slh_192f
+        uhbs_slh_192f_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
         assign core_state=dut.core.state;
-    end else begin: g_lms
-        uhbs_lms_top #(.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+    end else if(PROFILE==2) begin: g_slh_256f
+        uhbs_slh_256f_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+        assign core_state=dut.core.state;
+    end else if(PROFILE==3) begin: g_xmss_omega2
+        uhbs_xmss_omega2_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+        assign core_state=dut.core.state;
+    end else if(PROFILE==4) begin: g_xmss_omega4
+        uhbs_xmss_omega4_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+        assign core_state=dut.core.state;
+    end else if(PROFILE==5) begin: g_lms_omega2
+        uhbs_lms_omega2_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
+        assign core_state=dut.core.state;
+    end else if(PROFILE==6) begin: g_lms_omega4
+        uhbs_lms_omega4_top #(.INITIAL_Q(PROFILE<3 ? 0 : Q),.PROFILE_ENABLE(1),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL)) dut(.*);
         assign core_state=dut.core.state;
     end endgenerate
     always #5 clk=~clk;
@@ -55,12 +65,12 @@ module tb_uhbs_unified;
         stalled<=out_valid && !out_ready;
         stalled_word<={out_data,out_keep,out_last,result_kind};
         if(error) $fatal(1,"UNIFIED_ERROR profile=%0d code=%h cycle=%0d kg=%0d sg=%0d",PROFILE,error_code,cycles,kg_index,sg_index);
-        if(cycles>60000000) $fatal(1,"timeout profile=%0d",PROFILE);
+        if(cycles>200000000) $fatal(1,"timeout profile=%0d",PROFILE);
         if(state_commit_valid && state_commit_ready) begin
-            if(state_next_q!=6) $fatal(1,"incorrect durable next q");
+            if(state_next_q!=Q+1) $fatal(1,"incorrect durable next q");
             committed<=1;
         end
-        if(out_valid && result_kind && PROFILE!=0 && !committed)
+        if(out_valid && result_kind && PROFILE>=3 && !committed)
             $fatal(1,"signature before durable commit");
         if(out_valid && out_ready) begin
             for(integer b=0;b<8;b=b+1) if(out_keep[b]) begin
@@ -78,8 +88,8 @@ module tb_uhbs_unified;
         end
         if(keygen_done) begin
             if(kg_index!=KG_BYTES) $fatal(1,"keygen length");
-            if(hash_count!=(PROFILE==0 ? 4495 : PROFILE==1 ? 3430396 : 1100799)) $fatal(1,"keygen hash count");
-            if(permutation_count!=(PROFILE==0 ? 4527 : PROFILE==1 ? 3430396 : 1116159)) $fatal(1,"keygen permutation count");
+            if(hash_count!=KG_HASHES) $fatal(1,"keygen hash count");
+            if(permutation_count!=KG_PERMUTATIONS) $fatal(1,"keygen permutation count");
             $display("UNIFIED_KEYGEN profile=%0d cycles=%0d hashes=%0d permutations=%0d",PROFILE,keygen_cycles,hash_count,permutation_count);
             for(integer s=0;s<64;s=s+1) begin
                 if(residency[s]) $display("RESIDENCY keygen state=%0d cycles=%0d",s,residency[s]);
@@ -90,18 +100,62 @@ module tb_uhbs_unified;
     task tick; begin @(posedge clk); #1; end endtask
     initial begin
         for(integer s=0;s<64;s=s+1) residency[s]=0;
-        if(PROFILE==0) begin
-            $readmemh("tb/vectors/uhbs_slh_keygen.mem",expected_kg);
-            $readmemh("tb/vectors/uhbs_slh_sign.mem",expected_sg);
-            $readmemh("tb/vectors/uhbs_slh_message.mem",msg);
-        end else if(PROFILE==1) begin
-            $readmemh("tb/vectors/uhbs_xmss_keygen.mem",expected_kg);
-            $readmemh("tb/vectors/uhbs_xmss_sign.mem",expected_sg);
-            $readmemh("tb/vectors/uhbs_xmss_message.mem",msg);
-        end else begin
-            $readmemh("tb/vectors/uhbs_lms_keygen.mem",expected_kg);
-            $readmemh("tb/vectors/uhbs_lms_sign.mem",expected_sg);
-            $readmemh("tb/vectors/uhbs_lms_message.mem",msg);
+        case(PROFILE)
+            0: begin
+                $readmemh("tb/vectors/uhbs_slh_128f_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_slh_128f_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_slh_128f_message.mem",msg);
+            end
+            1: begin
+                $readmemh("tb/vectors/uhbs_slh_192f_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_slh_192f_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_slh_192f_message.mem",msg);
+            end
+            2: begin
+                $readmemh("tb/vectors/uhbs_slh_256f_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_slh_256f_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_slh_256f_message.mem",msg);
+            end
+            3: begin
+                $readmemh("tb/vectors/uhbs_xmss_omega2_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_xmss_omega2_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_xmss_omega2_message.mem",msg);
+            end
+            4: begin
+                $readmemh("tb/vectors/uhbs_xmss_omega4_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_xmss_omega4_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_xmss_omega4_message.mem",msg);
+            end
+            5: begin
+                $readmemh("tb/vectors/uhbs_lms_omega2_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_lms_omega2_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_lms_omega2_message.mem",msg);
+            end
+            6: begin
+                $readmemh("tb/vectors/uhbs_lms_omega4_keygen.mem",expected_kg);
+                $readmemh("tb/vectors/uhbs_lms_omega4_sign.mem",expected_sg);
+                $readmemh("tb/vectors/uhbs_lms_omega4_message.mem",msg);
+            end
+        endcase
+        if(PROFILE>=3 && Q!=5) begin
+            case(PROFILE)
+                3: begin
+                    $readmemh($sformatf("tb/vectors/uhbs_xmss_omega2_keygen_q%0d.mem",Q),expected_kg);
+                    $readmemh($sformatf("tb/vectors/uhbs_xmss_omega2_sign_q%0d.mem",Q),expected_sg);
+                end
+                4: begin
+                    $readmemh($sformatf("tb/vectors/uhbs_xmss_omega4_keygen_q%0d.mem",Q),expected_kg);
+                    $readmemh($sformatf("tb/vectors/uhbs_xmss_omega4_sign_q%0d.mem",Q),expected_sg);
+                end
+                5: begin
+                    $readmemh($sformatf("tb/vectors/uhbs_lms_omega2_keygen_q%0d.mem",Q),expected_kg);
+                    $readmemh($sformatf("tb/vectors/uhbs_lms_omega2_sign_q%0d.mem",Q),expected_sg);
+                end
+                6: begin
+                    $readmemh($sformatf("tb/vectors/uhbs_lms_omega4_keygen_q%0d.mem",Q),expected_kg);
+                    $readmemh($sformatf("tb/vectors/uhbs_lms_omega4_sign_q%0d.mem",Q),expected_sg);
+                end
+            endcase
         end
         repeat(4) tick(); rst_n=1; tick(); start=1; tick(); start=0;
         for(index=0;index<MSG_BYTES;index=index+8) begin
@@ -116,9 +170,9 @@ module tb_uhbs_unified;
         end
         while(!done) tick();
         if(sg_index!=SG_BYTES) $fatal(1,"signature length");
-        if(hash_count!=(PROFILE==0 ? 104937 : PROFILE==1 ? 1554 : 548)) $fatal(1,"hash count %0d",hash_count);
-        if(permutation_count!=(PROFILE==0 ? 105641 : PROFILE==1 ? 1555 : 548)) $fatal(1,"permutation count %0d",permutation_count);
-        $display("UNIFIED_PASS profile=%0d keygen_cycles=%0d sign_cycles=%0d hash=%0d permutations=%0d swap=%0d backpressure=%0d",PROFILE,keygen_cycles,sign_cycles,hash_count,permutation_count,SWAP,BACKPRESSURE);
+        if(hash_count!=SG_HASHES) $fatal(1,"hash count %0d",hash_count);
+        if(permutation_count!=SG_PERMUTATIONS) $fatal(1,"permutation count %0d",permutation_count);
+        $display("UNIFIED_PASS profile=%0d keygen_cycles=%0d sign_cycles=%0d hash=%0d permutations=%0d swap=%0d backpressure=%0d q=%0d",PROFILE,keygen_cycles,sign_cycles,hash_count,permutation_count,SWAP,BACKPRESSURE,Q);
         for(integer s=0;s<64;s=s+1)
             if(residency[s]) $display("RESIDENCY sign state=%0d cycles=%0d",s,residency[s]);
         $finish;

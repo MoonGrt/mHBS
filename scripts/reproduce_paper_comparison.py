@@ -11,6 +11,7 @@ import hashlib
 import json
 import math
 import re
+import subprocess
 from pathlib import Path
 
 
@@ -19,6 +20,13 @@ REPO = ROOT.parents[2]
 READER = REPO / "references/papers/Unified_HBS_Architecture_2026_Reader"
 ARCHIVE = ROOT / "manifests/experiments"
 REPORT = ROOT / "docs/Unified_HBS_Paper_Comparison.md"
+BASELINE_COMMIT = "c8dedf8be45d345f642f34675692f2a94915be2c"
+GIT_PREFIX = subprocess.check_output(["git", "rev-parse", "--show-prefix"], cwd=ROOT, text=True).strip()
+
+def historical_source(path: str) -> bytes:
+    return subprocess.check_output(["git", "show", f"{BASELINE_COMMIT}:{GIT_PREFIX}{path}"], cwd=ROOT)
+
+
 FAMILIES = {
     "slh": ("SPHINCS+", "n=128", 0),
     "xmss": ("XMSS", "h=10;w=4", 1),
@@ -62,27 +70,27 @@ def main() -> None:
                       if r[0] == scheme and r[1].replace("omega=", "w=") == parameter)
         table7 = next(r for r in tables["table7"]["rows"]
                       if r[0] == scheme and r[1] == "This work" and r[2] == parameter)
-        archived = ARCHIVE / "unified_hbs_v3" / f"{family}_u2"
+        archived = ARCHIVE / "unified_hbs_V3" / f"{family}_u2"
         raw_util = (archived / "utilization.rpt").read_text()
         raw_clock = json.loads((archived / "final_clock.json").read_text())
         raw_ppa = json.loads((archived / "ppa.json").read_text())
         raw_input = json.loads((archived / "inputs.json").read_text())
         timing = (archived / "timing_summary.rpt").read_text()
         status = (archived / "route_status.rpt").read_text()
-        normal = (ARCHIVE / "unified_hbs_v3" / f"{family}_u2_normal.log").read_text()
+        normal = (ARCHIVE / "unified_hbs_V3" / f"{family}_u2_normal.log").read_text()
         match = re.search(r"UNIFIED_PASS profile=(\d+) keygen_cycles=(\d+) sign_cycles=(\d+)", normal)
         require(match is not None and int(match[1]) == profile_id, f"{family}: missing cycle record")
         kg_cycles, sign_cycles = int(match[2]), int(match[3])
 
         for path, digest in raw_input["source_sha256"].items():
-            source = ROOT / path
+            source = historical_source(path)
             if path == "experiments/route_unified_hbs.tcl":
                 # Captured at synthesis; the final route flow has its own digest.
                 route_input = json.loads((archived / "route_inputs.json").read_text())
-                require(hashlib.sha256(source.read_bytes()).hexdigest() == route_input["script_sha256"],
+                require(hashlib.sha256(source).hexdigest() == route_input["script_sha256"],
                         f"{family}: final route flow changed")
                 continue
-            require(source.exists() and hashlib.sha256(source.read_bytes()).hexdigest() == digest,
+            require(hashlib.sha256(source).hexdigest() == digest,
                     f"{family}: source changed or removed: {path}")
         require(raw_ppa["source_set_sha256"] == raw_input["source_set_sha256"],
                 f"{family}: source set mismatch")
@@ -183,7 +191,7 @@ def main() -> None:
               f"paper_ATP={p_sign_atp:,.3f} PASS")
 
     for family in FAMILIES:
-        incomplete = ARCHIVE / "unified_hbs_v3" / f"{family}_u4_incomplete"
+        incomplete = ARCHIVE / "unified_hbs_V3" / f"{family}_u4_incomplete"
         require((incomplete / "status.json").exists() and
                 (incomplete / "post_synth_ppa.json").exists() and
                 (incomplete / "partial_route.log").exists(),

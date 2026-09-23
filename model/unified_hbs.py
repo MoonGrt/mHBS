@@ -1,4 +1,4 @@
-"""Executable HBS image ABI 3: 128-bit tokens/templates, 64-bit descriptors.
+"""Executable HBS image ABI 4: 128-bit tokens/templates, 64-bit descriptors.
 
 The interpreter executes the same five macro operations for every image. It
 does not call an algorithm oracle. hashlib supplies only the SHAKE primitive.
@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 import hashlib
 from typing import Callable
+from model.profiles import get_profile
 
 from model.static_task_microcode import (
     StaticTaskToken as Token, TOKEN_SINGLE, TOKEN_RUN, TOKEN_LOOP, TOKEN_HALT,
@@ -88,7 +89,7 @@ def field(word: int, shift: int, bits: int) -> int:
 def recipe(shape: Shape, n: int, domain: int = 0, arity: int = 1,
            blocks: int = 1) -> int:
     return record(Kind.HASH, shape=(shape, 56, 4), domain=(domain, 48, 8),
-                  arity=(arity, 40, 8), output=(n, 32, 6), blocks=(blocks, 24, 5))
+                  arity=(arity, 40, 8), output=(n, 32, 6), blocks=(blocks, 24, 6))
 
 
 def chain(seed: int, step: int, count: int, steps: int,
@@ -137,6 +138,24 @@ class Image:
     def stateful(self) -> bool:
         return bool(field(self.descriptors[1], 59, 1))
 
+    @property
+    def omega(self): return field(self.descriptors[1], 44, 4)
+
+    @property
+    def hp(self): return field(self.descriptors[1], 40, 4)
+
+    @property
+    def a(self): return field(self.descriptors[1], 36, 4)
+
+    @property
+    def k(self): return field(self.descriptors[1], 18, 6)
+
+    @property
+    def h(self): return field(self.descriptors[1], 0, 7)
+
+    @property
+    def m(self): return field(self.descriptors[1], 7, 6)
+
     def entry(self, sign: bool) -> int:
         return field(self.descriptors[0], 38 if sign else 47, 9)
 
@@ -175,14 +194,15 @@ class Image:
 
 
 def compile_image(name: str, *, full_cache: bool = False) -> Image:
-    """One compiler, three static profiles; no key or message in an image."""
-    if name not in ("slh", "xmss", "lms"):
-        raise ValueError("unknown profile")
-    n = 16 if name == "slh" else 32
+    """Compile one of seven static profiles; jobs are separate from images."""
+    p = get_profile(name)
+    name, n = p.family, p.n
     records = [0] * 128
-    records[1] = record(Kind.PROFILE, stateful=(int(n == 32), 59, 1),
-                        n=(n, 48, 8), height=(10 if n == 32 else 3, 40, 4),
-                        message_limit=(87, 24, 8))
+    records[1] = record(Kind.PROFILE, stateful=(int(p.stateful), 59, 1),
+        family=({"slh":1,"xmss":2,"lms":3}[name], 56, 3), n=(n,48,8),
+        omega=(p.omega,44,4), height=(p.hp,40,4), fors_a=(p.a,36,4),
+        message_limit=(87,24,8), fors_k=(p.k,18,6), layers=(p.d,13,5),
+        digest_bytes=(p.m,7,6), total_height=(p.h,0,7))
     records[40] = route(0, emit=True)
     records[41] = route(1, parse=True)
     records[42] = route(2)
@@ -190,7 +210,7 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
     records[44] = route(3)
     records[45] = route(0)
     records[48] = record(Kind.TRANSFORM, operation=(1, 56, 4), source=(2, 48, 2))
-    records[49] = record(Kind.TRANSFORM, operation=(2, 56, 4), shift=(3, 40, 4))
+    records[49] = record(Kind.TRANSFORM, operation=(2, 56, 4), shift=(p.hp, 40, 4))
 
     def emit(desc: int, base: int, parts: list[tuple]) -> None:
         records[desc] = record(Kind.EMIT, base=(base, 52, 8), count=(len(parts), 48, 4))
@@ -208,32 +228,33 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
 
     if name == "slh":
         for i, args in {
-            2: (Shape.MESSAGE_PRF, 16), 3: (Shape.MESSAGE_DIGEST, 34),
-            4: (Shape.ADDRESS_SEED, 16, 6), 5: (Shape.ADDRESS_VALUE, 16, 3),
-            6: (Shape.ADDRESS_VALUE, 16, 3, 2),
-            7: (Shape.ADDRESS_SEED, 16, 5), 8: (Shape.ADDRESS_VALUE, 16, 0),
-            9: (Shape.ADDRESS_LIST, 16, 1, 35, 5),
-            10: (Shape.ADDRESS_VALUE, 16, 2, 2),
-            11: (Shape.ADDRESS_LIST, 16, 4, 33, 5),
+            2: (Shape.MESSAGE_PRF, n, 0, 1, (2*n+87)//136+1),
+            3: (Shape.MESSAGE_DIGEST, p.m, 0, 1, (3*n+87)//136+1),
+            4: (Shape.ADDRESS_SEED, n, 6), 5: (Shape.ADDRESS_VALUE, n, 3),
+            6: (Shape.ADDRESS_VALUE, n, 3, 2),
+            7: (Shape.ADDRESS_SEED, n, 5), 8: (Shape.ADDRESS_VALUE, n, 0),
+            9: (Shape.ADDRESS_LIST, n, 1, p.chains, (n+32+n*p.chains)//136+1),
+            10: (Shape.ADDRESS_VALUE, n, 2, 2),
+            11: (Shape.ADDRESS_LIST, n, 4, p.k, (n+32+n*p.k)//136+1),
         }.items():
             records[i] = recipe(*args)
         records[16] = chain(4, 5, 1, 1)
-        records[17] = chain(7, 8, 35, 15, reduce=9, mode=1)
-        records[20] = tree(16, 6, 6, target=1, indexing=1)
-        records[21] = tree(17, 10, 3)
+        records[17] = chain(7, 8, p.chains, 15, reduce=9, mode=1)
+        records[20] = tree(16, 6, p.a, target=1, indexing=1)
+        records[21] = tree(17, 10, p.hp)
         emit(50, 64, [(Source.SECRET, n), (Source.PRF, n), (Source.PUBLIC, n),
                       (Source.ROOT, n), (Source.PUBLIC, n), (Source.ROOT, n)])
-        kg = [single(Macro.TREE, 21, 44, coord=21 << 19, first=True),
+        kg = [single(Macro.TREE, 21, 44, coord=(p.d-1) << 19, first=True),
               single(Macro.EMIT, 50), Token(TOKEN_HALT)]
         sg = [single(Macro.HASH, 2, 40, first=True), single(Macro.HASH, 3, 41),
-              single(Macro.TREE, 20, 43, CAPTURE|AUTH, repeat=33, stride=1 << 13),
+              single(Macro.TREE, 20, 43, CAPTURE|AUTH, repeat=p.k, stride=1 << 13),
               single(Macro.HASH, 11, 42), single(Macro.TRANSFORM, 48),
               single(Macro.TREE, 21, 42, CAPTURE|AUTH),
               single(Macro.TRANSFORM, 49), single(Macro.TRANSFORM, 48),
-              Token(TOKEN_LOOP, back_count=3, loop_repeats=20, delta0=1 << 19),
-              single(Macro.TREE, 21, 42, CAPTURE|AUTH|EXTERNAL_ROOT, coord=21 << 19),
+              Token(TOKEN_LOOP, back_count=3, loop_repeats=p.d-2, delta0=1 << 19),
+              single(Macro.TREE, 21, 42, CAPTURE|AUTH|EXTERNAL_ROOT, coord=(p.d-1) << 19),
               Token(TOKEN_HALT)]
-        kg_bytes, sg_bytes = 96, 17088
+        kg_bytes, sg_bytes = p.keygen_bytes, p.signature_bytes
     else:
         masked = name == "xmss"
         recipes = ((Shape.INDEX_PRF, 32), (Shape.ROOT_MESSAGE, 32, 0, 1, 2),
@@ -241,12 +262,12 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
                    (Shape.MASKED_VALUE, 32, 1, 2), (Shape.MASKED_VALUE, 32, 2, 2)) \
             if masked else ((Shape.PREFIX_MESSAGE, 32, 0, 1, 2),
                             (Shape.PREFIX_SEED, 32), (Shape.PREFIX_VALUE, 32),
-                            (Shape.PREFIX_LIST, 32, 0, 67, 16),
+                            (Shape.PREFIX_LIST, 32, 0, p.chains, (22+32*p.chains)//136+1),
                             (Shape.PREFIX_LEAF, 32), (Shape.PREFIX_PARENT, 32, 0, 2))
         for i, args in enumerate(recipes, 2):
             records[i] = recipe(*args)
-        records[16] = chain(4, 5, 67, 15, reduce=6, mode=2) if masked \
-            else chain(3, 4, 67, 15, reduce=5, leaf=6, mode=1)
+        records[16] = chain(4, 5, p.chains, (1 << p.omega)-1, reduce=6, mode=2) if masked \
+            else chain(3, 4, p.chains, (1 << p.omega)-1, reduce=5, leaf=6, mode=1)
         records[20] = tree(16, 7, 10, target=2, indexing=0 if masked else 2,
                            cache=True, full_cache=full_cache)
         records[21] = tree(16, 7, 10, target=2, indexing=0 if masked else 2, lookup=True)
@@ -254,9 +275,9 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
                  (Source.ROOT, n), (Source.PUBLIC, n), (Source.ROOT, n), (Source.PUBLIC, n)] \
             if masked else [(Source.INDEX, 4), (Source.IDENTIFIER, 16), (Source.SECRET, n),
                             (Source.ROOT, n), (Source.CONSTANT, 4, 0x80000006),
-                            (Source.CONSTANT, 4, 0x80000003), (Source.IDENTIFIER, 16), (Source.ROOT, n)]
+                            (Source.CONSTANT, 4, (0x80000002 if p.omega==2 else 0x80000003)), (Source.IDENTIFIER, 16), (Source.ROOT, n)]
         emit(50, 64, parts)
-        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, 0x80000003)])
+        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, (0x80000002 if p.omega==2 else 0x80000003))])
              + [(Source.RANDOM, n)])
         if not masked:
             emit(52, 84, [(Source.CONSTANT, 4, 0x80000006)])
@@ -269,11 +290,11 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
         if not masked:
             sg.append(single(Macro.EMIT, 52))
         sg += [single(Macro.TREE, 21, flags=AUTH), Token(TOKEN_HALT)]
-        kg_bytes, sg_bytes = (196, 2500) if masked else (140, 2508)
-    records[0] = record(Kind.IMAGE, version=(3, 56, 4), keygen=(0, 47, 9),
+        kg_bytes, sg_bytes = p.keygen_bytes, p.signature_bytes
+    records[0] = record(Kind.IMAGE, version=(4, 56, 4), keygen=(0, 47, 9),
                         sign=(len(kg), 38, 9), kg_bytes=(kg_bytes, 18, 18),
                         sg_bytes=(sg_bytes, 0, 18))
-    image = Image(name, tuple(t.encode() for t in kg+sg), tuple(templates), tuple(records))
+    image = Image(p.name, tuple(t.encode() for t in kg+sg), tuple(templates), tuple(records))
     validate(image)
     return image
 
@@ -284,10 +305,18 @@ def validate(image: Image) -> None:
         raise ValueError("image storage bounds")
     if any(x < 0 or x >= 1 << 64 for x in d):
         raise ValueError("descriptor width")
-    if d[0] >> 60 != Kind.IMAGE or field(d[0], 56, 4) != 3:
+    if d[0] >> 60 != Kind.IMAGE or field(d[0], 56, 4) != 4:
         raise ValueError("unsupported image ABI")
-    if d[1] >> 60 != Kind.PROFILE or image.n not in (16, 32):
+    if d[1] >> 60 != Kind.PROFILE or image.n not in (16, 24, 32):
         raise ValueError("unsupported node size")
+    family = field(d[1],56,3)
+    if family not in (1,2,3) or image.stateful != (family != 1) or image.omega not in (2,4):
+        raise ValueError("invalid profile identity/Winternitz width")
+    if image.stateful and (image.n != 32 or image.h != 10 or image.hp != 10):
+        raise ValueError("unsupported stateful profile")
+    if not image.stateful and (image.omega != 4 or (image.n,image.h,image.hp,image.k,image.a,image.m) not in
+            ((16,66,3,33,6,34),(24,66,3,33,8,42),(32,68,4,35,9,49))):
+        raise ValueError("unsupported stateless profile")
     if not 0 <= image.entry(False) < image.entry(True) < len(image.tokens):
         raise ValueError("invalid entry table")
     def ref(i: int, kind: Kind) -> int:
@@ -300,13 +329,13 @@ def validate(image: Image) -> None:
         kind = Kind(w >> 60)
         if kind == Kind.HASH:
             Shape(field(w, 56, 4))
-            if not 1 <= field(w, 32, 6) <= 34 or not 1 <= field(w, 24, 5) <= 16:
+            if not 1 <= field(w, 32, 6) <= 49 or not 1 <= field(w, 24, 6) <= 32:
                 raise ValueError("recipe result/block bound")
         elif kind == Kind.CHAIN:
             for shift in (52, 44): ref(field(w, shift, 8), Kind.HASH)
             for shift in (36, 28):
                 if field(w, shift, 8): ref(field(w, shift, 8), Kind.HASH)
-            if not 1 <= field(w, 20, 8) <= 67 or field(w, 15, 5) > 15:
+            if not 1 <= field(w, 20, 8) <= 133 or field(w, 15, 5) > 15:
                 raise ValueError("chain bound")
             if field(w, 12, 2) > 2:
                 raise ValueError("chain reduction mode")
@@ -365,7 +394,7 @@ class Machine:
         if len(job.identifier) != 16 or not 0 <= job.q <= 1024:
             raise ValueError("job identifier/index")
         self.image, self.job, self.n, self.observe = image, job, image.n, observe
-        self.values = [bytes(34) for _ in range(4)]
+        self.values = [bytes(image.m) for _ in range(4)]
         self.roots: dict[int, bytes] = {}
         self.cache: dict[tuple[int, int], bytes] = {}
         self.cache_valid = False
@@ -380,7 +409,7 @@ class Machine:
 
     def _hash(self, rid: int, data: bytes, length: int | None = None) -> bytes:
         r = self.image.descriptors[rid]
-        if len(data)//136+1 > field(r, 24, 5):
+        if len(data)//136+1 > field(r, 24, 6):
             raise ValueError("recipe exceeds block bound")
         result = hashlib.shake_256(data).digest(length or field(r, 32, 6))
         self.hashes += 1
@@ -460,8 +489,9 @@ class Machine:
         layer, group = coord >> 19, (coord >> 13) & 63
         target = self.active_q if target_mode == 2 else self.scalar_leaf
         if target_mode == 1:
-            digest = int.from_bytes(self.values[1][:25], "big")
-            target = (digest >> (200-6*(group+1))) & 63
+            fb = (self.image.k*self.image.a+7)//8
+            digest = int.from_bytes(self.values[1][:fb], "big")
+            target = (digest >> (8*fb-self.image.a*(group+1))) & ((1<<self.image.a)-1)
         if field(d, 30, 1):
             if not self.cache_valid: raise ValueError("authentication cache is invalid")
             for level in range(height): self.output.extend(self.cache[level, (target >> level) ^ 1])
@@ -534,9 +564,14 @@ class Machine:
                 elif op == Macro.TRANSFORM:
                     if field(d, 56, 4) == 1:
                         value = self.values[field(d, 48, 2)][:self.n]
-                        self.digits = [nib for x in value for nib in (x >> 4, x & 15)]
-                        checksum = sum(15-x for x in self.digits)
-                        self.digits += [(checksum >> shift) & 15 for shift in (8, 4, 0)]
+                        omega = self.image.omega
+                        mask = (1 << omega)-1
+                        self.digits = [(x >> shift) & mask for x in value
+                                       for shift in range(8-omega, -1, -omega)]
+                        checksum = sum(mask-x for x in self.digits)
+                        len2 = (len(self.digits)*mask).bit_length() // omega + 1
+                        self.digits += [(checksum >> shift) & mask
+                                        for shift in range((len2-1)*omega, -1, -omega)]
                     elif field(d, 56, 4) == 2:
                         shift = field(d, 40, 4)
                         self.scalar_leaf = self.scalar_tree & ((1 << shift)-1)
@@ -560,8 +595,10 @@ class Machine:
                     else: self.values[field(r, 56, 2)] = result
                     if field(r, 55, 1): self.output.extend(result)
                     if field(r, 54, 1):
-                        self.scalar_tree = int.from_bytes(result[25:33], "big") & ((1 << 63)-1)
-                        self.scalar_leaf = result[33] & 7
+                        fb = (self.image.k*self.image.a+7)//8
+                        tb = (self.image.h-self.image.hp+7)//8
+                        self.scalar_tree = int.from_bytes(result[fb:fb+tb], "big") & ((1 << (self.image.h-self.image.hp))-1)
+                        self.scalar_leaf = result[fb+tb] & ((1<<self.image.hp)-1)
             if len(self.output) != self.image.output_bytes(sign):
                 raise ValueError("output length")
             return bytes(self.output)
