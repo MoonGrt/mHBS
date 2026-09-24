@@ -29,6 +29,11 @@ module tb_uhbs_stateful_index_guard;
         state_commit_ready = 1; tick(); state_commit_ready = 0;
         if (!sign_grant || sign_q != 5 || current_q != 6)
             $fatal(1, "commit release");
+        // Failure after commitment may invalidate execution, but must never roll q back.
+        invalidate=1; tick(); invalidate=0; tick();
+        if(current_q!=6 || initialized) $fatal(1,"failure rolled index back");
+        sign_valid=1;tick();sign_valid=0;
+        if(!error || error_code!=16'h2501 || current_q!=6) $fatal(1,"failed run reused index");
         initial_q = 11'd1024; initialize_valid = 1; tick();
         initialize_valid = 0; sign_valid = 1; tick(); sign_valid = 0;
         if (!error || error_code != 16'h2502) $fatal(1, "exhaustion");

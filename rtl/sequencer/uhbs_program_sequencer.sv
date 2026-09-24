@@ -1,16 +1,15 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// Static 128-bit token sequencer for the product Sign image.  Coordinates are
+// Runtime 128-bit program sequencer for the two-entry ABI 4 image.  Coordinates are
 // the low 24 bits of each 48-bit lane command.  RUN applies affine strides;
 // LOOP replays a token range with a coordinate bias.  Two nested loops are
 // sufficient for layer -> WOTS leaf traversal.
-module uhbs_static_task_sequencer #(
-    parameter integer PROGRAM_TOKENS = 384,
-    parameter integer PROGRAM_TEMPLATES = 64,
-    parameter TOKEN_INIT_FILE = "rtl/microcode/slh_dsa_128f_sign_tokens.mem",
-    parameter TEMPLATE_INIT_FILE = "rtl/microcode/slh_dsa_128f_sign_templates.mem"
-) (
+module uhbs_program_sequencer (
+    output wire [5:0] program_address, template_address,
+    input wire [127:0] program_data, template_data,
+    input wire [5:0] program_count,
+    input wire [6:0] template_count,
     input  wire         clk,
     input  wire         rst_n,
     input  wire         job_valid,
@@ -53,15 +52,9 @@ module uhbs_static_task_sequencer #(
     typedef enum logic [1:0] {S_IDLE, S_FETCH, S_LOAD, S_RUN} state_t;
     state_t state;
     logic [8:0] pc;
-    logic [127:0] token_memory [0:PROGRAM_TOKENS-1];
-    logic [127:0] template_memory [0:PROGRAM_TEMPLATES-1];
-
-    initial begin
-        $readmemh(TOKEN_INIT_FILE, token_memory);
-        $readmemh(TEMPLATE_INIT_FILE, template_memory);
-    end
-
-    wire [127:0] token = token_memory[pc];
+    assign program_address=pc[5:0];
+    assign template_address=token_template;
+    logic [127:0] token, saved_template;
     wire [1:0] token_kind = token[127:126];
     wire [5:0] token_template = token[125:120];
     wire [23:0] token_coord0 = token[119:96];
@@ -94,12 +87,10 @@ module uhbs_static_task_sequencer #(
     logic [5:0] repeats_remaining;
     wire [24:0] initial_coord0 = {1'b0, token_coord0} + total_bias0;
     wire [24:0] initial_coord1 = {1'b0, token_coord1} + total_bias1;
-    wire template_in_range = token_template < PROGRAM_TEMPLATES;
-    wire [127:0] template_data = template_in_range
-        ? template_memory[token_template] : 128'b0;
+    wire template_in_range = token_template < template_count;
     logic [127:0] instruction;
     always_comb begin
-        instruction = template_data;
+        instruction = saved_template;
         instruction[75:52] = coordinate0;
         instruction[27:4] = coordinate1;
     end
@@ -189,8 +180,15 @@ module uhbs_static_task_sequencer #(
                     retired_tokens <= 0;
                     state <= S_FETCH;
                 end
-                S_FETCH: state <= S_LOAD;
+                S_FETCH: begin
+                    if (pc >= program_count || pc >= 32) begin
+                        error <= 1;
+                        error_code <= ERR_TOKEN;
+                        state <= S_IDLE;
+                    end else begin token<=program_data;state <= S_LOAD;end
+                end
                 S_LOAD: begin
+                    saved_template<=template_data;
                     if (token_kind == TOKEN_LOOP) begin
                         if (loop_reserved || loop_repeats == 0
                                 || loop_back_count > pc) begin

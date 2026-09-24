@@ -4,29 +4,30 @@ module tb_uhbs_recipe_lane;
     localparam integer N=PROFILE==0 ? 16 : PROFILE==1 ? 24 : 32;
     localparam integer M=PROFILE==0 ? 34 : PROFILE==1 ? 42 : PROFILE==2 ? 49 : 32;
     localparam integer IB=PROFILE==3 || PROFILE==5 ? 8 : 7, CASES=PROFILE<3 ? 7 : 6;
+    wire [5:0] node_bytes=N;
     logic clk=0,rst_n=0,request_valid=0;
     wire request_ready,response_valid,error;
     logic response_ready=0,request_chain,request_capture;
     logic [63:0] request_recipe,request_step_recipe;
     logic [4:0] request_steps,request_capture_after;
-    logic [N*8-1:0] secret_seed,secret_prf,public_seed,root,randomizer,request_left,request_right;
+    logic [255:0] secret_seed,secret_prf,public_seed,root,randomizer,request_left,request_right;
     logic [127:0] identifier;
     logic [695:0] message_buffer;
     logic [6:0] message_length=87;
-    logic [IB-1:0] request_a;
+    logic [7:0] request_a;
     logic [4:0] request_layer=0;
     logic [63:0] request_tree=0;
     logic [9:0] request_leaf=5;
     logic [31:0] request_b;
-    wire [IB-1:0] list_index0,list_index1;
-    logic [N*8-1:0] list_data0,list_data1;
-    wire [M*8-1:0] response_value;
-    wire [N*8-1:0] response_capture;
+    wire [7:0] list_index0,list_index1;
+    logic [255:0] list_data0,list_data1;
+    wire [391:0] response_value;
+    wire [255:0] response_capture;
     wire [31:0] hash_count,permutation_count;
     logic [1023:0] vectors[0:CASES-1];
     integer i,j,cycles=0,length;
     logic [M*8-1:0] expected;
-    uhbs_recipe_lane #(.N(N),.DIGEST_BYTES(M),.INDEX_BITS(IB),.PROFILE_ENABLE(1)) dut(.*);
+    uhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PROFILE_ENABLE(1)) dut(.*);
     always #5 clk=~clk;
     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
     always_comb for(integer b=0;b<N;b=b+1) begin
@@ -64,7 +65,7 @@ module tb_uhbs_recipe_lane;
             if(error) $fatal(1,"recipe error profile=%0d case=%0d",PROFILE,j);
             for(i=0;i<length;i=i+1)
                 if(response_value[i*8 +: 8]!==expected[i*8 +: 8]) $fatal(1,"recipe mismatch p=%0d c=%0d byte=%0d",PROFILE,j,i);
-            if(request_chain && response_capture!==vectors[j][N*8-1:0]) $fatal(1,"capture mismatch p=%0d c=%0d",PROFILE,j);
+            if(request_chain && response_capture[N*8-1:0]!==vectors[j][N*8-1:0]) $fatal(1,"capture mismatch p=%0d c=%0d",PROFILE,j);
             repeat(3) tick(); response_ready=1; tick(); response_ready=0; tick();
         end
         // A zero block allowance must fail before returning a digest.

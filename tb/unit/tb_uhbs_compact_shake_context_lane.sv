@@ -2,6 +2,8 @@
 `default_nettype none
 
 module tb_uhbs_compact_shake_context_lane;
+    wire [5:0] node_bytes=16;
+    wire [383:0] chain_prefix_data=0;
     logic clk = 1'b0;
     logic rst_n = 1'b0;
     logic context_valid = 1'b0;

@@ -9,6 +9,8 @@ module uhbs_compact_shake_context_lane #(
 ) (
     input  wire          clk,
     input  wire          rst_n,
+    input wire [5:0] node_bytes,
+    input wire [(N+32)*8-1:0] chain_prefix_data,
     input  wire          context_valid,
     output wire          context_ready,
     input  wire          fast_block_valid,
@@ -51,6 +53,9 @@ module uhbs_compact_shake_context_lane #(
 
     logic [1599:0] sponge_state;
     logic [(N+32)*8-1:0] chain_template;
+    // Recipe request fields stay stable through the response handshake.
+    // The production lane therefore reuses its live prefix without copying it.
+    wire [(N+32)*8-1:0] active_chain_template = STREAM_CHAIN_ENABLE ? chain_template : chain_prefix_data;
     logic [4:0] chains_remaining;
     logic [3:0] chain_counter;
     logic [4:0] chain_iteration;
@@ -182,17 +187,49 @@ module uhbs_compact_shake_context_lane #(
     end endgenerate
 
     always_comb begin
+        next_chain_state='0;
+        case(node_bytes)
+            6'd16: begin
         next_chain_state = '0;
-        next_chain_state[(N+32)*8-1:0] = chain_template;
+        next_chain_state[(16+32)*8-1:0] = active_chain_template[383:0];
         if (saved_chain_prefix)
-            next_chain_state[8*(N+16) +: 32] =
+            next_chain_state[8*(16+16) +: 32] =
                 {5'b0, saved_chain_prefix_domain, 24'b0};
         if (!saved_chain_prefix_preserve_counter)
-            next_chain_state[8*(N+28) +: 32] =
+            next_chain_state[8*(16+28) +: 32] =
                 {4'b0, transition_counter, 24'b0};
-        next_chain_state[8*(N+32) +: N*8] = advanced_state[N*8-1:0];
-        next_chain_state[8*(2*N+32) +: 8] = 8'h1f;
+        next_chain_state[8*(16+32) +: 16*8] = advanced_state[16*8-1:0];
+        next_chain_state[8*(2*16+32) +: 8] = 8'h1f;
         next_chain_state[1087] = 1'b1;
+            end
+            6'd24: begin
+        next_chain_state = '0;
+        next_chain_state[(24+32)*8-1:0] = active_chain_template[447:0];
+        if (saved_chain_prefix)
+            next_chain_state[8*(24+16) +: 32] =
+                {5'b0, saved_chain_prefix_domain, 24'b0};
+        if (!saved_chain_prefix_preserve_counter)
+            next_chain_state[8*(24+28) +: 32] =
+                {4'b0, transition_counter, 24'b0};
+        next_chain_state[8*(24+32) +: 24*8] = advanced_state[24*8-1:0];
+        next_chain_state[8*(2*24+32) +: 8] = 8'h1f;
+        next_chain_state[1087] = 1'b1;
+            end
+            6'd32: begin
+        next_chain_state = '0;
+        next_chain_state[(32+32)*8-1:0] = active_chain_template[511:0];
+        if (saved_chain_prefix)
+            next_chain_state[8*(32+16) +: 32] =
+                {5'b0, saved_chain_prefix_domain, 24'b0};
+        if (!saved_chain_prefix_preserve_counter)
+            next_chain_state[8*(32+28) +: 32] =
+                {4'b0, transition_counter, 24'b0};
+        next_chain_state[8*(32+32) +: 32*8] = advanced_state[32*8-1:0];
+        next_chain_state[8*(2*32+32) +: 8] = 8'h1f;
+        next_chain_state[1087] = 1'b1;
+            end
+            default: next_chain_state='0;
+        endcase
     end
 
     assign context_ready = lane_state == IDLE;
@@ -211,6 +248,33 @@ module uhbs_compact_shake_context_lane #(
         if (UNROLL < 1 || UNROLL > 24 || (24 % UNROLL) != 0)
             $error("compact SHAKE lane UNROLL must divide 24");
     end
+
+    // Mutually exclusive word updates expose one data mux instead of a
+    // priority network for whole-state loads mixed with partial absorption.
+    wire take_fast=(lane_state==IDLE && context_valid && fast_block_valid)
+        || (lane_state==WAIT_BLOCK && fast_block_valid && fast_block_ready);
+    wire take_stream=lane_state==WAIT_BLOCK && !take_fast && block_valid;
+    wire clear_stream=take_stream && first_block && append_index==0;
+    wire take_feedback=lane_state==RUN && round_index+UNROLL>=24
+        && saved_chain_enable && chains_remaining>1;
+    wire take_round=lane_state==RUN && !take_feedback;
+    genvar word_index;
+    generate for(word_index=0;word_index<25;word_index=word_index+1) begin: state_words
+        wire select_stream=word_index<17 && take_stream && append_index==word_index/2;
+        wire [63:0] fast_word;
+        if(word_index<17) assign fast_word=fast_block_data[word_index*64 +:64];
+        else assign fast_word=64'd0;
+        wire [63:0] stream_word=word_index%2==0 ? block_data[63:0] : block_data[127:64];
+        wire [63:0] next_word=
+            ({64{take_round}} & advanced_state[word_index*64 +:64])
+            | ({64{take_feedback}} & next_chain_state[word_index*64 +:64])
+            | ({64{take_fast}} & fast_word)
+            | ({64{select_stream}} & (stream_word ^
+                (sponge_state[word_index*64 +:64] & {64{!clear_stream}})));
+        always_ff @(posedge clk)
+            if(rst_n && (lane_state==RUN || take_fast || select_stream || clear_stream))
+                sponge_state[word_index*64 +:64]<=next_word;
+    end endgenerate
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -249,7 +313,6 @@ module uhbs_compact_shake_context_lane #(
                     first_block <= 1'b1;
                     append_index <= 0;
                     if (fast_block_valid) begin
-                        sponge_state <= {{512{1'b0}}, fast_block_data};
                         chain_template <= fast_block_data[(N+32)*8-1:0];
                         running_last <= 1'b1;
                         chains_remaining <= chain_enable
@@ -265,7 +328,6 @@ module uhbs_compact_shake_context_lane #(
                     // Generic pre-padded one-rate-block path.  The recipe
                     // executor builds fixed-format blocks while this lane is
                     // idle, avoiding nine serial append cycles per context.
-                    sponge_state <= {{512{1'b0}}, fast_block_data};
                     chain_template <= fast_block_data[(N+32)*8-1:0];
                     running_last <= 1'b1;
                     chains_remaining <= saved_chain_enable
@@ -275,37 +337,12 @@ module uhbs_compact_shake_context_lane #(
                     round_index <= 0;
                     lane_state <= RUN;
                 end else if (block_valid) begin
-                    if (append_index == 0) begin
-                        if (first_block)
-                            sponge_state <= {{1472{1'b0}}, block_data};
-                        else
-                            sponge_state[127:0]
-                                <= sponge_state[127:0] ^ block_data;
-                        if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[127:0] <= block_data;
-                    end else begin
-                        case (append_index)
-                            1: begin
-                                sponge_state[255:128]
-                                    <= sponge_state[255:128] ^ block_data;
-                                if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[255:128] <= block_data;
-                            end
-                            2: begin
-                                sponge_state[383:256]
-                                    <= sponge_state[383:256] ^ block_data;
-                                if(STREAM_CHAIN_ENABLE && saved_chain_enable) chain_template[383:256] <= block_data;
-                            end
-                            3: sponge_state[511:384]
-                                <= sponge_state[511:384] ^ block_data;
-                            4: sponge_state[639:512]
-                                <= sponge_state[639:512] ^ block_data;
-                            5: sponge_state[767:640]
-                                <= sponge_state[767:640] ^ block_data;
-                            6: sponge_state[895:768]
-                                <= sponge_state[895:768] ^ block_data;
-                            7: sponge_state[1023:896]
-                                <= sponge_state[1023:896] ^ block_data;
-                            default: sponge_state[1087:1024]
-                                <= sponge_state[1087:1024] ^ block_data[63:0];
+                    if(STREAM_CHAIN_ENABLE && saved_chain_enable) begin
+                        case(append_index)
+                            0:chain_template[127:0]<=block_data;
+                            1:chain_template[255:128]<=block_data;
+                            2:chain_template[383:256]<=block_data;
+                            default:begin end
                         endcase
                     end
                     if (append_index == 8) begin
@@ -327,13 +364,11 @@ module uhbs_compact_shake_context_lane #(
                     end
                 end
                 RUN: begin
-                    sponge_state <= advanced_state;
                     if (round_index + UNROLL >= 24) begin
                         if (saved_capture_enable
                             && saved_capture_after == chain_iteration)
                             captured_value <= advanced_state[N*8-1:0];
                         if (saved_chain_enable && chains_remaining > 1) begin
-                            sponge_state <= next_chain_state;
                             chain_template <= next_chain_state[(N+32)*8-1:0];
                             chains_remaining <= chains_remaining - 1'b1;
                             if (!saved_chain_prefix_preserve_counter

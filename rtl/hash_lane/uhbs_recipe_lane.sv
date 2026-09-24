@@ -11,6 +11,7 @@ module uhbs_recipe_lane #(
     parameter bit PROFILE_ENABLE = 0
 ) (
     input wire clk, rst_n,
+    input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
     input wire [63:0] request_recipe, request_step_recipe,
     input wire request_chain,
@@ -29,8 +30,8 @@ module uhbs_recipe_lane #(
     output wire [INDEX_BITS-1:0] list_index0, list_index1,
     input wire [N*8-1:0] list_data0, list_data1,
     output wire response_valid, input wire response_ready,
-    output logic [DIGEST_BYTES*8-1:0] response_value,
-    output logic [N*8-1:0] response_capture,
+    output wire [DIGEST_BYTES*8-1:0] response_value,
+    output wire [N*8-1:0] response_capture,
     output logic error,
     output logic [31:0] hash_count, permutation_count
 );
@@ -58,6 +59,10 @@ module uhbs_recipe_lane #(
             ? request_b : {27'd0, iteration}) : request_b;
     wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
     wire [31:0] leaf = {22'd0, request_leaf};
+    // A node is 16, 24 or 32 bytes. Explicit shifts avoid generic multipliers.
+    wire [12:0] list_bytes = node_bytes==16 ? {1'b0,arity,4'b0}
+        : node_bytes==24 ? ({1'b0,arity,4'b0}+{2'b0,arity,3'b0})
+        : {arity,5'b0};
     logic [12:0] input_length;
     logic [1087:0] fast_block;
     logic [127:0] stream_data;
@@ -73,10 +78,12 @@ module uhbs_recipe_lane #(
     wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
     wire [N*8-1:0] compact_capture;
     wire compact_capture_valid, hash_error;
-    wire completed = compact_chain ? digest_valid : finish_valid;
-    wire [DIGEST_BYTES*8-1:0] completed_value = compact_chain ? digest : finish_digest;
-    wire [7:0] prefix_bytes = !RECIPE_MASK[PREFIX_LIST] ? N+32
-        : !RECIPE_MASK[ADDRESS_LIST] ? 22 : shape == ADDRESS_LIST ? N+32 : 22;
+    wire completed = finish_valid;
+    wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
+    logic [N*8-1:0] saved_capture;
+    assign response_value=digest;
+    assign response_capture=compact_chain ? compact_capture : saved_capture;
+    wire [7:0] prefix_bytes = shape == ADDRESS_LIST ? node_bytes+32 : 22;
     logic staged_valid, staged_last;
     logic [127:0] staged_data;
     wire stream_accept = !staged_valid || block_ready;
@@ -86,7 +93,7 @@ module uhbs_recipe_lane #(
     logic [5:0] list_remainder;
     wire [4:0] stream_advance = beat==8 ? 5'd8 : 5'd16;
     wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
-    assign list_index0 = N==24 ? list_cursor : list_offset / N;
+    assign list_index0 = list_cursor;
     assign list_index1 = list_index0+1'b1;
     assign request_ready = state == IDLE;
     assign response_valid = state == RESPONSE;
@@ -94,60 +101,91 @@ module uhbs_recipe_lane #(
     function automatic [31:0] be32(input [31:0] value);
         be32 = {value[7:0],value[15:8],value[23:16],value[31:24]};
     endfunction
-    // Assemble each source once, then extract a beat with one shared shift.
-    // Per-byte variable indexing replicated the address and selection networks.
-    localparam integer STREAM_BITS=(MAX_MESSAGE_BYTES+4*N>3*N+32
-        ? MAX_MESSAGE_BYTES+4*N : 3*N+32)*8;
-    logic [STREAM_BITS-1:0] stream_source;
-    logic [12:0] stream_offset;
-    always @* begin
-        stream_source=0;
-        stream_offset=position;
-        case(shape)
-            MESSAGE_PRF: if(RECIPE_MASK[MESSAGE_PRF]) begin
-                stream_source[0 +: N*8]=secret_prf;
-                stream_source[N*8 +: N*8]=randomizer;
-                stream_source[2*N*8 +: MAX_MESSAGE_BYTES*8]=message_buffer;
-            end
-            MESSAGE_DIGEST: if(RECIPE_MASK[MESSAGE_DIGEST]) begin
-                stream_source[0 +: N*8]=randomizer;
-                stream_source[N*8 +: N*8]=public_seed;
-                stream_source[2*N*8 +: N*8]=root;
-                stream_source[3*N*8 +: MAX_MESSAGE_BYTES*8]=message_buffer;
-            end
-            ROOT_MESSAGE: if(RECIPE_MASK[ROOT_MESSAGE]) begin
-                stream_source[(N-1)*8 +: 8]=2;
-                stream_source[N*8 +: N*8]=randomizer;
-                stream_source[2*N*8 +: N*8]=root;
-                stream_source[(4*N-4)*8 +: 32]=be32(leaf);
-                stream_source[4*N*8 +: MAX_MESSAGE_BYTES*8]=message_buffer;
-            end
-            PREFIX_MESSAGE: if(RECIPE_MASK[PREFIX_MESSAGE]) begin
-                stream_source[0 +: 128]=identifier;
-                stream_source[128 +: 32]=be32(leaf);
-                stream_source[160 +: 16]=16'h8181;
-                stream_source[176 +: N*8]=randomizer;
-                stream_source[(22+N)*8 +: MAX_MESSAGE_BYTES*8]=message_buffer;
-            end
-            ADDRESS_LIST, PREFIX_LIST: if(RECIPE_MASK[ADDRESS_LIST] || RECIPE_MASK[PREFIX_LIST]) begin
-                if(position<prefix_bytes) begin
-                    if(shape==ADDRESS_LIST) begin
-                        stream_source[0 +: N*8]=public_seed;
-                        stream_source[N*8 +: 256]=address;
-                        stream_source[(N+32)*8 +: 2*N*8]={list_data1,list_data0};
-                    end else begin
-                        stream_source[0 +: 128]=identifier;
-                        stream_source[128 +: 32]=be32(leaf);
-                        stream_source[160 +: 16]=16'h8080;
-                        stream_source[176 +: 2*N*8]={list_data1,list_data0};
-                    end
-                end else begin
-                    stream_source[0 +: 2*N*8]={list_data1,list_data0};
-                    stream_offset=N==24 ? list_remainder : list_offset % N;
+    // All sponge beats start on an eight-byte boundary. Select two words
+    // directly instead of shifting a maximum-size concatenated message frame.
+    wire [2:0] node_words=node_bytes[5:3];
+    wire [703:0] padded_message={8'd0,message_buffer};
+    function automatic [63:0] node_word(input [255:0] data,input [5:0] index);
+        begin
+            case(index)
+                0:node_word=data[63:0];1:node_word=data[127:64];
+                2:node_word=data[191:128];3:node_word=data[255:192];
+                default:node_word=0;
+            endcase
+        end
+    endfunction
+    function automatic [63:0] message_word(input [5:0] index);
+        begin
+            message_word=index<11 ? padded_message[index*64 +:64] : 64'd0;
+        end
+    endfunction
+    function automatic [63:0] prefix_message_word(input [5:0] index);
+        begin
+            prefix_message_word=index<4 ? node_word(randomizer,index)
+                : message_word(index-4);
+        end
+    endfunction
+    function automatic [63:0] source_word(input [5:0] index);
+        reg [63:0] lower_word,upper_word;
+        begin
+            source_word=0;lower_word=0;upper_word=0;
+            case(shape)
+                MESSAGE_PRF: if(RECIPE_MASK[MESSAGE_PRF]) begin
+                    if(index<node_words) source_word=node_word(secret_prf,index);
+                    else if(index<2*node_words) source_word=node_word(randomizer,index-node_words);
+                    else source_word=message_word(index-2*node_words);
                 end
-            end
-            default: begin end
+                MESSAGE_DIGEST: if(RECIPE_MASK[MESSAGE_DIGEST]) begin
+                    if(index<node_words) source_word=node_word(randomizer,index);
+                    else if(index<2*node_words) source_word=node_word(public_seed,index-node_words);
+                    else if(index<3*node_words) source_word=node_word(root,index-2*node_words);
+                    else source_word=message_word(index-3*node_words);
+                end
+                ROOT_MESSAGE: if(RECIPE_MASK[ROOT_MESSAGE]) begin
+                    if(index==4-1) source_word=64'h0200000000000000;
+                    else if(index<4) source_word=0;
+                    else if(index<8) source_word=node_word(randomizer,index-4);
+                    else if(index<12) source_word=node_word(root,index-8);
+                    else if(index==16-1) source_word={be32(leaf),32'd0};
+                    else if(index>=16) source_word=message_word(index-16);
+                end
+                PREFIX_MESSAGE: if(RECIPE_MASK[PREFIX_MESSAGE]) begin
+                    lower_word=prefix_message_word(index-3);
+                    upper_word=prefix_message_word(index-2);
+                    if(index<2) source_word=index[0] ? identifier[127:64] : identifier[63:0];
+                    else if(index==2) source_word={upper_word[15:0],16'h8181,be32(leaf)};
+                    else source_word={upper_word[15:0],lower_word[63:16]};
+                end
+                ADDRESS_LIST: if(RECIPE_MASK[ADDRESS_LIST]) begin
+                    if(index<node_words) source_word=node_word(public_seed,index);
+                    else if(index<node_words+4) source_word=node_word(address,index-node_words);
+                    else source_word=node_word(list_data0,index-node_words-4);
+                end
+                PREFIX_LIST: if(RECIPE_MASK[PREFIX_LIST]) begin
+                    case(index)
+                        0:source_word=identifier[63:0];1:source_word=identifier[127:64];
+                        2:source_word={list_data0[15:0],16'h8080,be32(leaf)};
+                        3:source_word=list_data0[79:16];default:source_word=0;
+                    endcase
+                end
+                default:source_word=0;
+            endcase
+        end
+    endfunction
+    logic [511:0] list_pair;
+    always @* begin
+        case(node_bytes)
+            16:list_pair={256'd0,list_data1[127:0],list_data0[127:0]};
+            24:list_pair={128'd0,list_data1[191:0],list_data0[191:0]};
+            default:list_pair={list_data1,list_data0};
         endcase
+    end
+    wire [127:0] list_window=list_pair >> {list_remainder,3'b0};
+    wire [5:0] stream_word_index=position[8:3];
+    logic [127:0] stream_payload;
+    always_comb begin
+        stream_payload=(shape==ADDRESS_LIST || shape==PREFIX_LIST) && position>=prefix_bytes
+            ? list_window : {source_word(stream_word_index+6'd1),source_word(stream_word_index)};
     end
 
     integer i, absolute;
@@ -156,88 +194,139 @@ module uhbs_recipe_lane #(
             be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
         masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
         case (shape)
-            ADDRESS_SEED, ADDRESS_VALUE: input_length = N+32+(shape == ADDRESS_SEED ? N : N*arity);
-            MESSAGE_PRF: input_length = 2*N+message_length;
-            MESSAGE_DIGEST: input_length = 3*N+message_length;
-            INDEX_PRF: input_length = 2*N+32;
-            ROOT_MESSAGE: input_length = 4*N+message_length;
-            MASKED_SEED: input_length = 3*N+32;
-            MASKED_VALUE: input_length = compound < arity+1 ? 2*N+32 : (2+arity)*N;
-            PREFIX_SEED, PREFIX_VALUE: input_length = 23+N;
-            PREFIX_MESSAGE: input_length = 22+N+message_length;
-            ADDRESS_LIST: input_length = N+32+N*arity;
-            PREFIX_LIST: input_length = 22+N*arity;
-            PREFIX_LEAF: input_length = 22+N;
-            PREFIX_PARENT: input_length = 22+2*N;
+            ADDRESS_SEED, ADDRESS_VALUE: input_length = node_bytes+32+(shape == ADDRESS_SEED ? node_bytes : list_bytes);
+            MESSAGE_PRF: input_length = 2*node_bytes+message_length;
+            MESSAGE_DIGEST: input_length = 3*node_bytes+message_length;
+            INDEX_PRF: input_length = 96;
+            ROOT_MESSAGE: input_length = 128+message_length;
+            MASKED_SEED: input_length = 128;
+            MASKED_VALUE: input_length = compound < arity+1 ? 13'd96 : 13'd64+{arity,5'd0};
+            PREFIX_SEED, PREFIX_VALUE: input_length = 55;
+            PREFIX_MESSAGE: input_length = 54+message_length;
+            ADDRESS_LIST: input_length = node_bytes+32+list_bytes;
+            PREFIX_LIST: input_length = 13'd22+{arity,5'd0};
+            PREFIX_LEAF: input_length = 54;
+            PREFIX_PARENT: input_length = 86;
             default: input_length = 0;
         endcase
     end
+    // Select shared frame fields before alignment. This avoids replicating
+    // every seed/value/key/mask selector for all three node lengths.
+    logic [255:0] frame0,frame1,frame2,frame3;
+    logic [183:0] frame_prefix;
+    logic [7:0] frame_domain;
+    logic frame_two;
+    logic [2:0] frame_layout;
     always @* begin
-        fast_block = 0;
-        case (shape)
-            ADDRESS_SEED, ADDRESS_VALUE: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
-                fast_block[0 +: N*8] = public_seed;
-                fast_block[N*8 +: 256] = address;
-                fast_block[(N+32)*8 +: N*8] = shape == ADDRESS_SEED ? secret_seed : left_value;
-                if (shape == ADDRESS_VALUE && arity == 2)
-                    fast_block[(2*N+32)*8 +: N*8] = request_right;
-                if (shape == ADDRESS_VALUE && arity == 2)
-                    fast_block[(3*N+32)*8 +: 8] = 8'h1f;
-                else fast_block[(2*N+32)*8 +: 8] = 8'h1f;
+        frame0=0;frame1=0;frame2=0;frame3=0;frame_prefix=0;
+        frame_domain=0;frame_two=0;frame_layout=7;
+        case(shape)
+            ADDRESS_SEED,ADDRESS_VALUE: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
+                frame_layout=0;frame0=public_seed;frame1=address;
+                frame2=shape==ADDRESS_SEED ? secret_seed : left_value;
+                frame_two=shape==ADDRESS_VALUE && arity==2;
+                frame3=frame_two ? request_right : 256'd0;
             end
             INDEX_PRF: if(RECIPE_MASK[INDEX_PRF]) begin
-                fast_block[(N-1)*8 +: 8] = 3;
-                fast_block[N*8 +: N*8] = secret_prf;
-                fast_block[(2*N+28)*8 +: 32] = be32(leaf);
-                fast_block[(2*N+32)*8 +: 8] = 8'h1f;
+                frame_layout=1;frame_domain=3;frame1=secret_prf;frame2={be32(leaf),224'd0};
             end
             MASKED_SEED: if(RECIPE_MASK[MASKED_SEED]) begin
-                fast_block[(N-1)*8 +: 8] = 4;
-                fast_block[N*8 +: N*8] = secret_seed;
-                fast_block[2*N*8 +: N*8] = public_seed;
-                fast_block[3*N*8 +: 256] = masked_address;
-                fast_block[(3*N+32)*8 +: 8] = 8'h1f;
+                frame_layout=2;frame_domain=4;frame1=secret_seed;frame2=public_seed;frame3=masked_address;
             end
             MASKED_VALUE: if(RECIPE_MASK[MASKED_VALUE]) begin
-                if (compound < arity+1) begin
-                    fast_block[(N-1)*8 +: 8] = 3;
-                    fast_block[N*8 +: N*8] = public_seed;
-                    fast_block[2*N*8 +: 256] = masked_address;
-                    fast_block[(2*N+32)*8 +: 8] = 8'h1f;
+                if(compound<arity+1) begin
+                    frame_layout=1;frame_domain=3;frame1=public_seed;frame2=masked_address;
                 end else begin
-                    fast_block[(N-1)*8 +: 8] = arity-1'b1;
-                    fast_block[N*8 +: N*8] = temporary_key;
-                    fast_block[2*N*8 +: N*8] = left_value ^ mask0;
-                    if (arity == 2) fast_block[3*N*8 +: N*8] = request_right ^ mask1;
-                    if (arity == 2) fast_block[4*N*8 +: 8] = 8'h1f;
-                    else fast_block[3*N*8 +: 8] = 8'h1f;
+                    frame_layout=3;frame_domain=arity-1'b1;frame1=temporary_key;
+                    frame2=left_value^mask0;frame_two=arity==2;
+                    frame3=frame_two ? request_right^mask1 : 256'd0;
                 end
             end
-            PREFIX_SEED, PREFIX_VALUE: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
-                fast_block[0 +: 128] = identifier;
-                fast_block[128 +: 32] = be32(leaf);
-                fast_block[20*8 +: 16] = {8'(request_a),8'd0};
-                fast_block[22*8 +: 8] = shape == PREFIX_SEED ? 8'hff : b[7:0];
-                fast_block[23*8 +: N*8] = shape == PREFIX_SEED ? secret_seed : left_value;
-                fast_block[(23+N)*8 +: 8] = 8'h1f;
+            PREFIX_SEED,PREFIX_VALUE: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
+                frame_layout=4;
+                frame_prefix={shape==PREFIX_SEED ? 8'hff : b[7:0],8'(request_a),8'd0,be32(leaf),identifier};
+                frame1=shape==PREFIX_SEED ? secret_seed : left_value;
             end
-            PREFIX_LEAF, PREFIX_PARENT: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
-                fast_block[0 +: 128] = identifier;
-                fast_block[128 +: 32] = be32(request_b);
-                fast_block[20*8 +: 16] = shape == PREFIX_LEAF ? 16'h8282 : 16'h8383;
-                fast_block[22*8 +: N*8] = left_value;
-                if (shape == PREFIX_PARENT) fast_block[(22+N)*8 +: N*8] = request_right;
-                if (shape == PREFIX_PARENT) fast_block[(22+2*N)*8 +: 8] = 8'h1f;
-                else fast_block[(22+N)*8 +: 8] = 8'h1f;
+            PREFIX_LEAF,PREFIX_PARENT: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
+                frame_layout=5;
+                frame_prefix={8'd0,shape==PREFIX_LEAF ? 16'h8282 : 16'h8383,be32(request_b),identifier};
+                frame1=left_value;frame_two=shape==PREFIX_PARENT;
+                frame2=frame_two ? request_right : 256'd0;
             end
-            default: begin end
+            default:begin end
         endcase
-        // Padding is placed at constant offsets above. A variable part-select
-        // write here creates a wide barrel-write mux at every sponge input.
-        fast_block[1087] = 1'b1;
+    end
+    always @* begin
+        fast_block=0;
+        case(node_bytes)
+            16: begin
+                fast_block[0 +:128]=public_seed[127:0];
+                fast_block[128 +:256]=address;
+                fast_block[384 +:128]=shape==ADDRESS_SEED ? secret_seed[127:0] : left_value[127:0];
+                if(shape==ADDRESS_VALUE && arity==2) begin
+                    fast_block[512 +:128]=request_right[127:0];
+                    fast_block[640 +:8]=8'h1f;
+                end else fast_block[512 +:8]=8'h1f;
+            end
+            24: begin
+                fast_block[0 +:192]=public_seed[191:0];
+                fast_block[192 +:256]=address;
+                fast_block[448 +:192]=shape==ADDRESS_SEED ? secret_seed[191:0] : left_value[191:0];
+                if(shape==ADDRESS_VALUE && arity==2) begin
+                    fast_block[640 +:192]=request_right[191:0];
+                    fast_block[832 +:8]=8'h1f;
+                end else fast_block[640 +:8]=8'h1f;
+            end
+            32: case(frame_layout)
+                0: begin
+                    fast_block[0 +:256]=frame0[255:0];
+                    fast_block[256 +:256]=frame1;
+                    fast_block[512 +:256]=frame2[255:0];
+                    fast_block[768 +:256]=frame3[255:0];
+                    if(frame_two) fast_block[1024 +:8]=8'h1f;
+                    else fast_block[768 +:8]=8'h1f;
+                end
+                1: begin
+                    fast_block[248 +:8]=frame_domain;
+                    fast_block[256 +:256]=frame1[255:0];
+                    fast_block[512 +:256]=frame2;
+                    fast_block[768 +:8]=8'h1f;
+                end
+                2: begin
+                    fast_block[248 +:8]=frame_domain;
+                    fast_block[256 +:256]=frame1[255:0];
+                    fast_block[512 +:256]=frame2[255:0];
+                    fast_block[768 +:256]=frame3;
+                    fast_block[1024 +:8]=8'h1f;
+                end
+                3: begin
+                    fast_block[248 +:8]=frame_domain;
+                    fast_block[256 +:256]=frame1[255:0];
+                    fast_block[512 +:256]=frame2[255:0];
+                    fast_block[768 +:256]=frame3[255:0];
+                    if(frame_two) fast_block[1024 +:8]=8'h1f;
+                    else fast_block[768 +:8]=8'h1f;
+                end
+                4: begin
+                    fast_block[183:0]=frame_prefix;
+                    fast_block[184 +:256]=frame1[255:0];
+                    fast_block[440 +:8]=8'h1f;
+                end
+                5: begin
+                    fast_block[175:0]=frame_prefix[175:0];
+                    fast_block[176 +:256]=frame1[255:0];
+                    fast_block[432 +:256]=frame2[255:0];
+                    if(frame_two) fast_block[688 +:8]=8'h1f;
+                    else fast_block[432 +:8]=8'h1f;
+                end
+                default:begin end
+            endcase
+            default:begin end
+        endcase
+        fast_block[1087]=1'b1;
     end
     always_comb begin
-        stream_data = stream_source >> (stream_offset*8);
+        stream_data = stream_payload;
         for (i=0; i<16; i=i+1) begin
             absolute = position+i;
             if (beat*16+i < 136) begin
@@ -248,8 +337,17 @@ module uhbs_recipe_lane #(
         end
     end
 
+    logic [(N+32)*8-1:0] live_chain_prefix;
+    always @* begin
+        live_chain_prefix=0;
+        case(node_bytes)
+            16:live_chain_prefix[383:0]={address,public_seed[127:0]};
+            24:live_chain_prefix[447:0]={address,public_seed[191:0]};
+            default:live_chain_prefix[511:0]={address,public_seed};
+        endcase
+    end
     uhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0)) sponge (
-        .clk, .rst_n, .context_valid(state == START), .context_ready(hash_ready),
+        .clk, .rst_n, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
         .fast_block_data(fast_block), .chain_enable(compact_chain),
         .chain_prefix(compact_chain),
@@ -282,6 +380,7 @@ module uhbs_recipe_lane #(
                     rate_block <= 0; beat <= 0;
                     if (request_recipe[63:60] != 1 || request_recipe[59:56] == 0
                             || !RECIPE_MASK[request_recipe[59:56]]
+                            || (node_bytes!=32 && !(request_recipe[59:56]==1 || request_recipe[59:56]==2 || request_recipe[59:56]==3 || request_recipe[59:56]==4 || request_recipe[59:56]==12))
                             || request_steps > 15) begin error <= 1; state <= RESPONSE; end
                     else state <= START;
                 end
@@ -296,12 +395,12 @@ module uhbs_recipe_lane #(
                 end
                 STREAM: if (stream_accept) begin
                     staged_valid<=1; staged_data<=stream_data; staged_last<=stream_last;
-                    if(N==24) begin
+                    begin
                         if(position < prefix_bytes) begin
                             if(position+stream_advance >= prefix_bytes)
                                 list_remainder <= position+stream_advance-prefix_bytes;
-                        end else if(next_remainder >= N) begin
-                            list_remainder <= next_remainder-N;
+                        end else if(next_remainder >= node_bytes) begin
+                            list_remainder <= next_remainder-node_bytes;
                             list_cursor <= list_cursor+1'b1;
                         end else list_remainder <= next_remainder;
                     end
@@ -314,8 +413,6 @@ module uhbs_recipe_lane #(
                 end
                 WAIT_HASH: if (completed) begin
                     if (compact_chain) begin
-                        response_value <= completed_value;
-                        response_capture <= compact_capture;
                         state <= RESPONSE;
                     end else if (RECIPE_MASK[MASKED_VALUE] && shape == MASKED_VALUE && compound < arity+1) begin
                         case (compound)
@@ -330,13 +427,12 @@ module uhbs_recipe_lane #(
                         current_value <= completed_value[N*8-1:0];
                         if (request_capture && (seed_phase ? request_capture_after == 0
                             : request_capture_after == iteration+1))
-                            response_capture <= completed_value[N*8-1:0];
+                            saved_capture <= completed_value[N*8-1:0];
                         if (request_chain && (seed_phase ? request_steps != 0 : iteration+1 < request_steps)) begin
                             seed_phase <= 0;
                             if (!seed_phase) iteration <= iteration+1'b1;
                             state <= START;
                         end else begin
-                            response_value <= completed_value;
                             state <= RESPONSE;
                         end
                     end
