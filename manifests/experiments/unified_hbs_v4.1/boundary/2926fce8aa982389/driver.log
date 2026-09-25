@@ -1,0 +1,628 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Fri Sep 25 11:44:02 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source experiments/v4.1/check_rom_boundary.tcl
+# set root [file normalize [file join [file dirname [info script]] ../..]]
+# cd $root
+# set tag [lindex $argv 0]
+# set out [file join build v4.1 ${tag}_boundary]
+# file mkdir $out
+# set_param general.maxThreads 4
+# foreach variant {0 1} {
+#     open_checkpoint [file join build v4.1 $tag post_synth.dcp]
+#     set_property DONT_TOUCH false [get_cells processor]
+#     foreach c [get_cells -hier -filter {REF_NAME == RAM64X1S || REF_NAME == RAM128X1S}] {
+#         if {![regexp {^(program|template|descriptor)_rom/} $c]} {continue}
+#         set_property DONT_TOUCH true $c
+#         set_property DONT_TOUCH true [get_nets -of_objects [get_pins $c/O]]
+#         if {$variant} {
+#             if {[get_property REF_NAME $c] eq "RAM64X1S"} {
+#                 set_property INIT 64'h0123456789abcdef $c
+#             } else {set_property INIT 128'hfedcba98765432100123456789abcdef $c}
+#         }
+#     }
+#     opt_design
+#     set f [open [file join $out structure_${variant}.txt] w]
+#     foreach c [lsort [get_cells -hier]] {
+#         set init [get_property -quiet INIT $c]
+#         if {[regexp {^(program|template|descriptor)_rom/} $c]} {set init IMAGE}
+#         puts $f "CELL $c [get_property REF_NAME $c] $init"
+#     }
+#     foreach n [lsort [get_nets -hier]] {
+#         puts $f "NET $n [lsort [get_pins -of_objects $n]] [lsort [get_ports -quiet -of_objects $n]]"
+#     }
+#     close $f
+#     report_utilization -file [file join $out utilization_${variant}.rpt]
+#     write_checkpoint -force [file join $out optimized_${variant}.dcp]
+#     close_design
+# }
+Command: open_checkpoint build/v4.1/u2_area_balanced/post_synth.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1569.520 ; gain = 0.000 ; free physical = 109796 ; free virtual = 121349
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+Netlist sorting complete. Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.08 . Memory (MB): peak = 1861.344 ; gain = 0.000 ; free physical = 109534 ; free virtual = 121087
+INFO: [Netlist 29-17] Analyzing 2082 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1973.812 ; gain = 4.000 ; free physical = 109413 ; free virtual = 120966
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2616.008 ; gain = 0.000 ; free physical = 108811 ; free virtual = 120365
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 963 instances were transformed.
+  RAM128X1S => RAM128X1S (MUXF7, RAMS64E(x2)): 128 instances
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 215 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+  RAM64X1S => RAM64X1S (RAMS64E): 192 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:09 ; elapsed = 00:00:07 . Memory (MB): peak = 2616.043 ; gain = 1046.523 ; free physical = 108811 ; free virtual = 120365
+Command: opt_design
+Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Implementation' and/or device 'xc7a200t'
+Running DRC as a precondition to command opt_design
+
+Starting DRC Task
+INFO: [DRC 23-27] Running DRC with 4 threads
+WARNING: [DRC 23-814] Not all possible (connectivity based) DRCs may have been run because this design is seen as Out of Context.
+INFO: [Project 1-461] DRC finished with 0 Errors
+INFO: [Project 1-462] Please refer to the DRC report (report_drc) for more information.
+
+Time (s): cpu = 00:00:00.29 ; elapsed = 00:00:00.14 . Memory (MB): peak = 2661.602 ; gain = 45.559 ; free physical = 108801 ; free virtual = 120355
+
+Starting Cache Timing Information Task
+Ending Cache Timing Information Task | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2661.602 ; gain = 0.000 ; free physical = 108801 ; free virtual = 120355
+
+Starting Logic Optimization Task
+
+Phase 1 Initialization
+
+Phase 1.1 Core Generation And Design Setup
+Phase 1.1 Core Generation And Design Setup | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108455 ; free virtual = 120009
+
+Phase 1.2 Setup Constraints And Sort Netlist
+Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108455 ; free virtual = 120009
+Phase 1 Initialization | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108455 ; free virtual = 120009
+
+Phase 2 Timer Update And Timing Data Collection
+
+Phase 2.1 Detect if minReqCache needed
+Phase 2.1 Detect if minReqCache needed | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.05 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108439 ; free virtual = 119993
+
+Phase 2.2 Timer Update
+Phase 2.2 Timer Update | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.07 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108439 ; free virtual = 119993
+Phase 2 Timer Update And Timing Data Collection | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.07 . Memory (MB): peak = 3000.414 ; gain = 0.000 ; free physical = 108439 ; free virtual = 119993
+
+Phase 3 Retarget
+INFO: [Opt 31-1851] Number of loadless carry chains removed were: 0
+INFO: [Opt 31-1834] Total Chains To Be Transformed Were: 0 AND Number of Transformed insts Created are: 0
+INFO: [Opt 31-1566] Pulled 8 inverters resulting in an inversion of 84 pins
+INFO: [Opt 31-138] Pushed 1 inverter(s) to 1 load pin(s).
+INFO: [Opt 31-49] Retargeted 0 cell(s).
+Phase 3 Retarget | Checksum: 292ac7212
+
+Time (s): cpu = 00:00:00.35 ; elapsed = 00:00:00.34 . Memory (MB): peak = 3024.426 ; gain = 24.012 ; free physical = 108439 ; free virtual = 119993
+Retarget | Checksum: 292ac7212
+INFO: [Opt 31-389] Phase Retarget created 48 cells and removed 63 cells
+
+Phase 4 Constant propagation
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Phase 4 Constant propagation | Checksum: 2ca8e7f7a
+
+Time (s): cpu = 00:00:00.48 ; elapsed = 00:00:00.47 . Memory (MB): peak = 3024.426 ; gain = 24.012 ; free physical = 108440 ; free virtual = 119994
+Constant propagation | Checksum: 2ca8e7f7a
+INFO: [Opt 31-389] Phase Constant propagation created 9 cells and removed 47 cells
+
+Phase 5 Sweep
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3024.426 ; gain = 0.000 ; free physical = 108440 ; free virtual = 119994
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3024.426 ; gain = 0.000 ; free physical = 108440 ; free virtual = 119994
+Phase 5 Sweep | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.66 ; elapsed = 00:00:00.66 . Memory (MB): peak = 3024.426 ; gain = 24.012 ; free physical = 108440 ; free virtual = 119993
+Sweep | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Sweep created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Sweep, 642 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 6 BUFG optimization
+Phase 6 BUFG optimization | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.71 ; elapsed = 00:00:00.7 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108440 ; free virtual = 119993
+BUFG optimization | Checksum: 2c91387d5
+INFO: [Opt 31-662] Phase BUFG optimization created 0 cells of which 0 are BUFGs and removed 0 cells.
+
+Phase 7 Shift Register Optimization
+INFO: [Opt 31-1064] SRL Remap converted 0 SRLs to 0 registers and converted 0 registers of register chains to 0 SRLs
+Phase 7 Shift Register Optimization | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.72 ; elapsed = 00:00:00.71 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108440 ; free virtual = 119993
+Shift Register Optimization | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Shift Register Optimization created 0 cells and removed 0 cells
+
+Phase 8 Post Processing Netlist
+Phase 8 Post Processing Netlist | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.75 ; elapsed = 00:00:00.74 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108440 ; free virtual = 119993
+Post Processing Netlist | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Post Processing Netlist created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Post Processing Netlist, 34 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 9 Finalization
+
+Phase 9.1 Finalizing Design Cores and Updating Shapes
+Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.9 ; elapsed = 00:00:00.87 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108441 ; free virtual = 119995
+
+Phase 9.2 Verifying Netlist Connectivity
+
+Starting Connectivity Check Task
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108442 ; free virtual = 119995
+Phase 9.2 Verifying Netlist Connectivity | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.92 ; elapsed = 00:00:00.9 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108442 ; free virtual = 119995
+Phase 9 Finalization | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.93 ; elapsed = 00:00:00.9 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108442 ; free virtual = 119996
+Opt_design Change Summary
+=========================
+
+
+-------------------------------------------------------------------------------------------------------------------------
+|  Phase                        |  #Cells created  |  #Cells Removed  |  #Constrained objects preventing optimizations  |
+-------------------------------------------------------------------------------------------------------------------------
+|  Retarget                     |              48  |              63  |                                              0  |
+|  Constant propagation         |               9  |              47  |                                              0  |
+|  Sweep                        |               0  |               0  |                                            642  |
+|  BUFG optimization            |               0  |               0  |                                              0  |
+|  Shift Register Optimization  |               0  |               0  |                                              0  |
+|  Post Processing Netlist      |               0  |               0  |                                             34  |
+-------------------------------------------------------------------------------------------------------------------------
+
+
+Ending Logic Optimization Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.93 ; elapsed = 00:00:00.9 . Memory (MB): peak = 3056.441 ; gain = 56.027 ; free physical = 108442 ; free virtual = 119996
+
+Starting Power Optimization Task
+INFO: [Pwropt 34-132] Skipping clock gating for clocks with a period < 2.00 ns.
+Ending Power Optimization Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108443 ; free virtual = 119997
+
+Starting Final Cleanup Task
+Ending Final Cleanup Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108443 ; free virtual = 119997
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108443 ; free virtual = 119997
+INFO: [Common 17-83] Releasing license: Implementation
+34 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+opt_design completed successfully
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[103]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[67]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[68]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[69]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[70]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[71]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[72]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[73]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[74]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[75]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[76]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[77]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[78]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[79]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[80]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[81]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[82]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[83]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[84]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[85]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[86]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[87]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[94]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[95]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[96]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[97]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[98]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[99]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[106]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[10]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[11]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[12]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[13]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[14]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[15]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[16]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[17]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[18]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[19]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[1]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[20]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[21]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[22]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[23]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[24]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[25]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[26]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[27]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[28]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[29]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[2]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[30]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[31]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[32]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[33]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[34]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[35]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[36]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[37]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[38]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[39]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[40]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[41]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[42]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[43]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[44]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[45]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[46]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[47]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[48]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[49]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[4]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[50]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[51]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[52]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[53]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[54]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[55]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[56]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[57]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[58]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[59]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[5]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[60]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[61]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[62]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[63]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[67]}'.
+INFO: [Common 17-14] Message 'Vivado 12-508' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108440 ; free virtual = 120034
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.1/u2_area_balanced_boundary/optimized_0.dcp' has been generated.
+Command: open_checkpoint build/v4.1/u2_area_balanced/post_synth.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108435 ; free virtual = 120036
+Netlist sorting complete. Time (s): cpu = 00:00:00.09 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108435 ; free virtual = 120036
+INFO: [Netlist 29-17] Analyzing 2082 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108433 ; free virtual = 120034
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3056.441 ; gain = 0.000 ; free physical = 108417 ; free virtual = 120017
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 963 instances were transformed.
+  RAM128X1S => RAM128X1S (MUXF7, RAMS64E(x2)): 128 instances
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 215 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+  RAM64X1S => RAM64X1S (RAMS64E): 192 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+Command: opt_design
+Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Implementation' and/or device 'xc7a200t'
+Running DRC as a precondition to command opt_design
+
+Starting DRC Task
+INFO: [DRC 23-27] Running DRC with 4 threads
+WARNING: [DRC 23-814] Not all possible (connectivity based) DRCs may have been run because this design is seen as Out of Context.
+INFO: [Project 1-461] DRC finished with 0 Errors
+INFO: [Project 1-462] Please refer to the DRC report (report_drc) for more information.
+
+Time (s): cpu = 00:00:00.26 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3056.477 ; gain = 0.000 ; free physical = 108418 ; free virtual = 120019
+
+Starting Cache Timing Information Task
+Ending Cache Timing Information Task | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3056.477 ; gain = 0.000 ; free physical = 108418 ; free virtual = 120019
+
+Starting Logic Optimization Task
+
+Phase 1 Initialization
+
+Phase 1.1 Core Generation And Design Setup
+Phase 1.1 Core Generation And Design Setup | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108277 ; free virtual = 119878
+
+Phase 1.2 Setup Constraints And Sort Netlist
+Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108277 ; free virtual = 119878
+Phase 1 Initialization | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108277 ; free virtual = 119878
+
+Phase 2 Timer Update And Timing Data Collection
+
+Phase 2.1 Detect if minReqCache needed
+Phase 2.1 Detect if minReqCache needed | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.07 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108269 ; free virtual = 119870
+
+Phase 2.2 Timer Update
+Phase 2.2 Timer Update | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108269 ; free virtual = 119870
+Phase 2 Timer Update And Timing Data Collection | Checksum: 24971135b
+
+Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108269 ; free virtual = 119870
+
+Phase 3 Retarget
+INFO: [Opt 31-1851] Number of loadless carry chains removed were: 0
+INFO: [Opt 31-1834] Total Chains To Be Transformed Were: 0 AND Number of Transformed insts Created are: 0
+INFO: [Opt 31-1566] Pulled 8 inverters resulting in an inversion of 84 pins
+INFO: [Opt 31-138] Pushed 1 inverter(s) to 1 load pin(s).
+INFO: [Opt 31-49] Retargeted 0 cell(s).
+Phase 3 Retarget | Checksum: 292ac7212
+
+Time (s): cpu = 00:00:00.39 ; elapsed = 00:00:00.38 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108268 ; free virtual = 119869
+Retarget | Checksum: 292ac7212
+INFO: [Opt 31-389] Phase Retarget created 48 cells and removed 63 cells
+
+Phase 4 Constant propagation
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Phase 4 Constant propagation | Checksum: 2ca8e7f7a
+
+Time (s): cpu = 00:00:00.53 ; elapsed = 00:00:00.53 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108269 ; free virtual = 119870
+Constant propagation | Checksum: 2ca8e7f7a
+INFO: [Opt 31-389] Phase Constant propagation created 9 cells and removed 47 cells
+
+Phase 5 Sweep
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108270 ; free virtual = 119870
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108272 ; free virtual = 119872
+Phase 5 Sweep | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.76 ; elapsed = 00:00:00.75 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108272 ; free virtual = 119872
+Sweep | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Sweep created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Sweep, 642 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 6 BUFG optimization
+Phase 6 BUFG optimization | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.81 ; elapsed = 00:00:00.8 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119872
+BUFG optimization | Checksum: 2c91387d5
+INFO: [Opt 31-662] Phase BUFG optimization created 0 cells of which 0 are BUFGs and removed 0 cells.
+
+Phase 7 Shift Register Optimization
+INFO: [Opt 31-1064] SRL Remap converted 0 SRLs to 0 registers and converted 0 registers of register chains to 0 SRLs
+Phase 7 Shift Register Optimization | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.82 ; elapsed = 00:00:00.81 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119872
+Shift Register Optimization | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Shift Register Optimization created 0 cells and removed 0 cells
+
+Phase 8 Post Processing Netlist
+Phase 8 Post Processing Netlist | Checksum: 2c91387d5
+
+Time (s): cpu = 00:00:00.86 ; elapsed = 00:00:00.85 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108272 ; free virtual = 119873
+Post Processing Netlist | Checksum: 2c91387d5
+INFO: [Opt 31-389] Phase Post Processing Netlist created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Post Processing Netlist, 34 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 9 Finalization
+
+Phase 9.1 Finalizing Design Cores and Updating Shapes
+Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.99 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119871
+
+Phase 9.2 Verifying Netlist Connectivity
+
+Starting Connectivity Check Task
+
+Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119871
+Phase 9.2 Verifying Netlist Connectivity | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119871
+Phase 9 Finalization | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119871
+Opt_design Change Summary
+=========================
+
+
+-------------------------------------------------------------------------------------------------------------------------
+|  Phase                        |  #Cells created  |  #Cells Removed  |  #Constrained objects preventing optimizations  |
+-------------------------------------------------------------------------------------------------------------------------
+|  Retarget                     |              48  |              63  |                                              0  |
+|  Constant propagation         |               9  |              47  |                                              0  |
+|  Sweep                        |               0  |               0  |                                            642  |
+|  BUFG optimization            |               0  |               0  |                                              0  |
+|  Shift Register Optimization  |               0  |               0  |                                              0  |
+|  Post Processing Netlist      |               0  |               0  |                                             34  |
+-------------------------------------------------------------------------------------------------------------------------
+
+
+Ending Logic Optimization Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119871
+
+Starting Power Optimization Task
+INFO: [Pwropt 34-132] Skipping clock gating for clocks with a period < 2.00 ns.
+Ending Power Optimization Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119872
+
+Starting Final Cleanup Task
+Ending Final Cleanup Task | Checksum: 2e15d8087
+
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119872
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108271 ; free virtual = 119872
+INFO: [Common 17-83] Releasing license: Implementation
+33 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+opt_design completed successfully
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[103]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[67]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[68]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[69]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[70]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[71]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[72]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[73]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[74]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[75]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[76]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[77]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[78]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[79]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[80]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[81]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[82]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[83]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[84]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[85]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[86]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[87]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[94]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[95]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[96]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[97]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[98]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[99]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[106]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[10]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[11]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[12]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[13]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[14]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[15]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[16]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[17]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[18]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[19]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[1]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[20]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[21]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[22]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[23]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[24]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[25]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[26]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[27]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[28]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[29]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[2]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[30]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[31]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[32]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[33]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[34]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[35]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[36]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[37]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[38]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[39]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[40]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[41]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[42]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[43]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[44]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[45]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[46]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[47]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[48]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[49]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[4]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[50]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[51]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[52]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[53]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[54]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[55]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[56]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[57]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[58]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[59]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[5]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[60]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[61]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[62]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[63]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {processor/core/sequencer/template_data[67]}'.
+INFO: [Common 17-14] Message 'Vivado 12-508' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.07 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3200.254 ; gain = 0.000 ; free physical = 108192 ; free virtual = 119833
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.1/u2_area_balanced_boundary/optimized_1.dcp' has been generated.
+# set first [lindex [exec sha256sum [file join $out structure_0.txt]] 0]
+# set second [lindex [exec sha256sum [file join $out structure_1.txt]] 0]
+# if {$first ne $second} {error "ROM initialization affected common optimization"}
+# puts "ROM_BOUNDARY_PASS hardware_sha256=$first"
+ROM_BOUNDARY_PASS hardware_sha256=4da103f216e2bbc36e72ad4c0ad25c1b91bf0eb0b530c16f6fcf16e98142bafa
+INFO: [Common 17-206] Exiting Vivado at Fri Sep 25 11:44:48 2026...

@@ -66,6 +66,7 @@ def sim(args):
 def capture(args):
     folder=BUILD/args.tag;folder.mkdir(parents=True,exist_ok=True)
     paths=set(sources()+['manifests/unified_sources.txt','Makefile','manifests/experiments/unified_hbs_final.json','manifests/experiments/unified_hbs_v4/model_gate.json','manifests/experiments/unified_hbs_v4/boundary_counts.json','manifests/experiments/unified_hbs_v4/comparison.json','manifests/experiments/unified_hbs_v4.1/author_update.json'])
+    if (BASE/'area_baseline.json').exists():paths.add(str((BASE/'area_baseline.json').relative_to(ROOT)))
     for directory in ('model','scripts','tests','tb','experiments/v4.1'):
         paths.update(str(p.relative_to(ROOT)) for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in ('.py','.sv','.svh','.mem','.json','.tcl'))
     paths.update(str(p.relative_to(ROOT)) for p in BASE.rglob('*') if p.is_file() and ('images' in p.parts or p.name in ('images.json','software_gate.json','baseline.json')))
@@ -125,6 +126,15 @@ def collect(args):
     # Acceptance additionally requires route, timing, coverage and frozen-image structural proofs.
     result['index_policy']=inputs.get('index_policy','guarded')
     result['frequency_basis']='post_route_margin_checked' if args.route else 'normalized_only'
+    if (BASE/'area_baseline.json').exists():
+        reference=json.loads((BASE/'area_baseline.json').read_text())
+        for name,r in profiles.items():
+            before=reference['profiles'][name]['sign_cycles']
+            r['sign_cycle_ratio']=r['sign_cycles']/before
+            r['cycle_limit_pass']=r['sign_cycles']*100<=before*105
+        result['cycle_reference']=reference['candidate']
+        result['cycle_reference_sha256']=sha(BASE/'area_baseline.json')
+        result['cycle_limit_pass']=all(r['cycle_limit_pass'] for r in profiles.values())
     timing=(folder/'timing_summary.rpt').read_text()
     m=re.search(r'Worst Slack\s+([-\d.]+)ns',timing)
     result['wns_ns']=float(m[1]) if m else None

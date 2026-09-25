@@ -132,3 +132,32 @@ python3 scripts/reproduce_autonomous.py --allow-incomplete
 
 最终验收还要求七点 ATP 达标、旧三点 V3 不退化、共同频率及七份冻结检查点证明。
 目前不得把综合通过或功能通过标记为性能通过。
+
+## 面积优先：单宏调度、template 压缩和长消息格式器
+
+以 `u2_readselect_route` 的 9,830.875 Slice、100 MHz 为布线基线，
+增加七点分别不超过 5% 的 Sign 周期约束。软件镜像往返、单宏事件合同和七点 KAT
+先通过，随后修改 RTL。完整分项记录见 [面积优先优化](Area_Optimization.md)。
+
+- 单宏/单事件裁剪保留 RUN、两级 LOOP 和五类宏；宏内部双 Hash lane 仍并行。
+- template 物理存储改为 64×64，逻辑 ABI 4 模板仍为 128 位；descriptor 保持 128×64 双读。
+- 直接 64 位吸收候选整机面积反增，撤回；descriptor 压缩也因译码开销撤回。
+- 保留共享 128 位吸收 XOR；面积候选将长消息格式器缩至 32 位，保留短 Hash/链反馈。
+- `u2_area_balanced` 综合为 9,743.5 Slice，周期不变；`u2_area_stream32` 为 9,374 Slice，
+  七点 Sign 增量最大 2.702%，两者各保留独立快照与综合证据。
+
+两个组合候选均通过完整功能矩阵，来源复核命令为：
+
+```bash
+python3 scripts/reproduce_autonomous.py --allow-incomplete --functional-tag u2_area_balanced
+python3 scripts/reproduce_autonomous.py --allow-incomplete --functional-tag u2_area_stream32
+```
+
+历史 V3/V4 复现核验同时通过。后续布线与 INIT 冻结结果以对比报告为准；
+没有七点全部达标及最终证据时，不建立 `final.json`。
+
+本轮最终保留 `u2_area_balanced_route`：9,749.5 Slice、100 MHz，七点周期不变，
+面积和最差 ATP 比例较 `u2_readselect_route` 改善 0.828%。完整功能、时序/覆盖、
+七份仅 INIT 不同的检查点和来源审计均通过。32 位格式器的布线持续拥塞，
+3,432 秒后停止且未取得验收频率；保留综合和未完成布线证据，工作树恢复 64 位格式器。
+增量布局复用因匹配率不足停止；10.2 ns 布线对照亦明确记录为未完成。

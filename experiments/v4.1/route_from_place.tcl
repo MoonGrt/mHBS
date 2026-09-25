@@ -8,6 +8,11 @@ set directive [lindex $argv 1]
 if {$directive ni {Quick Default Explore RuntimeOptimized}} {error "unsupported route directive"}
 set started [clock seconds]
 open_checkpoint [file join $outdir post_place.dcp]
+set target_period [lindex $argv 2]
+if {$target_period ne ""} {
+    if {![string is double -strict $target_period] || $target_period <= 0} {error "invalid route period"}
+    create_clock -name clk -period $target_period [get_ports clk]
+}
 # Keep the saved common placement and timing boundary; perform no resynthesis.
 route_design -directive $directive
 write_checkpoint -force [file join $outdir post_route.dcp]

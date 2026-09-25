@@ -25,7 +25,7 @@ module uhbs_top #(
     wire [127:0] descriptor_data;
     uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.INIT_FILE(PROGRAM_INIT_FILE)) program_rom (
         .clk,.addresses(program_address),.data(program_data));
-    uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.INIT_FILE(TEMPLATE_INIT_FILE)) template_rom (
+    uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.PACKING(1),.INIT_FILE(TEMPLATE_INIT_FILE)) template_rom (
         .clk,.addresses(template_address),.data(template_data));
     uhbs_image_rom #(.WIDTH(64),.ADDRESS_BITS(7),.PORTS(2),.INIT_FILE(DESCRIPTOR_INIT_FILE)) descriptor_rom (
         .clk,.addresses(descriptor_addresses),.data(descriptor_data));

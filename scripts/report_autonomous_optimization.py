@@ -29,6 +29,19 @@ def main():
     for name,p in ppa['profiles'].items():
         old='—' if p['v3_ceiling'] is None else f'{p["v3_ceiling"]:,.6f}'
         lines.append(f'| {name} | {p["boot_cycles"]} | {p["keygen_cycles"]:,} | {p["sign_cycles"]:,} | {p["keygen_atp"]:,.3f} | {p["sign_atp"]:,.3f} | {p["paper_threshold"]:,.3f} | {old} | {"是" if p["paper_pass"] and p["v3_pass"] else "否"} |')
+    if 'cycle_reference' in ppa:
+        reference=json.loads((BASE/'area_baseline.json').read_text())
+        lines += ['', '### 面积优先约束：逐点 Sign 增量 ≤5%', '',
+            f'比较基线 `{reference["candidate"]}`：9,830.875 等效 Slice、100 MHz，均为 post-route。',
+            '下列周期来自完整算法仿真。综合候选面积只能与综合基线直接比较，最终面积收益采用 post-route。', '',
+            '| Profile | 基线 Sign | 当前 Sign | 周期增量 | ≤5% |',
+            '|---|---:|---:|---:|---|']
+        for name,p in ppa['profiles'].items():
+            lines.append(f'| {name} | {reference["profiles"][name]["sign_cycles"]:,} | {p["sign_cycles"]:,} | {(p["sign_cycle_ratio"]-1)*100:+.3f}% | {"通过" if p["cycle_limit_pass"] else "失败"} |')
+        if ppa['stage']=='post_route':
+            lines += ['',f'相对布线基线，面积变化 **{(ppa["equivalent_slice"]/9830.875-1)*100:+.3f}%**；',
+                      f'频率变化 **{(ppa["frequency_mhz"]/100-1)*100:+.3f}%**。',
+                      '具体优化、淘汰实验与物理镜像格式见 `Area_Optimization.md`。']
     limits={name:min(p['paper_threshold'],p['v3_ceiling'] if p['v3_ceiling'] is not None else float('inf')) for name,p in ppa['profiles'].items()}
     required=max((ppa['equivalent_slice']*p['sign_cycles']/(1000*limits[name]),name) for name,p in ppa['profiles'].items())
     area_at_100=min(limits[name]*100000/p['sign_cycles'] for name,p in ppa['profiles'].items())

@@ -34,6 +34,10 @@ module tb_uhbs_compact_shake_context_lane;
     byte message [0:607];
     integer index;
 
+    localparam [271:0] EXPECT_135 = 272'hc45dae624ad8a2f5aa7bac9d7557737fd91c96eedb70a6be5574d57a844eade07f40;
+    localparam [271:0] EXPECT_136 = 272'hb7ff4073b3f5a8eabd6e17705ca7f6761a31058f9df781a6a47e3a3063b9d67a757e;
+    localparam [271:0] EXPECT_137 = 272'h01d90952c642a5eb2a8fc9d713f843a45d7ac05132dddcb2efc9bebc27e37bcbe421;
+
     localparam [271:0] EXPECT_200 =
         272'h4ee1ca03272b05d3bfb1e1c79a967f823b9fc5e4bb3987b1ba9e9cb5afb07a5ee3a0;
     localparam [271:0] EXPECT_608 =
@@ -169,12 +173,17 @@ module tb_uhbs_compact_shake_context_lane;
         end
     endtask
 
+    initial begin #1000000; $fatal(1,"compact SHAKE unit timeout"); end
+
     initial begin
         for (index = 0; index < 608; index = index + 1)
             message[index] = index[7:0];
         repeat (3) tick();
         rst_n = 1'b1;
         tick();
+        run_message(135, EXPECT_135);
+        run_message(136, EXPECT_136);
+        run_message(137, EXPECT_137);
         run_message(200, EXPECT_200);
         run_message(608, EXPECT_608);
         run_chain_capture();

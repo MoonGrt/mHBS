@@ -12,42 +12,72 @@ XMSS/LMS 使用固定 q 和选定认证路径，不提供索引消耗、防复�
 
 | 候选 | 阶段 | MHz | 索引策略 | LUT | FF | LUTRAM（已包含于 LUT） | 等效 Slice | WNS/ns | 最差 ATP 比例 |
 |---|---|---:|---|---:|---:|---:|---:|---:|---:|
+| u2_area_balanced | post_synth | 100.000 | fixed_q_no_guard | 31,976 | 13,996 | 2,248 | 9,743.500 | 1.909 | 1.4764 |
+| u2_area_balanced_route | post_route | 100.000 | fixed_q_no_guard | 32,000 | 13,996 | 2,248 | 9,749.500 | 0.132 | 1.4774 |
+| u2_area_stream32 | post_synth | 100.000 | fixed_q_no_guard | 30,568 | 13,856 | 2,248 | 9,374.000 | 1.902 | 1.4469 |
 | u2_bootall | post_synth | 100.000 | fixed_q_no_guard | 32,181 | 14,120 | 2,312 | 9,810.250 | 1.618 | 1.4866 |
+| u2_bootall_route | post_route | 98.039 | fixed_q_no_guard | 32,286 | 14,123 | 2,312 | 9,836.875 | 0.112 | 1.5204 |
 | u2_bootpipe_resume1 | post_synth | 100.000 | fixed_q_no_guard | 32,207 | 14,123 | 2,312 | 9,817.125 | 0.754 | 1.4876 |
+| u2_bootpipe_resume1_route | post_route | 97.087 | fixed_q_no_guard | 32,405 | 14,131 | 2,312 | 9,867.625 | 0.173 | 1.5401 |
 | u2_descpipe | post_synth | 100.000 | fixed_q_no_guard | 36,636 | 14,133 | 2,312 | 10,925.625 | 0.499 | 1.6412 |
+| u2_direct64 | post_synth | 100.000 | fixed_q_no_guard | 32,611 | 13,869 | 2,312 | 9,886.375 | 0.776 | 1.4992 |
 | u2_feedback | post_synth | 100.000 | fixed_q_no_guard | 35,488 | 14,110 | 2,312 | 10,635.750 | 1.314 | 1.5976 |
 | u2_guard_baseline | post_synth | 100.000 | guarded | 42,190 | 14,124 | 5,132 | 12,313.000 | -0.188 | 1.8493 |
 | u2_hierarchy | post_synth | 100.000 | fixed_q_no_guard | 38,000 | 14,001 | 2,312 | 11,250.125 | -14.955 | 1.6897 |
 | u2_no_guard | post_synth | 100.000 | fixed_q_no_guard | 42,162 | 14,052 | 5,132 | 12,297.000 | -0.08 | 1.8469 |
 | u2_readselect | post_synth | 100.000 | fixed_q_no_guard | 32,312 | 14,127 | 2,312 | 9,843.875 | 2.115 | 1.4917 |
+| u2_readselect_route | post_route | 100.000 | fixed_q_no_guard | 32,257 | 14,133 | 2,312 | 9,830.875 | 0.104 | 1.4897 |
+| u2_singlemacro | post_synth | 100.000 | fixed_q_no_guard | 32,136 | 13,991 | 2,312 | 9,782.875 | 1.908 | 1.4824 |
 | u2_state_shared | post_synth | 100.000 | fixed_q_no_guard | 34,571 | 14,104 | 2,312 | 10,405.750 | 1.314 | 1.5631 |
 | u2_statemux | post_synth | 100.000 | fixed_q_no_guard | 35,167 | 14,121 | 2,312 | 10,556.875 | 0.756 | 1.5858 |
 | u2_storage | post_synth | 100.000 | fixed_q_no_guard | 38,811 | 14,030 | 3,080 | 11,456.500 | -0.099 | 1.7207 |
 | u2_stream64 | post_synth | 100.000 | fixed_q_no_guard | 32,188 | 14,120 | 2,312 | 9,812.000 | 0.504 | 1.4868 |
+| u2_stream64_area_resume1 | post_synth | 100.000 | fixed_q_no_guard | 32,013 | 14,083 | 2,312 | 9,763.625 | 0.638 | 1.4795 |
 | u2_stream_fixed | post_synth | 100.000 | fixed_q_no_guard | 35,026 | 14,066 | 2,312 | 10,514.750 | 0.331 | 1.5792 |
+| u2_template64 | post_synth | 100.000 | fixed_q_no_guard | 32,251 | 14,127 | 2,248 | 9,828.625 | 2.115 | 1.4893 |
+| u2_template64_absorbpair | post_synth | 100.000 | fixed_q_no_guard | 32,077 | 14,132 | 2,248 | 9,785.750 | 2.115 | 1.4829 |
 | u2_timing | post_synth | 100.000 | fixed_q_no_guard | 36,651 | 14,113 | 2,312 | 10,926.875 | 1.062 | 1.6411 |
 | u2_wordmux | post_synth | 100.000 | fixed_q_no_guard | 35,925 | 14,122 | 2,312 | 10,746.500 | 0.751 | 1.6143 |
 
 等效面积 = LUT/4 + FF/8 + BRAM36 等效数×232.4 + DSP×102.4。
 
-## 比较候选：u2_readselect
+## 比较候选：u2_area_balanced_route
 
-阶段：`post_synth`。以下面积、周期来自该候选同一源码快照；不代表之后工作树版本。
-共同面积 **9,843.875 Slice**；计算频率 **100.000 MHz**，依据 `normalized_only`。
+阶段：`post_route`。以下面积、周期来自该候选同一源码快照；不代表之后工作树版本。
+共同面积 **9,749.500 Slice**；计算频率 **100.000 MHz**，依据 `post_route_margin_checked`。
 
 | Profile | Boot | Keygen 周期 | Sign 周期 | Keygen ATP | Sign ATP | 论文门槛 | V3 上限 | 数值达标 |
 |---|---:|---:|---:|---:|---:|---:|---:|---|
-| slh_128f | 262 | 29,864 | 730,773 | 2,939.775 | 71,936.381 | 57,360.476 | 48,225.753595 | 否 |
-| slh_192f | 262 | 43,662 | 1,252,185 | 4,298.033 | 123,263.526 | 98,729.547 | — | 否 |
-| slh_256f | 262 | 115,780 | 2,583,685 | 11,397.238 | 254,334.722 | 205,686.556 | — | 否 |
-| xmss_omega2 | 262 | 16,898,048 | 5,599 | 1,663,422.723 | 551.159 | 811.158 | — | 是 |
-| xmss_omega4 | 262 | 24,844,288 | 11,172 | 2,445,640.655 | 1,099.758 | 1,506.437 | 888.938560 | 否 |
-| lms_omega2 | 262 | 4,871,203 | 3,363 | 479,515.134 | 331.050 | 347.639 | — | 是 |
-| lms_omega4 | 262 | 7,917,603 | 4,423 | 779,398.942 | 435.395 | 579.399 | 373.916427 | 否 |
+| slh_128f | 262 | 29,864 | 730,773 | 2,911.591 | 71,246.714 | 57,360.476 | 48,225.753595 | 否 |
+| slh_192f | 262 | 43,662 | 1,252,185 | 4,256.827 | 122,081.777 | 98,729.547 | — | 否 |
+| slh_256f | 262 | 115,780 | 2,583,685 | 11,287.971 | 251,896.369 | 205,686.556 | — | 否 |
+| xmss_omega2 | 262 | 16,898,048 | 5,599 | 1,647,475.190 | 545.875 | 811.158 | — | 是 |
+| xmss_omega4 | 262 | 24,844,288 | 11,172 | 2,422,193.859 | 1,089.214 | 1,506.437 | 888.938560 | 否 |
+| lms_omega2 | 262 | 4,871,203 | 3,363 | 474,917.936 | 327.876 | 347.639 | — | 是 |
+| lms_omega4 | 262 | 7,917,603 | 4,423 | 771,926.704 | 431.220 | 579.399 | 373.916427 | 否 |
+
+### 面积优先约束：逐点 Sign 增量 ≤5%
+
+比较基线 `u2_readselect_route`：9,830.875 等效 Slice、100 MHz，均为 post-route。
+下列周期来自完整算法仿真。综合候选面积只能与综合基线直接比较，最终面积收益采用 post-route。
+
+| Profile | 基线 Sign | 当前 Sign | 周期增量 | ≤5% |
+|---|---:|---:|---:|---|
+| slh_128f | 730,773 | 730,773 | +0.000% | 通过 |
+| slh_192f | 1,252,185 | 1,252,185 | +0.000% | 通过 |
+| slh_256f | 2,583,685 | 2,583,685 | +0.000% | 通过 |
+| xmss_omega2 | 5,599 | 5,599 | +0.000% | 通过 |
+| xmss_omega4 | 11,172 | 11,172 | +0.000% | 通过 |
+| lms_omega2 | 3,363 | 3,363 | +0.000% | 通过 |
+| lms_omega4 | 4,423 | 4,423 | +0.000% | 通过 |
+
+相对布线基线，面积变化 **-0.828%**；
+频率变化 **+0.000%**。
+具体优化、淘汰实验与物理镜像格式见 `Area_Optimization.md`。
 
 ### 距离验收目标
 
-保持该候选的面积与签名周期，共同频率需要达到约 **149.166 MHz**；约束最紧的参数点为 `slh_128f`。
+保持该候选的面积与签名周期，共同频率需要达到约 **147.736 MHz**；约束最紧的参数点为 `slh_128f`。
 若共同频率为 100 MHz、周期保持不变，面积需降至约 **6,599.280 Slice**。
 这些是门槛反算值，不是可实现频率或面积预测。最终仍以 post-route 实测、时序裕量和原严格比较规则验收。
 
@@ -104,10 +134,10 @@ ATP 单位：Slice·ms。论文门槛采用论文报告毫秒值；108 MHz 重�
 - 本设计使用固定输入、一次启动仅一次签名；XMSS/LMS Keygen 生成选定 q 的认证路径，Sign 复用缓存。
 - V3/V4 分别静态综合；v4.1 要求七点共用硬件和频率。当前无 guard，不能据此声称状态保护开销相同。
 - 最终验收还须具备 post-route 时序、完整布线、覆盖检查，以及七份仅 ROM INIT 不同的结构证据。
-- 候选来源：`manifests/experiments/unified_hbs_v4.1/candidates/u2_readselect/`，包含源码快照、SHA-256、原始报告及仿真引用。
+- 候选来源：`manifests/experiments/unified_hbs_v4.1/candidates/u2_area_balanced_route/`，包含源码快照、SHA-256、原始报告及仿真引用。
 
 ```bash
-python3 scripts/report_autonomous_optimization.py --tag u2_readselect
+python3 scripts/report_autonomous_optimization.py --tag u2_area_balanced_route
 python3 scripts/reproduce_paper_comparison.py
 python3 scripts/reproduce_seven_profiles.py
 python3 scripts/reproduce_autonomous.py --allow-incomplete

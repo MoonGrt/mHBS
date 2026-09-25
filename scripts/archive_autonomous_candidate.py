@@ -13,7 +13,8 @@ def main():
         'utilization_hierarchical.rpt','timing_summary.rpt','post_synth.dcp','rom_cells.tsv']
     names += [n for n in ('synth_seconds.txt','synthesis.json','route_flow.tcl','route_status.rpt','check_timing.rpt',
         'final_clock.json','post_route_final_clock.dcp','constraints.xdc','post_place.dcp',
-        'post_place_timing.rpt','route_resume.json','route_seconds.txt','driver.log','input_routed.dcp') if (source/n).exists()]
+        'post_place_timing.rpt','route_resume.json','route_seconds.txt','driver.log','input_routed.dcp',
+        'reference_routed.dcp','incremental_reuse_before.rpt','incremental_reuse_after.rpt') if (source/n).exists()]
     if (source/'frozen').is_dir():
         names += [str(p.relative_to(source)) for p in sorted((source/'frozen').rglob('*')) if p.is_file()]
     for n in names:

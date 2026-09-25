@@ -1,0 +1,246 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Fri Sep 25 11:17:44 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source experiments/v4.1/synth_unit.tcl
+# set root [file normalize [file join [file dirname [info script]] ../..]]
+# cd $root
+# set top [lindex $argv 0]
+# set tag [lindex $argv 1]
+# set depth [lindex $argv 2]
+# set flatten [lindex $argv 3]
+# if {$flatten eq ""} {set flatten rebuilt}
+# set directive [lindex $argv 4]
+# if {$directive eq ""} {set directive AreaOptimized_high}
+# set outdir [file join $root build v4.1 units $tag]
+# file mkdir $outdir
+# set started [clock seconds]
+# set_param general.maxThreads 4
+# create_project -in_memory -part xc7a200tffg1156-3
+# switch $top {
+#     uhbs_recipe_lane {
+#         foreach f {uhbs_keccak uhbs_compact_shake_context_lane uhbs_recipe_lane} {read_verilog -sv rtl/hash_lane/$f.sv}
+#         set params {N=32 DIGEST_BYTES=49 INDEX_BITS=8 UNROLL=2 MAX_MESSAGE_BYTES=87}
+#     }
+#     uhbs_value_store {
+#         read_verilog -sv rtl/memory/uhbs_value_store.sv
+#         set params [list WIDTH=256 ADDRESS_BITS=8 DEPTH=$depth]
+#     }
+#     uhbs_root_store {
+#         read_verilog -sv rtl/memory/uhbs_root_store.sv
+#         set params {}
+#     }
+#     uhbs_program_sequencer {
+#         read_verilog -sv rtl/sequencer/uhbs_event_scoreboard.sv
+#         read_verilog -sv rtl/sequencer/uhbs_program_sequencer.sv
+#         set params {}
+#     }
+#     uhbs_image_rom {
+#         read_verilog -sv rtl/memory/uhbs_image_rom.sv
+#         if {$depth==1} {set params {WIDTH=128 ADDRESS_BITS=6 PORTS=1 PACKING=1}} elseif {$depth==2} {set params {WIDTH=64 ADDRESS_BITS=7 PORTS=2 PACKING=2}} else {error "ROM packing must be 1 or 2"}
+#     }
+#     default {error "Unknown local unit $top"}
+# }
+# synth_design -top $top -mode out_of_context -flatten_hierarchy $flatten -directive $directive -max_dsp 0 -generic $params
+Command: synth_design -top uhbs_image_rom -mode out_of_context -flatten_hierarchy rebuilt -directive Default -max_dsp 0 -generic {WIDTH=64 ADDRESS_BITS=7 PORTS=2 PACKING=2}
+Starting synth_design
+Using part: xc7a200tffg1156-3
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Vivado_Tcl 4-287] User specified maximum number of block DSP allowed in design is 0
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 4 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 1899896
+---------------------------------------------------------------------------------
+Starting Synthesize : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2083.375 ; gain = 480.809 ; free physical = 113013 ; free virtual = 123717
+---------------------------------------------------------------------------------
+INFO: [Synth 8-6157] synthesizing module 'uhbs_image_rom' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/rtl/memory/uhbs_image_rom.sv:5]
+	Parameter WIDTH bound to: 64 - type: integer 
+	Parameter ADDRESS_BITS bound to: 7 - type: integer 
+	Parameter PORTS bound to: 2 - type: integer 
+	Parameter PACKING bound to: 2 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'RAM64X1S' [/opt/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:154656]
+	Parameter INIT bound to: 64'b0110100110010110100101100110100110010110011010010110100110010110 
+INFO: [Synth 8-6155] done synthesizing module 'RAM64X1S' (0#1) [/opt/Xilinx/2025.2/Vivado/scripts/rt/data/unisim_comp.v:154656]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_image_rom' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/rtl/memory/uhbs_image_rom.sv:5]
+---------------------------------------------------------------------------------
+Finished Synthesize : Time (s): cpu = 00:00:02 ; elapsed = 00:00:03 . Memory (MB): peak = 2169.344 ; gain = 566.777 ; free physical = 112792 ; free virtual = 123498
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Constraint Validation : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2178.250 ; gain = 575.684 ; free physical = 112791 ; free virtual = 123497
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Loading Part and Timing Information
+---------------------------------------------------------------------------------
+Loading part: xc7a200tffg1156-3
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+---------------------------------------------------------------------------------
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2178.250 ; gain = 575.684 ; free physical = 112791 ; free virtual = 123497
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2195.164 ; gain = 592.598 ; free physical = 112767 ; free virtual = 123473
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start RTL Component Statistics 
+---------------------------------------------------------------------------------
+Detailed RTL Component Info : 
++---Muxes : 
+	   2 Input   64 Bit        Muxes := 2     
+	   2 Input    7 Bit        Muxes := 2     
+	   2 Input    6 Bit        Muxes := 2     
+---------------------------------------------------------------------------------
+Finished RTL Component Statistics 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Part Resource Summary
+---------------------------------------------------------------------------------
+Part Resources:
+DSPs: 740 (col length:100)
+BRAMs: 730 (col length: RAMB18 100 RAMB36 50)
+---------------------------------------------------------------------------------
+Finished Part Resource Summary
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start Cross Boundary and Area Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:05 ; elapsed = 00:00:05 . Memory (MB): peak = 2378.047 ; gain = 775.480 ; free physical = 112387 ; free virtual = 123093
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start Timing Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Timing Optimization : Time (s): cpu = 00:00:05 ; elapsed = 00:00:05 . Memory (MB): peak = 2378.047 ; gain = 775.480 ; free physical = 112387 ; free virtual = 123093
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Technology Mapping
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Technology Mapping : Time (s): cpu = 00:00:05 ; elapsed = 00:00:05 . Memory (MB): peak = 2378.047 ; gain = 775.480 ; free physical = 112387 ; free virtual = 123093
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished IO Insertion : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Instances
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Rebuilding User Hierarchy
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Ports
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Ports : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Nets
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Nets : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Writing Synthesis Report
+---------------------------------------------------------------------------------
+
+Report BlackBoxes: 
++-+--------------+----------+
+| |BlackBox name |Instances |
++-+--------------+----------+
++-+--------------+----------+
+
+Report Cell Usage: 
++------+---------+------+
+|      |Cell     |Count |
++------+---------+------+
+|1     |LUT4     |     2|
+|2     |LUT5     |   132|
+|3     |LUT6     |    20|
+|4     |MUXF7    |     8|
+|5     |RAM64X1S |   128|
++------+---------+------+
+
+Report Instance Areas: 
++------+---------+-------+------+
+|      |Instance |Module |Cells |
++------+---------+-------+------+
+|1     |top      |       |   290|
++------+---------+-------+------+
+---------------------------------------------------------------------------------
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+---------------------------------------------------------------------------------
+Synthesis finished with 0 errors, 0 critical warnings and 0 warnings.
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.859 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+Synthesis Optimization Complete : Time (s): cpu = 00:00:06 ; elapsed = 00:00:06 . Memory (MB): peak = 2556.867 ; gain = 954.293 ; free physical = 112211 ; free virtual = 122917
+INFO: [Project 1-571] Translating synthesized netlist
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2573.703 ; gain = 0.000 ; free physical = 112347 ; free virtual = 123054
+INFO: [Netlist 29-17] Analyzing 136 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-570] Preparing netlist for logic optimization
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2679.297 ; gain = 0.000 ; free physical = 112155 ; free virtual = 122861
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 128 instances were transformed.
+  RAM64X1S => RAM64X1S (RAMS64E): 128 instances
+
+Synth Design complete | Checksum: 16d2ebf7
+INFO: [Common 17-83] Releasing license: Synthesis
+17 Infos, 0 Warnings, 0 Critical Warnings and 0 Errors encountered.
+synth_design completed successfully
+synth_design: Time (s): cpu = 00:00:09 ; elapsed = 00:00:08 . Memory (MB): peak = 2679.332 ; gain = 1076.801 ; free physical = 112154 ; free virtual = 122861
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 1841.385; main = 1841.385; forked = 0.000
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 2679.301; main = 2679.301; forked = 0.000
+# create_clock -name clk -period 10 [get_ports clk]
+# report_utilization -file [file join $outdir utilization.rpt]
+# report_utilization -hierarchical -file [file join $outdir utilization_hierarchical.rpt]
+# report_timing_summary -max_paths 5 -file [file join $outdir timing_summary.rpt]
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 4 CPUs
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+# write_checkpoint -force [file join $outdir post_synth.dcp]
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2759.336 ; gain = 0.000 ; free physical = 112178 ; free virtual = 122883
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.1/units/u2_pack_descriptor_local_r1/post_synth.dcp' has been generated.
+# set f [open [file join $outdir elapsed_seconds.txt] w]
+# puts $f [expr {[clock seconds]-$started}]
+# close $f
+# puts "UNIT_SYNTH_PASS $tag"
+UNIT_SYNTH_PASS u2_pack_descriptor_local_r1
+INFO: [Common 17-206] Exiting Vivado at Fri Sep 25 11:17:57 2026...

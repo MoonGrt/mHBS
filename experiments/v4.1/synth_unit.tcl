@@ -26,6 +26,15 @@ switch $top {
         read_verilog -sv rtl/memory/uhbs_root_store.sv
         set params {}
     }
+    uhbs_program_sequencer {
+        read_verilog -sv rtl/sequencer/uhbs_event_scoreboard.sv
+        read_verilog -sv rtl/sequencer/uhbs_program_sequencer.sv
+        set params {}
+    }
+    uhbs_image_rom {
+        read_verilog -sv rtl/memory/uhbs_image_rom.sv
+        if {$depth==1} {set params {WIDTH=128 ADDRESS_BITS=6 PORTS=1 PACKING=1}} elseif {$depth==2} {set params {WIDTH=64 ADDRESS_BITS=7 PORTS=2 PACKING=2}} else {error "ROM packing must be 1 or 2"}
+    }
     default {error "Unknown local unit $top"}
 }
 synth_design -top $top -mode out_of_context -flatten_hierarchy $flatten -directive $directive -max_dsp 0 -generic $params

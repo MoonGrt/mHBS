@@ -1,16 +1,109 @@
 #!/usr/bin/env python3
 """Audit v4.1 archived evidence; refuse to turn partial PPA into acceptance."""
 from pathlib import Path
-import argparse,hashlib,json,math,re,sys,tarfile
+import argparse,gzip,hashlib,json,math,re,sys,tarfile
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from model.profiles import PROFILES
 from model.autonomous_hbs import ProgramImage
 from rom_initialization import mapping
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.1'
 def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+def hardware_sha(folder):
+    path=folder/'hardware.txt'
+    if path.exists():return sha(path)
+    digest=hashlib.sha256()
+    with gzip.open(folder/'hardware.txt.gz','rb') as stream:
+        for block in iter(lambda:stream.read(1024*1024),b''):digest.update(block)
+    return digest.hexdigest()
 def check(ok,message):
     if not ok:raise AssertionError(message)
 def eq(a,b):return math.isclose(float(a),float(b),rel_tol=1e-11,abs_tol=1e-9)
+def audit_area_software():
+    folder=BASE/'software/area_v1'
+    if not folder.exists():return
+    from model.physical_image import PhysicalImage,validate_serial_schedule
+    gate=json.loads((folder/'software_gate.json').read_text())
+    check(gate['passed'] and set(gate['profiles'])==set(PROFILES),'area software coverage')
+    for name,digest in gate['source_sha256'].items():check(sha(ROOT/name)==digest,'area software source '+name)
+    expected={'template_lane1','template_coordinate','physical_reserved','physical_capacity',
+              'descriptor_width','unmapped_descriptor','nonzero_event','initial_wait'}
+    check(set(gate['rejected'])==expected,'area software error coverage')
+    for name,row in gate['profiles'].items():
+        logical=ProgramImage.read(BASE/'images'/name)
+        check(PhysicalImage.read(folder/'images'/name).unpack()==logical,'physical round trip '+name)
+        validate_serial_schedule(logical)
+        for kind,directory in [('logical',BASE/'images'/name),('physical',folder/'images'/name)]:
+            for file,digest in row[kind+'_sha256'].items():check(sha(directory/file)==digest,'area image '+name+'/'+file)
+        meta=[int(x,16) for x in (BASE/'images'/name/'metadata.mem').read_text().split()]
+        check([*row['stats']['keygen'],*row['stats']['sign']]==meta[2:6],'area software counts '+name)
+        for phase in ('keygen','sign'):
+            expected_bytes=bytes(int(x,16) for x in (BASE/'images'/name/(phase+'.mem')).read_text().split())
+            check(hashlib.sha256(expected_bytes).hexdigest()==row[phase+'_sha256'],'area software output '+name)
+    print('V4.1 compact-image/single-macro software gate: PASS')
+    reference=json.loads((BASE/'area_baseline.json').read_text())
+    baseline=BASE/'candidates'/reference['candidate']/'ppa.json'
+    check(sha(baseline)==reference['ppa_sha256'],'area baseline source')
+    measured=json.loads(baseline.read_text())
+    for field in ('stage','equivalent_slice','frequency_mhz'):check(reference[field]==measured[field],'area baseline '+field)
+    check(reference['max_sign_cycle_increase_percent']==5,'area cycle budget')
+    for name,cycles in reference['profiles'].items():
+        for field,value in cycles.items():check(measured['profiles'][name][field]==value,'area baseline cycles '+name)
+    for name in ('packed_roms','area_lanes','freeze_query_failed','incremental_placement','stream32_relaxed_incomplete','stream32_route_incomplete'):
+        directory=BASE/'screening'/name
+        records=json.loads((directory/'evidence.json').read_text())
+        for file,digest in records.get('evidence_sha256',records).items():
+            check(sha(directory/file)==digest,'local synthesis evidence '+name+'/'+file)
+    selection=BASE/'area_selection.json'
+    if selection.exists():
+        data=json.loads(selection.read_text())
+        check(data['baseline']==reference['candidate'] and data['baseline_sha256']==sha(baseline),'selection baseline')
+        eligible=[]
+        for tag,row in data['candidates'].items():
+            path=BASE/'candidates'/tag/'ppa.json';ppa=json.loads(path.read_text())
+            check(sha(path)==row['ppa_sha256'],'selection candidate '+tag)
+            cycle_ok=all(p['sign_cycles']*100<=reference['profiles'][n]['sign_cycles']*105 for n,p in ppa['profiles'].items())
+            area_ok=ppa['equivalent_slice']<measured['equivalent_slice']
+            atp_ok=ppa['worst_ratio']<measured['worst_ratio']
+            check(row['cycle_limit_pass']==cycle_ok and row['area_improves']==area_ok and row['worst_atp_ratio_improves']==atp_ok,'selection predicates '+tag)
+            check(row['eligible']==(cycle_ok and area_ok and atp_ok),'selection eligibility '+tag)
+            if row['eligible']:
+                check((path.parent/'frozen/evidence.tsv').exists(),'selected area candidate needs frozen proof')
+                eligible.append((ppa['equivalent_slice'],ppa['worst_ratio'],tag))
+        check(data['selected']==(min(eligible)[2] if eligible else reference['candidate']),'area candidate selection')
+        print('V4.1 routed area/cycle/ATP selection: PASS',data['selected'])
+
+def audit_frozen(folder,inputs):
+    frozen=folder/'frozen'
+    if not (frozen/'evidence.tsv').exists():return
+    rows=dict(line.split('\t') for line in (frozen/'evidence.tsv').read_text().splitlines())
+    check(set(rows)==set(PROFILES),'frozen profile coverage')
+    check(set(rows.values())=={hardware_sha(frozen)},'identical frozen structure')
+    with tarfile.open(folder/'source_snapshot.tar.gz') as tar:
+        top=tar.extractfile('rtl/top/uhbs_top.sv').read().decode()
+    packed=bool(re.search(r'\.PACKING\(1\)',top))
+    identity=hashlib.sha256(json.dumps(inputs['logic_sha256'],sort_keys=True).encode()).hexdigest()[:16]
+    boundary=BASE/'boundary'/identity
+    if packed:
+        evidence=json.loads((boundary/'evidence.json').read_text())
+        check(evidence['passed'] and evidence['logic_sha256']==inputs['logic_sha256'],'ROM boundary source')
+        for file,digest in evidence['evidence_sha256'].items():check(sha(boundary/file)==digest,'ROM boundary evidence '+file)
+        check(sha(boundary/'structure_0.txt')==sha(boundary/'structure_1.txt'),'INIT-independent optimization')
+    util=(folder/'utilization.rpt').read_text()
+    for name in PROFILES:
+        check((frozen/(name+'.dcp')).is_file(),'frozen checkpoint '+name)
+        other=(frozen/(name+'_utilization.rpt')).read_text()
+        check(all(resource(util,k)==resource(other,k) for k in ('Slice LUTs','Slice Registers','LUT as Memory','Block RAM Tile','DSPs')),'frozen resource equality '+name)
+        expected=mapping(name)
+        if not packed:
+            expected={k:v for k,v in expected.items() if not k.startswith('template_rom/')}
+            words=ProgramImage.read(BASE/'images'/name).templates
+            for bit in range(128):
+                column=sum(((word>>bit)&1)<<address for address,word in enumerate(words))
+                expected[f'template_rom/port_bank[0].bit_cell[{bit}].depth64.rom']=f"64'h{column:016x}"
+        actual=dict(line.split('\t') for line in (frozen/(name+'_init.tsv')).read_text().splitlines())
+        check(set(actual)==set(expected),'frozen ROM cells '+name)
+        check(all(int(actual[k].split("'h")[1],16)==int(v.split("'h")[1],16) for k,v in expected.items()),'frozen physical INIT '+name)
+    print('V4.1 seven INIT images / common area, placement and routing: PASS',folder.name)
 def resource(text,label):
     match=re.search(r'\|\s*'+re.escape(label)+r'\*?\s*\|\s*([\d,.]+)\s*\|',text)
     check(match is not None,'missing resource '+label)
@@ -127,6 +220,7 @@ def audit_candidates():
         check(eq(area,ppa['equivalent_slice']),'candidate area '+folder.name)
         period=10 if ppa['stage']=='post_synth' else json.loads((folder/'final_clock.json').read_text())['period_ns']
         if ppa['stage']=='post_route':audit_physical(folder)
+        if ppa['stage']=='post_route':audit_frozen(folder,inputs)
         check(eq(period,ppa['period_ns']) and eq(1000/period,ppa['frequency_mhz']),'candidate frequency')
         ratios=[]
         for name,p in PROFILES.items():
@@ -140,8 +234,16 @@ def audit_candidates():
             check(eq(atp,row['sign_atp']) and eq(ratio,row['ratio']),'candidate ATP '+name)
             check(eq(row['keygen_atp'],area*sim['keygen_cycles']*period/1e6),'candidate Keygen ATP '+name)
             check(row['paper_pass']==(atp<p.target) and row['v3_pass']==(name not in ceilings or atp<=ceilings[name]),'candidate pass flags '+name)
+            if 'cycle_reference' in ppa:
+                reference=json.loads((BASE/'area_baseline.json').read_text())
+                check(sha(BASE/'area_baseline.json')==ppa['cycle_reference_sha256'],'cycle reference digest')
+                check(reference['candidate']==ppa['cycle_reference'],'cycle reference candidate')
+                before=reference['profiles'][name]['sign_cycles']
+                check(eq(row['sign_cycle_ratio'],row['sign_cycles']/before),'cycle ratio '+name)
+                check(row['cycle_limit_pass']==(row['sign_cycles']*100<=before*105),'5% cycle limit '+name)
             ratios.append(ratio)
         check(eq(max(ratios),ppa['worst_ratio']),'candidate ranking '+folder.name)
+        if 'cycle_reference' in ppa:check(ppa['cycle_limit_pass']==all(r['cycle_limit_pass'] for r in ppa['profiles'].values()),'overall 5% cycle limit')
         print('V4.1 candidate audit: PASS',folder.name,ppa['stage'])
 
 def main():
@@ -153,6 +255,7 @@ def main():
         folder=BASE/'images'/name;ProgramImage.read(folder).decode()
         for path,digest in data['image_sha256'].items():check(sha(folder/path)==digest,'ROM image '+name+'/'+path)
     print('V4.1 software gate / images: PASS')
+    audit_area_software()
     update=json.loads((BASE/'author_update.json').read_text())
     check(update['updated_sign_cycles']==815706 and update['changes_acceptance_threshold'] is False,'author update/unchanged acceptance')
     audit_architecture()
@@ -199,7 +302,7 @@ def main():
         structural.add(final['hardware_sha256'][name])
         print(f'{name:14s} common_area={area:.3f} MHz={1000/period:.3f} KG={sim["keygen_cycles"]:,} Sign={sim["sign_cycles"]:,} ATP={atp:,.3f} PASS')
     check(len(structural)==1 and len(binaries)==1,'same hardware/netlist/simulation binary')
-    check(next(iter(structural))==sha(folder/'frozen/hardware.txt'),'frozen structure digest')
+    check(next(iter(structural))==hardware_sha(folder/'frozen'),'frozen structure digest')
     check(final['functional_pass'] and final['performance_pass'],'final acceptance flags')
     print('V4.1 seven-profile common-hardware acceptance: PASS')
     return 0

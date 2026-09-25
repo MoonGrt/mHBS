@@ -8,16 +8,18 @@ set frozen [file join $outdir frozen]
 file mkdir $frozen
 exec python3 scripts/rom_initialization.py [file join $frozen init]
 open_checkpoint [file join $outdir post_route_final_clock.dcp]
-# Deterministic serialization includes all cell properties except image INIT and all
-# net connectivity / route properties; profile initialization is serialized separately.
+# Serialize functional configuration, placement and routing. Querying every HD.*
+# property can invoke Vivado isolation transforms even in an OOC checkpoint.
+# list_property itself can invoke these transforms on a hierarchy. Use an
+# explicit property list, including every configuration of the primitive types
+# used here (LUT, FF, carry, distributed RAM, mux and clock/reset buffers).
 proc structure {path} {
     set f [open $path w]
     foreach c [lsort [get_cells -hier]] {
         puts $f "CELL $c"
-        foreach prop [lsort [list_property $c]] {
+        foreach prop {REF_NAME ORIG_REF_NAME IS_PRIMITIVE LOC BEL IS_LOC_FIXED IS_BEL_FIXED LOCK_PINS PIN_MAP DONT_TOUCH KEEP_HIERARCHY INIT INIT_A INIT_B INIT_C INIT_D INIT_00 INIT_01 SRVAL IS_C_INVERTED IS_D_INVERTED IS_R_INVERTED IS_S_INVERTED IS_CLK_INVERTED IS_WCLK_INVERTED} {
             if {$prop eq "INIT" && [regexp {^(program|template|descriptor)_rom/port_bank\[} $c]} {continue}
-            if {$prop in {FILE_NAME LINE_NUMBER}} {continue}
-            puts $f "  $prop=[get_property $prop $c]"
+            puts $f "  $prop=[get_property -quiet $prop $c]"
         }
     }
     foreach n [lsort [get_nets -hier]] {

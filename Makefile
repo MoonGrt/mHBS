@@ -11,11 +11,13 @@ FLATTEN ?= rebuilt
 TAG ?= common_u$(UNROLL)_l$(LANES)
 UHBS_RTL := $(shell cat manifests/unified_sources.txt)
 
-.PHONY: all test compile-microcode lint rtl-profile-test rtl-all-profiles rtl-test rtl-unit-test synth-common route-common reproduce-paper-comparison
+.PHONY: all test area-software-test compile-microcode lint rtl-profile-test rtl-all-profiles rtl-test rtl-unit-test synth-common route-common reproduce-paper-comparison
 all: rtl-test
-test:
+test: area-software-test
 	$(PYTHON) scripts/verify_autonomous_models.py
 	$(PYTHON) -m unittest tests.test_unified_rtl_contract -v
+area-software-test:
+	$(PYTHON) scripts/verify_area_models.py
 compile-microcode:
 	$(PYTHON) scripts/compile_autonomous_hbs.py
 lint:
@@ -30,6 +32,7 @@ rtl-unit-test:
 	$(PYTHON) scripts/verify_autonomous_units.py
 rtl-test: rtl-unit-test rtl-all-profiles
 rtl-verification: architecture-test
+	$(PYTHON) scripts/autonomous_flow.py sim --boundaries --message-cases --lanes $(LANES) --unroll $(UNROLL) --jobs $(JOBS)
 	$(PYTHON) scripts/autonomous_flow.py sim --boundaries --message-cases --replay --lanes $(LANES) --unroll $(UNROLL) --jobs $(JOBS)
 	$(PYTHON) scripts/autonomous_flow.py sim --swap 1 --lanes $(LANES) --unroll $(UNROLL) --jobs $(JOBS)
 	$(PYTHON) scripts/verify_autonomous_state.py --lanes $(LANES) --unroll $(UNROLL)
