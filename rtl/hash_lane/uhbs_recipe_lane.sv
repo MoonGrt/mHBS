@@ -41,23 +41,37 @@ module uhbs_recipe_lane #(
         ADDRESS_LIST=12, PREFIX_LIST=13, PREFIX_LEAF=14, PREFIX_PARENT=15;
     typedef enum logic [2:0] {IDLE, START, STREAM, WAIT_HASH, RESPONSE} state_t;
     state_t state;
+    wire chain_feedback_valid;
+    wire [3:0] chain_feedback_counter;
     logic seed_phase;
     logic [4:0] iteration;
     logic [1:0] compound;
     logic [N*8-1:0] current_value, temporary_key, mask0, mask1;
     logic [4:0] rate_block;
     logic [3:0] beat;
+    logic stream_half;
     wire [63:0] recipe = request_chain && !seed_phase
         ? request_step_recipe : request_recipe;
     wire [3:0] shape = recipe[59:56];
+    logic [15:0] seed_shapes,step_shapes;
+    wire [15:0] shapes=request_chain && !seed_phase ? step_shapes : seed_shapes;
+    always_ff @(posedge clk) begin
+        if(rst_n && state==IDLE && request_valid) begin
+            seed_shapes<=16'b1 << request_recipe[59:56];
+            step_shapes<=16'b1 << request_step_recipe[59:56];
+        end
+    end
     wire [7:0] domain = recipe[55:48];
     wire [7:0] arity = recipe[47:40];
     wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
     wire [31:0] a = request_a;
-    wire [31:0] b = request_chain && !seed_phase
+    wire [31:0] b = chain_feedback_valid
+        ? (request_step_recipe[55:48]==3 ? request_b : {28'd0,chain_feedback_counter})
+        : request_chain && !seed_phase
         ? (request_step_recipe[55:48] == 3 && request_step_recipe[59:56] == ADDRESS_VALUE
             ? request_b : {27'd0, iteration}) : request_b;
     wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
+    wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
     wire [31:0] leaf = {22'd0, request_leaf};
     // A node is 16, 24 or 32 bytes. Explicit shifts avoid generic multipliers.
     wire [12:0] list_bytes = node_bytes==16 ? {1'b0,arity,4'b0}
@@ -65,12 +79,12 @@ module uhbs_recipe_lane #(
         : {arity,5'b0};
     logic [12:0] input_length;
     logic [1087:0] fast_block;
-    logic [127:0] stream_data;
+    logic [63:0] stream_data;
     logic [255:0] address, masked_address;
-    wire fixed_block = (RECIPE_MASK & 16'h3858)==0 || shape == ADDRESS_SEED || shape == ADDRESS_VALUE
-        || shape == INDEX_PRF || shape == MASKED_SEED || shape == MASKED_VALUE
-        || shape == PREFIX_SEED || shape == PREFIX_VALUE
-        || shape == PREFIX_LEAF || shape == PREFIX_PARENT;
+    wire fixed_block = (RECIPE_MASK & 16'h3858)==0 || shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]
+        || shapes[INDEX_PRF] || shapes[MASKED_SEED] || shapes[MASKED_VALUE]
+        || shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]
+        || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT];
     wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
     wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
     wire stream_last = rate_offset+13'd136 > input_length;
@@ -83,15 +97,15 @@ module uhbs_recipe_lane #(
     logic [N*8-1:0] saved_capture;
     assign response_value=digest;
     assign response_capture=compact_chain ? compact_capture : saved_capture;
-    wire [7:0] prefix_bytes = shape == ADDRESS_LIST ? node_bytes+32 : 22;
+    wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? node_bytes+32 : 22;
     logic staged_valid, staged_last;
     logic [127:0] staged_data;
     wire stream_accept = !staged_valid || block_ready;
-    wire [12:0] position = rate_offset+{5'd0,beat,4'd0};
+    wire [12:0] position = rate_offset+{5'd0,beat,4'd0}+{9'd0,stream_half,3'd0};
     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
     logic [INDEX_BITS-1:0] list_cursor;
     logic [5:0] list_remainder;
-    wire [4:0] stream_advance = beat==8 ? 5'd8 : 5'd16;
+    wire [4:0] stream_advance = 5'd8;
     wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
     assign list_index0 = list_cursor;
     assign list_index1 = list_index0+1'b1;
@@ -119,56 +133,64 @@ module uhbs_recipe_lane #(
             message_word=index<11 ? padded_message[index*64 +:64] : 64'd0;
         end
     endfunction
-    function automatic [63:0] prefix_message_word(input [5:0] index);
+    // Select a source and a small word address BEFORE the wide data mux.
+    // All recipes share the same message/seed selectors instead of each
+    // recipe instantiating its own variable 64-bit extraction network.
+    function automatic [63:0] source_word(input [5:0] index,input bit lms_only);
+        reg [2:0] source;
+        reg [5:0] selected_index;
+        reg [63:0] literal;
         begin
-            prefix_message_word=index<4 ? node_word(randomizer,index)
-                : message_word(index-4);
-        end
-    endfunction
-    function automatic [63:0] source_word(input [5:0] index);
-        reg [63:0] lower_word,upper_word;
-        begin
-            source_word=0;lower_word=0;upper_word=0;
-            case(shape)
-                MESSAGE_PRF: if(RECIPE_MASK[MESSAGE_PRF]) begin
-                    if(index<node_words) source_word=node_word(secret_prf,index);
-                    else if(index<2*node_words) source_word=node_word(randomizer,index-node_words);
-                    else source_word=message_word(index-2*node_words);
+            source=0;selected_index=index;literal=0;
+            (* parallel_case *) case(1'b1)
+                shapes[MESSAGE_PRF]: if(!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
+                    if(index<node_words) source=1;
+                    else if(index<2*node_words) begin source=2;selected_index=index-node_words;end
+                    else begin source=5;selected_index=index-2*node_words;end
                 end
-                MESSAGE_DIGEST: if(RECIPE_MASK[MESSAGE_DIGEST]) begin
-                    if(index<node_words) source_word=node_word(randomizer,index);
-                    else if(index<2*node_words) source_word=node_word(public_seed,index-node_words);
-                    else if(index<3*node_words) source_word=node_word(root,index-2*node_words);
-                    else source_word=message_word(index-3*node_words);
+                shapes[MESSAGE_DIGEST]: if(!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
+                    if(index<node_words) source=2;
+                    else if(index<2*node_words) begin source=3;selected_index=index-node_words;end
+                    else if(index<3*node_words) begin source=4;selected_index=index-2*node_words;end
+                    else begin source=5;selected_index=index-3*node_words;end
                 end
-                ROOT_MESSAGE: if(RECIPE_MASK[ROOT_MESSAGE]) begin
-                    if(index==4-1) source_word=64'h0200000000000000;
-                    else if(index<4) source_word=0;
-                    else if(index<8) source_word=node_word(randomizer,index-4);
-                    else if(index<12) source_word=node_word(root,index-8);
-                    else if(index==16-1) source_word={be32(leaf),32'd0};
-                    else if(index>=16) source_word=message_word(index-16);
+                shapes[ROOT_MESSAGE]: if(!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
+                    if(index==3) literal=64'h0200000000000000;
+                    else if(index<4) literal=0;
+                    else if(index<8) begin source=2;selected_index=index-4;end
+                    else if(index<12) begin source=4;selected_index=index-8;end
+                    else if(index==15) literal={be32(leaf),32'd0};
+                    else if(index>=16) begin source=5;selected_index=index-16;end
                 end
-                PREFIX_MESSAGE: if(RECIPE_MASK[PREFIX_MESSAGE]) begin
-                    lower_word=prefix_message_word(index-3);
-                    upper_word=prefix_message_word(index-2);
-                    if(index<2) source_word=index[0] ? identifier[127:64] : identifier[63:0];
-                    else if(index==2) source_word={upper_word[15:0],16'h8181,be32(leaf)};
-                    else source_word={upper_word[15:0],lower_word[63:16]};
+                shapes[PREFIX_MESSAGE]: if(RECIPE_MASK[PREFIX_MESSAGE]) begin
+                    // Unaligned 22-byte prefix: assemble three aligned words,
+                    // then retain the fixed window starting two bytes later.
+                    if(index>=3 && index<7) begin source=2;selected_index=index-3;end
+                    else if(index>=7) begin source=5;selected_index=index-7;end
                 end
-                ADDRESS_LIST: if(RECIPE_MASK[ADDRESS_LIST]) begin
-                    if(index<node_words) source_word=node_word(public_seed,index);
-                    else if(index<node_words+4) source_word=node_word(address,index-node_words);
-                    else source_word=node_word(list_data0,index-node_words-4);
+                shapes[ADDRESS_LIST]: if(!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
+                    if(index<node_words) source=3;
+                    else if(index<node_words+4) begin source=6;selected_index=index-node_words;end
+                    else begin source=7;selected_index=index-node_words-4;end
                 end
-                PREFIX_LIST: if(RECIPE_MASK[PREFIX_LIST]) begin
+                shapes[PREFIX_LIST]: if(!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
                     case(index)
-                        0:source_word=identifier[63:0];1:source_word=identifier[127:64];
-                        2:source_word={list_data0[15:0],16'h8080,be32(leaf)};
-                        3:source_word=list_data0[79:16];default:source_word=0;
+                        0:literal=identifier[63:0];1:literal=identifier[127:64];
+                        2:literal={list_data0[15:0],16'h8080,be32(leaf)};
+                        3:literal=list_data0[79:16];default:literal=0;
                     endcase
                 end
-                default:source_word=0;
+                default:begin end
+            endcase
+            case(source)
+                1:source_word=node_word(secret_prf,selected_index);
+                2:source_word=node_word(randomizer,selected_index);
+                3:source_word=node_word(public_seed,selected_index);
+                4:source_word=node_word(root,selected_index);
+                5:source_word=message_word(selected_index);
+                6:source_word=node_word(address,selected_index);
+                7:source_word=node_word(list_data0,selected_index);
+                default:source_word=literal;
             endcase
         end
     endfunction
@@ -180,33 +202,53 @@ module uhbs_recipe_lane #(
             default:list_pair={list_data1,list_data0};
         endcase
     end
-    wire [127:0] list_window=list_pair >> {list_remainder,3'b0};
+    // Legal list offsets are whole 64-bit words (SLH), or two bytes
+    // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
+    logic [79:0] list_word_window;
+    always @* begin
+        case(list_remainder[4:3])
+            0:list_word_window=list_pair[79:0];
+            1:list_word_window=list_pair[143:64];
+            2:list_word_window=list_pair[207:128];
+            default:list_word_window=list_pair[271:192];
+        endcase
+    end
+    wire [63:0] list_window=list_remainder[1]
+        ? list_word_window[79:16] : list_word_window[63:0];
     wire [5:0] stream_word_index=position[8:3];
-    logic [127:0] stream_payload;
+    logic [63:0] stream_payload;
+    logic [127:0] source_window;
     always_comb begin
-        stream_payload=(shape==ADDRESS_LIST || shape==PREFIX_LIST) && position>=prefix_bytes
-            ? list_window : {source_word(stream_word_index+6'd1),source_word(stream_word_index)};
+        source_window={source_word(stream_word_index+6'd1,1'b1),source_word(stream_word_index,1'b0)};
+        stream_payload=source_window[63:0];
+        if(shapes[PREFIX_MESSAGE]) begin
+            stream_payload=source_window[79:16];
+            if(position==0) stream_payload=identifier[63:0];
+            else if(position==8) stream_payload=identifier[127:64];
+            else if(position==16) stream_payload[47:0]={16'h8181,be32(leaf)};
+        end else if((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position>=prefix_bytes)
+            stream_payload=list_window;
     end
 
     integer i, absolute;
     always @* begin
-        address = {be32(b),be32(a),be32(leaf),be32(domain),
+        address = {be32(b),be32(a),be32(leaf),be32({24'd0,address_domain}),
             be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
         masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
-        case (shape)
-            ADDRESS_SEED, ADDRESS_VALUE: input_length = node_bytes+32+(shape == ADDRESS_SEED ? node_bytes : list_bytes);
-            MESSAGE_PRF: input_length = 2*node_bytes+message_length;
-            MESSAGE_DIGEST: input_length = 3*node_bytes+message_length;
-            INDEX_PRF: input_length = 96;
-            ROOT_MESSAGE: input_length = 128+message_length;
-            MASKED_SEED: input_length = 128;
-            MASKED_VALUE: input_length = compound < arity+1 ? 13'd96 : 13'd64+{arity,5'd0};
-            PREFIX_SEED, PREFIX_VALUE: input_length = 55;
-            PREFIX_MESSAGE: input_length = 54+message_length;
-            ADDRESS_LIST: input_length = node_bytes+32+list_bytes;
-            PREFIX_LIST: input_length = 13'd22+{arity,5'd0};
-            PREFIX_LEAF: input_length = 54;
-            PREFIX_PARENT: input_length = 86;
+        (* parallel_case *) case(1'b1)
+            shapes[ADDRESS_SEED],shapes[ADDRESS_VALUE]: input_length = node_bytes+32+(shapes[ADDRESS_SEED] ? node_bytes : list_bytes);
+            shapes[MESSAGE_PRF]: input_length = 2*node_bytes+message_length;
+            shapes[MESSAGE_DIGEST]: input_length = 3*node_bytes+message_length;
+            shapes[INDEX_PRF]: input_length = 96;
+            shapes[ROOT_MESSAGE]: input_length = 128+message_length;
+            shapes[MASKED_SEED]: input_length = 128;
+            shapes[MASKED_VALUE]: input_length = compound < arity+1 ? 13'd96 : 13'd64+{arity,5'd0};
+            shapes[PREFIX_SEED],shapes[PREFIX_VALUE]: input_length = 55;
+            shapes[PREFIX_MESSAGE]: input_length = 54+message_length;
+            shapes[ADDRESS_LIST]: input_length = node_bytes+32+list_bytes;
+            shapes[PREFIX_LIST]: input_length = 13'd22+{arity,5'd0};
+            shapes[PREFIX_LEAF]: input_length = 54;
+            shapes[PREFIX_PARENT]: input_length = 86;
             default: input_length = 0;
         endcase
     end
@@ -220,20 +262,20 @@ module uhbs_recipe_lane #(
     always @* begin
         frame0=0;frame1=0;frame2=0;frame3=0;frame_prefix=0;
         frame_domain=0;frame_two=0;frame_layout=7;
-        case(shape)
-            ADDRESS_SEED,ADDRESS_VALUE: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
+        (* parallel_case *) case(1'b1)
+            shapes[ADDRESS_SEED],shapes[ADDRESS_VALUE]: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
                 frame_layout=0;frame0=public_seed;frame1=address;
-                frame2=shape==ADDRESS_SEED ? secret_seed : left_value;
-                frame_two=shape==ADDRESS_VALUE && arity==2;
+                frame2=chain_feedback_valid ? finish_digest[N*8-1:0] : shapes[ADDRESS_SEED] ? secret_seed : left_value;
+                frame_two=!chain_feedback_valid && shapes[ADDRESS_VALUE] && arity==2;
                 frame3=frame_two ? request_right : 256'd0;
             end
-            INDEX_PRF: if(RECIPE_MASK[INDEX_PRF]) begin
+            shapes[INDEX_PRF]: if(RECIPE_MASK[INDEX_PRF]) begin
                 frame_layout=1;frame_domain=3;frame1=secret_prf;frame2={be32(leaf),224'd0};
             end
-            MASKED_SEED: if(RECIPE_MASK[MASKED_SEED]) begin
+            shapes[MASKED_SEED]: if(RECIPE_MASK[MASKED_SEED]) begin
                 frame_layout=2;frame_domain=4;frame1=secret_seed;frame2=public_seed;frame3=masked_address;
             end
-            MASKED_VALUE: if(RECIPE_MASK[MASKED_VALUE]) begin
+            shapes[MASKED_VALUE]: if(RECIPE_MASK[MASKED_VALUE]) begin
                 if(compound<arity+1) begin
                     frame_layout=1;frame_domain=3;frame1=public_seed;frame2=masked_address;
                 end else begin
@@ -242,15 +284,15 @@ module uhbs_recipe_lane #(
                     frame3=frame_two ? request_right^mask1 : 256'd0;
                 end
             end
-            PREFIX_SEED,PREFIX_VALUE: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
+            shapes[PREFIX_SEED],shapes[PREFIX_VALUE]: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
                 frame_layout=4;
-                frame_prefix={shape==PREFIX_SEED ? 8'hff : b[7:0],8'(request_a),8'd0,be32(leaf),identifier};
-                frame1=shape==PREFIX_SEED ? secret_seed : left_value;
+                frame_prefix={shapes[PREFIX_SEED] ? 8'hff : b[7:0],8'(request_a),8'd0,be32(leaf),identifier};
+                frame1=shapes[PREFIX_SEED] ? secret_seed : left_value;
             end
-            PREFIX_LEAF,PREFIX_PARENT: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
+            shapes[PREFIX_LEAF],shapes[PREFIX_PARENT]: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
                 frame_layout=5;
-                frame_prefix={8'd0,shape==PREFIX_LEAF ? 16'h8282 : 16'h8383,be32(request_b),identifier};
-                frame1=left_value;frame_two=shape==PREFIX_PARENT;
+                frame_prefix={8'd0,shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,be32(request_b),identifier};
+                frame1=left_value;frame_two=shapes[PREFIX_PARENT];
                 frame2=frame_two ? request_right : 256'd0;
             end
             default:begin end
@@ -262,8 +304,8 @@ module uhbs_recipe_lane #(
             16: begin
                 fast_block[0 +:128]=public_seed[127:0];
                 fast_block[128 +:256]=address;
-                fast_block[384 +:128]=shape==ADDRESS_SEED ? secret_seed[127:0] : left_value[127:0];
-                if(shape==ADDRESS_VALUE && arity==2) begin
+                fast_block[384 +:128]=chain_feedback_valid ? finish_digest[127:0] : shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+                if(shapes[ADDRESS_VALUE] && arity==2) begin
                     fast_block[512 +:128]=request_right[127:0];
                     fast_block[640 +:8]=8'h1f;
                 end else fast_block[512 +:8]=8'h1f;
@@ -271,8 +313,8 @@ module uhbs_recipe_lane #(
             24: begin
                 fast_block[0 +:192]=public_seed[191:0];
                 fast_block[192 +:256]=address;
-                fast_block[448 +:192]=shape==ADDRESS_SEED ? secret_seed[191:0] : left_value[191:0];
-                if(shape==ADDRESS_VALUE && arity==2) begin
+                fast_block[448 +:192]=chain_feedback_valid ? finish_digest[191:0] : shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+                if(shapes[ADDRESS_VALUE] && arity==2) begin
                     fast_block[640 +:192]=request_right[191:0];
                     fast_block[832 +:8]=8'h1f;
                 end else fast_block[640 +:8]=8'h1f;
@@ -327,12 +369,12 @@ module uhbs_recipe_lane #(
     end
     always_comb begin
         stream_data = stream_payload;
-        for (i=0; i<16; i=i+1) begin
+        for (i=0; i<8; i=i+1) begin
             absolute = position+i;
-            if (beat*16+i < 136) begin
+            if (beat*16+stream_half*8+i < 136) begin
                 if (absolute >= input_length) stream_data[i*8 +: 8] = 0;
                 if (absolute == input_length) stream_data[i*8 +: 8] = 8'h1f;
-                if (stream_last && beat*16+i == 135) stream_data[i*8+7] = 1'b1;
+                if (stream_last && beat*16+stream_half*8+i == 135) stream_data[i*8+7] = 1'b1;
             end else stream_data[i*8 +: 8] = 0;
         end
     end
@@ -346,7 +388,7 @@ module uhbs_recipe_lane #(
             default:live_chain_prefix[511:0]={address,public_seed};
         endcase
     end
-    uhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0)) sponge (
+    uhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
         .clk, .rst_n, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
         .fast_block_data(fast_block), .chain_enable(compact_chain),
@@ -358,6 +400,7 @@ module uhbs_recipe_lane #(
         .capture_after(request_capture_after+5'd1),
         .block_valid(staged_valid), .block_ready, .block_data(staged_data),
         .block_last(staged_last), .response_valid(digest_valid), .response_digest(digest),
+        .chain_feedback_valid,.chain_feedback_counter,
         .finish_valid, .finish_digest, .capture_digest(compact_capture),
         .capture_valid(compact_capture_valid), .error(hash_error)
     );
@@ -367,7 +410,7 @@ module uhbs_recipe_lane #(
             staged_valid<=0; staged_last<=0; staged_data<=0;
             list_cursor<=0; list_remainder<=0;
             state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
-            seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0;
+            seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
         end else begin
             if(staged_valid && block_ready) staged_valid<=0;
             if (hash_error) begin error <= 1; state <= RESPONSE; end
@@ -377,7 +420,7 @@ module uhbs_recipe_lane #(
                     list_cursor<=0; list_remainder<=0;
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
                     current_value <= request_left;
-                    rate_block <= 0; beat <= 0;
+                    rate_block <= 0; beat <= 0; stream_half<=0;
                     if (request_recipe[63:60] != 1 || request_recipe[59:56] == 0
                             || !RECIPE_MASK[request_recipe[59:56]]
                             || (node_bytes!=32 && !(request_recipe[59:56]==1 || request_recipe[59:56]==2 || request_recipe[59:56]==3 || request_recipe[59:56]==4 || request_recipe[59:56]==12))
@@ -394,7 +437,12 @@ module uhbs_recipe_lane #(
                     end else state <= fixed_block ? WAIT_HASH : STREAM;
                 end
                 STREAM: if (stream_accept) begin
-                    staged_valid<=1; staged_data<=stream_data; staged_last<=stream_last;
+                    if(stream_half) staged_data[127:64]<=stream_data;
+                    else staged_data[63:0]<=stream_data;
+                    staged_valid<=stream_half || beat==8;
+                    staged_last<=stream_last;
+                    if(beat==8) staged_data[127:64]<=0;
+                    stream_half<=beat==8 ? 1'b0 : !stream_half;
                     begin
                         if(position < prefix_bytes) begin
                             if(position+stream_advance >= prefix_bytes)
@@ -409,12 +457,12 @@ module uhbs_recipe_lane #(
                         if (PROFILE_ENABLE) permutation_count <= permutation_count+1;
                         if (stream_last) state <= WAIT_HASH;
                         else rate_block <= rate_block+1'b1;
-                    end else beat <= beat+1'b1;
+                    end else if(stream_half) beat <= beat+1'b1;
                 end
                 WAIT_HASH: if (completed) begin
                     if (compact_chain) begin
                         state <= RESPONSE;
-                    end else if (RECIPE_MASK[MASKED_VALUE] && shape == MASKED_VALUE && compound < arity+1) begin
+                    end else if (RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1) begin
                         case (compound)
                             0: temporary_key <= completed_value[N*8-1:0];
                             1: mask0 <= completed_value[N*8-1:0];

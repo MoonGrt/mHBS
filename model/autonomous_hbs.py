@@ -9,6 +9,7 @@ from model.unified_hbs import Image, Job, Machine, compile_image, validate
 
 VERSION='v4.1'
 ABI_VERSION=4
+INDEX_POLICY='fixed_q_no_guard'
 PROGRAM_WORDS,TEMPLATE_WORDS,DESCRIPTOR_WORDS=64,64,128
 
 @dataclass(frozen=True)
@@ -79,7 +80,7 @@ class AutonomousMachine:
     """One reset epoch; no external Job, message or persistence interface."""
     def __init__(self, image: ProgramImage, observe=None):
         self.image,self.job,self.message=image.decode()
-        self.machine=Machine(self.image,self.job,observe)
+        self.machine=Machine(self.image,self.job,observe,index_policy=INDEX_POLICY)
         self.done=False;self.error=False;self.stats={}
 
     def run(self):

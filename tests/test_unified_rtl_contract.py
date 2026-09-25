@@ -18,6 +18,13 @@ class UnifiedRtlContractTests(unittest.TestCase):
         self.assertNotIn('parameter integer N ',params)
         self.assertIn('profile_descriptor[59]',core)
         self.assertNotIn('N==32',core)
+    def test_fixed_index_has_no_guard(self):
+        sources=(ROOT/'manifests/unified_sources.txt').read_text().splitlines()
+        self.assertFalse(any('stateful_index_guard' in p for p in sources))
+        for name in ('uhbs_top','uhbs_processor','uhbs_hbs'):
+            text=(ROOT/f'rtl/top/{name}.sv').read_text()
+            for removed in ('state_next_q','state_commit_','consumed_index','guard_current_q'):
+                self.assertNotIn(removed,text)
     def test_production_source_closure(self):
         sources=(ROOT/'manifests/unified_sources.txt').read_text().splitlines()
         self.assertTrue(all((ROOT/p).is_file() for p in sources))

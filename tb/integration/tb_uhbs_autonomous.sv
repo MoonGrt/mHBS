@@ -5,7 +5,6 @@ module tb_uhbs_autonomous;
     wire busy,done,keygen_done,error,out_valid,out_last,result_kind,tree_cache_valid;
     wire [15:0] error_code;
     wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
-    wire [10:0] state_next_q;
     wire [63:0] out_data;wire [7:0] out_keep;
     uhbs_top #(.LANES(LANES),.UNROLL(UNROLL),.SWAP_PHYSICAL_LANES(SWAP),
         .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
@@ -13,24 +12,19 @@ module tb_uhbs_autonomous;
     string directory;
     reg [31:0] metadata[0:9];
     reg [7:0] expected_kg[0:255],expected_sg[0:65535];
-    integer kg_index=0,sg_index=0,total_cycles=0,replays=1,interrupt_run=0,bad=0,fault=0,commit_delay=0;
+    integer kg_index=0,sg_index=0,total_cycles=0,replays=1,interrupt_run=0,bad=0,fault=0;
     integer residency[0:63];
-    logic committed=0;
     task tick;begin @(posedge clk);#1;end endtask
     always @(posedge clk) begin
-        if(rst) begin kg_index=0;sg_index=0;total_cycles=0;committed=0;for(integer i=0;i<64;i=i+1)residency[i]=0;end
+        if(rst) begin kg_index=0;sg_index=0;total_cycles=0;for(integer i=0;i<64;i=i+1)residency[i]=0;end
         else begin
             total_cycles=total_cycles+1;
             if(total_cycles>200000000) $fatal(1,"timeout");
             if(dut.processor.core.state!=0) residency[dut.processor.core.state]=residency[dut.processor.core.state]+1;
             if(error && bad==0 && fault==0) $fatal(1,"AUTONOMOUS_ERROR code=%h cycle=%0d kg=%0d sg=%0d",error_code,total_cycles,kg_index,sg_index);
-            if(dut.processor.commit_valid && dut.processor.commit_ready) begin
-                if(state_next_q!=metadata[6]+1 || dut.processor.consumed_index!=state_next_q) $fatal(1,"index reservation");
-                committed=1;
-            end
             if(out_valid) begin
                 if(bad!=0) $fatal(1,"invalid image produced output");
-                if(result_kind && metadata[7] && !committed) $fatal(1,"signature before index confirmation");
+                if(result_kind && metadata[7] && dut.processor.core.active_q!=metadata[6]) $fatal(1,"fixed index changed");
                 for(integer i=0;i<8;i=i+1) if(out_keep[i]) begin
                     if(result_kind) begin
                         if(sg_index>=metadata[1] || out_data[i*8 +:8]!==expected_sg[sg_index])
@@ -61,7 +55,6 @@ module tb_uhbs_autonomous;
         if($value$plusargs("INTERRUPT=%d",interrupt_run)) begin end
         if($value$plusargs("BAD=%d",bad)) begin end
         if($value$plusargs("FAULT=%d",fault)) begin end
-        if($value$plusargs("COMMIT_DELAY=%d",commit_delay)) begin end
         $readmemh({directory,"/program.mem"},dut.program_rom.memory);
         $readmemh({directory,"/template.mem"},dut.template_rom.memory);
         $readmemh({directory,"/descriptor.mem"},dut.descriptor_rom.memory);
@@ -95,32 +88,24 @@ module tb_uhbs_autonomous;
         if(interrupt_run) begin
             repeat(1000) tick();rst=1;repeat(4)tick();rst=0;
         end
-        if((fault || commit_delay) && !metadata[7]) $fatal(1,"stateful stress requires stateful image");
-        if(fault || commit_delay) begin
+        if(fault && !metadata[7]) $fatal(1,"stateful stress requires stateful image");
+        if(fault) begin
             while(!keygen_done) tick();
             if(fault==1) dut.processor.core.cache_q=metadata[6]^1;
-            if(commit_delay) begin
-                force dut.processor.commit_ready=0;
-                while(!dut.processor.commit_valid) tick();
-                repeat(commit_delay) begin tick();if(sg_index!=0) $fatal(1,"signature while commit delayed");end
-                release dut.processor.commit_ready;
-            end
             if(fault>=2) begin
-                while(!committed) tick();
+                while(!result_kind || !dut.processor.core.busy) tick();
                 if(fault==3) while(sg_index<40) tick();
                 force dut.processor.core.seq_error=1;
             end
-            if(fault) begin
-                while(!error) tick();
-                repeat(40) begin
-                    tick();
-                    if(out_valid || busy || done) $fatal(1,"failed run did not halt");
-                    if(dut.processor.core.guard_current_q != metadata[6]+(fault>=2)) $fatal(1,"failure rolled index back");
-                end
-                if(fault==1 && (sg_index!=0 || committed)) $fatal(1,"cache mismatch consumed index/output");
-                $display("AUTONOMOUS_FAULT_PASS fault=%0d q=%0d consumed=%0d sign_prefix=%0d",fault,metadata[6],dut.processor.core.guard_current_q,sg_index);
-                $finish;
+            while(!error) tick();
+            repeat(40) begin
+                tick();
+                if(out_valid || busy || done) $fatal(1,"failed run did not halt");
+                if(dut.processor.core.active_q != metadata[6]) $fatal(1,"fixed index changed after failure");
             end
+            if(fault<=2 && sg_index!=0) $fatal(1,"pre-execution failure produced signature");
+            $display("AUTONOMOUS_FAULT_PASS fault=%0d q=%0d sign_prefix=%0d",fault,metadata[6],sg_index);
+            $finish;
         end
         for(integer run=0;run<replays;run=run+1) begin
             while(!done) tick();

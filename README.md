@@ -4,7 +4,8 @@
 复位释放后自动执行 **镜像校验 → Keygen → 从 ROM 读取消息 → Sign → 停机**。
 
 七个 profile 共用固定硬件，通过替换 program / template / descriptor 三个独立 ROM 的初始化内容选择算法。
-program 含指令、Job 和消息；结果直接输出，无反压。XMSS/LMS 内部确认易失索引消耗；复位允许固定向量重放。
+program 含指令、Job 和消息；结果直接输出，无反压。XMSS/LMS 使用固定 q，无索引 guard 或提交握手；复位允许固定向量重放。
+当前优化固定 U2、双 lane，保留三个分布式 ROM。
 
 支持 SLH-DSA SHAKE 128f/192f/256f、XMSS ω=2/4、LMS ω=2/4（SHAKE256/256 研究 profile）。
 ω 是每个 Winternitz 数字的位数。
@@ -19,7 +20,8 @@ make rtl-profile-test PROFILE=slh_192f  # Verilator 5.008 --binary --timing
 make rtl-all-profiles LANES=2 UNROLL=2  # 同一仿真二进制替换七套镜像
 make rtl-verification             # 边界索引、复位重放、lane 交换
 make synth-common TAG=my_candidate LANES=2 UNROLL=2
-make route-common TAG=my_candidate
+make route-common TAG=my_candidate  # 输出 my_candidate_route，保留综合证据
+make freeze-common TAG=my_candidate
 ```
 
 共同候选按 post-synth 面积和 100 MHz 归一化签名 ATP 筛选，再进行 post-route 验收。

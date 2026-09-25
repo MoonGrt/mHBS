@@ -15,8 +15,137 @@ def resource(text,label):
     match=re.search(r'\|\s*'+re.escape(label)+r'\*?\s*\|\s*([\d,.]+)\s*\|',text)
     check(match is not None,'missing resource '+label)
     return float(match[1].replace(',',''))
+def audit_physical(folder):
+    clock=json.loads((folder/'final_clock.json').read_text())
+    check(eq(clock['period_ns']*10,round(clock['period_ns']*10)) and clock['wns_ns']>=.0999 and clock['whs_ns']>=0,'physical clock margin')
+    timing=(folder/'timing_summary.rpt').read_text()
+    row=re.search(r'WNS\(ns\).*?\n\s*[- ]+\n([^\n]+)',timing).group(1).split()
+    check(all(float(row[i])>=0 for i in (0,4,8)) and all(float(row[i])==0 for i in (1,5,9)),'physical setup/hold/pulse')
+    route=(folder/'route_status.rpt').read_text()
+    # Vivado 2025.2 omits the unrouted row when all routable nets are routed.
+    def nets(label):
+        m=re.search(r'# of '+re.escape(label)+r'\.*\s*:\s*(\d+)',route)
+        check(m is not None,'missing route count '+label)
+        return int(m[1])
+    check(nets('nets with routing errors')==0,'routing errors')
+    check(nets('routable nets')==nets('fully routed nets'),'incomplete routing')
+    coverage=(folder/'check_timing.rpt').read_text()
+    for label in ('no_clock','constant_clock','pulse_width_clock','multiple_clock','unconstrained_internal_endpoints','loops','latch_loops'):
+        m=re.search(r'checking '+label+r' \((\d+)\)',coverage);check(m and int(m[1])==0,'coverage '+label)
+    print('V4.1 routing/timing/coverage: PASS',folder.name)
+
+def audit_architecture():
+    for folder in sorted((BASE/'architecture').glob('*')):
+        if not (folder/'results.json').exists():continue
+        data=json.loads((folder/'results.json').read_text())
+        gate=json.loads((folder/'model_gate.json').read_text())
+        identity=hashlib.sha256(json.dumps(data['logic_sha256'],sort_keys=True).encode()).hexdigest()[:16]
+        check(identity==folder.name and data['passed'] and gate['passed'],'architecture identity/gate')
+        probes=data['probes']
+        check(set(probes)=={'base','program','template','recipe','route','loop','run'},'architecture coverage')
+        for name,probe in probes.items():
+            check(probe['model_pass'] and probe['rtl_pass'],'architecture pass '+name)
+            log=folder/(name+'.log');check(sha(log)==probe['log_sha256'],'architecture log '+name)
+            for file,digest in probe['image_sha256'].items():
+                check(sha(folder/'images'/name/file)==digest,'architecture image '+name+'/'+file)
+            text=log.read_text()
+            trace=[[int(phase),int(cmd,16)] for phase,cmd in re.findall(r'MACRO_TRACE phase=(\d+) command=([0-9a-f]+)',text)]
+            check('AUTONOMOUS_PASS' in text and trace==probe['macro_trace'],'architecture trace '+name)
+            check(all(probe[k]==v for k,v in gate['probes'][name].items()),'architecture software/RTL evidence '+name)
+        check(probes['program']['macro_trace']!=probes['base']['macro_trace'],'program changes execution')
+        check(probes['template']['macro_trace']!=probes['base']['macro_trace'],'template changes execution')
+        check(probes['loop']['macro_trace']==probes['run']['macro_trace'],'loop/run expansion')
+        for name in ('recipe','route'):
+            check(probes[name]['oracle_sha256']!=probes['base']['oracle_sha256'],name+' changes output')
+        print('V4.1 image-driven architecture: PASS',identity)
+
+def audit_functional(inputs):
+    logic=inputs['logic_sha256']
+    identity=hashlib.sha256(json.dumps(logic,sort_keys=True).encode()).hexdigest()[:16]
+    source=inputs['source_sha256'];bench=source['tb/integration/tb_uhbs_autonomous.sv']
+    unit_folder=BASE/'unit'/identity
+    unit=json.loads((unit_folder/'results.json').read_text())
+    check(unit['pass_all'] and unit['logic_sha256']==logic and unit['bench_sha256']==bench,'functional units/source')
+    for name,digest in unit['test_sha256'].items():check(source[name]==digest,'unit test source '+name)
+    for name,digest in unit['logs'].items():check(sha(unit_folder/(name+'.log'))==digest,'unit log '+name)
+    check('boot_drain' in unit['logs'],'boot pipeline drain coverage')
+    sim_folder=BASE/'simulations'/identity
+    names=list(PROFILES)+[name+f'_q{q}' for name,p in PROFILES.items() if p.stateful for q in (0,1023)]
+    names+=list(json.loads((BASE/'message_cases.json').read_text()))
+    normal_binaries=set()
+    for variant,profiles,replay in [('u2_l2_s0',names,False),('u2_l2_s1',list(PROFILES),False),('u2_l2_s0/replay',list(PROFILES),True)]:
+        binaries=set()
+        for name in profiles:
+            file=sim_folder/variant/(name+'.json');data=json.loads(file.read_text())
+            check(data['passed'] and data['logic_sha256']==logic and data['bench_sha256']==bench,'functional simulation/source '+name)
+            check(data['reset_replay']==replay and data['lanes']==2 and data['unroll']==2,'functional topology/replay')
+            check(data['swap']==int(variant.startswith('u2_l2_s1')),'lane swap')
+            check(sha(file.with_suffix('.log'))==data['log_sha256'],'functional simulation log '+name)
+            for image,digest in data['image_sha256'].items():check(sha(BASE/'images'/name/image)==digest,'functional simulation image '+name)
+            metadata=[int(x,16) for x in (BASE/'images'/name/'metadata.mem').read_text().split()]
+            check([data[k] for k in ('keygen_hashes','keygen_permutations','sign_hashes','sign_permutations')]==metadata[2:6],'functional Hash/Keccak counts '+name)
+            binaries.add(data['binary_sha256'])
+        check(len(binaries)==1,'common simulation executable '+variant)
+        if variant=='u2_l2_s0':normal_binaries=binaries
+    faults_folder=BASE/'state_verification'/identity/'u2_l2_s0'
+    faults=json.loads((faults_folder/'results.json').read_text())
+    check(faults['pass_all'] and faults['logic_sha256']==logic and faults['bench_sha256']==bench,'fault source')
+    check(faults['binary_sha256'] in normal_binaries,'fault executable')
+    expected={name+f'_fault{i}.log' for name,p in PROFILES.items() if p.stateful for i in (1,2,3)}
+    check(set(faults['logs'])==expected,'fault matrix coverage')
+    for name,digest in faults['logs'].items():check(sha(faults_folder/name)==digest and 'AUTONOMOUS_FAULT_PASS' in (faults_folder/name).read_text(),'fault log '+name)
+    arch=json.loads((BASE/'architecture'/identity/'results.json').read_text())
+    check(arch['passed'] and arch['logic_sha256']==logic,'architecture source')
+    for name,digest in arch['bench_sha256'].items():check(source[name]==digest,'architecture bench '+name)
+    check(arch['script_sha256']==source['scripts/verify_microcode_architecture.py'],'architecture driver source')
+    physical=json.loads((unit_folder/'physical_rom.json').read_text())
+    check(physical['passed'] and physical['rom_rtl_sha256']==logic['rtl/memory/uhbs_image_rom.sv'],'physical ROM source')
+    check(physical['generator_sha256']==source['scripts/verify_physical_rom.py'],'physical ROM test generator source')
+    for name,images in physical['image_sha256'].items():
+        for kind,digest in images.items():check(sha(BASE/'images'/name/(kind+'.mem'))==digest,'physical ROM image '+name+'/'+kind)
+    check(sha(unit_folder/'physical_rom.log')==physical['log_sha256'],'physical ROM log')
+    print('V4.1 complete functional evidence: PASS',identity)
+
+def audit_candidates():
+    ceilings_raw=json.loads((ROOT/'manifests/experiments/unified_hbs_final.json').read_text())['profiles']
+    ceilings={a:ceilings_raw[b]['sign_atp'] for a,b in [('slh_128f','slh'),('xmss_omega4','xmss'),('lms_omega4','lms')]}
+    for folder in sorted((BASE/'candidates').glob('*')):
+        if not (folder/'evidence.json').exists():continue
+        evidence=json.loads((folder/'evidence.json').read_text())
+        for name,digest in evidence['evidence_sha256'].items():
+            check(sha(folder/name)==digest,'candidate evidence '+folder.name+'/'+name)
+        inputs=json.loads((folder/'inputs.json').read_text())
+        ppa=json.loads((folder/'ppa.json').read_text())
+        check(sha(folder/'inputs.json')==ppa['inputs_sha256'],'candidate inputs '+folder.name)
+        check(sha(folder/'source_snapshot.tar.gz')==inputs['snapshot_sha256'],'candidate snapshot '+folder.name)
+        with tarfile.open(folder/'source_snapshot.tar.gz') as tar:
+            for name,digest in inputs['source_sha256'].items():
+                check(hashlib.sha256(tar.extractfile(name).read()).hexdigest()==digest,'candidate source '+name)
+        check(all(inputs['source_sha256'][name]==digest for name,digest in inputs['logic_sha256'].items()),'candidate logic closure')
+        util=(folder/'utilization.rpt').read_text()
+        area=resource(util,'Slice LUTs')/4+resource(util,'Slice Registers')/8+resource(util,'Block RAM Tile')*232.4+resource(util,'DSPs')*102.4
+        check(eq(area,ppa['equivalent_slice']),'candidate area '+folder.name)
+        period=10 if ppa['stage']=='post_synth' else json.loads((folder/'final_clock.json').read_text())['period_ns']
+        if ppa['stage']=='post_route':audit_physical(folder)
+        check(eq(period,ppa['period_ns']) and eq(1000/period,ppa['frequency_mhz']),'candidate frequency')
+        ratios=[]
+        for name,p in PROFILES.items():
+            row=ppa['profiles'][name];path=ROOT/row['simulation'];sim=json.loads(path.read_text())
+            check(sha(path)==row['simulation_sha256'] and sha(path.with_suffix('.log'))==sim['log_sha256'],'candidate simulation '+name)
+            check(sim['passed'] and sim['logic_sha256']==inputs['logic_sha256'],'candidate cycle/source mismatch '+name)
+            for kind in ('boot','keygen','sign'):
+                check(row[kind+'_cycles']==sim[kind+'_cycles'],'candidate cycles '+name)
+            atp=area*sim['sign_cycles']*period/1e6
+            ratio=atp/min(p.target,ceilings.get(name,float('inf')))
+            check(eq(atp,row['sign_atp']) and eq(ratio,row['ratio']),'candidate ATP '+name)
+            check(eq(row['keygen_atp'],area*sim['keygen_cycles']*period/1e6),'candidate Keygen ATP '+name)
+            check(row['paper_pass']==(atp<p.target) and row['v3_pass']==(name not in ceilings or atp<=ceilings[name]),'candidate pass flags '+name)
+            ratios.append(ratio)
+        check(eq(max(ratios),ppa['worst_ratio']),'candidate ranking '+folder.name)
+        print('V4.1 candidate audit: PASS',folder.name,ppa['stage'])
+
 def main():
-    parser=argparse.ArgumentParser();parser.add_argument('--allow-incomplete',action='store_true');args=parser.parse_args()
+    parser=argparse.ArgumentParser();parser.add_argument('--allow-incomplete',action='store_true');parser.add_argument('--functional-tag');args=parser.parse_args()
     gate=json.loads((BASE/'software_gate.json').read_text());check(gate['pass'],'software gate')
     for path,digest in gate['sources'].items():check(sha(ROOT/path)==digest,'software source '+path)
     images=json.loads((BASE/'images.json').read_text())['profiles']
@@ -24,12 +153,19 @@ def main():
         folder=BASE/'images'/name;ProgramImage.read(folder).decode()
         for path,digest in data['image_sha256'].items():check(sha(folder/path)==digest,'ROM image '+name+'/'+path)
     print('V4.1 software gate / images: PASS')
+    update=json.loads((BASE/'author_update.json').read_text())
+    check(update['updated_sign_cycles']==815706 and update['changes_acceptance_threshold'] is False,'author update/unchanged acceptance')
+    audit_architecture()
+    audit_candidates()
+    if args.functional_tag:
+        audit_functional(json.loads((BASE/'candidates'/args.functional_tag/'inputs.json').read_text()))
     final_path=BASE/'final.json'
     if not final_path.exists():
         print('V4.1 performance acceptance: INCOMPLETE (no final manifest)')
         return 0 if args.allow_incomplete else 2
     final=json.loads(final_path.read_text());check(final['version']=='v4.1' and final['abi_version']==4,'version/ABI')
     folder=BASE/final['archive'];inputs=json.loads((folder/'inputs.json').read_text());ppa=json.loads((folder/'ppa.json').read_text())
+    audit_functional(inputs)
     check(sha(folder/'source_snapshot.tar.gz')==inputs['snapshot_sha256'],'snapshot digest')
     with tarfile.open(folder/'source_snapshot.tar.gz','r:gz') as tar:
         for path,digest in inputs['source_sha256'].items():check(hashlib.sha256(tar.extractfile(path).read()).hexdigest()==digest,'snapshot source '+path)
@@ -41,14 +177,7 @@ def main():
     clock=json.loads((folder/'final_clock.json').read_text());period=clock['period_ns']
     check(eq(period*10,round(period*10)) and clock['wns_ns']>=.0999 and clock['whs_ns']>=0,'clock margin')
     check(eq(period,ppa['period_ns']),'common clock')
-    timing=(folder/'timing_summary.rpt').read_text();row=re.search(r'WNS\(ns\).*?\n\s*[- ]+\n([^\n]+)',timing).group(1).split()
-    check(all(float(row[i])>=0 for i in (0,4,8)) and all(float(row[i])==0 for i in (1,5,9)),'setup/hold/pulse')
-    route=(folder/'route_status.rpt').read_text()
-    for label in ('Number of nets with routing errors','Number of unrouted nets'):
-        m=re.search(re.escape(label)+r'\s*:\s*(\d+)',route);check(m and int(m[1])==0,label)
-    coverage=(folder/'check_timing.rpt').read_text()
-    for label in ('no_clock','constant_clock','multiple_clock','unconstrained_internal_endpoints','loops','latch_loops'):
-        m=re.search(r'checking '+label+r' \((\d+)\)',coverage);check(m and int(m[1])==0,'coverage '+label)
+    audit_physical(folder)
     old=json.loads((ROOT/'manifests/experiments/unified_hbs_final.json').read_text())['profiles']
     ceilings={a:old[b]['sign_atp'] for a,b in [('slh_128f','slh'),('xmss_omega4','xmss'),('lms_omega4','lms')]}
     structural=set();binaries=set()

@@ -1,0 +1,495 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Thu Sep 24 21:39:29 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source experiments/v4.1/check_rom_boundary.tcl
+# set root [file normalize [file join [file dirname [info script]] ../..]]
+# cd $root
+# set tag [lindex $argv 0]
+# set out [file join build v4.1 ${tag}_boundary]
+# file mkdir $out
+# set_param general.maxThreads 4
+# foreach variant {0 1} {
+#     open_checkpoint [file join build v4.1 $tag post_synth.dcp]
+#     set_property DONT_TOUCH false [get_cells processor]
+#     foreach c [get_cells -hier -filter {REF_NAME == RAM64X1S || REF_NAME == RAM128X1S}] {
+#         if {![regexp {^(program|template|descriptor)_rom/} $c]} {continue}
+#         set_property DONT_TOUCH true $c
+#         set_property DONT_TOUCH true [get_nets -of_objects [get_pins $c/O]]
+#         if {$variant} {
+#             if {[get_property REF_NAME $c] eq "RAM64X1S"} {
+#                 set_property INIT 64'h0123456789abcdef $c
+#             } else {set_property INIT 128'hfedcba98765432100123456789abcdef $c}
+#         }
+#     }
+#     opt_design
+#     set f [open [file join $out structure_${variant}.txt] w]
+#     foreach c [lsort [get_cells -hier]] {
+#         set init [get_property -quiet INIT $c]
+#         if {[regexp {^(program|template|descriptor)_rom/} $c]} {set init IMAGE}
+#         puts $f "CELL $c [get_property REF_NAME $c] $init"
+#     }
+#     foreach n [lsort [get_nets -hier]] {
+#         puts $f "NET $n [lsort [get_pins -of_objects $n]] [lsort [get_ports -quiet -of_objects $n]]"
+#     }
+#     close $f
+#     report_utilization -file [file join $out utilization_${variant}.rpt]
+#     write_checkpoint -force [file join $out optimized_${variant}.dcp]
+#     close_design
+# }
+Command: open_checkpoint build/v4.1/u2_readselect/post_synth.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1572.488 ; gain = 0.000 ; free physical = 62577 ; free virtual = 70737
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+Netlist sorting complete. Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.1 . Memory (MB): peak = 1861.281 ; gain = 0.000 ; free physical = 62412 ; free virtual = 70571
+INFO: [Netlist 29-17] Analyzing 2036 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1974.781 ; gain = 3.000 ; free physical = 62317 ; free virtual = 70477
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2618.039 ; gain = 0.000 ; free physical = 61775 ; free virtual = 69935
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 1027 instances were transformed.
+  RAM128X1S => RAM128X1S (MUXF7, RAMS64E(x2)): 128 instances
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 215 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+  RAM64X1S => RAM64X1S (RAMS64E): 256 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:11 ; elapsed = 00:00:09 . Memory (MB): peak = 2618.074 ; gain = 1045.586 ; free physical = 61776 ; free virtual = 69936
+Command: opt_design
+Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Implementation' and/or device 'xc7a200t'
+Running DRC as a precondition to command opt_design
+
+Starting DRC Task
+INFO: [DRC 23-27] Running DRC with 4 threads
+WARNING: [DRC 23-814] Not all possible (connectivity based) DRCs may have been run because this design is seen as Out of Context.
+INFO: [Project 1-461] DRC finished with 0 Errors
+INFO: [Project 1-462] Please refer to the DRC report (report_drc) for more information.
+
+Time (s): cpu = 00:00:00.3 ; elapsed = 00:00:00.2 . Memory (MB): peak = 2666.602 ; gain = 48.527 ; free physical = 61775 ; free virtual = 69935
+
+Starting Cache Timing Information Task
+Ending Cache Timing Information Task | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2666.602 ; gain = 0.000 ; free physical = 61775 ; free virtual = 69935
+
+Starting Logic Optimization Task
+
+Phase 1 Initialization
+
+Phase 1.1 Core Generation And Design Setup
+Phase 1.1 Core Generation And Design Setup | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3001.414 ; gain = 0.000 ; free physical = 61452 ; free virtual = 69612
+
+Phase 1.2 Setup Constraints And Sort Netlist
+Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3001.414 ; gain = 0.000 ; free physical = 61452 ; free virtual = 69612
+Phase 1 Initialization | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3001.414 ; gain = 0.000 ; free physical = 61451 ; free virtual = 69611
+
+Phase 2 Timer Update And Timing Data Collection
+
+Phase 2.1 Detect if minReqCache needed
+Phase 2.1 Detect if minReqCache needed | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.09 . Memory (MB): peak = 3004.383 ; gain = 2.969 ; free physical = 61436 ; free virtual = 69596
+
+Phase 2.2 Timer Update
+Phase 2.2 Timer Update | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.11 . Memory (MB): peak = 3004.383 ; gain = 2.969 ; free physical = 61436 ; free virtual = 69596
+Phase 2 Timer Update And Timing Data Collection | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.11 . Memory (MB): peak = 3004.383 ; gain = 2.969 ; free physical = 61436 ; free virtual = 69596
+
+Phase 3 Retarget
+INFO: [Opt 31-1851] Number of loadless carry chains removed were: 0
+INFO: [Opt 31-1834] Total Chains To Be Transformed Were: 0 AND Number of Transformed insts Created are: 0
+INFO: [Opt 31-1566] Pulled 3 inverters resulting in an inversion of 70 pins
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+INFO: [Opt 31-49] Retargeted 0 cell(s).
+Phase 3 Retarget | Checksum: 2ab2ee609
+
+Time (s): cpu = 00:00:00.6 ; elapsed = 00:00:00.59 . Memory (MB): peak = 3028.395 ; gain = 26.980 ; free physical = 61457 ; free virtual = 69616
+Retarget | Checksum: 2ab2ee609
+INFO: [Opt 31-389] Phase Retarget created 28 cells and removed 32 cells
+
+Phase 4 Constant propagation
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Phase 4 Constant propagation | Checksum: 2917356e1
+
+Time (s): cpu = 00:00:00.86 ; elapsed = 00:00:00.85 . Memory (MB): peak = 3028.395 ; gain = 26.980 ; free physical = 61457 ; free virtual = 69617
+Constant propagation | Checksum: 2917356e1
+INFO: [Opt 31-389] Phase Constant propagation created 6 cells and removed 12 cells
+
+Phase 5 Sweep
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3028.395 ; gain = 0.000 ; free physical = 61457 ; free virtual = 69617
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3028.395 ; gain = 0.000 ; free physical = 61457 ; free virtual = 69617
+Phase 5 Sweep | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3028.395 ; gain = 26.980 ; free physical = 61459 ; free virtual = 69619
+Sweep | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Sweep created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Sweep, 770 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 6 BUFG optimization
+Phase 6 BUFG optimization | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+BUFG optimization | Checksum: 24670c8c7
+INFO: [Opt 31-662] Phase BUFG optimization created 0 cells of which 0 are BUFGs and removed 0 cells.
+
+Phase 7 Shift Register Optimization
+INFO: [Opt 31-1064] SRL Remap converted 0 SRLs to 0 registers and converted 0 registers of register chains to 0 SRLs
+Phase 7 Shift Register Optimization | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61478 ; free virtual = 69638
+Shift Register Optimization | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Shift Register Optimization created 0 cells and removed 0 cells
+
+Phase 8 Post Processing Netlist
+Phase 8 Post Processing Netlist | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+Post Processing Netlist | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Post Processing Netlist created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Post Processing Netlist, 34 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 9 Finalization
+
+Phase 9.1 Finalizing Design Cores and Updating Shapes
+Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+
+Phase 9.2 Verifying Netlist Connectivity
+
+Starting Connectivity Check Task
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 61477 ; free virtual = 69637
+Phase 9.2 Verifying Netlist Connectivity | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+Phase 9 Finalization | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:01 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+Opt_design Change Summary
+=========================
+
+
+-------------------------------------------------------------------------------------------------------------------------
+|  Phase                        |  #Cells created  |  #Cells Removed  |  #Constrained objects preventing optimizations  |
+-------------------------------------------------------------------------------------------------------------------------
+|  Retarget                     |              28  |              32  |                                              0  |
+|  Constant propagation         |               6  |              12  |                                              0  |
+|  Sweep                        |               0  |               0  |                                            770  |
+|  BUFG optimization            |               0  |               0  |                                              0  |
+|  Shift Register Optimization  |               0  |               0  |                                              0  |
+|  Post Processing Netlist      |               0  |               0  |                                             34  |
+-------------------------------------------------------------------------------------------------------------------------
+
+
+Ending Logic Optimization Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3060.410 ; gain = 58.996 ; free physical = 61477 ; free virtual = 69637
+
+Starting Power Optimization Task
+INFO: [Pwropt 34-132] Skipping clock gating for clocks with a period < 2.00 ns.
+Ending Power Optimization Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 61478 ; free virtual = 69637
+
+Starting Final Cleanup Task
+Ending Final Cleanup Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 61478 ; free virtual = 69637
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 61478 ; free virtual = 69637
+INFO: [Common 17-83] Releasing license: Implementation
+34 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+opt_design completed successfully
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[103]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[67]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[68]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[69]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[70]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[71]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[72]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[73]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[74]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[75]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[76]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[77]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[78]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[79]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[80]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[81]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[82]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[83]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[84]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[85]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[86]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[87]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[94]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[95]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[96]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[97]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[98]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[99]}'.
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.07 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 62001 ; free virtual = 70202
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.1/u2_readselect_boundary/optimized_0.dcp' has been generated.
+Command: open_checkpoint build/v4.1/u2_readselect/post_synth.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 62020 ; free virtual = 70227
+Netlist sorting complete. Time (s): cpu = 00:00:00.16 ; elapsed = 00:00:00.17 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 62035 ; free virtual = 70243
+INFO: [Netlist 29-17] Analyzing 2036 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 62056 ; free virtual = 70263
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3060.410 ; gain = 0.000 ; free physical = 62079 ; free virtual = 70293
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 1027 instances were transformed.
+  RAM128X1S => RAM128X1S (MUXF7, RAMS64E(x2)): 128 instances
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 215 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+  RAM64X1S => RAM64X1S (RAMS64E): 256 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:07 ; elapsed = 00:00:07 . Memory (MB): peak = 3060.445 ; gain = 0.035 ; free physical = 62079 ; free virtual = 70292
+Command: opt_design
+Attempting to get a license for feature 'Implementation' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Implementation' and/or device 'xc7a200t'
+Running DRC as a precondition to command opt_design
+
+Starting DRC Task
+INFO: [DRC 23-27] Running DRC with 4 threads
+WARNING: [DRC 23-814] Not all possible (connectivity based) DRCs may have been run because this design is seen as Out of Context.
+INFO: [Project 1-461] DRC finished with 0 Errors
+INFO: [Project 1-462] Please refer to the DRC report (report_drc) for more information.
+
+Time (s): cpu = 00:00:00.33 ; elapsed = 00:00:00.14 . Memory (MB): peak = 3060.445 ; gain = 0.000 ; free physical = 62079 ; free virtual = 70292
+
+Starting Cache Timing Information Task
+Ending Cache Timing Information Task | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3060.445 ; gain = 0.000 ; free physical = 62079 ; free virtual = 70292
+
+Starting Logic Optimization Task
+
+Phase 1 Initialization
+
+Phase 1.1 Core Generation And Design Setup
+Phase 1.1 Core Generation And Design Setup | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61974 ; free virtual = 70188
+
+Phase 1.2 Setup Constraints And Sort Netlist
+Phase 1.2 Setup Constraints And Sort Netlist | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61974 ; free virtual = 70187
+Phase 1 Initialization | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.04 ; elapsed = 00:00:00.04 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61973 ; free virtual = 70187
+
+Phase 2 Timer Update And Timing Data Collection
+
+Phase 2.1 Detect if minReqCache needed
+Phase 2.1 Detect if minReqCache needed | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.1 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61965 ; free virtual = 70179
+
+Phase 2.2 Timer Update
+Phase 2.2 Timer Update | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.12 ; elapsed = 00:00:00.13 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61965 ; free virtual = 70179
+Phase 2 Timer Update And Timing Data Collection | Checksum: 35e7f4c13
+
+Time (s): cpu = 00:00:00.13 ; elapsed = 00:00:00.13 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61965 ; free virtual = 70179
+
+Phase 3 Retarget
+INFO: [Opt 31-1851] Number of loadless carry chains removed were: 0
+INFO: [Opt 31-1834] Total Chains To Be Transformed Were: 0 AND Number of Transformed insts Created are: 0
+INFO: [Opt 31-1566] Pulled 3 inverters resulting in an inversion of 70 pins
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+INFO: [Opt 31-49] Retargeted 0 cell(s).
+Phase 3 Retarget | Checksum: 2ab2ee609
+
+Time (s): cpu = 00:00:00.62 ; elapsed = 00:00:00.61 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61976 ; free virtual = 70190
+Retarget | Checksum: 2ab2ee609
+INFO: [Opt 31-389] Phase Retarget created 28 cells and removed 32 cells
+
+Phase 4 Constant propagation
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Phase 4 Constant propagation | Checksum: 2917356e1
+
+Time (s): cpu = 00:00:00.82 ; elapsed = 00:00:00.8 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61974 ; free virtual = 70188
+Constant propagation | Checksum: 2917356e1
+INFO: [Opt 31-389] Phase Constant propagation created 6 cells and removed 12 cells
+
+Phase 5 Sweep
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61951 ; free virtual = 70165
+INFO: [Constraints 18-11670] Building netlist checker database with flags, 0x8
+Done building netlist checker database: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61469 ; free virtual = 69683
+Phase 5 Sweep | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61206 ; free virtual = 69419
+Sweep | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Sweep created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Sweep, 770 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 6 BUFG optimization
+Phase 6 BUFG optimization | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61009 ; free virtual = 69222
+BUFG optimization | Checksum: 24670c8c7
+INFO: [Opt 31-662] Phase BUFG optimization created 0 cells of which 0 are BUFGs and removed 0 cells.
+
+Phase 7 Shift Register Optimization
+INFO: [Opt 31-1064] SRL Remap converted 0 SRLs to 0 registers and converted 0 registers of register chains to 0 SRLs
+Phase 7 Shift Register Optimization | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60922 ; free virtual = 69135
+Shift Register Optimization | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Shift Register Optimization created 0 cells and removed 0 cells
+
+Phase 8 Post Processing Netlist
+Phase 8 Post Processing Netlist | Checksum: 24670c8c7
+
+Time (s): cpu = 00:00:01 ; elapsed = 00:00:01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60701 ; free virtual = 68915
+Post Processing Netlist | Checksum: 24670c8c7
+INFO: [Opt 31-389] Phase Post Processing Netlist created 0 cells and removed 0 cells
+INFO: [Opt 31-1021] In phase Post Processing Netlist, 34 netlist objects are constrained preventing optimization. Please run opt_design with -debug_log to get more detail. 
+
+Phase 9 Finalization
+
+Phase 9.1 Finalizing Design Cores and Updating Shapes
+Phase 9.1 Finalizing Design Cores and Updating Shapes | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+
+Phase 9.2 Verifying Netlist Connectivity
+
+Starting Connectivity Check Task
+
+Time (s): cpu = 00:00:00.07 ; elapsed = 00:00:00.07 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+Phase 9.2 Verifying Netlist Connectivity | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+Phase 9 Finalization | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+Opt_design Change Summary
+=========================
+
+
+-------------------------------------------------------------------------------------------------------------------------
+|  Phase                        |  #Cells created  |  #Cells Removed  |  #Constrained objects preventing optimizations  |
+-------------------------------------------------------------------------------------------------------------------------
+|  Retarget                     |              28  |              32  |                                              0  |
+|  Constant propagation         |               6  |              12  |                                              0  |
+|  Sweep                        |               0  |               0  |                                            770  |
+|  BUFG optimization            |               0  |               0  |                                              0  |
+|  Shift Register Optimization  |               0  |               0  |                                              0  |
+|  Post Processing Netlist      |               0  |               0  |                                             34  |
+-------------------------------------------------------------------------------------------------------------------------
+
+
+Ending Logic Optimization Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+
+Starting Power Optimization Task
+INFO: [Pwropt 34-132] Skipping clock gating for clocks with a period < 2.00 ns.
+Ending Power Optimization Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+
+Starting Final Cleanup Task
+Ending Final Cleanup Task | Checksum: 30a57bf2f
+
+Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 60441 ; free virtual = 68654
+INFO: [Common 17-83] Releasing license: Implementation
+33 Infos, 1 Warnings, 0 Critical Warnings and 0 Errors encountered.
+opt_design completed successfully
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[100]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[101]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[102]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[103]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[64]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[65]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[66]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[67]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[68]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[69]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[70]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[71]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[72]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[73]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[74]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[75]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[76]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[77]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[78]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[79]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[80]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[81]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[82]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[83]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[84]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[85]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[86]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[87]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[94]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[95]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[96]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[97]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[98]}'.
+WARNING: [Vivado 12-508] No pins matched 'get_pins -of_objects {descriptor_data[99]}'.
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.08 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3210.223 ; gain = 0.000 ; free physical = 61332 ; free virtual = 69588
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.1/u2_readselect_boundary/optimized_1.dcp' has been generated.
+# set first [lindex [exec sha256sum [file join $out structure_0.txt]] 0]
+# set second [lindex [exec sha256sum [file join $out structure_1.txt]] 0]
+# if {$first ne $second} {error "ROM initialization affected common optimization"}
+# puts "ROM_BOUNDARY_PASS hardware_sha256=$first"
+ROM_BOUNDARY_PASS hardware_sha256=952d7a3f0e2bff38b569ceea4add82fa1fd6b6b72bb8d96f4c8e20b18d265dbb
+INFO: [Common 17-206] Exiting Vivado at Thu Sep 24 21:40:29 2026...

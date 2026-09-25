@@ -387,7 +387,11 @@ class Job:
 
 class Machine:
     def __init__(self, image: Image, job: Job,
-                 observe: Callable[[int, bytes, bytes], None] | None = None):
+                 observe: Callable[[int, bytes, bytes], None] | None = None,
+                 *, index_policy: str = "guarded"):
+        if index_policy not in ("guarded", "fixed_q_no_guard"):
+            raise ValueError("index policy")
+        self.index_policy = index_policy
         validate(image)
         if any(len(v) != image.n for v in (job.secret, job.prf, job.public, job.random)):
             raise ValueError("job node width")
@@ -535,9 +539,11 @@ class Machine:
             if self.q >= 1024: raise ValueError("index exhausted")
             if not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
                 raise ValueError("authentication cache belongs to another index")
-            if not commit: raise ValueError("state commit required before execution/output")
+            if self.index_policy == "guarded" and not commit:
+                raise ValueError("state commit required before execution/output")
         self.active_q = self.q
-        if sign and self.image.stateful: self.q += 1  # never rolled back
+        if sign and self.image.stateful and self.index_policy == "guarded":
+            self.q += 1  # historical guarded policy: never rolled back
         if not sign:
             self.cache_valid = False
             self.cache.clear()

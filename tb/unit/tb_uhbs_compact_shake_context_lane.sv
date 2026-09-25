@@ -24,6 +24,8 @@ module tb_uhbs_compact_shake_context_lane;
     logic block_last = 1'b0;
     wire response_valid;
     wire [271:0] response_digest;
+    wire chain_feedback_valid;
+    wire [3:0] chain_feedback_counter;
     wire finish_valid;
     wire [271:0] finish_digest;
     wire [127:0] capture_digest;

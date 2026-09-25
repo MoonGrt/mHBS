@@ -12,8 +12,8 @@ module uhbs_hbs #(
     input wire [127:0] program_data, template_data,
     input wire [5:0] program_count,
     input wire [6:0] template_count,
-    output wire [55:0] descriptor_addresses,
-    input wire [511:0] descriptor_data,
+    output wire [13:0] descriptor_addresses,
+    input wire [127:0] descriptor_data,
     input wire clk, rst_n,
     input wire job_valid, output wire job_ready, input wire job_operation,
     input wire [6:0] job_message_length, input wire [10:0] job_initial_q,
@@ -21,8 +21,6 @@ module uhbs_hbs #(
     input wire [127:0] job_identifier,
     input wire message_valid, output wire message_ready,
     input wire [63:0] message_data,
-    output wire state_commit_valid, input wire state_commit_ready,
-    output wire [10:0] state_next_q,
     output wire out_valid, input wire out_ready, output wire [63:0] out_data,
     output wire [7:0] out_keep, output wire out_last,
     output wire busy, output logic done, error, output logic [15:0] error_code,
@@ -32,7 +30,8 @@ module uhbs_hbs #(
 );
     localparam integer N=32, W=256, V=392, INDEX_BITS=8, MAX_MESSAGE_BYTES=87;
     localparam integer DIGEST_BYTES=49, FORS_INDEX_BITS=9;
-    wire [5:0] node_bytes=profile_descriptor[53:48];
+    wire [5:0] node_bytes=profile_descriptor[53:48]==16 ? 6'd16
+        : profile_descriptor[53:48]==24 ? 6'd24 : 6'd32;
     wire STATEFUL=profile_descriptor[59];
     wire [3:0] OMEGA=profile_descriptor[47:44], FORS_A=profile_descriptor[39:36];
     wire [3:0] HP=profile_descriptor[43:40];
@@ -41,12 +40,18 @@ module uhbs_hbs #(
     wire [5:0] FORS_BYTES=node_bytes==16 ? 25 : node_bytes==24 ? 33 : 40;
     localparam integer TREE_BYTES=8;
     wire [63:0] descriptors [0:7];
-    genvar descriptor_port;
-    generate for(descriptor_port=0;descriptor_port<8;descriptor_port=descriptor_port+1) begin: descriptor_bus
-        assign descriptors[descriptor_port]=descriptor_data[descriptor_port*64 +:64];
-    end endgenerate
+    // Two reads are sufficient: request recipe plus chain-step recipe.
+    // Macro and tree/chain descriptors are already latched in setup states.
+    assign descriptors[0]=descriptor_data[63:0];
+    assign descriptors[1]=descriptor_data[127:64];
+    assign descriptors[2]=64'd0;
+    assign descriptors[3]=descriptor_data[63:0];
+    assign descriptors[4]=descriptor_data[63:0];
+    assign descriptors[5]=descriptor_data[127:64];
+    assign descriptors[6]=descriptor_data[63:0];
+    assign descriptors[7]=descriptor_data[63:0];
     typedef enum logic [5:0] {
-        IDLE, MESSAGE, RESERVE, LAUNCH, FETCH, DECODE,
+        IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
         TREE_INIT, CHAIN_SETUP, CHAIN_STORE, CHAIN_OUTPUT0, CHAIN_OUTPUT1,
         CHAIN_NEXT, REDUCE_SETUP, REDUCE_STORE, LEAF_SETUP, LEAF_DONE,
         PUSH_NODE, PARENT_SETUP, PARENT_DONE, AUTH_OUTPUT, TREE_FINISH,
@@ -55,8 +60,19 @@ module uhbs_hbs #(
         SIGN_RUN, SIGN_EMIT, SIGN_EMIT_NEXT
     } state_t;
     state_t state, hash_return, output_return;
-    // Abort outstanding execution on an error; keep the index guard alive so
-    // a committed q remains burned when Keygen is retried.
+    // Registered memory ownership follows every macro-internal transition.
+    // Address selection therefore does not decode the controller state before
+    // reading distributed RAM. Dynamic return states use the same helper.
+    (* keep="true" *) logic endpoint_sign_read, endpoint_reduce_read;
+    task automatic enter_state(input state_t next_state);
+        begin
+            state<=next_state;
+            endpoint_sign_read<=next_state==SIGN_EMIT;
+            endpoint_reduce_read<=next_state==REDUCE_SETUP;
+        end
+    endtask
+    // Abort outstanding execution on an error. The autonomous wrapper halts
+    // until reset; this benchmark does not track index consumption.
     // The main controller uses return-state registers and need not synthesize
     // as a one-hot FSM. Never drive asynchronous reset from its binary decode.
     (* dont_touch="yes" *) logic abort_execution;
@@ -79,7 +95,7 @@ module uhbs_hbs #(
     logic [3:0] macro_op, macro_flags;
     logic [7:0] macro_desc, macro_route;
     logic [63:0] saved_descriptor, saved_chain_descriptor;
-    wire [63:0] descriptor = state==DECODE ? descriptors[0] : saved_descriptor;
+    wire [63:0] descriptor = saved_descriptor;
     wire [63:0] route_descriptor = descriptors[1];
 
     logic seq_start, seq_complete;
@@ -99,25 +115,6 @@ module uhbs_hbs #(
         .program_counter(), .pending_events(), .retired_words(), .retired_tokens()
     );
 
-    wire guard_grant, guard_error, guard_initialized;
-    wire [9:0] guard_q;
-    wire [10:0] guard_current_q;
-    wire [15:0] guard_error_code;
-    logic reservation_issued;
-    // Cache invalidation must never make a committed index reusable.
-    logic index_started;
-    generate begin: g_guard
-        uhbs_stateful_index_guard guard (
-            .clk, .rst_n, .initialize_valid(STATEFUL && state==FINISH && !operation), .initialize_ready(),
-            .initial_q({1'b0,active_q}), .invalidate(state==FAILED),
-            .sign_valid(STATEFUL && state==RESERVE && !reservation_issued), .sign_ready(),
-            .sign_grant(guard_grant), .sign_q(guard_q),
-            .state_commit_valid, .state_commit_ready, .state_next_q,
-            .initialized(guard_initialized), .current_q(guard_current_q),
-            .error(guard_error), .error_code(guard_error_code)
-        );
-    end endgenerate
-
     logic [7:0] chain_id, parent_id;
     wire [63:0] chain_descriptor = saved_chain_descriptor;
     logic standalone_chain, fors_pair_pending;
@@ -132,11 +129,12 @@ module uhbs_hbs #(
     (* ram_style="distributed" *) logic [255:0] auth_path [0:15];
 
     logic [7:0] hash_recipe_id;
-    assign descriptor_addresses={parent_id[6:0],descriptor[58:52],chain_descriptor[50:44],hash_recipe_id[6:0],
-        7'(emit_base+emit_cursor),chain_id[6:0],macro_route[6:0],macro_desc[6:0]};
+    assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[50:44] : macro_route[6:0],hash_recipe_id[6:0]};
     always @* begin
         hash_recipe_id=macro_desc;
         case(state)
+            TREE_INIT: hash_recipe_id={1'b0,saved_descriptor[58:52]};
+            EMIT: hash_recipe_id=emit_base+emit_cursor;
             CHAIN_SETUP: hash_recipe_id=chain_descriptor[59:52];
             REDUCE_SETUP: hash_recipe_id=chain_descriptor[43:36];
             LEAF_SETUP: hash_recipe_id=chain_descriptor[35:28];
@@ -173,7 +171,7 @@ module uhbs_hbs #(
     wire list_roots = !STATEFUL && task_list_roots;
     wire [255:0] root_value0, root_value1;
     wire [INDEX_BITS-1:0] root_read0 = lane_list0[0], root_read1 = lane_list1[0];
-    uhbs_value_store #(.WIDTH(W),.DEPTH(256),.ADDRESS_BITS(INDEX_BITS)) endpoints (
+    uhbs_value_store #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS)) endpoints (
         .clk, .write0(endpoint_write0), .write1(endpoint_write1),
         .address0(endpoint_address0), .address1(endpoint_address1),
         .data0(endpoint_data0), .data1(endpoint_data1),
@@ -181,10 +179,10 @@ module uhbs_hbs #(
         .value0(endpoint_value0), .value1(endpoint_value1)
     );
     generate begin: g_roots
-    uhbs_value_store #(.WIDTH(W),.DEPTH(64),.ADDRESS_BITS(INDEX_BITS)) roots (
-        .clk, .write0(state==ROUTE && macro_route!=0 && route_descriptor[53]), .write1(1'b0),
-        .address0(INDEX_BITS'(group_index)), .address1({INDEX_BITS{1'b0}}), .data0(route_value[W-1:0]), .data1({W{1'b0}}),
-        .read0(root_read0), .read1(root_read1), .value0(root_value0), .value1(root_value1)
+    uhbs_root_store roots (
+        .clk, .write(state==ROUTE && macro_route!=0 && route_descriptor[53]),
+        .address(group_index), .data(route_value[W-1:0]),
+        .read0(root_read0[5:0]), .read1(root_read1[5:0]), .value0(root_value0), .value1(root_value1)
     );
     end endgenerate
     genvar physical;
@@ -231,7 +229,7 @@ module uhbs_hbs #(
     assign pack_ready=out_ready;
     assign pack_idle=1'b1;
     assign out_valid=state==OUTPUT_CHUNK;
-    assign out_data=emit_value >> (emit_offset*8);
+    assign out_data=emit_value[{emit_offset[4:3],6'b0} +:64];
     assign out_keep=8'hff >> (8-emit_chunk_bytes);
     assign out_last=emitted+emit_chunk_bytes==output_bytes;
     assign job_ready=state==IDLE;
@@ -296,23 +294,23 @@ module uhbs_hbs #(
         end
     endfunction
     task automatic fail(input [15:0] code);
-        begin error<=1; error_code<=code; tree_cache_valid<=0; abort_execution<=1; state<=FAILED; end
+        begin error<=1; error_code<=code; tree_cache_valid<=0; abort_execution<=1; enter_state(FAILED); end
     endtask
     task automatic complete_macro;
-        begin seq_complete<=1; state<=FETCH; end
+        begin seq_complete<=1; enter_state(FETCH); end
     endtask
     task automatic route_result(input [V-1:0] v);
-        begin route_value<=v; state<=ROUTE; end
+        begin route_value<=v; enter_state(ROUTE); end
     endtask
     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
-        begin emit_value<=v; emit_length<=length; emit_offset<=0; output_return<=ret; state<=OUTPUT_CHUNK; end
+        begin emit_value<=v; emit_length<=length; emit_offset<=0; output_return<=ret; enter_state(OUTPUT_CHUNK); end
     endtask
-    task automatic start_hash(input [7:0] rid, input [1:0] mask, input state_t ret);
+    task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
         begin
-            task_recipe<=descriptors[4]; active_mask<=mask;
-            task_list_roots<=!STATEFUL && descriptors[4][59:56]==12 && descriptors[4][55:48]==4;
+            task_recipe<=selected_recipe; active_mask<=mask;
+            task_list_roots<=!STATEFUL && selected_recipe[59:56]==12 && selected_recipe[55:48]==4;
             launch_pending<=mask; response_pending<=mask;
-            hash_return<=ret; state<=HASH_ISSUE;
+            hash_return<=ret; enter_state(HASH_ISSUE);
         end
     endtask
 
@@ -332,10 +330,10 @@ module uhbs_hbs #(
             endpoint_address0=task_a[0];endpoint_address1=task_a[1];
             endpoint_data0=lane_value[0][W-1:0];endpoint_data1=lane_value[1][W-1:0];
         end
-        if (state==SIGN_EMIT) begin
+        if (endpoint_sign_read) begin
             endpoint_read0=chain_cursor;endpoint_read1=chain_cursor+1'b1;
         end
-        if (state==REDUCE_SETUP) begin
+        if (endpoint_reduce_read) begin
             endpoint_read0=reduction_cursor*2; endpoint_read1=reduction_cursor*2+1;
             if (reduction_cursor*2+1>=reduction_count) begin
                 endpoint_write0=1; endpoint_address0=reduction_cursor;
@@ -374,7 +372,7 @@ module uhbs_hbs #(
 
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state<=IDLE; done<=0; error<=0; error_code<=0; cycles<=0;
+            enter_state(IDLE); done<=0; error<=0; error_code<=0; cycles<=0;
             abort_execution<=0;
             tree_cache_valid<=0; seq_start<=0; seq_complete<=0;
             operation<=0; scalar_tree<=0; scalar_leaf<=0; active_q<=0; cache_q<=0;
@@ -383,7 +381,7 @@ module uhbs_hbs #(
             task_chain<=0; task_capture0<=0; task_capture1<=0;
             hash_base<=0; permutation_base<=0; emitted<=0; layer<=0;
             task_recipe<=0; task_step<=0; task_list_roots<=0; message_received<=0;
-            reservation_issued<=0; index_started<=0; fors_pair_pending<=0;
+            fors_pair_pending<=0;
             for(i=0;i<2;i=i+1) begin
                 task_steps[i]<=0; task_capture_after[i]<=0;
                 task_leaf[i]<=0; task_a[i]<=0; task_b[i]<=0;
@@ -392,7 +390,6 @@ module uhbs_hbs #(
             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
             if(state!=IDLE && state!=FAILED) cycles<=cycles+1;
             if(seq_error && state!=IDLE && state!=FAILED) fail({8'h31,seq_error_code});
-            else if(STATEFUL && guard_error && state==RESERVE) fail(guard_error_code);
             else case(state)
                 IDLE: if(job_valid) begin
                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
@@ -400,19 +397,18 @@ module uhbs_hbs #(
                     scalar_tree<=0; scalar_leaf<=0; layer<=0; group_index<=0;
                     emitted<=0; output_bytes<=job_operation ? image_header[17:0] : image_header[35:18];
                     hash_base<=total_hashes; permutation_base<=total_permutations;
-                    reservation_issued<=0;
                     if(image_header[63:56]!=8'ha4) fail(16'h3001);
+                    else if(STATEFUL && job_initial_q>=1024) fail(16'h3004);
                     else if(job_operation) begin
                         if(job_message_length==0 || job_message_length>MAX_MESSAGE_BYTES) fail(16'h3002);
-                        else if(STATEFUL && (!tree_cache_valid || guard_current_q!=cache_q)) fail(16'h3003);
+                        else if(STATEFUL && (!tree_cache_valid || job_initial_q[9:0]!=cache_q)) fail(16'h3003);
                         else begin
-                            active_q<=guard_current_q[9:0]; state<=MESSAGE;
+                            active_q<=job_initial_q[9:0]; enter_state(MESSAGE);
                         end
                     end else begin
                         tree_cache_valid<=0;
-                        active_q<=STATEFUL && index_started ? guard_current_q[9:0] : job_initial_q[9:0];
-                        if(STATEFUL && (job_initial_q>=1024 || (index_started && guard_current_q>=1024))) fail(16'h3004);
-                        else state<=LAUNCH;
+                        active_q<=job_initial_q[9:0];
+                        enter_state(LAUNCH);
                     end
                 end
                 MESSAGE: if(message_valid) begin
@@ -420,47 +416,43 @@ module uhbs_hbs #(
                     // eight-byte beats; its last word is already zero padded.
                     message_buffer[{message_received[6:3],6'b0} +:64]<=message_data;
                     message_received<=message_received+7'd8;
-                    if(message_received+7'd8>=message_length) state<=STATEFUL ? RESERVE : LAUNCH;
+                    if(message_received+7'd8>=message_length) enter_state(LAUNCH);
                 end
-                RESERVE: begin
-                    reservation_issued<=1;
-                    if(guard_grant) begin active_q<=guard_q; state<=LAUNCH; end
-                end
-                LAUNCH: if(seq_ready) begin seq_start<=1; state<=FETCH; end
+                LAUNCH: if(seq_ready) begin seq_start<=1; enter_state(FETCH); end
                 FETCH: begin
                     if(seq_done) begin
                         if(emitted!=output_bytes) fail(16'h3005);
-                        else state<=DRAIN;
+                        else enter_state(DRAIN);
                     end else if(cmd_valid) begin
                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
                         task_chain<=0; task_capture0<=0; task_capture1<=0;
                         task_steps[0]<=0; task_steps[1]<=0;
                         if(cmd[43:36]>=128 || cmd[35:28]>=128 || cmd1_valid) fail(16'h3006);
-                        else state<=DECODE;
+                        else enter_state(LOAD_DESCRIPTOR);
                     end
                 end
+                LOAD_DESCRIPTOR: begin saved_descriptor<=descriptors[0];enter_state(DECODE);end
                 DECODE: begin
-                    saved_descriptor<=descriptors[0];
                     case(macro_op)
                     1: if(descriptor[63:60]!=1) fail(16'h3006);
                        else begin
                            task_leaf[0]<=STATEFUL ? active_q : scalar_leaf;
                            task_a[0]<=0; task_b[0]<=0;
-                           start_hash(macro_desc,2'b01,HASH_RESULT);
+                           start_hash(saved_descriptor,2'b01,HASH_RESULT);
                        end
                     2: if(descriptor[63:60]!=4) fail(16'h3006);
                        else begin
                            chain_id<=macro_desc; standalone_chain<=1; indexing<=0;
                            leaf_cursor<=active_q; target<=active_q; chain_cursor<=0;
-                           endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor; state<=CHAIN_SETUP;
+                           endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor; enter_state(CHAIN_SETUP);
                        end
                     3: if(descriptor[63:60]!=5 || descriptor[43:40]>10 || descriptor[29]) fail(16'h3006);
-                       else state<=TREE_INIT;
+                       else enter_state(TREE_INIT);
                     4: if(descriptor[63:60]!=8) fail(16'h3006);
-                       else begin checksum<=0; transform_index<=0; state<=TRANSFORM; end
+                       else begin checksum<=0; transform_index<=0; enter_state(TRANSFORM); end
                     5: if(descriptor[63:60]!=9) fail(16'h3006);
-                       else begin emit_base<=descriptor[59:52]; emit_count<=descriptor[51:48]; emit_cursor<=0; state<=EMIT; end
+                       else begin emit_base<=descriptor[59:52]; emit_count<=descriptor[51:48]; emit_cursor<=0; enter_state(EMIT); end
                     default: fail(16'h3006);
                 endcase
                 end
@@ -475,8 +467,8 @@ module uhbs_hbs #(
                     endpoint_count<=descriptors[6][27:20];
                     if(descriptor[30]) begin
                         if(!tree_cache_valid || active_q!=cache_q) fail(16'h3003);
-                        else state<=AUTH_OUTPUT;
-                    end else state<=CHAIN_SETUP;
+                        else enter_state(AUTH_OUTPUT);
+                    end else enter_state(CHAIN_SETUP);
                 end
                 CHAIN_SETUP: begin
                     task_chain<=1; task_step<=descriptors[5];
@@ -495,8 +487,8 @@ module uhbs_hbs #(
                         task_capture0<=0;task_capture1<=0;
                         launch_pending<=LANES==2 && endpoint_count>1 ? 2'b11 : 2'b01;
                         sign_lane_done<=LANES==2 && endpoint_count>1 ? 2'b00 : 2'b10;
-                        state<=SIGN_RUN;
-                    end else start_hash(chain_descriptor[59:52],LANES==2 && (indexing==1 || chain_cursor+1<endpoint_count) ? 2'b11 : 2'b01,CHAIN_STORE);
+                        enter_state(SIGN_RUN);
+                    end else start_hash(descriptors[4],LANES==2 && (indexing==1 || chain_cursor+1<endpoint_count) ? 2'b11 : 2'b01,CHAIN_STORE);
                 end
                 SIGN_RUN: begin
                     for(i=0;i<LANES;i=i+1) begin
@@ -510,82 +502,82 @@ module uhbs_hbs #(
                         end
                     end
                     if(|(lane_error & lane_valid)) fail(16'h3007);
-                    else if(&sign_lane_done) begin task_chain<=0;chain_cursor<=0;state<=SIGN_EMIT;end
+                    else if(&sign_lane_done) begin task_chain<=0;chain_cursor<=0;enter_state(SIGN_EMIT);end
                 end
                 SIGN_EMIT: start_output(endpoint_value0,node_bytes,SIGN_EMIT_NEXT);
                 SIGN_EMIT_NEXT: begin
-                    if(chain_cursor+1<endpoint_count) begin chain_cursor<=chain_cursor+1'b1;state<=SIGN_EMIT;end
+                    if(chain_cursor+1<endpoint_count) begin chain_cursor<=chain_cursor+1'b1;enter_state(SIGN_EMIT);end
                     else complete_macro();
                 end
                 CHAIN_STORE: begin
                     task_chain<=0;
-                    if(macro_flags[2] || (macro_flags[0] && (leaf_cursor==target || (indexing==1 && LANES==2 && leaf_cursor+1==target)))) state<=CHAIN_OUTPUT0;
-                    else state<=CHAIN_NEXT;
+                    if(macro_flags[2] || (macro_flags[0] && (leaf_cursor==target || (indexing==1 && LANES==2 && leaf_cursor+1==target)))) enter_state(CHAIN_OUTPUT0);
+                    else enter_state(CHAIN_NEXT);
                 end
                 CHAIN_OUTPUT0: start_output(macro_flags[2] ? result[0][W-1:0]
                     : indexing==1 && LANES==2 && target[0] ? capture[1] : capture[0],node_bytes,
                     active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
                 CHAIN_OUTPUT1: start_output(macro_flags[2] ? result[1][W-1:0] : capture[1],node_bytes,CHAIN_NEXT);
                 CHAIN_NEXT: begin
-                    if(chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; state<=CHAIN_SETUP; end
+                    if(chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
                     else if(standalone_chain) complete_macro();
                     else if(macro_flags[3] && leaf_cursor==target) begin
-                        node_value<=0; node_level<=0; node_index<=leaf_cursor; state<=PUSH_NODE;
+                        node_value<=0; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
                     end else if(chain_descriptor[13:12]==0) begin
                         fors_pair_pending<=indexing==1 && active_mask[1];
-                        node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; state<=PUSH_NODE;
+                        node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
                     end else begin
                         reduction_count<=endpoint_count; reduction_cursor<=0; reduction_level<=0;
-                        state<=REDUCE_SETUP;
+                        enter_state(REDUCE_SETUP);
                     end
                 end
                 REDUCE_SETUP: begin
                     task_chain<=0; task_capture0<=0; task_capture1<=0; task_steps[0]<=0;
                     task_leaf[0]<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
-                    if(chain_descriptor[13:12]==1) start_hash(chain_descriptor[43:36],2'b01,LEAF_SETUP);
+                    if(chain_descriptor[13:12]==1) start_hash(descriptors[4],2'b01,LEAF_SETUP);
                     else if(reduction_cursor*2+1>=reduction_count) begin
                         reduction_count<=(reduction_count+1)>>1; reduction_cursor<=0;
                         reduction_level<=reduction_level+1'b1;
                     end else begin
                         task_a[0]<=reduction_level; task_b[0]<=reduction_cursor;
                         task_left[0]<=endpoint_value0; task_right[0]<=endpoint_value1;
-                        start_hash(chain_descriptor[43:36],2'b01,REDUCE_STORE);
+                        start_hash(descriptors[4],2'b01,REDUCE_STORE);
                     end
                 end
                 REDUCE_STORE: begin
-                    if(reduction_count==2) state<=LEAF_SETUP;
+                    if(reduction_count==2) enter_state(LEAF_SETUP);
                     else if((reduction_cursor+1)*2<reduction_count) begin
-                        reduction_cursor<=reduction_cursor+1'b1; state<=REDUCE_SETUP;
+                        reduction_cursor<=reduction_cursor+1'b1; enter_state(REDUCE_SETUP);
                     end else begin
                         reduction_count<=(reduction_count+1)>>1; reduction_cursor<=0;
-                        reduction_level<=reduction_level+1'b1; state<=REDUCE_SETUP;
+                        reduction_level<=reduction_level+1'b1; enter_state(REDUCE_SETUP);
                     end
                 end
                 LEAF_SETUP: begin
                     if(chain_descriptor[35:28]!=0) begin
                         task_left[0]<=result[0][W-1:0]; task_b[0]<=(1<<tree_height)+leaf_cursor;
-                        start_hash(chain_descriptor[35:28],2'b01,LEAF_DONE);
-                    end else begin node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; state<=PUSH_NODE; end
+                        start_hash(descriptors[4],2'b01,LEAF_DONE);
+                    end else begin node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE); end
                 end
-                LEAF_DONE: begin node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; state<=PUSH_NODE; end
+                LEAF_DONE: begin node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE); end
                 PUSH_NODE: begin
                     if(node_level==tree_height) begin
                         if(cache_build) begin tree_cache_valid<=1; cache_q<=active_q; end
                         auth_level<=0;
-                        if(macro_flags[1]) state<=AUTH_OUTPUT;
-                        else state<=TREE_FINISH;
-                    end else if(node_index[0]) state<=PARENT_SETUP;
+                        if(macro_flags[1]) enter_state(AUTH_OUTPUT);
+                        else enter_state(TREE_FINISH);
+                    end else if(node_index[0]) enter_state(PARENT_SETUP);
                     else if(fors_pair_pending) begin
                         node_value<=result[1][W-1:0]; node_level<=0;
                         node_index<=leaf_cursor+1'b1; leaf_cursor<=leaf_cursor+1'b1;
                         fors_pair_pending<=0;
                     end else begin
-                        leaf_cursor<=leaf_cursor+1'b1; chain_cursor<=0; state<=CHAIN_SETUP;
+                        leaf_cursor<=leaf_cursor+1'b1; chain_cursor<=0; enter_state(CHAIN_SETUP);
                     end
                 end
                 PARENT_SETUP: begin
                     if(macro_flags[3] && (node_index>>1)==(target>>(node_level+1))) begin
-                        node_value<=0; node_index<=node_index>>1; node_level<=node_level+1'b1; state<=PUSH_NODE;
+                        node_value<=0; node_index<=node_index>>1; node_level<=node_level+1'b1; enter_state(PUSH_NODE);
                     end else begin
                         task_chain<=0; task_capture0<=0; task_capture1<=0; task_steps[0]<=0;
                         task_leaf[0]<=indexing==1 ? scalar_leaf : 0;
@@ -593,22 +585,22 @@ module uhbs_hbs #(
                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
                         task_left[0]<=stack[node_level]; task_right[0]<=node_value;
-                        start_hash(parent_id,2'b01,PARENT_DONE);
+                        start_hash(descriptors[4],2'b01,PARENT_DONE);
                     end
                 end
                 PARENT_DONE: begin
-                    node_value<=result[0][W-1:0]; node_index<=node_index>>1; node_level<=node_level+1'b1; state<=PUSH_NODE;
+                    node_value<=result[0][W-1:0]; node_index<=node_index>>1; node_level<=node_level+1'b1; enter_state(PUSH_NODE);
                 end
                 AUTH_OUTPUT: begin
                     if(auth_level<tree_height) begin
                         start_output(auth_path[auth_level],node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
                     end else if(descriptor[30]) complete_macro();
-                    else state<=TREE_FINISH;
+                    else enter_state(TREE_FINISH);
                 end
                 TREE_FINISH: route_result(macro_flags[3] ? value[3] : {{(V-W){1'b0}},node_value});
                 HASH_ISSUE: begin
                     launch_pending<=launch_pending & ~lane_ready;
-                    if((launch_pending & ~lane_ready)==0) state<=HASH_WAIT;
+                    if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
                 end
                 HASH_WAIT: begin
                     for(i=0;i<2;i=i+1) if(response_pending[i] && lane_valid[i]) begin
@@ -616,7 +608,7 @@ module uhbs_hbs #(
                     end
                     response_pending<=response_pending & ~lane_valid;
                     if((lane_error & response_pending & lane_valid)!=0) fail(16'h3007);
-                    else if((response_pending & ~lane_valid)==0) state<=hash_return;
+                    else if((response_pending & ~lane_valid)==0) enter_state(hash_return);
                 end
                 HASH_RESULT: route_result(result[0]);
                 ROUTE: begin
@@ -629,7 +621,7 @@ module uhbs_hbs #(
                             scalar_leaf <= node_bytes==16 ? {7'b0,route_value[264 +:3]} : node_bytes==24 ? {7'b0,route_value[328 +:3]} : {6'b0,route_value[384 +:4]};
                         end
                         if(route_descriptor[55]) start_output(route_value[W-1:0],node_bytes,FETCH);
-                        else state<=FETCH;
+                        else enter_state(FETCH);
                         seq_complete<=1;
                     end
                 end
@@ -648,20 +640,19 @@ module uhbs_hbs #(
                     else start_output(emit_source,emit_descriptor[53:48],EMIT_NEXT);
                 end
                 EMIT_NEXT: begin
-                    if(emit_cursor+1<emit_count) begin emit_cursor<=emit_cursor+1'b1; state<=EMIT; end
+                    if(emit_cursor+1<emit_count) begin emit_cursor<=emit_cursor+1'b1; enter_state(EMIT); end
                     else complete_macro();
                 end
                 OUTPUT_CHUNK: if(pack_ready) begin
                     emitted<=emitted+emit_chunk_bytes;
-                    if(emit_remaining<=8) state<=output_return;
+                    if(emit_remaining<=8) enter_state(output_return);
                     else emit_offset<=emit_offset+8;
                 end
-                DRAIN: if(pack_idle) state<=FINISH;
+                DRAIN: if(pack_idle) enter_state(FINISH);
                 FINISH: begin
-                    if(STATEFUL && !operation) index_started<=1;
-                    done<=1; state<=IDLE;
+                    done<=1; enter_state(IDLE);
                 end
-                FAILED: state<=IDLE;
+                FAILED: enter_state(IDLE);
                 default: fail(16'h3006);
             endcase
         end

@@ -1,10 +1,11 @@
 `timescale 1ns/1ps
 module tb_uhbs_value_store;
+    parameter integer DEPTH=136;
     logic clk=0, write0=0, write1=0;
     logic [7:0] address0=0,address1=0,read0=0,read1=1;
     logic [255:0] data0=0,data1=0;
     wire [255:0] value0,value1;
-    uhbs_value_store #(.WIDTH(256),.DEPTH(256),.ADDRESS_BITS(8)) dut(.*);
+    uhbs_value_store #(.WIDTH(256),.DEPTH(DEPTH),.ADDRESS_BITS(8)) dut(.*);
     always #5 clk=~clk;
     task tick;begin @(posedge clk);#1;end endtask
     function automatic [255:0] sample(input integer i);

@@ -10,9 +10,19 @@ set_property HD.CLK_SRC BUFGCTRL_X0Y0 [get_ports clk]
 # OOC internal timing only. rst is synchronized internally; board timing is unspecified.
 set_false_path -from [get_ports rst]
 set_false_path -to [all_outputs]
+# Preserve the ROM boundary while allowing common processor optimization.
+# check_rom_boundary.tcl verifies INIT-independent cells/connectivity.
+set_property DONT_TOUCH false [get_cells processor]
+foreach c [get_cells -hier -filter {REF_NAME == RAM64X1S || REF_NAME == RAM128X1S}] {
+    if {![regexp {^(program|template|descriptor)_rom/} $c]} {continue}
+    set_property DONT_TOUCH true $c
+    set_property DONT_TOUCH true [get_nets -of_objects [get_pins $c/O]]
+}
 opt_design
 place_design -directive Explore
 phys_opt_design -directive AggressiveExplore
+report_timing_summary -delay_type min_max -max_paths 10 -file [file join $outdir post_place_timing.rpt]
+write_checkpoint -force [file join $outdir post_place.dcp]
 route_design -directive Explore
 write_checkpoint -force [file join $outdir post_route.dcp]
 set original_period [get_property PERIOD [get_clocks clk]]

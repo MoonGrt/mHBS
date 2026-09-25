@@ -3,9 +3,13 @@ cd $root
 set tag [lindex $argv 0]
 set lanes [lindex $argv 1]
 set unroll [lindex $argv 2]
-if {![regexp {^[a-zA-Z0-9_.-]+$} $tag] || $lanes ni {1 2} || $unroll ni {1 2 4}} {error "tag lanes unroll"}
-set directive AreaOptimized_high
+if {![regexp {^[a-zA-Z0-9_.-]+$} $tag] || $lanes != 2 || $unroll != 2} {error "tag lanes unroll"}
+set directive Default
 if {$argc>3} {set directive [lindex $argv 3]}
+set flatten rebuilt
+if {$argc>4} {set flatten [lindex $argv 4]}
+if {$flatten ni {none rebuilt}} {error "invalid flatten policy"}
+set started [clock seconds]
 set part xc7a200tffg1156-3
 set outdir [file join $root build v4.1 $tag]
 file mkdir $outdir
@@ -16,7 +20,13 @@ set f [open manifests/unified_sources.txt];set sources [split [string trim [read
 foreach source $sources {
     if {$source ni {rtl/top/uhbs_top.sv rtl/memory/uhbs_image_rom.sv}} {read_verilog -sv $source}
 }
-synth_design -top uhbs_processor -part $part -mode out_of_context -flatten_hierarchy rebuilt -directive $directive -max_dsp 0 -generic LANES=$lanes -generic UNROLL=$unroll
+# Make the internal register timing target visible during synthesis, not
+# only in the linked reporting design. ROM initialization remains opaque.
+set f [open [file join $outdir synth_clock.xdc] w]
+puts $f {create_clock -name clk -period 10.0 [get_ports clk]}
+close $f
+read_xdc [file join $outdir synth_clock.xdc]
+synth_design -top uhbs_processor -part $part -mode out_of_context -flatten_hierarchy $flatten -directive $directive -max_dsp 0 -generic LANES=$lanes -generic UNROLL=$unroll
 write_checkpoint -force [file join $outdir processor.dcp]
 write_edif -force [file join $outdir uhbs_processor.edf]
 write_verilog -force -mode synth_stub [file join $outdir processor_stub.v]
@@ -50,3 +60,11 @@ set f [open [file join $outdir rom_cells.tsv] w]
 foreach c [get_cells -hier -filter {NAME =~ *rom* && IS_PRIMITIVE == 1}] {puts $f "$c\t[get_property REF_NAME $c]\t[get_property INIT $c]"}
 close $f
 puts "COMMON_SYNTH_PASS tag=$tag lanes=$lanes unroll=$unroll"
+
+set f [open [file join $outdir synth_seconds.txt] w]
+puts $f [expr {[clock seconds]-$started}]
+close $f
+
+set f [open [file join $outdir synthesis.json] w]
+puts $f "{\"lanes\":$lanes,\"unroll\":$unroll,\"directive\":\"$directive\",\"flatten_hierarchy\":\"$flatten\",\"synthesis_period_ns\":10.0}"
+close $f

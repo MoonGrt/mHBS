@@ -7,7 +7,7 @@ from model.profiles import PROFILES
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.1'
 def mapping(name):
     result={}
-    for kind,width,depth,ports in [('program',128,64,1),('template',128,64,1),('descriptor',64,128,8)]:
+    for kind,width,depth,ports in [('program',128,64,1),('template',128,64,1),('descriptor',64,128,2)]:
         words=[int(x,16) for x in (BASE/'images'/name/(kind+'.mem')).read_text().split()]
         assert len(words)==depth and all(w.bit_length()<=width for w in words)
         for port in range(ports):

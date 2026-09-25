@@ -5,7 +5,7 @@
 // statically sized chain template.  The two top-level instances remain identical.
 module uhbs_compact_shake_context_lane #(
     parameter integer UNROLL = 2, N = 16, DIGEST_BYTES = 34,
-    parameter bit STREAM_CHAIN_ENABLE = 1
+    parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
 ) (
     input  wire          clk,
     input  wire          rst_n,
@@ -29,6 +29,8 @@ module uhbs_compact_shake_context_lane #(
     input  wire          block_last,
     output logic         response_valid,
     output wire [DIGEST_BYTES*8-1:0]  response_digest,
+    output wire          chain_feedback_valid,
+    output wire [3:0]    chain_feedback_counter,
     output wire          finish_valid,
     output wire [DIGEST_BYTES*8-1:0]  finish_digest,
     output wire [N*8-1:0]  capture_digest,
@@ -179,7 +181,7 @@ module uhbs_compact_shake_context_lane #(
     generate for (round_step = 0; round_step < UNROLL;
                   round_step = round_step + 1) begin : generated_rounds
         localparam logic [4:0] ROUND_OFFSET = round_step;
-        uhbs_keccak round_logic (
+        (* keep_hierarchy="yes" *) uhbs_keccak round_logic (
             .state_in(round_state[round_step]),
             .round_index(round_index + ROUND_OFFSET),
             .state_out(round_state[round_step+1])
@@ -188,7 +190,8 @@ module uhbs_compact_shake_context_lane #(
 
     always_comb begin
         next_chain_state='0;
-        case(node_bytes)
+        if(REUSE_FAST_FEEDBACK) next_chain_state={512'd0,fast_block_data};
+        else case(node_bytes)
             6'd16: begin
         next_chain_state = '0;
         next_chain_state[(16+32)*8-1:0] = active_chain_template[383:0];
@@ -257,6 +260,8 @@ module uhbs_compact_shake_context_lane #(
     wire clear_stream=take_stream && first_block && append_index==0;
     wire take_feedback=lane_state==RUN && round_index+UNROLL>=24
         && saved_chain_enable && chains_remaining>1;
+    assign chain_feedback_valid=REUSE_FAST_FEEDBACK && take_feedback;
+    assign chain_feedback_counter=transition_counter;
     wire take_round=lane_state==RUN && !take_feedback;
     genvar word_index;
     generate for(word_index=0;word_index<25;word_index=word_index+1) begin: state_words
@@ -265,12 +270,21 @@ module uhbs_compact_shake_context_lane #(
         if(word_index<17) assign fast_word=fast_block_data[word_index*64 +:64];
         else assign fast_word=64'd0;
         wire [63:0] stream_word=word_index%2==0 ? block_data[63:0] : block_data[127:64];
-        wire [63:0] next_word=
-            ({64{take_round}} & advanced_state[word_index*64 +:64])
-            | ({64{take_feedback}} & next_chain_state[word_index*64 +:64])
-            | ({64{take_fast}} & fast_word)
-            | ({64{select_stream}} & (stream_word ^
-                (sponge_state[word_index*64 +:64] & {64{!clear_stream}})));
+        // The register enable suppresses idle cycles. The default data can
+        // therefore be the permutation result without a 1,600-bit RUN mask.
+        wire [63:0] round_or_clear=clear_stream ? 64'd0
+            : advanced_state[word_index*64 +:64];
+        wire [63:0] absorb_word=stream_word ^
+            (sponge_state[word_index*64 +:64] & {64{!clear_stream}});
+        wire [63:0] next_word;
+        if(REUSE_FAST_FEEDBACK) begin: common_fast_data
+            assign next_word=(take_fast || take_feedback) ? fast_word
+                : select_stream ? absorb_word : round_or_clear;
+        end else begin: separate_feedback_data
+            assign next_word=take_fast ? fast_word
+                : take_feedback ? next_chain_state[word_index*64 +:64]
+                : select_stream ? absorb_word : round_or_clear;
+        end
         always_ff @(posedge clk)
             if(rst_n && (lane_state==RUN || take_fast || select_stream || clear_stream))
                 sponge_state[word_index*64 +:64]<=next_word;
