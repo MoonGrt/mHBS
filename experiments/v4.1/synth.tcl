@@ -3,7 +3,7 @@ cd $root
 set tag [lindex $argv 0]
 set lanes [lindex $argv 1]
 set unroll [lindex $argv 2]
-if {![regexp {^[a-zA-Z0-9_.-]+$} $tag] || $lanes != 2 || $unroll != 2} {error "tag lanes unroll"}
+if {![regexp {^[a-zA-Z0-9_.-]+$} $tag] || $lanes ni {1 2 4} || $unroll != 2} {error "tag lanes unroll"}
 set directive Default
 if {$argc>3} {set directive [lindex $argv 3]}
 set flatten rebuilt

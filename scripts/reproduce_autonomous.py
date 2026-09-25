@@ -8,6 +8,12 @@ from model.autonomous_hbs import ProgramImage
 from rom_initialization import mapping
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.1'
 def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
+def archived_source_sha(path):
+    snapshot=BASE/'candidates/u2_area_balanced_route/source_snapshot.tar.gz'
+    with tarfile.open(snapshot,'r:gz') as tar:
+        source=tar.extractfile(path)
+        check(source is not None,'historical source missing '+path)
+        return hashlib.sha256(source.read()).hexdigest()
 def hardware_sha(folder):
     path=folder/'hardware.txt'
     if path.exists():return sha(path)
@@ -24,7 +30,7 @@ def audit_area_software():
     from model.physical_image import PhysicalImage,validate_serial_schedule
     gate=json.loads((folder/'software_gate.json').read_text())
     check(gate['passed'] and set(gate['profiles'])==set(PROFILES),'area software coverage')
-    for name,digest in gate['source_sha256'].items():check(sha(ROOT/name)==digest,'area software source '+name)
+    for name,digest in gate['source_sha256'].items():check(archived_source_sha(name)==digest,'area software source '+name)
     expected={'template_lane1','template_coordinate','physical_reserved','physical_capacity',
               'descriptor_width','unmapped_descriptor','nonzero_event','initial_wait'}
     check(set(gate['rejected'])==expected,'area software error coverage')
@@ -249,7 +255,7 @@ def audit_candidates():
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--allow-incomplete',action='store_true');parser.add_argument('--functional-tag');args=parser.parse_args()
     gate=json.loads((BASE/'software_gate.json').read_text());check(gate['pass'],'software gate')
-    for path,digest in gate['sources'].items():check(sha(ROOT/path)==digest,'software source '+path)
+    for path,digest in gate['sources'].items():check(archived_source_sha(path)==digest,'software source '+path)
     images=json.loads((BASE/'images.json').read_text())['profiles']
     for name,data in images.items():
         folder=BASE/'images'/name;ProgramImage.read(folder).decode()

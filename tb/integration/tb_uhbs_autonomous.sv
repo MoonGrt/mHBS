@@ -2,7 +2,7 @@
 module tb_uhbs_autonomous;
     parameter integer LANES=2,UNROLL=2,SWAP=0;
     logic clk=0,rst=1;
-    wire busy,done,keygen_done,error,out_valid,out_last,result_kind,tree_cache_valid;
+    wire busy,done,keygen_done,error,out_valid,out_last,result_kind;
     wire [15:0] error_code;
     wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
     wire [63:0] out_data;wire [7:0] out_keep;
@@ -24,7 +24,6 @@ module tb_uhbs_autonomous;
             if(error && bad==0 && fault==0) $fatal(1,"AUTONOMOUS_ERROR code=%h cycle=%0d kg=%0d sg=%0d",error_code,total_cycles,kg_index,sg_index);
             if(out_valid) begin
                 if(bad!=0) $fatal(1,"invalid image produced output");
-                if(result_kind && metadata[7] && dut.processor.core.active_q!=metadata[6]) $fatal(1,"fixed index changed");
                 for(integer i=0;i<8;i=i+1) if(out_keep[i]) begin
                     if(result_kind) begin
                         if(sg_index>=metadata[1] || out_data[i*8 +:8]!==expected_sg[sg_index])
@@ -76,6 +75,15 @@ module tb_uhbs_autonomous;
             12:dut.descriptor_rom.memory[20][43:40]=0;
             13:dut.descriptor_rom.memory[50][59:52]=127;
             14:dut.descriptor_rom.memory[2][59:56]=1;
+            22:begin end // Unmodified legacy XMSS/LMS image must be rejected.
+            23:dut.descriptor_rom.memory[1][58:56]=2;
+            24:dut.program_rom.memory[41][10:0]=5;
+            25:dut.descriptor_rom.memory[2][59:56]=5;
+            26:dut.descriptor_rom.memory[20][31]=1;
+            27:dut.descriptor_rom.memory[17][27:20]=68;
+            28:dut.descriptor_rom.memory[64][59:56]=5;
+            29:dut.program_rom.memory[40]=1;
+            30:dut.template_rom.memory[0][78]=1;
             default:begin end
         endcase
         repeat(4) tick();rst=0;
@@ -88,11 +96,9 @@ module tb_uhbs_autonomous;
         if(interrupt_run) begin
             repeat(1000) tick();rst=1;repeat(4)tick();rst=0;
         end
-        if(fault && !metadata[7]) $fatal(1,"stateful stress requires stateful image");
         if(fault) begin
             while(!keygen_done) tick();
-            if(fault==1) dut.processor.core.cache_q=metadata[6]^1;
-            if(fault>=2) begin
+            if(fault>=1) begin
                 while(!result_kind || !dut.processor.core.busy) tick();
                 if(fault==3) while(sg_index<40) tick();
                 force dut.processor.core.seq_error=1;
@@ -101,7 +107,6 @@ module tb_uhbs_autonomous;
             repeat(40) begin
                 tick();
                 if(out_valid || busy || done) $fatal(1,"failed run did not halt");
-                if(dut.processor.core.active_q != metadata[6]) $fatal(1,"fixed index changed after failure");
             end
             if(fault<=2 && sg_index!=0) $fatal(1,"pre-execution failure produced signature");
             $display("AUTONOMOUS_FAULT_PASS fault=%0d q=%0d sign_prefix=%0d",fault,metadata[6],sg_index);

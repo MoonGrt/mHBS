@@ -7,7 +7,7 @@ Their emitted bytes also have a direct hashlib oracle independent of the VM.
 import hashlib,json,re,subprocess
 from dataclasses import replace
 from pathlib import Path
-from autonomous_flow import ROOT,BASE,BUILD,logic,logic_id,sha,write,run,sources
+from autonomous_flow import ROOT,BASE,ACTIVE,BUILD,logic,logic_id,sha,write,run,sources
 import sys
 sys.path.insert(0,str(ROOT))
 from model.autonomous_hbs import pack
@@ -16,7 +16,7 @@ from model.unified_hbs import (Machine,Macro,Kind,Source,record,route,segment,
 from tests.test_unified_hbs import default_job
 
 def main():
-    identity=logic();out=BASE/'architecture'/logic_id(identity);out.mkdir(parents=True,exist_ok=True)
+    identity=logic();out=ACTIVE/'architecture'/logic_id(identity);out.mkdir(parents=True,exist_ok=True)
     job,msg=default_job('slh_128f');original=pack('slh_128f',job,msg)
     records={};expected_traces={}
     for variant in ('base','program','template','recipe','route','loop','run'):

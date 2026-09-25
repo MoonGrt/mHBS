@@ -3,14 +3,13 @@
 module uhbs_top #(
     parameter integer LANES=2,UNROLL=2,
     parameter bit SWAP_PHYSICAL_LANES=0,
-    parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.1/images/slh_128f/program.mem",
-    parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.1/images/slh_128f/template.mem",
-    parameter DESCRIPTOR_INIT_FILE="manifests/experiments/unified_hbs_v4.1/images/slh_128f/descriptor.mem"
+    parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/program.mem",
+    parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/template.mem",
+    parameter DESCRIPTOR_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/descriptor.mem"
 )(
     input wire clk,rst,
     output wire busy,done,keygen_done,error,output wire [15:0] error_code,
     output wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count,
-    output wire tree_cache_valid,
     output wire out_valid,output wire [63:0] out_data,output wire [7:0] out_keep,
     output wire out_last,result_kind
 );
@@ -33,7 +32,7 @@ module uhbs_top #(
         .clk,.rst_n,.program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses,.descriptor_data,.busy,.done,.keygen_done,.error,.error_code,
         .boot_cycles,.keygen_cycles,.sign_cycles,.hash_count,.permutation_count,
-        .tree_cache_valid,.out_valid,.out_data,.out_keep,.out_last,.result_kind
+        .out_valid,.out_data,.out_keep,.out_last,.result_kind
     );
 endmodule
 `default_nettype wire

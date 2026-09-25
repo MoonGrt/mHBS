@@ -4,6 +4,7 @@ from pathlib import Path
 import argparse,json,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from model.profiles import PROFILES
+from model.slh_only import SLH_PROFILES
 from model.autonomous_hbs import ProgramImage
 from model.physical_image import pack_template
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.1'
@@ -21,8 +22,8 @@ def mapping(name):
                 result[cell]=f"{depth}'h{column:0{depth//4}x}"
     return result
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('directory',type=Path);args=parser.parse_args();args.directory.mkdir(parents=True,exist_ok=True)
-    all_maps={name:mapping(name) for name in PROFILES}
+    parser=argparse.ArgumentParser();parser.add_argument('directory',type=Path);parser.add_argument('--slh-only',action='store_true');args=parser.parse_args();args.directory.mkdir(parents=True,exist_ok=True)
+    all_maps={name:mapping(name) for name in (SLH_PROFILES if args.slh_only else PROFILES)}
     for name,values in all_maps.items():
         # Exact names, including square brackets; braces avoid Tcl substitutions.
         commands=[]

@@ -35,11 +35,17 @@ module uhbs_value_store #(parameter integer WIDTH=128, DEPTH=128, ADDRESS_BITS=7
     localparam integer AW=$clog2(DEPTH/2);
     (* ram_style="distributed" *) logic [WIDTH-1:0] even_bank [0:DEPTH/2-1];
     (* ram_style="distributed" *) logic [WIDTH-1:0] odd_bank [0:DEPTH/2-1];
+    wire even_select0=write0 && !address0[0];
+    wire even_select1=write1 && !address1[0];
+    wire odd_select0=write0 && address0[0];
+    wire odd_select1=write1 && address1[0];
+    wire [AW-1:0] even_write_address=even_select0 ? address0[AW:1] : address1[AW:1];
+    wire [AW-1:0] odd_write_address=odd_select0 ? address0[AW:1] : address1[AW:1];
+    wire [WIDTH-1:0] even_write_data=even_select0 ? data0 : data1;
+    wire [WIDTH-1:0] odd_write_data=odd_select0 ? data0 : data1;
     always_ff @(posedge clk) begin
-        if (write0 && !address0[0]) even_bank[address0[AW:1]] <= data0;
-        else if (write1 && !address1[0]) even_bank[address1[AW:1]] <= data1;
-        if (write0 && address0[0]) odd_bank[address0[AW:1]] <= data0;
-        else if (write1 && address1[0]) odd_bank[address1[AW:1]] <= data1;
+        if (even_select0 || even_select1) even_bank[even_write_address] <= even_write_data;
+        if (odd_select0 || odd_select1) odd_bank[odd_write_address] <= odd_write_data;
     end
     // Readers request adjacent values; one read per parity bank avoids
     // duplicating distributed RAM for two independent read ports.

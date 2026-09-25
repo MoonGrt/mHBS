@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 `default_nettype none
-// v4.1 processor compiled independently of all three ROM contents.
+// v4.1 SLH-only processor compiled independently of all three ROM contents.
 module uhbs_processor #(
     parameter integer LANES=2, UNROLL=2,
     parameter bit SWAP_PHYSICAL_LANES=0
@@ -14,8 +14,7 @@ module uhbs_processor #(
     output wire out_last,result_kind,
     output logic busy,done,keygen_done,error,output logic [15:0] error_code,
     output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
-    output wire [31:0] hash_count,permutation_count,
-    output wire tree_cache_valid
+    output wire [31:0] hash_count,permutation_count
 );
     typedef enum logic [3:0] {HEADER,PROFILE,CONTROL,CHECK_PROGRAM,CHECK_TEMPLATE,CHECK_DESCRIPTOR,
         RELEASE_CORE,KEYGEN_REQUEST,KEYGEN_WAIT,SIGN_REQUEST,SIGN_WAIT,HALTED} phase_t;
@@ -24,9 +23,7 @@ module uhbs_processor #(
     logic [63:0] image_header,profile_descriptor;
     logic [5:0] program_count;
     logic [6:0] template_count,message_length;
-    logic [10:0] initial_q;
     logic [255:0] secret_seed,secret_prf,public_seed,randomizer;
-    logic [127:0] identifier;
     logic core_released,operation;
     wire [5:0] core_program_address,core_template_address;
     wire [13:0] core_descriptor_addresses;
@@ -45,19 +42,16 @@ module uhbs_processor #(
     assign descriptor_addresses=booting ? {7'd0,boot_descriptor_address} : core_descriptor_addresses;
     wire [63:0] boot_descriptor=descriptor_data[63:0];
     wire [5:0] node_bytes=profile_descriptor[53:48];
-    wire stateful=profile_descriptor[59];
     wire [2:0] family=profile_descriptor[58:56];
     wire [3:0] omega=profile_descriptor[47:44], hp=profile_descriptor[43:40], a=profile_descriptor[39:36];
     wire [5:0] k=profile_descriptor[23:18],m=profile_descriptor[12:7];
     wire [4:0] d=profile_descriptor[17:13];
     wire [6:0] h=profile_descriptor[6:0];
-    wire slh_profile=!stateful && family==1 && omega==4 &&
+    wire slh_profile=!profile_descriptor[59] && family==1 && omega==4 &&
         ((node_bytes==16 && hp==3 && a==6 && k==33 && d==22 && m==34 && h==66) ||
          (node_bytes==24 && hp==3 && a==8 && k==33 && d==22 && m==42 && h==66) ||
          (node_bytes==32 && hp==4 && a==9 && k==35 && d==17 && m==49 && h==68));
-    wire stateful_profile=stateful && (family==2 || family==3) && node_bytes==32 &&
-        (omega==2 || omega==4) && hp==10 && a==0 && k==0 && d==1 && m==32 && h==10;
-    wire [15:0] profile_recipe_mask=family==1 ? 16'h101e : family==2 ? 16'h01e0 : 16'hee00;
+    localparam [15:0] PROFILE_RECIPE_MASK=16'h101e;
     wire core_job_ready,core_done,core_error,core_busy;
     wire [15:0] core_error_code;
     wire [31:0] core_cycles;
@@ -68,12 +62,12 @@ module uhbs_processor #(
         .program_address(core_program_address),.program_data,.template_address(core_template_address),.template_data,
         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
         .job_valid(phase==KEYGEN_REQUEST || phase==SIGN_REQUEST),.job_ready(core_job_ready),.job_operation(operation),
-        .job_message_length(message_length),.job_initial_q(initial_q),
-        .job_secret_seed(secret_seed),.job_secret_prf(secret_prf),.job_public_seed(public_seed),.job_randomizer(randomizer),.job_identifier(identifier),
+        .job_message_length(message_length),
+        .job_secret_seed(secret_seed),.job_secret_prf(secret_prf),.job_public_seed(public_seed),.job_randomizer(randomizer),
         .message_valid(feed_message),.message_ready,.message_data,
         .out_valid,.out_ready(1'b1),.out_data,.out_keep,.out_last,
         .busy(core_busy),.done(core_done),.error(core_error),.error_code(core_error_code),
-        .hash_count,.permutation_count,.cycles(core_cycles),.tree_cache_valid
+        .hash_count,.permutation_count,.cycles(core_cycles)
     );
     task automatic reject(input [15:0] code);
         begin phase<=HALTED;error<=1;error_code<=code;busy<=0;feeding_message<=0;end
@@ -89,7 +83,7 @@ module uhbs_processor #(
     always_ff @(posedge clk) begin
         template_bad <= scan>=template_count ? template_data!=0 :
             (template_data[127:124]!=1 || !template_data[107] || template_data[106] ||
-             template_data[99:96]<1 || template_data[99:96]>5 || template_data[95] || template_data[87]);
+             template_data[99:96]<1 || template_data[99:96]>5 || template_data[95] || template_data[87] || template_data[78]);
         descriptor_check_q<=descriptor_check;
     end
     always @* begin
@@ -99,16 +93,17 @@ module uhbs_processor #(
             1:begin
                 if(boot_descriptor[29:24]==0 || boot_descriptor[29:24]>32 ||
                     boot_descriptor[37:32]==0 || boot_descriptor[37:32]>49) descriptor_check=1;
-                else if(!profile_recipe_mask[boot_descriptor[59:56]]) descriptor_check=2;
+                else if(!PROFILE_RECIPE_MASK[boot_descriptor[59:56]]) descriptor_check=2;
             end
-            2:if(boot_descriptor[59:56]>7 || boot_descriptor[55:48]==0 || boot_descriptor[55:48]>node_bytes ||
+            2:if(boot_descriptor[59:56]>7 || boot_descriptor[59:56]==5 || boot_descriptor[59:56]==6 ||
+                boot_descriptor[55:48]==0 || boot_descriptor[55:48]>node_bytes ||
                 (boot_descriptor[59:56]>=6 && boot_descriptor[55:48]>4) ||
                 (boot_descriptor[59:56]==5 && boot_descriptor[55:48]>16)) descriptor_check=1;
             4:if(boot_descriptor[59] || boot_descriptor[51] || boot_descriptor[43] || boot_descriptor[35] ||
-                boot_descriptor[27:20]==0 || boot_descriptor[27:20]>133 || boot_descriptor[19:15]>15 ||
+                    boot_descriptor[27:20]==0 || boot_descriptor[27:20]>67 || boot_descriptor[19:15]>15 ||
                 boot_descriptor[13:12]>2) descriptor_check=1;
-            5:if(boot_descriptor[59] || boot_descriptor[51] || boot_descriptor[43:40]==0 || boot_descriptor[43:40]>10 ||
-                boot_descriptor[37:36]>2 || boot_descriptor[33:32]>2 || boot_descriptor[29]) descriptor_check=1;
+            5:if(boot_descriptor[59] || boot_descriptor[51] || boot_descriptor[43:40]==0 || boot_descriptor[43:40]>9 ||
+                    boot_descriptor[37:36]>1 || boot_descriptor[33:32]>1 || |boot_descriptor[31:29]) descriptor_check=1;
             9:if(boot_descriptor[51:48]==0 || {1'b0,boot_descriptor[59:52]}+{5'd0,boot_descriptor[51:48]}>128) descriptor_check=1;
             6,8,10,11:begin end
             default:descriptor_check=1;
@@ -130,7 +125,7 @@ module uhbs_processor #(
         end else if(scan>=32 && scan<=39 && scan[0]) begin
             if(node_bytes==16) invalid_word=program_data!=0;
             else if(node_bytes==24) invalid_word=|program_data[127:64];
-        end else if(scan==42 || scan==43 || scan>=50) invalid_word=program_data!=0;
+        end else if(scan==40 || scan==42 || scan==43 || scan>=50) invalid_word=program_data!=0;
         else if(scan>=44 && scan<=49) begin
             for(j=0;j<16;j=j+1) if(({message_scan_word,4'b0}+7'(j))>=message_length && program_data[j*8 +:8]!=0) invalid_word=1;
         end
@@ -145,7 +140,6 @@ module uhbs_processor #(
                             34:secret_prf[127:0]<=program_data;35:secret_prf[255:128]<=program_data;
                             36:public_seed[127:0]<=program_data;37:public_seed[255:128]<=program_data;
                             38:randomizer[127:0]<=program_data;39:randomizer[255:128]<=program_data;
-                            40:identifier<=program_data;
                             default: begin end
                         endcase
         end
@@ -157,7 +151,7 @@ module uhbs_processor #(
             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
             message_offset<=0;feeding_message<=0;message_last_beat<=0;program_check_valid<=0;descriptor_last<=0;
             image_header<=0;profile_descriptor<=0;program_count<=0;template_count<=0;
-            message_length<=0;initial_q<=0;
+            message_length<=0;
         end else begin
             keygen_done<=0;
             if(!core_released && phase!=HALTED) boot_cycles<=boot_cycles+1;
@@ -173,16 +167,16 @@ module uhbs_processor #(
                 end
                 PROFILE: begin profile_descriptor<=boot_descriptor;phase<=CONTROL;end
                 CONTROL: begin
-                    initial_q<=program_data[10:0];message_length<=program_data[17:11];
+                    message_length<=program_data[17:11];
                     message_last_beat<=control_last_byte[6:3];program_check_valid<=0;
                     program_count<=program_data[23:18];template_count<=program_data[30:24];
                     scan<=0;phase<=CHECK_PROGRAM;
-                    if(profile_descriptor[63:60]!=11 || profile_descriptor[55:54]!=0 || !(slh_profile || stateful_profile)) reject(16'h4102);
+                    if(profile_descriptor[63:60]!=11 || profile_descriptor[55:54]!=0 || !slh_profile) reject(16'h4102);
                     else if(|program_data[127:31] || program_data[23:18]==0 || program_data[23:18]>32 ||
                         program_data[30:24]==0 || program_data[30:24]>64 ||
                         program_data[17:11]==0 || program_data[17:11]>87 ||
                         image_header[55:47]>=image_header[46:38] || image_header[46:38]>=program_data[23:18]) reject(16'h4103);
-                    else if((stateful && program_data[10:0]>=1024) || (!stateful && program_data[10:0]!=0)) reject(16'h4104);
+                    else if(program_data[10:0]!=0) reject(16'h4104);
                 end
                 CHECK_PROGRAM: begin
                     // Validate the preceding ROM word. Scan 64 drains word 63;

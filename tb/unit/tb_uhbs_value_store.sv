@@ -13,12 +13,12 @@ module tb_uhbs_value_store;
     endfunction
     integer i;
     initial begin
-        for(i=0;i<134;i=i+2)begin
+        for(i=0;i<DEPTH;i=i+2)begin
             write0=1;write1=1;address0=i;address1=i+1;data0=sample(i);data1=sample(i+1);tick();
         end
         write0=0;write1=0;
         // Include both bank orders and the crossing from address 127 to 128.
-        for(i=0;i<133;i=i+1)begin
+        for(i=0;i<DEPTH-1;i=i+1)begin
             read0=i;read1=i+1;#1;
             if(value0!==sample(i) || value1!==sample(i+1))$fatal(1,"store address %0d",i);
             read0=i+1;read1=i;#1;
@@ -27,6 +27,6 @@ module tb_uhbs_value_store;
         // The final odd L-tree endpoint survives in-place promotion.
         address0=66;data0=sample(132);write0=1;tick();write0=0;read0=66;read1=67;#1;
         if(value0!==sample(132))$fatal(1,"odd promotion");
-        $display("VALUE_STORE_133_PASS");$finish;
+        $display("VALUE_STORE_PASS depth=%0d",DEPTH);$finish;
     end
 endmodule
