@@ -3,9 +3,9 @@
 module uhbs_top #(
     parameter integer LANES=2,UNROLL=2,
     parameter bit SWAP_PHYSICAL_LANES=0,
-    parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/program.mem",
-    parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/template.mem",
-    parameter DESCRIPTOR_INIT_FILE="manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f/descriptor.mem"
+    parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.2/images/slh_128f/sign/program.mem",
+    parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.2/images/slh_128f/sign/template.mem",
+    parameter DESCRIPTOR_INIT_FILE="manifests/experiments/unified_hbs_v4.2/images/slh_128f/sign/descriptor.mem"
 )(
     input wire clk,rst,
     output wire busy,done,keygen_done,error,output wire [15:0] error_code,
@@ -18,16 +18,25 @@ module uhbs_top #(
         if(rst) reset_sync<=2'b11; else reset_sync<={reset_sync[0],1'b0};
     end
     wire rst_n=~reset_sync[1];
-    wire [5:0] program_address,template_address;
-    wire [127:0] program_data,template_data;
-    wire [13:0] descriptor_addresses;
+    wire [5:0] program_address;
+    wire [3:0] template_address;
+    wire [63:0] program_data,template_data;
+    wire [9:0] descriptor_addresses;
     wire [127:0] descriptor_data;
-    uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.INIT_FILE(PROGRAM_INIT_FILE)) program_rom (
-        .clk,.addresses(program_address),.data(program_data));
-    uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.PACKING(1),.INIT_FILE(TEMPLATE_INIT_FILE)) template_rom (
-        .clk,.addresses(template_address),.data(template_data));
-    uhbs_image_rom #(.WIDTH(64),.ADDRESS_BITS(7),.PORTS(2),.INIT_FILE(DESCRIPTOR_INIT_FILE)) descriptor_rom (
-        .clk,.addresses(descriptor_addresses),.data(descriptor_data));
+    // Inferred arrays, no explicit ROM module or vendor memory primitive.
+    // Hardware synthesis uses algorithm-independent construction images;
+    // real images are applied to INIT only after the common netlist is frozen.
+    (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] program_memory[0:63];
+    (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] template_memory[0:15];
+    (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] descriptor_memory[0:31];
+    initial begin
+        if(PROGRAM_INIT_FILE!="") $readmemh(PROGRAM_INIT_FILE,program_memory);
+        if(TEMPLATE_INIT_FILE!="") $readmemh(TEMPLATE_INIT_FILE,template_memory);
+        if(DESCRIPTOR_INIT_FILE!="") $readmemh(DESCRIPTOR_INIT_FILE,descriptor_memory);
+    end
+    assign program_data=program_memory[program_address];
+    assign template_data=template_memory[template_address];
+    assign descriptor_data={descriptor_memory[descriptor_addresses[9:5]],descriptor_memory[descriptor_addresses[4:0]]};
     (* DONT_TOUCH="yes" *) uhbs_processor #(.LANES(LANES),.UNROLL(UNROLL),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES)) processor (
         .clk,.rst_n,.program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses,.descriptor_data,.busy,.done,.keygen_done,.error,.error_code,

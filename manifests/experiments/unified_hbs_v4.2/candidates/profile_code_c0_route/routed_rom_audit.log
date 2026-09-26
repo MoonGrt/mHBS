@@ -1,0 +1,94 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Sat Sep 26 13:01:33 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source experiments/v4.2/audit_routed_rom.tcl
+# set root [file normalize [file join [file dirname [info script]] ../..]]
+# cd $root
+# set tag [lindex $argv 0]
+# if {![regexp {^[a-zA-Z0-9_.-]+$} $tag]} {error "invalid tag"}
+# set out [file join $root build v4.2 $tag]
+# open_checkpoint [file join $out post_route_final_clock.dcp]
+Command: open_checkpoint /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/profile_code_c0_route/post_route_final_clock.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1568.395 ; gain = 0.000 ; free physical = 97536 ; free virtual = 121052
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+Netlist sorting complete. Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.06 . Memory (MB): peak = 1853.117 ; gain = 0.000 ; free physical = 97284 ; free virtual = 120803
+INFO: [Netlist 29-17] Analyzing 1085 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 1960.961 ; gain = 5.250 ; free physical = 97164 ; free virtual = 120684
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+INFO: [Designutils 20-5722] Start Reading Physical Databases.
+Reading placement.
+Read Netlist Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 2592.039 ; gain = 0.000 ; free physical = 96588 ; free virtual = 120113
+Reading placer database...
+Read Device Cache: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2592.039 ; gain = 0.000 ; free physical = 96588 ; free virtual = 120113
+Read PlaceDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2592.039 ; gain = 0.000 ; free physical = 96588 ; free virtual = 120113
+Read placeStorage: Time (s): cpu = 00:00:00.35 ; elapsed = 00:00:00.35 . Memory (MB): peak = 2599.039 ; gain = 7.000 ; free physical = 96574 ; free virtual = 120100
+Read PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2599.039 ; gain = 0.000 ; free physical = 96574 ; free virtual = 120100
+Reading routing.
+Read RouteStorage: Time (s): cpu = 00:00:00.4 ; elapsed = 00:00:00.11 . Memory (MB): peak = 2618.758 ; gain = 19.719 ; free physical = 96555 ; free virtual = 120081
+Read Physdb Files: Time (s): cpu = 00:00:00.77 ; elapsed = 00:00:00.49 . Memory (MB): peak = 2618.758 ; gain = 26.719 ; free physical = 96555 ; free virtual = 120081
+Restored from archive | CPU: 0.810000 secs | Memory: 34.038025 MB |
+Finished XDEF File Restore: Time (s): cpu = 00:00:00.79 ; elapsed = 00:00:00.5 . Memory (MB): peak = 2618.758 ; gain = 29.688 ; free physical = 96555 ; free virtual = 120081
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2629.438 ; gain = 0.000 ; free physical = 96539 ; free virtual = 120065
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 557 instances were transformed.
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 129 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:10 ; elapsed = 00:00:07 . Memory (MB): peak = 2637.473 ; gain = 1069.078 ; free physical = 96538 ; free virtual = 120065
+# source experiments/v4.2/rom_mapping.tcl
+## proc export_rom_mapping {path} {
+##  set f [open $path w]
+##  foreach kind {program template descriptor} {
+##   set depth [dict get {program 64 template 16 descriptor 32} $kind]
+##   set abits [dict get {program 6 template 4 descriptor 5} $kind]
+##   set ports [expr {$kind eq "descriptor" ? 2 : 1}]
+##   set signal [expr {$kind eq "descriptor" ? "descriptor_addresses" : "${kind}_address"}]
+##   for {set p 0} {$p<$ports} {incr p} {
+##    for {set b 0} {$b<64} {incr b} {
+##     set dp [get_pins [format {processor/%s_data[%d]} $kind [expr {$p*64+$b}]]]
+##     set dn [get_nets -of_objects $dp]
+##     set driver [get_pins -leaf -of_objects $dn -filter {DIRECTION == OUT}]
+##     if {[llength $driver]!=1} {error "ROM output driver $kind $p $b: $driver"}
+##     set c [get_cells -of_objects $driver]
+##     if {[get_property REF_NAME $c] ne "LUT$abits"} {error "Unsupported inferred ROM primitive $c"}
+##     set mapping {}
+##     for {set i 0} {$i<$abits} {incr i} {
+##      set input_net [get_nets -of_objects [get_pins $c/I$i]]
+##      set found -1
+##      for {set a 0} {$a<$abits} {incr a} {
+##       set ap [get_pins [format {processor/%s[%d]} $signal [expr {$p*$abits+$a}]]]
+##       if {[get_nets -of_objects $ap] eq $input_net} {set found $a}
+##      }
+##      if {$found<0} {error "Unmapped input $c/I$i $input_net"}
+##      lappend mapping $found
+##     }
+##     set_property DONT_TOUCH true $c
+##     set_property DONT_TOUCH true $dn
+##     puts $f "$kind\t$p\t$b\t$c\t$abits\t[join $mapping ,]\t[get_property INIT $c]"
+##    }
+##   }
+##  }
+##  close $f
+## }
+# export_rom_mapping [file join $out routed_rom_mapping.tsv]
+# puts "ROUTED_ROM_MAPPING_EXPORTED"
+ROUTED_ROM_MAPPING_EXPORTED
+INFO: [Common 17-206] Exiting Vivado at Sat Sep 26 13:01:42 2026...

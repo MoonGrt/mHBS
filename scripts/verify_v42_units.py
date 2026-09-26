@@ -1,0 +1,70 @@
+#!/usr/bin/env python3
+"""Icarus 12 units for the trusted-image SLH-only core."""
+from pathlib import Path
+import hashlib,json,re,subprocess,sys
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT/'scripts'))
+def logic():
+    return {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in (ROOT/'manifests/v42_sources.txt').read_text().split()}
+def logic_id(x):return hashlib.sha256(json.dumps(x,sort_keys=True).encode()).hexdigest()[:16]
+
+identity=logic()
+OUT=ROOT/'manifests/experiments/unified_hbs_v4.2/unit'/logic_id(identity)
+BUILD=ROOT/'build/v4.2/unit'/logic_id(identity)
+OUT.mkdir(parents=True,exist_ok=True);BUILD.mkdir(parents=True,exist_ok=True)
+rtl=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()
+records={}
+used_sources=set()
+
+def one(name,top,files,params=(),runs=((),)):
+    assert logic()==identity
+    used_sources.update(files)
+    binary=BUILD/(name+'.vvp')
+    with (OUT/(name+'.log')).open('w') as log:
+        subprocess.run(['iverilog','-g2012','-s',top,*params,'-o',str(binary),*files],
+                       cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
+        for options in runs:
+            subprocess.run(['vvp',str(binary),*options],cwd=ROOT,stdout=log,
+                           stderr=subprocess.STDOUT,check=True)
+    records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
+    print('SLH_UNIT_PASS',name,flush=True)
+
+one('endpoint_68','tb_uhbs_value_store',
+    ['rtl/memory/uhbs_value_store.sv','tb/unit/tb_uhbs_value_store.sv'],
+    ['-Ptb_uhbs_value_store.DEPTH=68'])
+one('fors_roots','tb_uhbs_root_store',
+    ['rtl/memory/uhbs_root_store.sv','tb/unit/tb_uhbs_root_store.sv'])
+one('slh64_sequencer','tb_uhbs_slh64_sequencer',
+    ['rtl/sequencer/uhbs_program_sequencer.sv','tb/unit/tb_uhbs_slh64_sequencer.sv'])
+one('sponge','tb_uhbs_compact_shake_context_lane',
+    ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
+     'tb/unit/tb_uhbs_compact_shake_context_lane.sv'])
+for p in range(3):
+    one('recipe_'+str(p),'tb_uhbs_v42_recipe_lane',
+        ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
+         'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_v42_recipe_lane.sv'],
+        [f'-Ptb_uhbs_v42_recipe_lane.PROFILE={p}'])
+# Independent hashlib vectors exercise padding on both sides of the rate
+# boundary and change the cached request fields between consecutive hashes.
+padding=[]
+for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
+                  (32,3,73),(24,4,63),(32,4,41),(32,3,71),(32,4,40)]:
+    prf=bytes(range(32,32+n));seed=bytes(range(64,64+n))
+    randomizer=bytes(range(96,96+n));root=bytes(range(128,128+n))
+    payload=(prf+randomizer if shape==3 else randomizer+seed+root)+bytes(range(m))
+    digest=hashlib.shake_256(payload).digest(49)
+    padding.append((n<<442)|(shape<<438)|(m<<431)|((len(payload)//136+1)<<423)|
+                   int.from_bytes(digest,'little'))
+padding_file=OUT/'recipe_padding.mem'
+padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
+one('recipe_padding','tb_uhbs_recipe_padding',
+    ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
+     'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_recipe_padding.sv'],
+    runs=((f'+VECTORS={padding_file.relative_to(ROOT)}',),))
+assert logic()==identity
+(OUT/'results.json').write_text(json.dumps({'passed':True,'logic_sha256':identity,
+    'test_source_sha256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
+                          for p in sorted(used_sources)},
+    'tool':subprocess.check_output(['iverilog','-V'],text=True,stderr=subprocess.DEVNULL).splitlines()[0],
+    'logs':records},indent=2)+'\n')

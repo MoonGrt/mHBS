@@ -442,20 +442,14 @@ module uhbs_recipe_lane #(
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
                     current_value <= request_left;
                     rate_block <= 0; beat <= 0; stream_half<=0;
-                    if (request_recipe[63:60] != 1 || request_recipe[59:56] == 0
-                            || !RECIPE_MASK[request_recipe[59:56]]
-                            || (node_bytes!=32 && !(request_recipe[59:56]==1 || request_recipe[59:56]==2 || request_recipe[59:56]==3 || request_recipe[59:56]==4 || request_recipe[59:56]==12))
-                            || request_steps > 15) begin error <= 1; state <= RESPONSE; end
-                    else state <= START;
+                    state <= START;
                 end
                 START: if (hash_ready) begin
                     if (PROFILE_ENABLE) begin
                         hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
                         if (fixed_block) permutation_count <= permutation_count+(compact_chain ? request_steps+1 : 1);
                     end
-                    if (input_length >= recipe_limit || recipe[29:24] == 0) begin
-                        error <= 1; state <= RESPONSE;
-                    end else state <= fixed_block ? WAIT_HASH : STREAM;
+                    state <= fixed_block ? WAIT_HASH : STREAM;
                 end
                 STREAM: if (stream_accept) begin
                     position<=position+13'd8;
