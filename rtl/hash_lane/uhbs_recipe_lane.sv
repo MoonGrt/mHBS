@@ -10,7 +10,7 @@ module uhbs_recipe_lane #(
     parameter [15:0] RECIPE_MASK = 16'hffff,
     parameter bit PROFILE_ENABLE = 0
 ) (
-    input wire clk, rst_n,
+    input wire clk, rst,
     input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
     input wire [63:0] request_recipe, request_step_recipe,
@@ -86,7 +86,7 @@ module uhbs_recipe_lane #(
         end
     endfunction
     always_ff @(posedge clk) begin
-        if(rst_n && state==IDLE && request_valid) begin
+        if(!rst && state==IDLE && request_valid) begin
             seed_shapes<=16'b1 << request_recipe[59:56];
             step_shapes<=16'b1 << request_step_recipe[59:56];
             seed_length<=decode_length(request_recipe);
@@ -408,7 +408,7 @@ module uhbs_recipe_lane #(
         endcase
     end
     uhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
-        .clk, .rst_n, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
+        .clk, .rst, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
         .fast_block_data(fast_block), .chain_enable(compact_chain),
         .chain_prefix(compact_chain),
@@ -424,8 +424,8 @@ module uhbs_recipe_lane #(
         .capture_valid(compact_capture_valid), .error(hash_error)
     );
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always_ff @(posedge clk) begin
+        if (rst) begin
             staged_valid<=0; staged_last<=0; staged_data<=0;
             position<=0;
             list_cursor<=0; list_remainder<=0;

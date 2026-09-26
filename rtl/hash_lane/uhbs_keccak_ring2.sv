@@ -3,7 +3,7 @@
 // Two resident contexts, two U2 stages. Four physical rounds total.
 // Recirculation has priority; a completed slot can immediately accept a new hash.
 module uhbs_keccak_ring2(
- input wire clk,rst_n,input wire [1:0] request_valid,output logic [1:0] request_ready,
+ input wire clk,rst,input wire [1:0] request_valid,output logic [1:0] request_ready,
  input wire [1599:0] request_state0,request_state1,
  output wire [1:0] result_valid,output wire [1599:0] result_state
 );
@@ -29,8 +29,8 @@ module uhbs_keccak_ring2(
   if(input_valid)state0<=stage0_out;
   if(valid0)state1<=stage1_out;
  end
- always_ff @(posedge clk or negedge rst_n)begin
-  if(!rst_n)begin valid0<=0;valid1<=0;tag0<=0;tag1<=0;count0<=0;count1<=0;end
+ always_ff @(posedge clk)begin
+  if(rst)begin valid0<=0;valid1<=0;tag0<=0;tag1<=0;count0<=0;count1<=0;end
   else begin
    valid0<=input_valid;valid1<=valid0;
    if(input_valid)begin tag0<=input_tag;count0<=input_count+5'd2;end

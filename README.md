@@ -1,52 +1,46 @@
-# μHBS v4.2：SLH 共同硬件与独立操作
+# μHBS v4.2：SLH 共同核、参数 Job 与外部消息
 
-支持 **SLH-DSA SHAKE 128f、192f、256f**。三个参数点及 Keygen/Sign 共用一套硬件；
-唯一生产顶层 `uhbs_top` 输入仅 `clk`、高有效 `rst`，复位后装载输入，执行镜像选择的一项操作，然后停机。
-Sign 镜像提供公钥根，不依赖前一次 Keygen 的内部状态。结果流无背压。
+支持 **SLH-DSA SHAKE 128f、192f、256f**。唯一生产顶层 `uhbs_top` 保留高有效同步 `rst`，复位后自动执行一次 Keygen 或 Sign，然后停机。
 
-保留 HASH / CHAIN / TREE / TRANSFORM / EMIT 五类宏指令及 RUN/LOOP。
-微码决定操作顺序，宏内部使用 U2、两个 Hash 上下文。
-物理格式为 **`slh64_v4.2`（布局修订 2）**，沿用 ABI 4 宏语义；旧镜像不能直接装载。
-program 64×64、template 16×64、descriptor 32×64，保持三个独立数据结构。
-格式和引用在离线工具中验证，硬件不扫描校验镜像。
+Job 通过五个 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMIZER / PUBLIC_ROOT` 提供；`OPERATION=0/1` 选择 Keygen/Sign。
+消息使用 **64 位 message_data + valid/ready** 外部输入，长度由 `message_length[6:0]` 输入给出（Keygen 为 0，Sign 为 1–87）。低字节先传，尾拍多余字节忽略。Sign 的公钥根须预先配置，结果流无背压。
 
-三个数组直接使用 `$readmemh`。执行核独立综合，ROM 使用算法无关构建数据完成推断，
-每个候选只综合、布线一次，随后替换六套 INIT 并核验单元、连接、布局、布线和资源一致。
-实际镜像不会常量传播到执行核形成专用设计。
+保留 HASH / CHAIN / TREE / TRANSFORM / EMIT 五类宏指令、RUN/LOOP、U2 和两个 Hash lane。
+物理格式为 **`slh64_v4.2`，布局修订 3**，宏语义沿用 ABI 4：program **32×64** 只存指令；template **16×64**；descriptor **32×64、双读**。
+三个独立数组使用 `$readmemh`；每个参数点的一组镜像含 Keygen/Sign 两个入口，Job 和消息已移出 program。
 
-## 构建和验证
+`uhbs_processor.sv` 已删除，启动控制并入顶层。构建时从顶层自动提取“启动控制＋执行核”作为共同综合区域，六种参数外壳链接同一网表。共同核受保护，外层常量连接允许不同。
+本轮分别测量共同核和完整顶层的 post-synth 资源，**没有新接口的 post-route 频率**。
 
-以下命令使用同一个新候选名；不要在捕获源码后修改文件再复用该名称。
+## 使用与验证
 
 ```bash
-make compile-microcode                    # 六组软件执行、独立参考/KAT、离线格式检查
-make rtl-unit-test                        # Icarus 12
-make rtl-all-profiles TAG=my_v42           # 六组独立运行，Verilator 5.008
-make rtl-verification TAG=my_v42           # 根转交、交换、复位、消息、故障和微码轨迹
-make synth-common TAG=my_v42
-make route-common TAG=my_v42
-make freeze-common TAG=my_v42
-python3 scripts/finalize_v42.py my_v42_route --verification-tag my_v42
+make compile-microcode rtl-unit-test
+make rtl-all-profiles TAG=my_external
+make rtl-verification TAG=my_external
+make synth-common TAG=my_external
 make report-v42 reproduce-v42
 ```
 
-单点仿真可用 `make rtl-profile-test TAG=my_v42 PROFILE=slh_192f OPERATION=sign`。
-单点结果不能代替整机 PPA 所需的完整六组结果；正式候选先运行 `rtl-all-profiles`。
-构建与仿真产物位于 `build/v4.2/`，生产 RTL 清单为 `manifests/v42_sources.txt`。
+单点仿真：`make rtl-profile-test TAG=my_external PROFILE=slh_192f OPERATION=sign`。
+PPA 验收需要先完成同一源码的六组正常仿真、扩展验证及单元验证。捕获源码后修改文件需使用新候选名。
 
-## 结果与复现
-
-- [v4.2 架构及镜像](docs/v4.2/Architecture_and_Image.md)
-- [v4.2 优化结果与论文对照](docs/v4.2/Optimization_and_Paper_Comparison.md)
-- `manifests/experiments/unified_hbs_v4.2/`：软件门禁、六组镜像、候选源码快照及 PPA 证据。
-- `make reproduce-v42`：核对来源、面积/ATP 计算、冻结证据及最终验收；没有完成验收时会报未完成。
-
-选择以签名 ATP 为主、面积为次。最终要求三个 Sign ATP 均优于指定 v4.1 已布线基线，
-论文作为 NON_STRICT 对照，不作为本轮硬门槛。Boot 与操作周期分列；独立 Sign 的公钥根为外部预置输入。
-综合归一化结果、功能通过与布线性能通过分别标记。
-
-历史 XMSS/LMS、七点共同核、V3/V4/v4.1 报告与未完成 U4 候选保留，使用封存源码复现。
+旧布局转换：
 
 ```bash
-make reproduce-slh-only reproduce-paper-comparison
+python3 scripts/convert_v42_external.py <旧布局2镜像目录> <新输出目录>
 ```
+
+输出三份布局 3 镜像，以及分离的 `job.json`、`message.mem`。
+
+## 文档与证据
+
+- [当前接口、实测资源和复现说明](docs/v4.2/External_Job_Message_Interface.md)
+- [历史布局2架构](docs/v4.2/Architecture_and_Image.md)
+- [历史v4.2布线结果与论文对照](docs/v4.2/Optimization_and_Paper_Comparison.md)
+- 当前证据：`manifests/experiments/unified_hbs_v4.2/external_job_message/`
+- 当前构建：`build/v4.2/external_job_message/`
+- 生产 RTL 清单：`manifests/v42_sources.txt`
+
+历史提交 **366b614** 的 7,249 Slice、101.010101 MHz 属于旧接口的已布线结果。
+历史 V3/V4/v4.1、XMSS/LMS 和未完成 U4 候选保留，可用 `make reproduce-slh-only reproduce-paper-comparison` 核验。

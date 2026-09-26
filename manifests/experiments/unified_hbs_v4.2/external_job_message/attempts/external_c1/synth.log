@@ -1,0 +1,1084 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Sat Sep 26 13:56:39 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source experiments/v4.2/external_job_message/synth.tcl
+# set root [file normalize [file join [file dirname [info script]] ../../..]]
+# cd $root
+# set tag [lindex $argv 0]
+# if {![regexp {^[a-zA-Z0-9_.-]+$} $tag]} {error "invalid tag"}
+# set out [file join $root build v4.2 external_job_message $tag synthesis]
+# file mkdir $out
+# set started [clock seconds]
+# set part xc7a200tffg1156-3
+# set_param general.maxThreads 8
+# create_project -in_memory -part $part
+# set f [open manifests/v42_sources.txt]
+# set sources [split [string trim [read $f]] \n]
+# close $f
+# foreach p $sources {if {$p ne "rtl/top/uhbs_top.sv"} {read_verilog -sv $p}}
+# set f [open [file join $out clock.xdc] w]
+# puts $f {create_clock -name clk -period 10.0 [get_ports clk]}
+# close $f
+# read_xdc [file join $out clock.xdc]
+# synth_design -top uhbs_processor -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2
+Command: synth_design -top uhbs_processor -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2
+Starting synth_design
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Vivado_Tcl 4-287] User specified maximum number of block DSP allowed in design is 0
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 7 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 3935493
+---------------------------------------------------------------------------------
+Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 2298.355 ; gain = 491.875 ; free physical = 97699 ; free virtual = 122210
+---------------------------------------------------------------------------------
+WARNING: [Synth 8-6901] identifier 'emit_base' is used before its declaration [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:121]
+WARNING: [Synth 8-6901] identifier 'emit_cursor' is used before its declaration [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:121]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_processor' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_processor.sv:4]
+	Parameter LANES bound to: 2 - type: integer 
+	Parameter UNROLL bound to: 2 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'uhbs_hbs' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:4]
+	Parameter UNROLL bound to: 2 - type: integer 
+	Parameter LANES bound to: 2 - type: integer 
+	Parameter PROFILE_ENABLE bound to: 1'b1 
+	Parameter SWAP_PHYSICAL_LANES bound to: 1'b0 
+INFO: [Synth 8-6157] synthesizing module 'uhbs_root_store' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/memory/uhbs_root_store.sv:4]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_root_store' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/memory/uhbs_root_store.sv:4]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_recipe_lane' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:5]
+	Parameter N bound to: 32 - type: integer 
+	Parameter DIGEST_BYTES bound to: 49 - type: integer 
+	Parameter INDEX_BITS bound to: 7 - type: integer 
+	Parameter UNROLL bound to: 2 - type: integer 
+	Parameter MAX_MESSAGE_BYTES bound to: 87 - type: integer 
+	Parameter RECIPE_MASK bound to: 16'b0001000000011110 
+	Parameter PROFILE_ENABLE bound to: 1'b1 
+INFO: [Synth 8-6157] synthesizing module 'uhbs_compact_shake_context_lane' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_compact_shake_context_lane.sv:6]
+	Parameter UNROLL bound to: 2 - type: integer 
+	Parameter N bound to: 32 - type: integer 
+	Parameter DIGEST_BYTES bound to: 49 - type: integer 
+	Parameter STREAM_CHAIN_ENABLE bound to: 1'b0 
+	Parameter REUSE_FAST_FEEDBACK bound to: 1'b1 
+INFO: [Synth 8-6157] synthesizing module 'uhbs_keccak' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_keccak.sv:6]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_keccak' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_keccak.sv:6]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_compact_shake_context_lane' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_compact_shake_context_lane.sv:6]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_recipe_lane' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:5]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_recipe_lane__parameterized0' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:5]
+	Parameter N bound to: 32 - type: integer 
+	Parameter DIGEST_BYTES bound to: 49 - type: integer 
+	Parameter INDEX_BITS bound to: 7 - type: integer 
+	Parameter UNROLL bound to: 2 - type: integer 
+	Parameter MAX_MESSAGE_BYTES bound to: 87 - type: integer 
+	Parameter RECIPE_MASK bound to: 16'b0000000000000110 
+	Parameter PROFILE_ENABLE bound to: 1'b1 
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_recipe_lane__parameterized0' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:5]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_program_sequencer' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/sequencer/uhbs_program_sequencer.sv:4]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_program_sequencer' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/sequencer/uhbs_program_sequencer.sv:4]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_value_store' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/memory/uhbs_value_store.sv:3]
+	Parameter WIDTH bound to: 256 - type: integer 
+	Parameter DEPTH bound to: 68 - type: integer 
+	Parameter ADDRESS_BITS bound to: 7 - type: integer 
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_value_store' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/memory/uhbs_value_store.sv:3]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_hbs' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:4]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_processor' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_processor.sv:4]
+WARNING: [Synth 8-6014] Unused sequential element saved_chain_prefix_domain_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_compact_shake_context_lane.sv:314]
+WARNING: [Synth 8-6014] Unused sequential element chain_template_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_compact_shake_context_lane.sv:345]
+WARNING: [Synth 8-7137] Register captured_value_reg in module uhbs_compact_shake_context_lane has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_compact_shake_context_lane.sv:248]
+WARNING: [Synth 8-6014] Unused sequential element compound_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:433]
+WARNING: [Synth 8-3936] Found unconnected internal register 'source_window_reg' and it is trimmed from '128' to '80' bits. [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:257]
+WARNING: [Synth 8-3936] Found unconnected internal register 'list_pair_reg' and it is trimmed from '512' to '272' bits. [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:235]
+WARNING: [Synth 8-7137] Register current_value_reg in module uhbs_recipe_lane has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:106]
+WARNING: [Synth 8-7137] Register saved_capture_reg in module uhbs_recipe_lane has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:131]
+WARNING: [Synth 8-6014] Unused sequential element compound_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:433]
+WARNING: [Synth 8-3936] Found unconnected internal register 'list_pair_reg' and it is trimmed from '512' to '272' bits. [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:235]
+WARNING: [Synth 8-7137] Register current_value_reg in module uhbs_recipe_lane__parameterized0 has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:106]
+WARNING: [Synth 8-7137] Register saved_capture_reg in module uhbs_recipe_lane__parameterized0 has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:131]
+WARNING: [Synth 8-6014] Unused sequential element operation_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:338]
+WARNING: [Synth 8-6014] Unused sequential element task_steps_reg[2] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:181]
+WARNING: [Synth 8-6014] Unused sequential element task_steps_reg[3] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:181]
+WARNING: [Synth 8-6014] Unused sequential element task_capture_after_reg[2] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:182]
+WARNING: [Synth 8-6014] Unused sequential element task_capture_after_reg[3] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:182]
+WARNING: [Synth 8-6014] Unused sequential element task_leaf_reg[2] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:187]
+WARNING: [Synth 8-6014] Unused sequential element task_leaf_reg[3] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:187]
+WARNING: [Synth 8-6014] Unused sequential element task_a_reg[2] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-6014] Unused sequential element task_a_reg[3] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-6014] Unused sequential element task_b_reg[2] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-6014] Unused sequential element task_b_reg[3] was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-6014] Unused sequential element chain_id_reg was removed.  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:395]
+WARNING: [Synth 8-7137] Register message_length_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:186]
+WARNING: [Synth 8-7137] Register group_index_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:169]
+WARNING: [Synth 8-7137] Register output_bytes_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:219]
+WARNING: [Synth 8-7137] Register value_reg[0] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:233]
+WARNING: [Synth 8-7137] Register value_reg[1] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:233]
+WARNING: [Synth 8-7137] Register value_reg[2] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:233]
+WARNING: [Synth 8-7137] Register value_reg[3] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:233]
+WARNING: [Synth 8-7137] Register message_buffer_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:186]
+WARNING: [Synth 8-7137] Register saved_descriptor_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:386]
+WARNING: [Synth 8-7137] Register hash_return_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:291]
+WARNING: [Synth 8-7137] Register standalone_chain_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:395]
+WARNING: [Synth 8-7137] Register indexing_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:395]
+WARNING: [Synth 8-7137] Register leaf_cursor_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:396]
+WARNING: [Synth 8-7137] Register target_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:396]
+WARNING: [Synth 8-7137] Register chain_cursor_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:396]
+WARNING: [Synth 8-7137] Register endpoint_count_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:397]
+WARNING: [Synth 8-7137] Register saved_chain_descriptor_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:97]
+WARNING: [Synth 8-7137] Register checksum_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:236]
+WARNING: [Synth 8-7137] Register transform_index_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:400]
+WARNING: [Synth 8-7137] Register emit_base_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:401]
+WARNING: [Synth 8-7137] Register emit_count_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:401]
+WARNING: [Synth 8-7137] Register emit_cursor_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:401]
+WARNING: [Synth 8-7137] Register parent_id_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:408]
+WARNING: [Synth 8-7137] Register tree_height_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:408]
+WARNING: [Synth 8-7137] Register node_level_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:412]
+WARNING: [Synth 8-7137] Register auth_level_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:412]
+WARNING: [Synth 8-7137] Register node_value_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:430]
+WARNING: [Synth 8-7137] Register emit_value_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:217]
+WARNING: [Synth 8-7137] Register emit_length_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:210]
+WARNING: [Synth 8-7137] Register emit_offset_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:210]
+WARNING: [Synth 8-7137] Register output_return_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:284]
+WARNING: [Synth 8-7137] Register route_value_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:169]
+WARNING: [Synth 8-7137] Register node_index_reg in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:453]
+WARNING: [Synth 8-7137] Register task_left_reg[0] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-7137] Register task_right_reg[0] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:188]
+WARNING: [Synth 8-7137] Register result_reg[0] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:430]
+WARNING: [Synth 8-7137] Register result_reg[1] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:430]
+WARNING: [Synth 8-7137] Register result_reg[2] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:430]
+WARNING: [Synth 8-7137] Register result_reg[3] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:430]
+WARNING: [Synth 8-7137] Register capture_reg[0] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:441]
+WARNING: [Synth 8-7137] Register capture_reg[1] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:441]
+WARNING: [Synth 8-7137] Register capture_reg[2] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:441]
+WARNING: [Synth 8-7137] Register capture_reg[3] in module uhbs_hbs has both Set and reset with same priority. This may cause simulation mismatches. Consider rewriting code  [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:441]
+WARNING: [Synth 8-3848] Net task_left[1] in module/entity uhbs_hbs does not have driver. [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:135]
+WARNING: [Synth 8-3848] Net task_right[1] in module/entity uhbs_hbs does not have driver. [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/top/uhbs_hbs.sv:135]
+WARNING: [Synth 8-7129] Port read1[0] in module uhbs_value_store is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[63] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[62] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[61] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[60] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[59] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[58] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[57] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[56] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[55] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[54] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[53] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[52] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[51] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[50] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[49] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[48] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[47] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[46] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[45] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[44] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[43] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[42] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[41] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[40] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[39] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[38] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[37] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[36] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[35] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[34] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[33] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[32] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[31] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[30] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[29] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[28] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[27] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[26] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[25] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[24] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[23] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[22] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[21] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[20] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[19] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[18] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[17] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port template_data[16] in module uhbs_program_sequencer is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[5] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[4] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[3] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[2] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[1] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[0] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[511] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[510] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[509] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[508] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[507] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[506] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[505] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[504] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[503] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[502] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[501] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[500] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[499] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[498] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[497] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[496] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[495] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[494] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[493] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[492] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[491] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[490] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[489] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[488] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[487] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[486] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[485] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[484] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[483] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[482] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[481] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[480] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[479] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[478] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[477] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[476] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[475] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[474] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[473] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[472] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[471] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[470] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[469] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[468] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+WARNING: [Synth 8-7129] Port chain_prefix_data[467] in module uhbs_compact_shake_context_lane is either unconnected or has no load
+INFO: [Common 17-14] Message 'Synth 8-7129' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+---------------------------------------------------------------------------------
+Finished RTL Elaboration : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2460.324 ; gain = 653.844 ; free physical = 97505 ; free virtual = 122020
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2460.324 ; gain = 653.844 ; free physical = 97505 ; free virtual = 122020
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 2460.324 ; gain = 653.844 ; free physical = 97505 ; free virtual = 122020
+---------------------------------------------------------------------------------
+Netlist sorting complete. Time (s): cpu = 00:00:00.14 ; elapsed = 00:00:00.15 . Memory (MB): peak = 2460.324 ; gain = 0.000 ; free physical = 97502 ; free virtual = 122017
+INFO: [Project 1-570] Preparing netlist for logic optimization
+
+Processing XDC Constraints
+Initializing timing engine
+Parsing XDC File [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/clock.xdc]
+Finished Parsing XDC File [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/clock.xdc]
+Completed Processing XDC Constraints
+
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2640.727 ; gain = 0.000 ; free physical = 97497 ; free virtual = 122010
+INFO: [Project 1-111] Unisim Transformation Summary:
+No Unisim elements were transformed.
+
+Constraint Validation Runtime : Time (s): cpu = 00:00:00.15 ; elapsed = 00:00:00.05 . Memory (MB): peak = 2640.762 ; gain = 0.000 ; free physical = 97496 ; free virtual = 122009
+---------------------------------------------------------------------------------
+Finished Constraint Validation : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2640.762 ; gain = 834.281 ; free physical = 97524 ; free virtual = 122040
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Loading Part and Timing Information
+---------------------------------------------------------------------------------
+Loading part: xc7a200tffg1156-3
+---------------------------------------------------------------------------------
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2648.730 ; gain = 842.250 ; free physical = 97524 ; free virtual = 122040
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying 'set_property' XDC Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2648.730 ; gain = 842.250 ; free physical = 97524 ; free virtual = 122040
+---------------------------------------------------------------------------------
+INFO: [Synth 8-802] inferred FSM for state register 'lane_state_reg' in module 'uhbs_compact_shake_context_lane'
+INFO: [Synth 8-802] inferred FSM for state register 'state_reg' in module 'uhbs_program_sequencer'
+INFO: [Synth 8-802] inferred FSM for state register 'phase_reg' in module 'uhbs_processor'
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+                    IDLE |                              001 |                               00
+              WAIT_BLOCK |                              100 |                               01
+                     RUN |                              010 |                               10
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'lane_state_reg' using encoding 'one-hot' in module 'uhbs_compact_shake_context_lane'
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+                    IDLE |                              000 |                              000
+                   FETCH |                              001 |                              001
+                    LOAD |                              010 |                              010
+                   ISSUE |                              011 |                              011
+              WAIT_MACRO |                              100 |                              100
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'state_reg' using encoding 'sequential' in module 'uhbs_program_sequencer'
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+                  HEADER |                              000 |                              000
+                 PROFILE |                              001 |                              001
+                 RELEASE |                              010 |                              010
+                 REQUEST |                              011 |                              011
+                     RUN |                              100 |                              100
+                  HALTED |                              101 |                              101
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'phase_reg' using encoding 'sequential' in module 'uhbs_processor'
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:10 ; elapsed = 00:00:09 . Memory (MB): peak = 2648.730 ; gain = 842.250 ; free physical = 97498 ; free virtual = 122016
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start RTL Component Statistics 
+---------------------------------------------------------------------------------
+Detailed RTL Component Info : 
++---Adders : 
+	   2 Input   32 Bit       Adders := 5     
+	   3 Input   32 Bit       Adders := 3     
+	   2 Input   18 Bit       Adders := 1     
+	   2 Input   17 Bit       Adders := 1     
+	   2 Input   16 Bit       Adders := 2     
+	   3 Input   14 Bit       Adders := 2     
+	   2 Input   14 Bit       Adders := 14    
+	   3 Input   13 Bit       Adders := 6     
+	   2 Input   13 Bit       Adders := 10    
+	   3 Input   12 Bit       Adders := 1     
+	   2 Input   11 Bit       Adders := 18    
+	   3 Input   11 Bit       Adders := 1     
+	   2 Input   10 Bit       Adders := 3     
+	   2 Input    9 Bit       Adders := 1     
+	   3 Input    9 Bit       Adders := 1     
+	   3 Input    8 Bit       Adders := 5     
+	   2 Input    8 Bit       Adders := 4     
+	   2 Input    7 Bit       Adders := 11    
+	   3 Input    7 Bit       Adders := 1     
+	   2 Input    6 Bit       Adders := 9     
+	   3 Input    6 Bit       Adders := 10    
+	   2 Input    5 Bit       Adders := 20    
+	   3 Input    5 Bit       Adders := 1     
+	   2 Input    4 Bit       Adders := 9     
+	   2 Input    2 Bit       Adders := 1     
++---XORs : 
+	   2 Input    128 Bit         XORs := 2     
+	   5 Input     64 Bit         XORs := 20    
+	   2 Input     64 Bit         XORs := 216   
+	   3 Input     64 Bit         XORs := 4     
+	   2 Input     32 Bit         XORs := 1     
++---Registers : 
+	              696 Bit    Registers := 1     
+	              392 Bit    Registers := 7     
+	              256 Bit    Registers := 12    
+	              128 Bit    Registers := 2     
+	               64 Bit    Registers := 58    
+	               32 Bit    Registers := 7     
+	               18 Bit    Registers := 2     
+	               16 Bit    Registers := 7     
+	               13 Bit    Registers := 6     
+	               12 Bit    Registers := 1     
+	               11 Bit    Registers := 6     
+	               10 Bit    Registers := 6     
+	                8 Bit    Registers := 1     
+	                7 Bit    Registers := 9     
+	                6 Bit    Registers := 10    
+	                5 Bit    Registers := 25    
+	                4 Bit    Registers := 15    
+	                3 Bit    Registers := 6     
+	                2 Bit    Registers := 2     
+	                1 Bit    Registers := 43    
++---Muxes : 
+	   2 Input 1088 Bit        Muxes := 8     
+	   2 Input  696 Bit        Muxes := 2     
+	  34 Input  696 Bit        Muxes := 1     
+	   2 Input  512 Bit        Muxes := 2     
+	   2 Input  392 Bit        Muxes := 1     
+	  34 Input  392 Bit        Muxes := 1     
+	   2 Input  272 Bit        Muxes := 2     
+	   2 Input  256 Bit        Muxes := 22    
+	   6 Input  256 Bit        Muxes := 2     
+	   7 Input  256 Bit        Muxes := 8     
+	  34 Input  256 Bit        Muxes := 2     
+	   2 Input  192 Bit        Muxes := 4     
+	   2 Input  128 Bit        Muxes := 12    
+	   6 Input  128 Bit        Muxes := 2     
+	   4 Input   80 Bit        Muxes := 2     
+	   2 Input   64 Bit        Muxes := 138   
+	   4 Input   64 Bit        Muxes := 8     
+	  34 Input   64 Bit        Muxes := 3     
+	   2 Input   56 Bit        Muxes := 2     
+	   2 Input   32 Bit        Muxes := 9     
+	  34 Input   32 Bit        Muxes := 2     
+	   2 Input   18 Bit        Muxes := 1     
+	  34 Input   18 Bit        Muxes := 1     
+	   2 Input   17 Bit        Muxes := 1     
+	   2 Input   16 Bit        Muxes := 3     
+	  34 Input   16 Bit        Muxes := 1     
+	   2 Input   13 Bit        Muxes := 6     
+	   6 Input   13 Bit        Muxes := 2     
+	  34 Input   12 Bit        Muxes := 1     
+	   2 Input   11 Bit        Muxes := 4     
+	   5 Input   11 Bit        Muxes := 4     
+	  34 Input   10 Bit        Muxes := 4     
+	   2 Input   10 Bit        Muxes := 6     
+	   2 Input    8 Bit        Muxes := 34    
+	   2 Input    7 Bit        Muxes := 4     
+	   6 Input    7 Bit        Muxes := 4     
+	  34 Input    7 Bit        Muxes := 5     
+	   6 Input    6 Bit        Muxes := 3     
+	   2 Input    6 Bit        Muxes := 25    
+	   7 Input    6 Bit        Muxes := 1     
+	   5 Input    6 Bit        Muxes := 1     
+	  34 Input    6 Bit        Muxes := 3     
+	   3 Input    6 Bit        Muxes := 2     
+	   2 Input    5 Bit        Muxes := 22    
+	   3 Input    5 Bit        Muxes := 6     
+	   6 Input    5 Bit        Muxes := 4     
+	   5 Input    5 Bit        Muxes := 2     
+	   4 Input    5 Bit        Muxes := 1     
+	  34 Input    5 Bit        Muxes := 3     
+	   2 Input    4 Bit        Muxes := 25    
+	   3 Input    4 Bit        Muxes := 5     
+	   6 Input    4 Bit        Muxes := 2     
+	  34 Input    4 Bit        Muxes := 7     
+	   4 Input    4 Bit        Muxes := 3     
+	   3 Input    3 Bit        Muxes := 7     
+	   2 Input    3 Bit        Muxes := 11    
+	   6 Input    3 Bit        Muxes := 2     
+	   7 Input    3 Bit        Muxes := 4     
+	   4 Input    3 Bit        Muxes := 1     
+	   5 Input    3 Bit        Muxes := 1     
+	   2 Input    2 Bit        Muxes := 2     
+	   5 Input    2 Bit        Muxes := 1     
+	  34 Input    2 Bit        Muxes := 1     
+	   2 Input    1 Bit        Muxes := 114   
+	   3 Input    1 Bit        Muxes := 34    
+	   6 Input    1 Bit        Muxes := 48    
+	   7 Input    1 Bit        Muxes := 2     
+	   5 Input    1 Bit        Muxes := 13    
+	  34 Input    1 Bit        Muxes := 49    
+---------------------------------------------------------------------------------
+Finished RTL Component Statistics 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Part Resource Summary
+---------------------------------------------------------------------------------
+Part Resources:
+DSPs: 740 (col length:100)
+BRAMs: 730 (col length: RAMB18 100 RAMB36 50)
+---------------------------------------------------------------------------------
+Finished Part Resource Summary
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Cross Boundary and Area Optimization
+---------------------------------------------------------------------------------
+INFO: [Synth 8-5546] ROM "round_constant" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "round_constant" won't be mapped to RAM because it is too sparse
+INFO: [Common 17-14] Message 'Synth 8-7129' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[5] driven by constant 0
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[4] driven by constant 0
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[3] driven by constant 0
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[2] driven by constant 0
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[1] driven by constant 0
+WARNING: [Synth 8-3917] design uhbs_recipe_lane__GCB3 has port P[0] driven by constant 0
+INFO: [Synth 8-4471] merging register 'stream_node_words_reg[2:0]' into 'stream_node_words_reg[2:0]' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:94]
+INFO: [Synth 8-4471] merging register 'stream_node_words_reg[2:0]' into 'stream_node_words_reg[2:0]' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/rtl/hash_lane/uhbs_recipe_lane.sv:94]
+INFO: [Synth 8-5544] ROM "state" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "state1" won't be mapped to Block RAM because address size (2) smaller than threshold (5)
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][2] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][1] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][0] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][5] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][4] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][3] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][8] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][7] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][6] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][11] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][10] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][9] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][14] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][13] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][12] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][17] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][16] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][15] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][20] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][19] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][18] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][23] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][22] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][21] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][26] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][25] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][24] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][29] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][28] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][27] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][32] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][31] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][30] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][35] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][34] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][33] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][38] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][37] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][36] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][41] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][40] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][39] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][44] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][43] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][42] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][47] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][46] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][45] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][50] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][49] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][48] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][53] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][52] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][51] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][56] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][55] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][54] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][59] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][58] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][57] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][62] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][61] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][60] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][65] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][64] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][63] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][68] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][67] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][66] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][71] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][70] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][69] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][74] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][73] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][72] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][77] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][76] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][75] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][80] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][79] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][78] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][83] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][82] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][81] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][86] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][85] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][84] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][89] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][88] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][87] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][92] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][91] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][90] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][95] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][94] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][93] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][98] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][97] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][96] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\result_reg[2][101] )
+INFO: [Common 17-14] Message 'Synth 8-3333' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+INFO: [Common 17-14] Message 'Synth 8-3333' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+INFO: [Synth 8-3886] merging instance 'hash_return_reg[5]' (FDE) to 'hash_return_reg[2]'
+INFO: [Synth 8-3886] merging instance 'active_mask_reg[2]' (FDCE) to 'task_b_reg[0][17]'
+INFO: [Synth 8-3886] merging instance 'active_mask_reg[3]' (FDCE) to 'task_b_reg[0][17]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][17]' (FDCE) to 'task_b_reg[1][18]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][18]' (FDCE) to 'task_b_reg[1][19]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][19]' (FDCE) to 'task_b_reg[1][20]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][20]' (FDCE) to 'task_b_reg[1][21]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][21]' (FDCE) to 'task_b_reg[1][22]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][22]' (FDCE) to 'task_b_reg[1][23]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][23]' (FDCE) to 'task_b_reg[1][24]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][24]' (FDCE) to 'task_b_reg[1][25]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][25]' (FDCE) to 'task_b_reg[1][26]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][26]' (FDCE) to 'task_b_reg[1][27]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][27]' (FDCE) to 'task_b_reg[1][28]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][28]' (FDCE) to 'task_b_reg[1][29]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][29]' (FDCE) to 'task_b_reg[1][30]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][30]' (FDCE) to 'task_b_reg[1][31]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[1][31]' (FDCE) to 'task_capture_after_reg[1][4]'
+INFO: [Synth 8-3886] merging instance 'task_capture_after_reg[1][4]' (FDCE) to 'task_capture_after_reg[0][4]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][17]' (FDCE) to 'task_b_reg[0][18]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][18]' (FDCE) to 'task_b_reg[0][19]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][19]' (FDCE) to 'task_b_reg[0][20]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][20]' (FDCE) to 'task_b_reg[0][21]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][21]' (FDCE) to 'task_b_reg[0][22]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][22]' (FDCE) to 'task_b_reg[0][23]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][23]' (FDCE) to 'task_b_reg[0][24]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][24]' (FDCE) to 'task_b_reg[0][25]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][25]' (FDCE) to 'task_b_reg[0][26]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][26]' (FDCE) to 'task_b_reg[0][27]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][27]' (FDCE) to 'task_b_reg[0][28]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][28]' (FDCE) to 'task_b_reg[0][29]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][29]' (FDCE) to 'task_b_reg[0][30]'
+INFO: [Synth 8-3886] merging instance 'task_b_reg[0][30]' (FDCE) to 'task_b_reg[0][31]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[2]' (FDCE) to 'error_code_reg[12]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[3]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[4]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[5]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[6]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[7]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[8]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[9]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[10]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[11]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[12]' (FDCE) to 'error_code_reg[13]'
+INFO: [Synth 8-3886] merging instance 'error_code_reg[14]' (FDCE) to 'error_code_reg[15]'
+INFO: [Synth 8-3886] merging instance 'hash_return_reg[0]' (FDE) to 'hash_return_reg[1]'
+---------------------------------------------------------------------------------
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:24 ; elapsed = 00:00:40 . Memory (MB): peak = 2676.664 ; gain = 870.184 ; free physical = 90592 ; free virtual = 115112
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+Distributed RAM: Preliminary Mapping Report (see note below)
++----------------+-----------------------+----------------+----------------------+-----------------+
+|Module Name     | RTL Object            | Inference      | Size (Depth x Width) | Primitives      | 
++----------------+-----------------------+----------------+----------------------+-----------------+
+|\g_roots.roots  | even_bank_reg         | User Attribute | 32 x 256             | RAM32M x 43     | 
+|\g_roots.roots  | odd_bank_reg          | User Attribute | 32 x 256             | RAM32M x 43     | 
+|endpoints       | regular.even_bank_reg | User Attribute | 64 x 256             | RAM64M x 86     | 
+|endpoints       | regular.odd_bank_reg  | User Attribute | 64 x 256             | RAM64M x 86     | 
+|uhbs_hbs__GC0   | auth_path_reg         | User Attribute | 16 x 256             | RAM32M x 43     | 
+|uhbs_hbs__GC0   | stack_reg             | User Attribute | 16 x 256             | RAM16X1S x 256  | 
++----------------+-----------------------+----------------+----------------------+-----------------+
+
+Note: The table above is a preliminary report that shows the Distributed RAMs at the current stage of the synthesis flow. Some Distributed RAMs may be reimplemented as non Distributed RAM primitives later in the synthesis flow. Multiple instantiated RAMs are reported only once.
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying XDC Timing Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:46 ; elapsed = 00:00:43 . Memory (MB): peak = 2676.664 ; gain = 870.184 ; free physical = 92140 ; free virtual = 116659
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Timing Optimization
+---------------------------------------------------------------------------------
+info: optimization accepted worst group hill climbing move (1082.0/oG. 145.0ps)
+info: optimization accepted worst group hill climbing move (1659.0/oG. 191.0ps)
+---------------------------------------------------------------------------------
+Finished Timing Optimization : Time (s): cpu = 00:01:31 ; elapsed = 00:01:29 . Memory (MB): peak = 3120.844 ; gain = 1314.363 ; free physical = 91780 ; free virtual = 116307
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+Distributed RAM: Final Mapping Report
++----------------+-----------------------+----------------+----------------------+-----------------+
+|Module Name     | RTL Object            | Inference      | Size (Depth x Width) | Primitives      | 
++----------------+-----------------------+----------------+----------------------+-----------------+
+|endpoints       | regular.even_bank_reg | User Attribute | 64 x 256             | RAM64M x 86     | 
+|endpoints       | regular.odd_bank_reg  | User Attribute | 64 x 256             | RAM64M x 86     | 
+|\g_roots.roots  | even_bank_reg         | User Attribute | 32 x 256             | RAM32M x 43     | 
+|\g_roots.roots  | odd_bank_reg          | User Attribute | 32 x 256             | RAM32M x 43     | 
+|uhbs_hbs__GC0   | auth_path_reg         | User Attribute | 16 x 256             | RAM32M x 43     | 
+|uhbs_hbs__GC0   | stack_reg             | User Attribute | 16 x 256             | RAM16X1S x 256  | 
++----------------+-----------------------+----------------+----------------------+-----------------+
+
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Technology Mapping
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Technology Mapping : Time (s): cpu = 00:01:33 ; elapsed = 00:01:36 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90339 ; free virtual = 114861
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished IO Insertion : Time (s): cpu = 00:01:36 ; elapsed = 00:01:39 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90330 ; free virtual = 114854
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Instances
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Instances : Time (s): cpu = 00:01:36 ; elapsed = 00:01:39 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90330 ; free virtual = 114854
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Rebuilding User Hierarchy
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:01:37 ; elapsed = 00:01:40 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90331 ; free virtual = 114853
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Ports
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Ports : Time (s): cpu = 00:01:37 ; elapsed = 00:01:40 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90331 ; free virtual = 114853
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:01:38 ; elapsed = 00:01:42 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90333 ; free virtual = 114855
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Nets
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Nets : Time (s): cpu = 00:01:38 ; elapsed = 00:01:42 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90333 ; free virtual = 114855
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Writing Synthesis Report
+---------------------------------------------------------------------------------
+
+Report BlackBoxes: 
++-+--------------+----------+
+| |BlackBox name |Instances |
++-+--------------+----------+
++-+--------------+----------+
+
+Report Cell Usage: 
++------+---------+------+
+|      |Cell     |Count |
++------+---------+------+
+|1     |CARRY4   |   251|
+|2     |LUT1     |    46|
+|3     |LUT2     |  1367|
+|4     |LUT3     |  2254|
+|5     |LUT4     |  1610|
+|6     |LUT5     |  3350|
+|7     |LUT6     | 14743|
+|8     |MUXF7    |   244|
+|9     |MUXF8    |    34|
+|10    |RAM16X1S |   256|
+|11    |RAM32M   |   129|
+|12    |RAM64M   |   170|
+|13    |RAM64X1D |     2|
+|14    |FDCE     |  1259|
+|15    |FDPE     |     8|
+|16    |FDRE     |  9629|
++------+---------+------+
+---------------------------------------------------------------------------------
+Finished Writing Synthesis Report : Time (s): cpu = 00:01:38 ; elapsed = 00:01:42 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 90333 ; free virtual = 114855
+---------------------------------------------------------------------------------
+Synthesis finished with 0 errors, 0 critical warnings and 156 warnings.
+Synthesis Optimization Runtime : Time (s): cpu = 00:01:35 ; elapsed = 00:01:44 . Memory (MB): peak = 3132.770 ; gain = 1145.852 ; free physical = 95691 ; free virtual = 120223
+Synthesis Optimization Complete : Time (s): cpu = 00:01:38 ; elapsed = 00:01:46 . Memory (MB): peak = 3132.770 ; gain = 1326.289 ; free physical = 95698 ; free virtual = 120222
+INFO: [Project 1-571] Translating synthesized netlist
+Netlist sorting complete. Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.1 . Memory (MB): peak = 3132.770 ; gain = 0.000 ; free physical = 95203 ; free virtual = 119732
+INFO: [Netlist 29-17] Analyzing 1086 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Parsing XDC File [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/clock.xdc]
+Finished Parsing XDC File [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/clock.xdc]
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3176.871 ; gain = 0.000 ; free physical = 95464 ; free virtual = 120002
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 557 instances were transformed.
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 129 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+Synth Design complete | Checksum: 31f003bd
+INFO: [Common 17-83] Releasing license: Synthesis
+195 Infos, 177 Warnings, 0 Critical Warnings and 0 Errors encountered.
+synth_design completed successfully
+synth_design: Time (s): cpu = 00:01:43 ; elapsed = 00:01:51 . Memory (MB): peak = 3176.906 ; gain = 1540.480 ; free physical = 95425 ; free virtual = 119963
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 8851.639; main = 2524.355; forked = 7309.143
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 17909.633; main = 3176.875; forked = 15236.883
+# report_utilization -file [file join $out core_utilization.rpt]
+# report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
+# report_timing_summary -file [file join $out core_timing.rpt]
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 8 CPUs
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+report_timing_summary: Time (s): cpu = 00:00:13 ; elapsed = 00:00:07 . Memory (MB): peak = 3176.906 ; gain = 0.000 ; free physical = 94557 ; free virtual = 119124
+# write_checkpoint -force [file join $out processor.dcp]
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3208.887 ; gain = 0.000 ; free physical = 94557 ; free virtual = 119124
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/processor.dcp' has been generated.
+# write_edif -force [file join $out processor.edf]
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 3208.887 ; gain = 0.000 ; free physical = 95096 ; free virtual = 119670
+# write_verilog -force -mode synth_stub [file join $out processor_stub.v]
+# set core_seconds [expr {[clock seconds]-$started}]
+# close_project
+# proc core_structure {path} {
+#  set f [open $path w]
+#  foreach c [lsort [get_cells -hier -filter {NAME =~ processor/* && IS_PRIMITIVE == 1}]] {
+#   puts $f "CELL $c"
+#   foreach prop {REF_NAME INIT INIT_A INIT_B INIT_C INIT_D SRVAL IS_C_INVERTED IS_D_INVERTED IS_R_INVERTED IS_S_INVERTED IS_CLK_INVERTED IS_WCLK_INVERTED} {
+#    puts $f "$prop=[get_property -quiet $prop $c]"
+#   }
+#  }
+#  foreach n [lsort [get_nets -hier -filter {NAME =~ processor/*}]] {
+#   set seg [get_nets -segments $n]
+#   set bp [get_pins -quiet -of_objects $seg -filter {NAME =~ processor/* && IS_LEAF == 0}]
+#   set boundary 0
+#   foreach p $bp {if {[llength [split $p /]]==2} {set boundary 1}}
+#   if {$boundary} {continue}
+#   puts $f "NET $n PINS=[lsort [get_pins -quiet -of_objects $n]]"
+#  }
+#  close $f
+# }
+# source experiments/v4.2/external_job_message/rom_mapping.tcl
+## proc export_rom_mapping {path} {
+##  set f [open $path w]
+##  foreach kind {program template descriptor} {
+##   set depth [dict get {program 32 template 16 descriptor 32} $kind]
+##   set abits [dict get {program 5 template 4 descriptor 5} $kind]
+##   set ports [expr {$kind eq "descriptor" ? 2 : 1}]
+##   set signal [expr {$kind eq "descriptor" ? "descriptor_addresses" : "${kind}_address"}]
+##   for {set p 0} {$p<$ports} {incr p} {
+##    for {set b 0} {$b<64} {incr b} {
+##     set dp [get_pins [format {processor/%s_data[%d]} $kind [expr {$p*64+$b}]]]
+##     set dn [get_nets -of_objects $dp]
+##     set driver [get_pins -leaf -of_objects $dn -filter {DIRECTION == OUT}]
+##     if {[llength $driver]!=1} {error "ROM output driver $kind $p $b: $driver"}
+##     set c [get_cells -of_objects $driver]
+##     if {[get_property REF_NAME $c] ne "LUT$abits"} {error "Unsupported inferred ROM primitive $c"}
+##     set mapping {}
+##     for {set i 0} {$i<$abits} {incr i} {
+##      set input_net [get_nets -of_objects [get_pins $c/I$i]]
+##      set found -1
+##      for {set a 0} {$a<$abits} {incr a} {
+##       set ap [get_pins [format {processor/%s[%d]} $signal [expr {$p*$abits+$a}]]]
+##       if {[get_nets -of_objects $ap] eq $input_net} {set found $a}
+##      }
+##      if {$found<0} {error "Unmapped input $c/I$i $input_net"}
+##      lappend mapping $found
+##     }
+##     set_property DONT_TOUCH true $c
+##     set_property DONT_TOUCH true $dn
+##     puts $f "$kind\t$p\t$b\t$c\t$abits\t[join $mapping ,]\t[get_property INIT $c]"
+##    }
+##   }
+##  }
+##  close $f
+## }
+# set previous_hash ""
+# set times [open [file join $out elapsed.tsv] w]
+# puts $times "core\t$core_seconds"
+# foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_256f_keygen slh_256f_sign} {
+#  set start [clock seconds]
+#  set d [file join $out $name];file mkdir $d
+#  create_project -in_memory -part $part
+#  read_verilog [file join $out processor_stub.v]
+#  read_verilog -sv [file join $out ${name}_shell.sv]
+#  synth_design -top uhbs_top -part $part -mode out_of_context -flatten_hierarchy none
+#  write_edif -force [file join $d shell.edf]
+#  close_project
+#  read_edif [file join $out processor.edf]
+#  read_edif [file join $d shell.edf]
+#  link_design -top uhbs_top -part $part -mode out_of_context
+#  if {[llength [get_cells -hier -filter {IS_BLACKBOX == 1}]]} {error "unresolved blackbox"}
+#  set_property DONT_TOUCH true [get_cells processor]
+#  create_clock -name clk -period 10.0 [get_ports clk]
+#  core_structure [file join $d core_structure.txt]
+#  set h [lindex [exec sha256sum [file join $d core_structure.txt]] 0]
+#  if {$previous_hash ne "" && $h ne $previous_hash} {error "common core changed for $name"}
+#  set previous_hash $h
+#  export_rom_mapping [file join $d rom_mapping.tsv]
+#  set profile [join [lrange [split $name _] 0 1] _]
+#  exec python3 scripts/v42_external_rom.py $d $profile
+#  source [file join $d init.tcl]
+#  export_rom_mapping [file join $d initialized_rom.tsv]
+#  exec python3 scripts/v42_external_rom.py $d $profile --audit
+#  report_utilization -file [file join $d utilization.rpt]
+#  report_utilization -hierarchical -file [file join $d hierarchical.rpt]
+#  report_timing_summary -max_paths 10 -file [file join $d timing.rpt]
+#  write_checkpoint -force [file join $d post_synth.dcp]
+#  set f [open [file join $d core_sha256.txt] w];puts $f $h;close $f
+#  puts $times "$name\t[expr {[clock seconds]-$start}]"
+#  puts "EXTERNAL_TOP_SYNTH_PASS $name core_sha256=$h"
+#  close_project
+# }
+Command: synth_design -top uhbs_top -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy none
+Starting synth_design
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 7 processes.
+---------------------------------------------------------------------------------
+Starting Synthesize : Time (s): cpu = 00:00:02 ; elapsed = 00:00:02 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 93933 ; free virtual = 118543
+---------------------------------------------------------------------------------
+INFO: [Synth 8-6157] synthesizing module 'uhbs_top' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:3]
+INFO: [Synth 8-3876] $readmem data file 'experiments/v4.2/external_job_message/program_construction.mem' is read successfully [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:45]
+INFO: [Synth 8-3876] $readmem data file 'experiments/v4.2/external_job_message/template_construction.mem' is read successfully [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:46]
+INFO: [Synth 8-3876] $readmem data file 'experiments/v4.2/external_job_message/descriptor_construction.mem' is read successfully [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:47]
+INFO: [Synth 8-6157] synthesizing module 'uhbs_processor' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/processor_stub.v:17]
+INFO: [Synth 8-6155] done synthesizing module 'uhbs_top' (0#1) [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:3]
+WARNING: [Synth 8-6026] Ignoring keep related attribute (keep/mark_debug/dont_touch) applied on memory [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:41]
+WARNING: [Synth 8-6026] Ignoring keep related attribute (keep/mark_debug/dont_touch) applied on memory [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:42]
+WARNING: [Synth 8-6026] Ignoring keep related attribute (keep/mark_debug/dont_touch) applied on memory [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:43]
+---------------------------------------------------------------------------------
+Finished Synthesize : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94659 ; free virtual = 119271
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Constraint Validation : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94657 ; free virtual = 119270
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Loading Part and Timing Information
+---------------------------------------------------------------------------------
+Loading part: xc7a200tffg1156-3
+---------------------------------------------------------------------------------
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94657 ; free virtual = 119270
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:03 ; elapsed = 00:00:03 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94835 ; free virtual = 119448
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start RTL Component Statistics 
+---------------------------------------------------------------------------------
+Detailed RTL Component Info : 
++---Registers : 
+	                2 Bit    Registers := 1     
+---------------------------------------------------------------------------------
+Finished RTL Component Statistics 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Part Resource Summary
+---------------------------------------------------------------------------------
+Part Resources:
+DSPs: 740 (col length:100)
+BRAMs: 730 (col length: RAMB18 100 RAMB36 50)
+---------------------------------------------------------------------------------
+Finished Part Resource Summary
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start Cross Boundary and Area Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94736 ; free virtual = 119353
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+ROM: Preliminary Mapping Report
++------------+-------------------+---------------+----------------+
+|Module Name | RTL Object        | Depth x Width | Implemented As | 
++------------+-------------------+---------------+----------------+
+|uhbs_top    | program_memory    | 32x64         | LUT            | 
+|uhbs_top    | template_memory   | 16x64         | LUT            | 
+|uhbs_top    | descriptor_memory | 32x64         | LUT            | 
+|uhbs_top    | descriptor_memory | 32x64         | LUT            | 
+|uhbs_top    | p_0_out           | 32x64         | LUT            | 
+|uhbs_top    | p_0_out           | 32x64         | LUT            | 
++------------+-------------------+---------------+----------------+
+
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+No constraint files found.
+---------------------------------------------------------------------------------
+Start Timing Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Timing Optimization : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94734 ; free virtual = 119352
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Technology Mapping
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Technology Mapping : Time (s): cpu = 00:00:04 ; elapsed = 00:00:04 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94724 ; free virtual = 119341
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished IO Insertion : Time (s): cpu = 00:00:05 ; elapsed = 00:00:05 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94773 ; free virtual = 119401
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Instances
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:05 ; elapsed = 00:00:05 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94773 ; free virtual = 119401
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94770 ; free virtual = 119398
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Writing Synthesis Report
+---------------------------------------------------------------------------------
+
+Report BlackBoxes: 
++------+---------------+----------+
+|      |BlackBox name  |Instances |
++------+---------------+----------+
+|1     |uhbs_processor |         1|
++------+---------------+----------+
+
+Report Cell Usage: 
++------+--------------------+------+
+|      |Cell                |Count |
++------+--------------------+------+
+|1     |uhbs_processor_bbox |     1|
+|2     |LUT1                |     1|
+|3     |LUT4                |    64|
+|4     |LUT5                |   192|
+|5     |FDPE                |     2|
++------+--------------------+------+
+---------------------------------------------------------------------------------
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94770 ; free virtual = 119398
+---------------------------------------------------------------------------------
+Synthesis finished with 0 errors, 0 critical warnings and 3 warnings.
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94764 ; free virtual = 119392
+Synthesis Optimization Complete : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94763 ; free virtual = 119391
+INFO: [Project 1-571] Translating synthesized netlist
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 94749 ; free virtual = 119377
+INFO: [Project 1-570] Preparing netlist for logic optimization
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+CRITICAL WARNING: [Project 1-486] Could not resolve non-primitive black box cell 'uhbs_processor' instantiated as 'processor' [/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/idea/slh-dsa-acceleration/projects/μHBS/build/v4.2/external_job_message/external_c1/synth_source/build/v4.2/external_job_message/external_c1/synthesis/slh_128f_keygen_shell.sv:52]
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 95087 ; free virtual = 119718
+INFO: [Project 1-111] Unisim Transformation Summary:
+No Unisim elements were transformed.
+
+Synth Design complete | Checksum: 5b32b65f
+INFO: [Common 17-83] Releasing license: Synthesis
+13 Infos, 3 Warnings, 1 Critical Warnings and 0 Errors encountered.
+synth_design completed successfully
+synth_design: Time (s): cpu = 00:00:09 ; elapsed = 00:00:07 . Memory (MB): peak = 3208.922 ; gain = 0.035 ; free physical = 95246 ; free virtual = 119877
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2530.188; main = 2530.188; forked = 0.000
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 3208.891; main = 3208.891; forked = 0.000
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 3208.922 ; gain = 0.000 ; free physical = 95261 ; free virtual = 119892
+Command: link_design -top uhbs_top -part xc7a200tffg1156-3 -mode out_of_context
+Design is defaulting to srcset: sources_1
+Design is defaulting to constrset: constrs_1
+0 Infos, 0 Warnings, 0 Critical Warnings and 1 Errors encountered.
+link_design failed
+ERROR: [Project 1-68] No files found to match top module 'uhbs_top'
+Resolution: Please verify your EDIF file is named after its top module.  For instance, if the top module is called 'viterbi', name the file 'viterbi.edf'. File naming is case sensitive on Linux.
+INFO: [Common 17-206] Exiting Vivado at Sat Sep 26 13:58:47 2026...

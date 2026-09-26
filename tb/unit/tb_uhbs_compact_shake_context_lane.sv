@@ -5,7 +5,7 @@ module tb_uhbs_compact_shake_context_lane;
     wire [5:0] node_bytes=16;
     wire [383:0] chain_prefix_data=0;
     logic clk = 1'b0;
-    logic rst_n = 1'b0;
+    logic rst = 1'b1;
     logic context_valid = 1'b0;
     wire context_ready;
     logic fast_block_valid = 1'b0;
@@ -179,7 +179,7 @@ module tb_uhbs_compact_shake_context_lane;
         for (index = 0; index < 608; index = index + 1)
             message[index] = index[7:0];
         repeat (3) tick();
-        rst_n = 1'b1;
+        rst = 1'b0;
         tick();
         run_message(135, EXPECT_135);
         run_message(136, EXPECT_136);

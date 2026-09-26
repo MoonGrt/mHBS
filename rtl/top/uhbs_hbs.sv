@@ -6,13 +6,13 @@ module uhbs_hbs #(
     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
 ) (
     input wire [63:0] image_header, profile_descriptor,
-    output wire [5:0] program_address,
+    output wire [4:0] program_address,
     output wire [3:0] template_address,
     input wire [63:0] program_data, template_data,
     input wire [4:0] job_entry,
     output wire [9:0] descriptor_addresses,
     input wire [127:0] descriptor_data,
-    input wire clk, rst_n,
+    input wire clk, rst,
     input wire job_valid, output wire job_ready, input wire job_operation,
     input wire [6:0] job_message_length,
     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
@@ -63,7 +63,7 @@ module uhbs_hbs #(
     // The main controller uses return-state registers and need not synthesize
     // as a one-hot FSM. Never drive asynchronous reset from its binary decode.
     (* dont_touch="yes" *) logic abort_execution;
-    wire execution_rst_n=rst_n && !abort_execution;
+    wire execution_rst=rst || abort_execution;
     logic operation;
     // Boot loader owns immutable Job registers for this reset epoch.
     wire [255:0] secret_seed=job_secret_seed, secret_prf=job_secret_prf;
@@ -88,7 +88,7 @@ module uhbs_hbs #(
     wire seq_ready,seq_done,cmd_valid;
     wire [47:0] cmd;
     uhbs_program_sequencer sequencer (
-        .clk,.rst_n(execution_rst_n),.start(seq_start),.entry(job_entry),.ready(seq_ready),.done(seq_done),
+        .clk,.rst(execution_rst),.start(seq_start),.entry(job_entry),.ready(seq_ready),.done(seq_done),
         .program_address,.program_data,.template_address,.template_data,
         .command_valid(cmd_valid),.command_ready(state==FETCH),.command_done(seq_complete),.command(cmd)
     );
@@ -176,7 +176,7 @@ module uhbs_hbs #(
         uhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
             .RECIPE_MASK(L==0 ? 16'h101e : 16'h0006),
             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
-            .clk,.rst_n(execution_rst_n),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L]),
+            .clk,.rst(execution_rst),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L]),
             .request_ready(lane_ready[L]), .request_recipe(task_recipe), .request_step_recipe(task_step),
             .request_chain(task_chain), .request_steps(task_steps[L]),
             .request_capture_after(task_capture_after[L]),
@@ -330,8 +330,8 @@ module uhbs_hbs #(
         endcase
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always_ff @(posedge clk) begin
+        if (rst) begin
             enter_state(IDLE); done<=0; error<=0; error_code<=0; cycles<=0;
             abort_execution<=0;
             seq_start<=0; seq_complete<=0;

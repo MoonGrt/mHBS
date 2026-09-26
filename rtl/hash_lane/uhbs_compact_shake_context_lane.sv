@@ -8,7 +8,7 @@ module uhbs_compact_shake_context_lane #(
     parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
 ) (
     input  wire          clk,
-    input  wire          rst_n,
+    input  wire          rst,
     input wire [5:0] node_bytes,
     input wire [(N+32)*8-1:0] chain_prefix_data,
     input  wire          context_valid,
@@ -301,12 +301,12 @@ module uhbs_compact_shake_context_lane #(
                 : select_stream ? absorb_word : round_or_clear;
         end
         always_ff @(posedge clk)
-            if(rst_n && (lane_state==RUN || take_fast || select_stream || clear_stream))
+            if(!rst && (lane_state==RUN || take_fast || select_stream || clear_stream))
                 sponge_state[word_index*64 +:64]<=next_word;
     end endgenerate
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always_ff @(posedge clk) begin
+        if (rst) begin
             lane_state <= IDLE;
             saved_chain_enable <= 1'b0;
             saved_chain_prefix <= 1'b0;

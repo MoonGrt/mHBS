@@ -1,16 +1,16 @@
 `timescale 1ns/1ps
 module tb_uhbs_slh64_sequencer;
- logic clk=0,rst_n=0,start=0,command_ready=0,command_done=0;
+ logic clk=0,rst=1,start=0,command_ready=0,command_done=0;
  wire ready,done,command_valid;
  wire [5:0] program_address;wire [3:0] template_address;wire [47:0] command;
  logic [63:0] prog[0:63],tpl[0:15];
  wire [63:0] program_data=prog[program_address],template_data=tpl[template_address];
- uhbs_program_sequencer dut(.clk,.rst_n,.start,.entry(5'd0),.ready,.done,.program_address,.program_data,
+ uhbs_program_sequencer dut(.clk,.rst,.start,.entry(5'd0),.ready,.done,.program_address,.program_data,
   .template_address,.template_data,.command_valid,.command_ready,.command_done,.command);
  always #5 clk=~clk;
  integer count=0,delay_count=0,cycles=0;
  task tick;begin @(posedge clk);#1;end endtask
- always @(posedge clk)if(rst_n)begin
+ always @(posedge clk)if(!rst)begin
   cycles=cycles+1;if(cycles>1000)$fatal(1,"timeout");
   if(command_valid && command_ready)begin
    if(delay_count || command[23:13]!==11'((count/2)*64+count%2))$fatal(1,"nested coordinate/order %0d %h",count,command);
@@ -29,7 +29,7 @@ module tb_uhbs_slh64_sequencer;
   prog[1]=(64'd2<<62)|(64'd1<<51)|(64'd1<<40);
   prog[2]=(64'd2<<62)|(64'd1<<57)|(64'd2<<51)|(64'd64<<40);
   prog[3]=64'd3<<62;
-  repeat(3)tick();rst_n=1;tick();start=1;tick();start=0;
+  repeat(3)tick();rst=0;tick();start=1;tick();start=0;
   while(!done)tick();
   if(count!=6 || delay_count!=0)$fatal(1,"macro completion count");
   repeat(10)tick();if(!ready || command_valid)$fatal(1,"halt");

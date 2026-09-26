@@ -2,7 +2,7 @@
 module tb_uhbs_unified;
     parameter integer PROFILE=0, SWAP=0, BACKPRESSURE=0, LANES=2, UNROLL=2, Q=5;
     `include "tb/vectors/uhbs_profile_constants.svh"
-    logic clk=0, rst_n=0, start=0;
+    logic clk=0, rst=1, start=0;
     wire ready,busy,keygen_done,done,error;
     wire [15:0] error_code;
     wire [31:0] keygen_cycles,sign_cycles,hash_count,permutation_count;
@@ -48,7 +48,7 @@ module tb_uhbs_unified;
     end endgenerate
     always #5 clk=~clk;
     always @(negedge clk) begin
-        if(rst_n) begin
+        if(!rst) begin
             lfsr<={lfsr[14:0],lfsr[15]^lfsr[13]^lfsr[12]^lfsr[10]};
             out_ready<=!BACKPRESSURE || lfsr[2:0]!=0;
             if(state_commit_valid) begin
@@ -57,7 +57,7 @@ module tb_uhbs_unified;
             end else state_commit_ready<=0;
         end
     end
-    always @(posedge clk) if(rst_n) begin
+    always @(posedge clk) if(!rst) begin
         cycles<=cycles+1;
         if(core_state!=0) residency[core_state]=residency[core_state]+1;
         if(stalled && (!out_valid || {out_data,out_keep,out_last,result_kind}!==stalled_word))
@@ -157,7 +157,7 @@ module tb_uhbs_unified;
                 end
             endcase
         end
-        repeat(4) tick(); rst_n=1; tick(); start=1; tick(); start=0;
+        repeat(4) tick(); rst=0; tick(); start=1; tick(); start=0;
         for(index=0;index<MSG_BYTES;index=index+8) begin
             while(!message_ready) tick();
             if(BACKPRESSURE) repeat(index%3+1) tick();

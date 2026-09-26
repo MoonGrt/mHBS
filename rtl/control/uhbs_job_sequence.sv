@@ -2,7 +2,7 @@
 `default_nettype none
 // Fixed demonstration lifecycle: one start, Keygen, one message, one Sign.
 module uhbs_job_sequence (
-    input wire clk, rst_n, start,
+    input wire clk, rst, start,
     output wire ready, busy,
     output wire job_valid, input wire job_ready, output wire job_operation,
     input wire core_done, core_error, input wire [31:0] core_cycles,
@@ -15,8 +15,8 @@ module uhbs_job_sequence (
     assign busy=state!=IDLE;
     assign job_valid=state==KEYGEN_REQUEST || state==SIGN_REQUEST;
     assign job_operation=state==SIGN_REQUEST || state==SIGN_WAIT;
-    always_ff @(posedge clk or negedge rst_n) begin
-        if(!rst_n) begin state<=IDLE; keygen_done<=0; done<=0; keygen_cycles<=0; sign_cycles<=0; end
+    always_ff @(posedge clk) begin
+        if(rst) begin state<=IDLE; keygen_done<=0; done<=0; keygen_cycles<=0; sign_cycles<=0; end
         else begin
             keygen_done<=0; done<=0;
             if(core_error && (state==KEYGEN_WAIT || state==SIGN_WAIT)) state<=IDLE;

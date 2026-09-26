@@ -9,7 +9,7 @@ module uhbs_event_scoreboard #(
     parameter integer EVENTS = 8
 ) (
     input  wire              clk,
-    input  wire              rst_n,
+    input  wire              rst,
     input  wire              clear,
     input  wire              allocate_valid,
     input  wire [EVENTS-1:0] allocate_mask,
@@ -47,8 +47,8 @@ module uhbs_event_scoreboard #(
     // soon as both lanes expose done/ready, without a scoreboard bubble.
     assign wait_ready = (effective_completed & wait_mask) == wait_mask;
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always_ff @(posedge clk) begin
+        if (rst) begin
             pending <= '0;
             completed <= '0;
             error <= 1'b0;

@@ -2,7 +2,7 @@
 module tb_uhbs_admission #(parameter integer PROFILE=4);
     // Equal-length path strings avoid Icarus padding a conditional filename with NUL bytes.
     localparam integer OMEGA=(PROFILE==3 || PROFILE==5) ? 2 : 4;
-    logic clk=0,rst_n=0,job_valid=0,job_operation=0;
+    logic clk=0,rst=1,job_valid=0,job_operation=0;
     logic [6:0] job_message_length=1;
     logic [10:0] job_initial_q=5;
     wire job_ready,error,out_valid,busy,done;
@@ -16,7 +16,7 @@ module tb_uhbs_admission #(parameter integer PROFILE=4);
         .TOKEN_INIT_FILE(PROFILE==3 ? "rtl/microcode/uhbs_xmss_omega2_tokens.mem" : PROFILE==4 ? "rtl/microcode/uhbs_xmss_omega4_tokens.mem" : PROFILE==5 ? "rtl/microcode//uhbs_lms_omega2_tokens.mem" : "rtl/microcode//uhbs_lms_omega4_tokens.mem"),
         .TEMPLATE_INIT_FILE(PROFILE==3 ? "rtl/microcode/uhbs_xmss_omega2_templates.mem" : PROFILE==4 ? "rtl/microcode/uhbs_xmss_omega4_templates.mem" : PROFILE==5 ? "rtl/microcode//uhbs_lms_omega2_templates.mem" : "rtl/microcode//uhbs_lms_omega4_templates.mem"),
         .DESCRIPTOR_INIT_FILE(PROFILE==3 ? "rtl/microcode/uhbs_xmss_omega2_descriptors.mem" : PROFILE==4 ? "rtl/microcode/uhbs_xmss_omega4_descriptors.mem" : PROFILE==5 ? "rtl/microcode//uhbs_lms_omega2_descriptors.mem" : "rtl/microcode//uhbs_lms_omega4_descriptors.mem")) dut (
-        .clk,.rst_n,.job_valid,.job_ready,.job_operation,.job_message_length,.job_initial_q,
+        .clk,.rst,.job_valid,.job_ready,.job_operation,.job_message_length,.job_initial_q,
         .job_secret_seed(256'd0),.job_secret_prf(256'd0),.job_public_seed(256'd0),
         .job_randomizer(256'd0),.job_identifier(128'd0),
         .message_valid,.message_ready(),.message_data(64'd0),.message_keep,.message_last,
@@ -25,11 +25,11 @@ module tb_uhbs_admission #(parameter integer PROFILE=4);
         .busy,.done,.error,.error_code,.hash_count(),.permutation_count(),.cycles(),.tree_cache_valid()
     );
     always #5 clk=~clk;
-    always @(posedge clk) if(rst_n && (out_valid || done)) $fatal(1,"invalid job produced output/completion");
+    always @(posedge clk) if(!rst && (out_valid || done)) $fatal(1,"invalid job produced output/completion");
     task tick; begin @(posedge clk); #1; end endtask
     task reject(input [15:0] expected);
         begin
-            rst_n=0; repeat(2) tick(); rst_n=1; tick();
+            rst=1; repeat(2) tick(); rst=0; tick();
             job_valid=1; tick(); job_valid=0;
             if(!error || error_code!==expected) $fatal(1,"admission code %h expected %h",error_code,expected);
             repeat(3) tick();
@@ -37,7 +37,7 @@ module tb_uhbs_admission #(parameter integer PROFILE=4);
     endtask
     task reject_message(input [7:0] keep, input last);
         begin
-            rst_n=0; repeat(2) tick(); rst_n=1; tick();
+            rst=1; repeat(2) tick(); rst=0; tick();
             dut.tree_cache_valid=1; dut.cache_q=0;
             job_operation=1; job_message_length=1;
             job_valid=1; tick(); job_valid=0;
@@ -60,30 +60,30 @@ module tb_uhbs_admission #(parameter integer PROFILE=4);
         dut.descriptors[1]=profile_descriptor ^ (64'd1<<59); reject(16'h3001);
         dut.descriptors[1]=profile_descriptor;
         // A valid cache for another index must not authorize Sign.
-        rst_n=0; repeat(2) tick(); rst_n=1; tick();
+        rst=1; repeat(2) tick(); rst=0; tick();
         dut.tree_cache_valid=1; dut.cache_q=7; job_operation=1; job_message_length=1;
         job_valid=1; tick(); job_valid=0;
         if(!error || error_code!=16'h3003) $fatal(1,"mismatched authentication path accepted");
         job_operation=0;
-        rst_n=0; repeat(2) tick(); rst_n=1; tick();
+        rst=1; repeat(2) tick(); rst=0; tick();
         job_initial_q=1023; job_valid=1; tick(); job_valid=0;
         if(error || dut.active_q!=1023) $fatal(1,"last valid index rejected");
         job_initial_q=5;
         // Model the state left after a committed signature subsequently fails:
         // the cache/guard validity is cleared, but q+1 remains burned.
-        rst_n=0; repeat(2) tick(); rst_n=1; tick();
+        rst=1; repeat(2) tick(); rst=0; tick();
         dut.index_started=1;
         dut.g_guard.guard.current_q=6;
         dut.g_guard.guard.initialized=0;
         job_valid=1; tick(); job_valid=0;
         if(error || dut.active_q!=6) $fatal(1,"failure recovery rolled back committed q");
-        rst_n=0; repeat(2) tick(); rst_n=1; tick();
+        rst=1; repeat(2) tick(); rst=0; tick();
         dut.index_started=1;
         dut.g_guard.guard.current_q=1024;
         dut.g_guard.guard.initialized=0;
         job_valid=1; tick(); job_valid=0;
         if(!error || error_code!=16'h3004) $fatal(1,"failure recovery bypassed exhaustion");
-        rst_n=0; repeat(2) tick(); rst_n=1; tick();
+        rst=1; repeat(2) tick(); rst=0; tick();
         dut.descriptors[20]=0;
         job_valid=1; tick(); job_valid=0;
         timeout=0;

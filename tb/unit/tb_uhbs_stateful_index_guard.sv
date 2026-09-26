@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 module tb_uhbs_stateful_index_guard;
     logic clk = 0;
-    logic rst_n = 0;
+    logic rst = 1;
     logic initialize_valid = 0, invalidate = 0, sign_valid = 0;
     logic [10:0] initial_q = 0;
     logic state_commit_ready = 0;
@@ -16,7 +16,7 @@ module tb_uhbs_stateful_index_guard;
 
     task tick; begin @(posedge clk); #1; end endtask
     initial begin
-        repeat (2) tick(); rst_n = 1; tick();
+        repeat (2) tick(); rst = 0; tick();
         sign_valid = 1; tick(); sign_valid = 0;
         if (!error || error_code != 16'h2501) $fatal(1, "sign-before-keygen");
         initial_q = 11'd5; initialize_valid = 1; tick();

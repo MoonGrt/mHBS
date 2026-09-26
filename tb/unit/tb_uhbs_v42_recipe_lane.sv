@@ -5,7 +5,7 @@ module tb_uhbs_v42_recipe_lane;
     localparam integer M=PROFILE==0 ? 34 : PROFILE==1 ? 42 : PROFILE==2 ? 49 : 32;
     localparam integer IB=PROFILE==3 || PROFILE==5 ? 8 : 7, CASES=PROFILE<3 ? 7 : 6;
     wire [5:0] node_bytes=N;
-    logic clk=0,rst_n=0,request_valid=0;
+    logic clk=0,rst=1,request_valid=0;
     wire request_ready,response_valid,error;
     logic response_ready=0,request_chain,request_capture;
     logic [63:0] request_recipe,request_step_recipe;
@@ -52,7 +52,7 @@ module tb_uhbs_v42_recipe_lane;
         end
         for(i=0;i<16;i=i+1) identifier[i*8 +: 8]=i;
         for(i=0;i<87;i=i+1) message_buffer[i*8 +: 8]=i;
-        repeat(3) tick(); rst_n=1; tick();
+        repeat(3) tick(); rst=0; tick();
         for(j=0;j<CASES;j=j+1) begin
             $display("RECIPE_CASE profile=%0d case=%0d",PROFILE,j);
             request_recipe=vectors[j][1023:960]; request_step_recipe=vectors[j][959:896];

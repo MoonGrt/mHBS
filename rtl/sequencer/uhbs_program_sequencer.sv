@@ -2,8 +2,8 @@
 `default_nettype none
 // slh64_v4.2: offline-validated image, one outstanding macro.
 module uhbs_program_sequencer (
- input wire clk,rst_n,start,input wire [4:0] entry,output wire ready,output logic done,
- output wire [5:0] program_address,input wire [63:0] program_data,
+ input wire clk,rst,start,input wire [4:0] entry,output wire ready,output logic done,
+ output wire [4:0] program_address,input wire [63:0] program_data,
  output wire [3:0] template_address,input wire [63:0] template_data,
  output wire command_valid,input wire command_ready,command_done,output wire [47:0] command
 );
@@ -20,15 +20,15 @@ module uhbs_program_sequencer (
  logic [10:0] loop_bias[0:1],loop_delta[0:1];
  wire [1:0] kind=token[63:62];
  wire [5:0] back_count={1'b0,token[61:57]}+6'd1;
- assign program_address={1'b0,pc};
+ assign program_address=pc;
  assign template_address=token[61:58];
  assign ready=state==IDLE;
  assign command_valid=state==ISSUE;
  assign command={1'b0,template_word[2:0],3'd0,template_word[7:3],3'd0,template_word[12:8],
                  template_word[15],1'b0,template_word[14:13],coordinate,13'd0};
  integer i;
- always_ff @(posedge clk or negedge rst_n) begin
-  if(!rst_n) begin
+ always_ff @(posedge clk) begin
+  if(rst) begin
    state<=IDLE;done<=0;pc<=0;token<=0;template_word<=0;coordinate<=0;stride<=0;remaining<=0;sp<=0;
    for(i=0;i<2;i=i+1)begin loop_pc[i]<=0;loop_remaining[i]<=0;loop_bias[i]<=0;loop_delta[i]<=0;end
   end else begin

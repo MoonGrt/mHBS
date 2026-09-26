@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 module tb_uhbs_recipe_padding;
-    logic clk=0,rst_n=0,request_valid=0,response_ready=0;
+    logic clk=0,rst=1,request_valid=0,response_ready=0;
     logic [5:0] node_bytes;
     wire request_ready,response_valid,error;
     logic [63:0] request_recipe;
@@ -13,7 +13,7 @@ module tb_uhbs_recipe_padding;
     integer i,j,cycles=0,old_hashes,old_permutations;
     string vector_file;
     uhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (
-        .clk,.rst_n,.node_bytes,.request_valid,.request_ready,.request_recipe,
+        .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),
         .secret_prf,.public_seed,.root,.randomizer,.identifier(128'd0),
@@ -37,7 +37,7 @@ module tb_uhbs_recipe_padding;
             randomizer[i*8+:8]=96+i;root[i*8+:8]=128+i;
         end
         for(i=0;i<87;i=i+1) message_buffer[i*8+:8]=i;
-        repeat(3) tick();rst_n=1;tick();
+        repeat(3) tick();rst=0;tick();
         for(j=0;j<10;j=j+1) begin
             node_bytes=vectors[j][447:442];message_length=vectors[j][437:431];
             request_recipe=64'h1000000002000000;

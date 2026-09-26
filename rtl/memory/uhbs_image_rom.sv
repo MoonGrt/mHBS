@@ -5,8 +5,10 @@
 module uhbs_image_rom #(
     parameter integer WIDTH=128, ADDRESS_BITS=6, PORTS=1, PACKING=0,
     parameter INIT_FILE=""
-)(input wire clk, input wire [PORTS*ADDRESS_BITS-1:0] addresses,
-  output wire [PORTS*WIDTH-1:0] data);
+)(
+    input wire clk, input wire [PORTS*ADDRESS_BITS-1:0] addresses,
+    output wire [PORTS*WIDTH-1:0] data
+);
 `ifdef SYNTHESIS
     localparam integer PHYSICAL_WIDTH=PACKING==1 ? 64 : WIDTH;
     localparam integer PHYSICAL_ADDRESS_BITS=PACKING==2 ? 6 : ADDRESS_BITS;

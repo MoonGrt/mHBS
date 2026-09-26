@@ -8,7 +8,7 @@ module uhbs_stateful_index_guard #(
     parameter integer TREE_HEIGHT = 10
 ) (
     input  wire        clk,
-    input  wire        rst_n,
+    input  wire        rst,
     input  wire        initialize_valid,
     output wire        initialize_ready,
     input  wire [10:0] initial_q,
@@ -45,8 +45,8 @@ module uhbs_stateful_index_guard #(
             $error("stateful index guard currently fixes h=10");
     end
 
-    always_ff @(posedge clk or negedge rst_n) begin
-        if (!rst_n) begin
+    always_ff @(posedge clk) begin
+        if (rst) begin
             state <= S_IDLE;
             reserved_q <= '0;
             sign_grant <= 1'b0;
