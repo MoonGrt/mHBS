@@ -54,11 +54,44 @@ module uhbs_recipe_lane #(
         ? request_step_recipe : request_recipe;
     wire [3:0] shape = recipe[59:56];
     logic [15:0] seed_shapes,step_shapes;
+    logic [12:0] seed_length,step_length;
+    logic [2:0] stream_node_words;
     wire [15:0] shapes=request_chain && !seed_phase ? step_shapes : seed_shapes;
+    // Decode lengths once in the existing request stage. In particular the
+    // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
+    // byte comparator during STREAM. Request fields remain stable until the
+    // response, but their registered decode cuts that wide data-path cone.
+    function automatic [12:0] decode_length(input [63:0] desc);
+        reg [12:0] nodes;
+        begin
+            nodes=node_bytes==16 ? {1'b0,desc[47:40],4'b0}
+                : node_bytes==24 ? ({1'b0,desc[47:40],4'b0}+{2'b0,desc[47:40],3'b0})
+                : {desc[47:40],5'b0};
+            case(desc[59:56])
+                ADDRESS_SEED: decode_length=node_bytes+32+node_bytes;
+                ADDRESS_VALUE,ADDRESS_LIST: decode_length=node_bytes+32+nodes;
+                MESSAGE_PRF: decode_length=2*node_bytes+message_length;
+                MESSAGE_DIGEST: decode_length=3*node_bytes+message_length;
+                INDEX_PRF: decode_length=96;
+                ROOT_MESSAGE: decode_length=128+message_length;
+                MASKED_SEED: decode_length=128;
+                MASKED_VALUE: decode_length=13'd64+{desc[47:40],5'd0};
+                PREFIX_SEED,PREFIX_VALUE: decode_length=55;
+                PREFIX_MESSAGE: decode_length=54+message_length;
+                PREFIX_LIST: decode_length=13'd22+{desc[47:40],5'd0};
+                PREFIX_LEAF: decode_length=54;
+                PREFIX_PARENT: decode_length=86;
+                default: decode_length=0;
+            endcase
+        end
+    endfunction
     always_ff @(posedge clk) begin
         if(rst_n && state==IDLE && request_valid) begin
             seed_shapes<=16'b1 << request_recipe[59:56];
             step_shapes<=16'b1 << request_step_recipe[59:56];
+            seed_length<=decode_length(request_recipe);
+            step_length<=decode_length(request_step_recipe);
+            stream_node_words<=node_bytes[5:3];
         end
     end
     wire [7:0] domain = recipe[55:48];
@@ -73,11 +106,10 @@ module uhbs_recipe_lane #(
     wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
     wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
     wire [31:0] leaf = {22'd0, request_leaf};
-    // A node is 16, 24 or 32 bytes. Explicit shifts avoid generic multipliers.
-    wire [12:0] list_bytes = node_bytes==16 ? {1'b0,arity,4'b0}
-        : node_bytes==24 ? ({1'b0,arity,4'b0}+{2'b0,arity,3'b0})
-        : {arity,5'b0};
-    logic [12:0] input_length;
+    wire [12:0] input_length = RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE]
+        && compound < arity+1 ? 13'd96
+        : request_chain && !seed_phase ? step_length : seed_length;
+    wire [5:0] stream_node_bytes={stream_node_words,3'b0};
     logic [1087:0] fast_block;
     logic [63:0] stream_data;
     logic [255:0] address, masked_address;
@@ -97,11 +129,14 @@ module uhbs_recipe_lane #(
     logic [N*8-1:0] saved_capture;
     assign response_value=digest;
     assign response_capture=compact_chain ? compact_capture : saved_capture;
-    wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? node_bytes+32 : 22;
+    wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
     logic staged_valid, staged_last;
     logic [127:0] staged_data;
     wire stream_accept = !staged_valid || block_ready;
-    wire [12:0] position = rate_offset+{5'd0,beat,4'd0}+{9'd0,stream_half,3'd0};
+    // The producer emits exactly eight bytes per accepted STREAM cycle.
+    // Keeping that cursor avoids a rate_block*136 + beat*16 adder chain
+    // ahead of the source selector and each padding-byte comparator.
+    logic [12:0] position;
     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
     logic [INDEX_BITS-1:0] list_cursor;
     logic [5:0] list_remainder;
@@ -117,7 +152,7 @@ module uhbs_recipe_lane #(
     endfunction
     // All sponge beats start on an eight-byte boundary. Select two words
     // directly instead of shifting a maximum-size concatenated message frame.
-    wire [2:0] node_words=node_bytes[5:3];
+    wire [2:0] node_words=stream_node_words;
     wire [703:0] padded_message={8'd0,message_buffer};
     function automatic [63:0] node_word(input [255:0] data,input [5:0] index);
         begin
@@ -196,7 +231,7 @@ module uhbs_recipe_lane #(
     endfunction
     logic [511:0] list_pair;
     always @* begin
-        case(node_bytes)
+        case(stream_node_bytes)
             16:list_pair={256'd0,list_data1[127:0],list_data0[127:0]};
             24:list_pair={128'd0,list_data1[191:0],list_data0[191:0]};
             default:list_pair={list_data1,list_data0};
@@ -235,22 +270,6 @@ module uhbs_recipe_lane #(
         address = {be32(b),be32(a),be32(leaf),be32({24'd0,address_domain}),
             be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
         masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
-        (* parallel_case *) case(1'b1)
-            shapes[ADDRESS_SEED],shapes[ADDRESS_VALUE]: input_length = node_bytes+32+(shapes[ADDRESS_SEED] ? node_bytes : list_bytes);
-            shapes[MESSAGE_PRF]: input_length = 2*node_bytes+message_length;
-            shapes[MESSAGE_DIGEST]: input_length = 3*node_bytes+message_length;
-            shapes[INDEX_PRF]: input_length = 96;
-            shapes[ROOT_MESSAGE]: input_length = 128+message_length;
-            shapes[MASKED_SEED]: input_length = 128;
-            shapes[MASKED_VALUE]: input_length = compound < arity+1 ? 13'd96 : 13'd64+{arity,5'd0};
-            shapes[PREFIX_SEED],shapes[PREFIX_VALUE]: input_length = 55;
-            shapes[PREFIX_MESSAGE]: input_length = 54+message_length;
-            shapes[ADDRESS_LIST]: input_length = node_bytes+32+list_bytes;
-            shapes[PREFIX_LIST]: input_length = 13'd22+{arity,5'd0};
-            shapes[PREFIX_LEAF]: input_length = 54;
-            shapes[PREFIX_PARENT]: input_length = 86;
-            default: input_length = 0;
-        endcase
     end
     // Select shared frame fields before alignment. This avoids replicating
     // every seed/value/key/mask selector for all three node lengths.
@@ -408,6 +427,7 @@ module uhbs_recipe_lane #(
     always_ff @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             staged_valid<=0; staged_last<=0; staged_data<=0;
+            position<=0;
             list_cursor<=0; list_remainder<=0;
             state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
             seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
@@ -417,6 +437,7 @@ module uhbs_recipe_lane #(
             else case (state)
                 IDLE: if (request_valid) begin
                     staged_valid<=0;
+                    position<=0;
                     list_cursor<=0; list_remainder<=0;
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
                     current_value <= request_left;
@@ -437,6 +458,7 @@ module uhbs_recipe_lane #(
                     end else state <= fixed_block ? WAIT_HASH : STREAM;
                 end
                 STREAM: if (stream_accept) begin
+                    position<=position+13'd8;
                     if(stream_half) staged_data[127:64]<=stream_data;
                     else staged_data[63:0]<=stream_data;
                     staged_valid<=stream_half || beat==8;
@@ -447,8 +469,8 @@ module uhbs_recipe_lane #(
                         if(position < prefix_bytes) begin
                             if(position+stream_advance >= prefix_bytes)
                                 list_remainder <= position+stream_advance-prefix_bytes;
-                        end else if(next_remainder >= node_bytes) begin
-                            list_remainder <= next_remainder-node_bytes;
+                        end else if(next_remainder >= stream_node_bytes) begin
+                            list_remainder <= next_remainder-stream_node_bytes;
                             list_cursor <= list_cursor+1'b1;
                         end else list_remainder <= next_remainder;
                     end

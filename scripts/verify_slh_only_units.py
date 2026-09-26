@@ -13,9 +13,11 @@ BUILD=ROOT/'build/v4.1/slh_only/unit'
 OUT.mkdir(parents=True,exist_ok=True);BUILD.mkdir(parents=True,exist_ok=True)
 rtl=(ROOT/'manifests/unified_sources.txt').read_text().splitlines()
 records={}
+used_sources=set()
 
 def one(name,top,files,params=(),runs=((),)):
     assert logic()==identity
+    used_sources.update(files)
     binary=BUILD/(name+'.vvp')
     with (OUT/(name+'.log')).open('w') as log:
         subprocess.run(['iverilog','-g2012','-s',top,*params,'-o',str(binary),*files],
@@ -42,6 +44,23 @@ for p in range(3):
         ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
          'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_recipe_lane.sv'],
         [f'-Ptb_uhbs_recipe_lane.PROFILE={p}'])
+# Independent hashlib vectors exercise padding on both sides of the rate
+# boundary and change the cached request fields between consecutive hashes.
+padding=[]
+for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
+                  (32,3,73),(24,4,63),(32,4,41),(32,3,71),(32,4,40)]:
+    prf=bytes(range(32,32+n));seed=bytes(range(64,64+n))
+    randomizer=bytes(range(96,96+n));root=bytes(range(128,128+n))
+    payload=(prf+randomizer if shape==3 else randomizer+seed+root)+bytes(range(m))
+    digest=hashlib.shake_256(payload).digest(49)
+    padding.append((n<<442)|(shape<<438)|(m<<431)|((len(payload)//136+1)<<423)|
+                   int.from_bytes(digest,'little'))
+padding_file=OUT/'recipe_padding.mem'
+padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
+one('recipe_padding','tb_uhbs_recipe_padding',
+    ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
+     'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_recipe_padding.sv'],
+    runs=((f'+VECTORS={padding_file.relative_to(ROOT)}',),))
 slh='manifests/experiments/unified_hbs_v4.1/slh_only/images/slh_128f'
 legacy='manifests/experiments/unified_hbs_v4.1/images'
 runs=[[f'+IMAGE={slh}',f'+BAD={bad}'] for bad in (1,2,3,11,23,24,25,26,27,28,29,30)]
@@ -50,5 +69,7 @@ runs += [[f'+IMAGE={legacy}/{name}','+BAD=22'] for name in
 one('boot_reject','tb_uhbs_autonomous',rtl+['tb/integration/tb_uhbs_autonomous.sv'],runs=runs)
 assert logic()==identity
 (OUT/'results.json').write_text(json.dumps({'passed':True,'logic_sha256':identity,
+    'test_source_sha256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
+                          for p in sorted(used_sources)},
     'tool':subprocess.check_output(['iverilog','-V'],text=True,stderr=subprocess.DEVNULL).splitlines()[0],
     'logs':records},indent=2)+'\n')

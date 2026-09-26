@@ -71,7 +71,12 @@ def sim(args):
 
 def capture(args):
     folder=BUILD/args.tag;folder.mkdir(parents=True,exist_ok=True)
+    baseline=ACTIVE/'candidates'/args.baseline/'ppa.json'
+    baseline_data=json.loads(baseline.read_text())
+    if not baseline_data.get('performance_pass'):
+        raise RuntimeError('Optimization baseline must have passed routed acceptance')
     paths=set(sources()+['manifests/unified_sources.txt','Makefile','manifests/experiments/unified_hbs_final.json','manifests/experiments/unified_hbs_v4/model_gate.json','manifests/experiments/unified_hbs_v4/boundary_counts.json','manifests/experiments/unified_hbs_v4/comparison.json','manifests/experiments/unified_hbs_v4.1/author_update.json'])
+    paths.add(str(baseline.relative_to(ROOT)))
     if (BASE/'area_baseline.json').exists():paths.add(str((BASE/'area_baseline.json').relative_to(ROOT)))
     for directory in ('model','scripts','tests','tb','experiments/v4.1'):
         paths.update(str(p.relative_to(ROOT)) for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in ('.py','.sv','.svh','.mem','.json','.tcl'))
@@ -88,7 +93,7 @@ def capture(args):
         return
     with tarfile.open(snapshot,'w:gz') as tar:
         for p in hashes:tar.add(ROOT/p,arcname=p)
-    write(folder/'inputs.json',dict(version='v4.1',abi_version=4,profile_set='slh_only',lanes=args.lanes,unroll=args.unroll,logic_sha256=logic(),source_sha256=hashes,snapshot_sha256=sha(snapshot),part='xc7a200tffg1156-3',tool='Vivado 2025.2',timing_scope='OOC_INTERNAL_REGISTER_PATHS',comparison='NON_STRICT_FIPS205_VS_SPHINCS_PLUS'))
+    write(folder/'inputs.json',dict(version='v4.1',abi_version=4,profile_set='slh_only',lanes=args.lanes,unroll=args.unroll,baseline=str(baseline.relative_to(ROOT)),baseline_sha256=sha(baseline),logic_sha256=logic(),source_sha256=hashes,snapshot_sha256=sha(snapshot),part='xc7a200tffg1156-3',tool='Vivado 2025.2',timing_scope='OOC_INTERNAL_REGISTER_PATHS',comparison='NON_STRICT_FIPS205_VS_SPHINCS_PLUS'))
 
 def prepare_route(args):
     source=BUILD/args.tag;target=BUILD/(args.tag+'_route')
@@ -119,7 +124,10 @@ def collect(args):
     lut,ff,ram,bram,dsp=[amount(x) for x in ('Slice LUTs','Slice Registers','LUT as Memory','Block RAM Tile','DSPs')]
     area=lut/4+ff/8+bram*232.4+dsp*102.4
     period=json.loads((folder/'final_clock.json').read_text())['period_ns'] if args.route else 10.0
-    baseline=json.loads((BASE/'candidates/u2_area_balanced_route/ppa.json').read_text())['profiles']
+    baseline_path=ROOT/inputs.get('baseline',str((BASE/'candidates/u2_area_balanced_route/ppa.json').relative_to(ROOT)))
+    if 'baseline_sha256' in inputs and sha(baseline_path)!=inputs['baseline_sha256']:
+        raise RuntimeError('Captured comparison baseline changed')
+    baseline=json.loads(baseline_path.read_text())['profiles']
     huang={'slh_128f':19584.5325,'slh_192f':32088.50325,'slh_256f':66416.67355}
     profiles={}
     for name,p in SLH_PROFILES.items():
@@ -158,6 +166,7 @@ def archive(tag):
            'post_synth.dcp','post_route_final_clock.dcp')
     files=[folder/name for name in names if (folder/name).is_file()]
     files += [p for p in (folder/'frozen').rglob('*') if p.is_file() and p.name!='hardware.txt'] if (folder/'frozen').exists() else []
+    files += [p for p in (folder/'verification').rglob('*') if p.is_file()]
     log_names=([tag+'_synth.log'] if not tag.endswith('_route') else
                [tag+'.log',tag.removesuffix('_route')+'_freeze.log'])
     for log_name in log_names:
@@ -191,6 +200,34 @@ def finalize(args):
     tag=args.tag;folder=BUILD/tag
     result=json.loads((folder/'ppa.json').read_text())
     if result['stage']!='post_route':raise RuntimeError('Not a routed candidate')
+    if 'frozen_hardware_sha256' in result:
+        archive(tag)
+        print('SLH_ONLY_ALREADY_FINALIZED',tag)
+        return
+    inputs=json.loads((folder/'inputs.json').read_text())
+    validation={}
+    validation_roots=set()
+    if 'baseline' in inputs:
+        identity=inputs['logic_sha256'];lid=logic_id(identity)
+        for suite in ('unit','architecture','faults'):
+            path=ACTIVE/suite/lid/'results.json'
+            record=json.loads(path.read_text())
+            if not record.get('passed') or record['logic_sha256']!=identity:
+                raise RuntimeError('Missing functional acceptance: '+suite)
+            validation_roots.add(path.parent)
+        modes=[(0,False),(0,True)]
+        if inputs['lanes']>1:modes.append((1,False))
+        for swap,replay in modes:
+            simdir=ACTIVE/'simulations'/lid/f'u{inputs["unroll"]}_l{inputs["lanes"]}_s{swap}'
+            if replay:simdir=simdir/'replay'
+            for name in SLH_PROFILES:
+                path=simdir/(name+'.json');record=json.loads(path.read_text())
+                if (not record.get('passed') or record['logic_sha256']!=identity
+                        or record['lanes']!=inputs['lanes'] or record['unroll']!=inputs['unroll']
+                        or record['swap']!=swap or record['reset_replay']!=replay
+                        or record['log_sha256']!=sha(path.with_suffix('.log'))):
+                    raise RuntimeError('Missing simulation acceptance: '+str(path))
+                validation_roots.add(path.parent)
     clock=json.loads((folder/'final_clock.json').read_text())
     if clock['wns_ns']<0.0999 or clock['whs_ns']<0:
         raise RuntimeError('Final timing margin failed')
@@ -210,14 +247,31 @@ def finalize(args):
     rows=dict(line.split('\t') for line in evidence.read_text().splitlines())
     if set(rows)!=set(SLH_PROFILES) or len(set(rows.values()))!=1:
         raise RuntimeError('Three INIT checkpoints differ in common hardware')
+    init_mapping=json.loads((folder/'frozen/init/mapping.json').read_text())
     for name in SLH_PROFILES:
         if not (folder/'frozen'/(name+'.dcp')).is_file():
             raise RuntimeError('Missing frozen checkpoint '+name)
+        actual=dict(line.split('\t') for line in
+                    (folder/'frozen'/(name+'_init.tsv')).read_text().splitlines())
+        expected=init_mapping[name]
+        if set(actual)!=set(expected) or any(
+                int(actual[cell].split("'h")[1],16)!=int(value.split("'h")[1],16)
+                for cell,value in expected.items()):
+            raise RuntimeError('Frozen INIT values do not match image mapping: '+name)
+    # Freeze the validation logs alongside the checkpoint. Re-running a
+    # current-workspace test must not invalidate an accepted past candidate.
+    for source in sorted(validation_roots):
+        target=folder/'verification'/source.relative_to(ACTIVE)
+        shutil.copytree(source,target,dirs_exist_ok=True)
+    for path in sorted((folder/'verification').rglob('*')):
+        if path.is_file():validation[str(path.relative_to(folder))]=sha(path)
     result['frozen_hardware_sha256']=next(iter(rows.values()))
+    result['frozen_init_mapping_pass']=True
+    if validation:result['functional_evidence_sha256']=validation
     result['performance_pass']=bool(result['numerical_pass'])
     write(folder/'ppa.json',result)
     archive(tag)
     print('SLH_ONLY_FINALIZED',tag,'performance_pass='+str(result['performance_pass']))
 
 if __name__=='__main__':
-    parser=argparse.ArgumentParser();parser.add_argument('action',choices=['sim','capture','collect','prepare_route','archive','finalize']);parser.add_argument('--tag',default='slh_only_l2_c0');parser.add_argument('--lanes',type=int,default=2,choices=[1,2,4]);parser.add_argument('--unroll',type=int,default=2,choices=[2]);parser.add_argument('--swap',type=int,default=0,choices=[0,1]);parser.add_argument('--profile',default='all',choices=['all',*SLH_PROFILES]);parser.add_argument('--jobs',type=int,default=8);parser.add_argument('--boundaries',action='store_true');parser.add_argument('--message-cases',action='store_true');parser.add_argument('--replay',action='store_true');parser.add_argument('--route',action='store_true');args=parser.parse_args();globals()[args.action](args) if args.action!='archive' else archive(args.tag)
+    parser=argparse.ArgumentParser();parser.add_argument('action',choices=['sim','capture','collect','prepare_route','archive','finalize']);parser.add_argument('--tag',default='slh_only_l2_c0');parser.add_argument('--baseline',default='slh_only_l2_c2_route');parser.add_argument('--lanes',type=int,default=2,choices=[1,2,4]);parser.add_argument('--unroll',type=int,default=2,choices=[2]);parser.add_argument('--swap',type=int,default=0,choices=[0,1]);parser.add_argument('--profile',default='all',choices=['all',*SLH_PROFILES]);parser.add_argument('--jobs',type=int,default=8);parser.add_argument('--boundaries',action='store_true');parser.add_argument('--message-cases',action='store_true');parser.add_argument('--replay',action='store_true');parser.add_argument('--route',action='store_true');args=parser.parse_args();globals()[args.action](args) if args.action!='archive' else archive(args.tag)

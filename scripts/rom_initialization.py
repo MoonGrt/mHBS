@@ -8,9 +8,9 @@ from model.slh_only import SLH_PROFILES
 from model.autonomous_hbs import ProgramImage
 from model.physical_image import pack_template
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.1'
-def mapping(name):
+def mapping(name,image_directory=None):
     result={}
-    logical=ProgramImage.read(BASE/'images'/name)
+    logical=ProgramImage.read((image_directory or BASE/'images')/name)
     for kind,width,depth,ports,words in [('program',128,64,1,logical.program),('template',64,64,1,tuple(map(pack_template,logical.templates))),('descriptor',64,128,2,logical.descriptors)]:
         assert len(words)==depth and all(w.bit_length()<=width for w in words)
         for port in range(ports):
@@ -23,7 +23,8 @@ def mapping(name):
     return result
 if __name__=='__main__':
     parser=argparse.ArgumentParser();parser.add_argument('directory',type=Path);parser.add_argument('--slh-only',action='store_true');args=parser.parse_args();args.directory.mkdir(parents=True,exist_ok=True)
-    all_maps={name:mapping(name) for name in (SLH_PROFILES if args.slh_only else PROFILES)}
+    image_directory=BASE/'slh_only/images' if args.slh_only else BASE/'images'
+    all_maps={name:mapping(name,image_directory) for name in (SLH_PROFILES if args.slh_only else PROFILES)}
     for name,values in all_maps.items():
         # Exact names, including square brackets; braces avoid Tcl substitutions.
         commands=[]

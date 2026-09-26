@@ -8,6 +8,7 @@ UNROLL ?= 2
 SWAP ?= 0
 SYNTH_DIRECTIVE ?= Default
 FLATTEN ?= rebuilt
+BASELINE ?= slh_only_l2_c2_route
 TAG ?= slh_only_l$(LANES)_c0
 UHBS_RTL := $(shell cat manifests/unified_sources.txt)
 
@@ -35,7 +36,7 @@ rtl-verification: architecture-test
 	$(PYTHON) scripts/autonomous_flow.py sim --swap 1 --lanes $(LANES) --unroll $(UNROLL) --jobs $(JOBS)
 	$(PYTHON) scripts/verify_slh_only_faults.py
 synth-common:
-	$(PYTHON) scripts/autonomous_flow.py capture --tag $(TAG) --lanes $(LANES) --unroll $(UNROLL)
+	$(PYTHON) scripts/autonomous_flow.py capture --tag $(TAG) --lanes $(LANES) --unroll $(UNROLL) --baseline $(BASELINE)
 	mkdir -p build/v4.1/$(TAG)
 	vivado -mode batch -nolog -nojournal -source experiments/v4.1/synth.tcl -tclargs $(TAG) $(LANES) $(UNROLL) $(SYNTH_DIRECTIVE) $(FLATTEN) > build/v4.1/$(TAG)_synth.log 2>&1
 	$(PYTHON) scripts/autonomous_flow.py collect --tag $(TAG)
@@ -52,3 +53,4 @@ reproduce-paper-comparison:
 	$(PYTHON) scripts/reproduce_autonomous.py --allow-incomplete
 reproduce-slh-only:
 	$(PYTHON) scripts/reproduce_slh_only.py
+	$(PYTHON) scripts/report_slh_paper_optimization.py --check
