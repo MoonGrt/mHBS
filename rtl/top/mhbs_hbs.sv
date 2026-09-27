@@ -47,9 +47,9 @@ module mhbs_hbs #(
     assign descriptors[7]=descriptor_data[63:0];
     typedef enum logic [5:0] {
         IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
-        TREE_INIT, CHAIN_SETUP, CHAIN_STORE, CHAIN_STORE2,
-        CHAIN_OUTPUT0, CHAIN_OUTPUT1, CHAIN_OUTPUT2, CHAIN_OUTPUT3,
-        CHAIN_NEXT, REDUCE_SETUP, LEAF_SETUP,
+        TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
+        CHAIN_OUTPUT0=10, CHAIN_OUTPUT1,
+        CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
         PUSH_NODE, PARENT_SETUP, PARENT_DONE, AUTH_OUTPUT, TREE_FINISH,
         HASH_ISSUE, HASH_WAIT, HASH_RESULT, ROUTE, TRANSFORM,
         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED
@@ -100,12 +100,11 @@ module mhbs_hbs #(
     logic [1:0] indexing;
     logic [9:0] target, leaf_cursor, node_index;
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
-    logic [3:0] chain_batch_mask;
+    logic [1:0] chain_batch_mask;
     always_comb begin
         chain_batch_mask=0;
-        for(int lane_index=0; lane_index<4; lane_index=lane_index+1)
-            if(lane_index<LANES && (indexing!=1 || lane_index<2) &&
-               (indexing==1 || chain_cursor+lane_index<endpoint_count))
+        for(int lane_index=0; lane_index<2; lane_index=lane_index+1)
+            if(indexing==1 || chain_cursor+lane_index<endpoint_count)
                 chain_batch_mask[lane_index]=1;
     end
     logic [255:0] node_value;
@@ -127,26 +126,25 @@ module mhbs_hbs #(
     end
     logic [63:0] task_recipe, task_step;
     logic task_chain;
-    logic [3:0] task_capture;
-    logic [4:0] task_steps [0:3], task_capture_after [0:3];
-    logic [9:0] task_leaf [0:3];
-    logic [INDEX_BITS-1:0] task_a [0:3];
-    logic [31:0] task_b [0:3];
-    logic [255:0] task_left [0:3], task_right [0:3];
-    logic [3:0] active_mask, launch_pending, response_pending;
-    wire [3:0] lane_ready, lane_valid, lane_error;
-    wire [V-1:0] lane_value [0:3];
-    wire [255:0] lane_capture [0:3];
-    wire [INDEX_BITS-1:0] lane_list0 [0:3], lane_list1 [0:3];
-    wire [31:0] lane_hashes [0:3], lane_permutations [0:3];
+    logic [1:0] task_capture;
+    logic [4:0] task_steps [0:1], task_capture_after [0:1];
+    logic [9:0] task_leaf [0:1];
+    logic [INDEX_BITS-1:0] task_a [0:1];
+    logic [31:0] task_b [0:1];
+    logic [255:0] task_left [0:1], task_right [0:1];
+    logic [1:0] active_mask, launch_pending, response_pending;
+    wire [1:0] lane_ready, lane_valid, lane_error;
+    wire [V-1:0] lane_value [0:1];
+    wire [255:0] lane_capture [0:1];
+    wire [INDEX_BITS-1:0] lane_list0 [0:1], lane_list1 [0:1];
+    wire [31:0] lane_hashes [0:1], lane_permutations [0:1];
     logic [31:0] hash_base, permutation_base;
-    logic [V-1:0] result [0:3], route_value;
-    logic [255:0] capture [0:3];
-    wire [31:0] total_hashes = (lane_hashes[0]+lane_hashes[1])+(lane_hashes[2]+lane_hashes[3]);
-    wire [31:0] total_permutations = (lane_permutations[0]+lane_permutations[1])+
-        (lane_permutations[2]+lane_permutations[3]);
-    assign hash_count = total_hashes-hash_base;
-    assign permutation_count = total_permutations-permutation_base;
+    logic [V-1:0] result [0:1], route_value;
+    logic [255:0] capture [0:1];
+    wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1];
+    wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1];
+    assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+    assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
 
     logic endpoint_write0, endpoint_write1;
     logic [INDEX_BITS-1:0] endpoint_address0, endpoint_address1, endpoint_read0, endpoint_read1;
@@ -194,13 +192,8 @@ module mhbs_hbs #(
             .hash_count(lane_hashes[L]),.permutation_count(lane_permutations[L])
         );
     end
-    for (physical=LANES; physical<4; physical=physical+1) begin: unused_lane
-        assign lane_ready[physical]=1; assign lane_valid[physical]=0; assign lane_error[physical]=0;
-        assign lane_value[physical]=0; assign lane_capture[physical]=0;
-        assign lane_list0[physical]=0; assign lane_list1[physical]=0;
-        assign lane_hashes[physical]=0; assign lane_permutations[physical]=0;
-    end endgenerate
-    initial if(LANES!=1 && LANES!=2 && LANES!=4) $error("LANES must be 1, 2 or 4");
+    endgenerate
+    initial if(LANES!=2 || UNROLL!=2) $error("Production core requires K2U2");
 
     logic [255:0] emit_value;
     logic [5:0] emit_length, emit_offset;
@@ -283,7 +276,7 @@ module mhbs_hbs #(
     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
         begin emit_value<=v; emit_length<=length; emit_offset<=0; output_return<=ret; enter_state(OUTPUT_CHUNK); end
     endtask
-    task automatic start_hash(input [63:0] selected_recipe, input [3:0] mask, input state_t ret);
+    task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
         begin
             task_recipe<=selected_recipe; active_mask<=mask;
             task_list_roots<=selected_recipe[59:56]==12 && selected_recipe[55:48]==4;
@@ -300,11 +293,7 @@ module mhbs_hbs #(
         if (state==CHAIN_STORE) begin
             endpoint_write0=active_mask[0]; endpoint_write1=active_mask[1];
         end
-        if (state==CHAIN_STORE2) begin
-            endpoint_write0=active_mask[2]; endpoint_write1=active_mask[3];
-            endpoint_address0=chain_cursor+2'd2; endpoint_address1=chain_cursor+2'd3;
-            endpoint_data0=result[2][W-1:0]; endpoint_data1=result[3][W-1:0];
-        end
+
     end
 
     // Validity is owned by the tree controller; data arrays have no reset.
@@ -342,20 +331,20 @@ module mhbs_hbs #(
             hash_base<=0; permutation_base<=0; emitted<=0; layer<=0;
             task_recipe<=0; task_step<=0; task_list_roots<=0; message_received<=0;
             fors_pair_pending<=0;
-            for(i=0;i<4;i=i+1) begin
+            for(i=0;i<2;i=i+1) begin
                 task_steps[i]<=0; task_capture_after[i]<=0;
                 task_leaf[i]<=0; task_a[i]<=0; task_b[i]<=0;
             end
         end else begin
             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
-            if(state!=IDLE && state!=FAILED) cycles<=cycles+1;
+            if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
             case(state)
                 IDLE: if(job_valid) begin
                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
                     message_length<=job_message_length; message_received<=0;
                     scalar_tree<=0; scalar_leaf<=0; layer<=0; group_index<=0;
                     emitted<=0; output_bytes<=job_operation ? image_header[17:0] : image_header[35:18];
-                    hash_base<=total_hashes; permutation_base<=total_permutations;
+                    if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
                     value[3]<={{(V-W){1'b0}},job_public_root};
                     if(job_operation) begin
                         enter_state(MESSAGE);
@@ -379,7 +368,7 @@ module mhbs_hbs #(
                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
                         task_chain<=0; task_capture<=0;
-                        for(i=0;i<4;i=i+1) task_steps[i]<=0;
+                        for(i=0;i<2;i=i+1) task_steps[i]<=0;
                         enter_state(LOAD_DESCRIPTOR);
                     end
                 end
@@ -415,7 +404,7 @@ module mhbs_hbs #(
                 end
                 CHAIN_SETUP: begin
                     task_chain<=1; task_step<=descriptors[5];
-                    for(i=0;i<4;i=i+1) begin
+                    for(i=0;i<2;i=i+1) begin
                         task_capture[i]<=(indexing==1 ? leaf_cursor+i==target : leaf_cursor==target) && macro_flags[0];
                         task_leaf[i]<=indexing==1 ? scalar_leaf : leaf_cursor;
                         task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
@@ -429,22 +418,13 @@ module mhbs_hbs #(
                 CHAIN_STORE: begin
                     if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
                     task_chain<=0;
-                    if(|active_mask[3:2]) enter_state(CHAIN_STORE2);
-                    else if(macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target))) enter_state(CHAIN_OUTPUT0);
-                    else enter_state(CHAIN_NEXT);
-                end
-                CHAIN_STORE2: begin
-                    if(macro_flags[0] && leaf_cursor==target) enter_state(CHAIN_OUTPUT0);
+                    if(macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target))) enter_state(CHAIN_OUTPUT0);
                     else enter_state(CHAIN_NEXT);
                 end
                 CHAIN_OUTPUT0: start_output(indexing==1 && active_mask[1] && target[0]
                     ? capture[1] : capture[0],node_bytes,
                     active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
-                CHAIN_OUTPUT1: start_output(capture[1],node_bytes,
-                    active_mask[2] ? CHAIN_OUTPUT2 : CHAIN_NEXT);
-                CHAIN_OUTPUT2: start_output(capture[2],node_bytes,
-                    active_mask[3] ? CHAIN_OUTPUT3 : CHAIN_NEXT);
-                CHAIN_OUTPUT3: start_output(capture[3],node_bytes,CHAIN_NEXT);
+                CHAIN_OUTPUT1: start_output(capture[1],node_bytes,CHAIN_NEXT);
                 CHAIN_NEXT: begin
                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
                     else if(standalone_chain && chain_descriptor[13:12]==0)
@@ -506,7 +486,7 @@ module mhbs_hbs #(
                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
                 end
                 HASH_WAIT: begin
-                    for(i=0;i<4;i=i+1) if(response_pending[i] && lane_valid[i]) begin
+                    for(i=0;i<2;i=i+1) if(response_pending[i] && lane_valid[i]) begin
                         result[i]<=lane_value[i]; capture[i]<=lane_capture[i];
                     end
                     response_pending<=response_pending & ~lane_valid;

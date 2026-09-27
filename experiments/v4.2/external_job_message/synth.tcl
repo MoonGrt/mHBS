@@ -13,10 +13,22 @@ foreach p $sources {if {$p ne "rtl/top/mhbs_top.sv"} {read_verilog -sv $p}}
 set f [open [file join $out clock.xdc] w];puts $f {create_clock -name clk -period 10.0 [get_ports clk]};close $f
 read_xdc [file join $out clock.xdc]
 read_verilog -sv [file join $out mhbs_common.sv]
-synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2
+synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2 -generic PROFILE_ENABLE=0
 report_utilization -file [file join $out core_utilization.rpt]
 report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
 report_timing_summary -file [file join $out core_timing.rpt]
+# Audit actual sequential cells, rather than relying on a disabled RTL flag.
+set redundant_registers {}
+foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
+ if {[string match FD* [get_property REF_NAME $cell]] &&
+     [regexp {(boot_cycles|keygen_cycles|sign_cycles|cycles|hash_count|permutation_count|hash_base|permutation_base|legacy_value|current_value|saved_capture)_reg} $cell]} {
+  lappend redundant_registers $cell
+ }
+}
+if {[llength $redundant_registers]} {error "Unpruned registers: $redundant_registers"}
+set audit [open [file join $out pruning_audit.json] w]
+puts $audit {{"passed": true, "profile_enable": false, "redundant_registers": 0}}
+close $audit
 write_checkpoint -force [file join $out common.dcp]
 write_edif -force [file join $out mhbs_common.edf]
 write_verilog -force -mode synth_stub [file join $out common_stub.v]

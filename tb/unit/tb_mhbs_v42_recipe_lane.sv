@@ -1,9 +1,11 @@
 `timescale 1ns/1ps
 module tb_mhbs_v42_recipe_lane;
     parameter integer PROFILE=0;
+    parameter [15:0] MASK=16'h101e;
+    parameter integer CASES=7;
     localparam integer N=PROFILE==0 ? 16 : PROFILE==1 ? 24 : 32;
     localparam integer M=PROFILE==0 ? 34 : PROFILE==1 ? 42 : PROFILE==2 ? 49 : 32;
-    localparam integer IB=PROFILE==3 || PROFILE==5 ? 8 : 7, CASES=PROFILE<3 ? 7 : 6;
+    localparam integer IB=PROFILE==3 || PROFILE==5 ? 8 : 7;
     wire [5:0] node_bytes=N;
     logic clk=0,rst=1,request_valid=0;
     wire request_ready,response_valid,error;
@@ -27,7 +29,7 @@ module tb_mhbs_v42_recipe_lane;
     logic [1023:0] vectors[0:CASES-1];
     integer i,j,cycles=0,length;
     logic [M*8-1:0] expected;
-    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PROFILE_ENABLE(1)) dut(.*);
+    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.*);
     always #5 clk=~clk;
     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
     always_comb for(integer b=0;b<N;b=b+1) begin
@@ -35,8 +37,10 @@ module tb_mhbs_v42_recipe_lane;
         list_data1[b*8 +: 8]=list_index1+b;
     end
     task tick; begin @(posedge clk); #1; end endtask
+    string vector_path;
     initial begin
-        case(PROFILE)
+        if($value$plusargs("VECTORS=%s",vector_path)) $readmemh(vector_path,vectors);
+        else case(PROFILE)
             0: $readmemh("tb/vectors/mhbs_slh_128f_lane.mem",vectors);
             1: $readmemh("tb/vectors/mhbs_slh_192f_lane.mem",vectors);
             2: $readmemh("tb/vectors/mhbs_slh_256f_lane.mem",vectors);

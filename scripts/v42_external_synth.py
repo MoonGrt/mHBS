@@ -2,8 +2,9 @@
 """Synthesize one generic body and six parameter shells from a sealed snapshot."""
 import json,re,shutil,subprocess,sys,tarfile,time
 from pathlib import Path
-from v42_external_flow import ROOT,BASE,BUILD,NAMES,PARAMS,capture,sha,write
+from v42_external_flow import ROOT,BASE,BUILD,NAMES,PARAMS,capture,sha,write,tool_version
 from v42_common_partition import partition
+vivado_version=tool_version('vivado','-version')
 f=capture(sys.argv[1]);inp=json.loads((f/'inputs.json').read_text())
 workspace=f/'synth_source';workspace.mkdir(exist_ok=False)
 with tarfile.open(f/'source_snapshot.tar.gz') as t:t.extractall(workspace,filter='data')
@@ -23,7 +24,7 @@ for n in NAMES:
    shell=re.sub(r'(parameter '+kind.upper()+r'_INIT_FILE=)"[^"]+"',lambda m:m[1]+f'"experiments/v4.2/external_job_message/{kind}_construction.mem"',shell)
   (out/(n+'_'+op+'_shell.sv')).write_text(shell)
 cmd=['vivado','-mode','batch','-nolog','-nojournal','-source','experiments/v4.2/external_job_message/synth.tcl','-tclargs',f.name]
-start=time.time();write(f/'synth_invocation.json',dict(command=cmd,started=start,driver_sha256=sha(Path(__file__))))
+start=time.time();write(f/'synth_invocation.json',dict(command=cmd,started=start,driver_sha256=sha(Path(__file__)),profile_enable=False,statistics_ports='constant_zero',tool_versions={'vivado':vivado_version}))
 with (f/'synth.log').open('w') as log:subprocess.run(cmd,cwd=workspace,stdout=log,stderr=subprocess.STDOUT,check=True)
 shutil.copytree(out,f/'synthesis')
 write(f/'synth_elapsed.json',dict(seconds=time.time()-start))

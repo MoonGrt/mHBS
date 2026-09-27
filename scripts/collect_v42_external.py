@@ -13,6 +13,12 @@ for group in (sim['cases'],ext['cases']):
  for name,row in group.items():assert sha(sf/'logs'/(name+'.log'))==row['log_sha256']
 for path,h in unit['logs'].items():assert sha(BASE/'unit'/path)==h
 s=f/'synthesis'
+pruning=json.loads((sf/'pruning_verification.json').read_text())
+assert pruning['passed'] and pruning['rtl_sha256']==inp['rtl_sha256']
+for path,h in pruning['evidence_sha256'].items():assert sha(sf/path)==h,path
+hardware_pruning=json.loads((s/'pruning_audit.json').read_text())
+assert hardware_pruning['passed'] and hardware_pruning['profile_enable'] is False
+assert hardware_pruning['redundant_registers']==0
 partition=None
 if (s/'mhbs_common.sv').exists():
  partition=json.loads((sf/'simulation_partition.json').read_text())
@@ -38,7 +44,7 @@ for name,row in sim['cases'].items():
  tops[name]=r
 assert len(fingerprints)==1
 result=dict(version='v4.2',layout_revision=3,stage='post_synth',functional_pass=True,common_core_pass=True,rom_mapping_pass=True,post_synth_acceptance=True,post_route_pass=False,frequency_mhz=None,
- tag=a.tag,simulation_tag=a.sim_tag,core=core,tops=tops,common_core_sha256=next(iter(fingerprints)),rtl_sha256=inp['rtl_sha256'],source_snapshot_sha256=sha(f/'source_snapshot.tar.gz'))
+ tag=a.tag,simulation_tag=a.sim_tag,simulation_profile_enable=True,synthesis_profile_enable=False,pruning_verification_pass=True,core=core,tops=tops,common_core_sha256=next(iter(fingerprints)),rtl_sha256=inp['rtl_sha256'],source_snapshot_sha256=sha(f/'source_snapshot.tar.gz'))
 write(f/'result.json',result)
 if partition:
  result.update(reset='active_high_synchronous',common_execution_scope='boot_and_core',partition_equivalence_pass=True)
@@ -51,7 +57,7 @@ for path in s.rglob('*'):
  if path.name=='core_structure.txt':
   with path.open('rb') as src,gzip.open(str(target)+'.gz','wb') as dst:shutil.copyfileobj(src,dst)
  else:shutil.copy2(path,target)
-for name in ('simulation.json','simulation_partition.json','extended.json','extended_previous.json','faults.json'):
+for name in ('simulation.json','simulation_partition.json','extended.json','extended_previous.json','faults.json','pruning_verification.json','simulation_no_profile.json','simulation_partition_no_profile.json','verification.json'):
  if (sf/name).exists():shutil.copy2(sf/name,out/name)
 for sub in ('logs','extended_vectors'):
  shutil.copytree(sf/sub,out/sub)

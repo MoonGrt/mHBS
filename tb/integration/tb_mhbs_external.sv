@@ -8,6 +8,7 @@ module tb_mhbs_external;
  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
  parameter integer OPERATION=1,MESSAGE_BYTES=1;
  parameter integer SWAP=0;
+ parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  wire busy,done,keygen_done,error,out_valid,out_last,result_kind;
  wire [15:0] error_code;
@@ -18,7 +19,7 @@ module tb_mhbs_external;
  reg [7:0] message_bytes[0:86];
  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  string directory,vector_directory,dump_path,trace_path;
  integer trace_words=0,trace_cursor=0,fault=0;
@@ -27,6 +28,33 @@ module tb_mhbs_external;
  reg [7:0] expected_bytes[0:65535];
  integer cursor=0,cycles=0,replays=1,interrupt_run=0,dump_file=0;
  integer residency[0:63];
+ // Testbench-only observers keep production-disabled statistics independently
+ // checkable. Count completed permutations/hashes, not the RTL issue counters.
+ integer observed_boot=0,observed_cycles=0;
+ integer observed_hashes[0:1],observed_permutations[0:1];
+ wire [31:0] measured_hashes=observed_hashes[0]+observed_hashes[1];
+ wire [31:0] measured_permutations=observed_permutations[0]+observed_permutations[1];
+ wire [31:0] measured_keygen=OPERATION ? 0 : observed_cycles;
+ wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
+ genvar lane;
+ generate for(lane=0;lane<2;lane=lane+1)begin: observers
+  always @(posedge clk)begin
+   if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
+   else if(`HBS_CORE.lanes[lane].lane.sponge.lane_state==2 &&
+           `HBS_CORE.lanes[lane].lane.sponge.round_index+2>=24)begin
+    observed_permutations[lane]=observed_permutations[lane]+1;
+    if(`HBS_CORE.lanes[lane].lane.sponge.running_last)
+     observed_hashes[lane]=observed_hashes[lane]+1;
+   end
+  end
+ end endgenerate
+ always @(posedge clk)begin
+  if(rst)observed_boot=0;
+  else if(`HBS_CORE.rst)observed_boot=observed_boot+1;
+  if(`HBS_CORE.rst)observed_cycles=0;
+  else if(`HBS_CORE.state==0 && `HBS_CORE.job_valid)observed_cycles=0;
+  else if(`HBS_CORE.state!=0 && `HBS_CORE.state!=32)observed_cycles=observed_cycles+1;
+ end
  task tick;begin @(posedge clk);#1;end endtask
  always @(negedge clk)begin
   if(rst)begin message_valid=0;message_data=0;rng=32'h51c0ffee;end
@@ -97,12 +125,16 @@ module tb_mhbs_external;
   end
   for(integer run=0;run<replays;run=run+1)begin
    while(!done)tick();
-   if(cursor!=metadata[0] || hash_count!=metadata[1] || permutation_count!=metadata[2])
-    $fatal(1,"counts bytes=%0d hash=%0d perm=%0d expected=%0d/%0d/%0d",cursor,hash_count,permutation_count,metadata[0],metadata[1],metadata[2]);
+   if(cursor!=metadata[0] || measured_hashes!=metadata[1] || measured_permutations!=metadata[2])
+    $fatal(1,"counts bytes=%0d hash=%0d perm=%0d expected=%0d/%0d/%0d",cursor,measured_hashes,measured_permutations,metadata[0],metadata[1],metadata[2]);
    if(trace_words && trace_cursor!=trace_words)$fatal(1,"incomplete macro trace");
-   if(boot_cycles!=2)$fatal(1,"boot cycles");
-   if(metadata[3] ? keygen_cycles!=0 : sign_cycles!=0)$fatal(1,"inactive cycle counter");
-   $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count,SWAP,run,wait_cycles,cycles);
+   if(observed_boot!=2)$fatal(1,"boot cycles");
+   if(PROFILE_ENABLE)begin
+    if(boot_cycles!=observed_boot || keygen_cycles!=measured_keygen || sign_cycles!=measured_sign ||
+       hash_count!=measured_hashes || permutation_count!=measured_permutations)$fatal(1,"statistics observer mismatch");
+   end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)
+    $fatal(1,"production statistics must be zero");
+   $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end
    if(run+1<replays)begin rst=1;repeat(4)tick();rst=0;end

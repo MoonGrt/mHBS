@@ -46,7 +46,12 @@ module mhbs_recipe_lane #(
     logic seed_phase;
     logic [4:0] iteration;
     logic [1:0] compound;
-    logic [N*8-1:0] current_value, temporary_key, mask0, mask1;
+    // Masked legacy recipes need a value across intermediate hashes. SLH
+    // chains instead reuse the sponge's retained digest at the next START.
+    logic [N*8-1:0] legacy_value, temporary_key, mask0, mask1;
+    wire [N*8-1:0] current_value = RECIPE_MASK[MASKED_VALUE] ? legacy_value
+        : seed_phase ? request_left : digest[N*8-1:0];
+    localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858)!=0;
     logic [4:0] rate_block;
     logic [3:0] beat;
     logic stream_half;
@@ -67,7 +72,8 @@ module mhbs_recipe_lane #(
             nodes=node_bytes==16 ? {1'b0,desc[47:40],4'b0}
                 : node_bytes==24 ? ({1'b0,desc[47:40],4'b0}+{2'b0,desc[47:40],3'b0})
                 : {desc[47:40],5'b0};
-            case(desc[59:56])
+            if(!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length=0;
+            else case(desc[59:56])
                 ADDRESS_SEED: decode_length=node_bytes+32+node_bytes;
                 ADDRESS_VALUE,ADDRESS_LIST: decode_length=node_bytes+32+nodes;
                 MESSAGE_PRF: decode_length=2*node_bytes+message_length;
@@ -87,8 +93,8 @@ module mhbs_recipe_lane #(
     endfunction
     always_ff @(posedge clk) begin
         if(!rst && state==IDLE && request_valid) begin
-            seed_shapes<=16'b1 << request_recipe[59:56];
-            step_shapes<=16'b1 << request_step_recipe[59:56];
+            seed_shapes<=(16'b1 << request_recipe[59:56]) & RECIPE_MASK;
+            step_shapes<=(16'b1 << request_step_recipe[59:56]) & RECIPE_MASK;
             seed_length<=decode_length(request_recipe);
             step_length<=decode_length(request_step_recipe);
             stream_node_words<=node_bytes[5:3];
@@ -126,9 +132,13 @@ module mhbs_recipe_lane #(
     wire compact_capture_valid, hash_error;
     wire completed = finish_valid;
     wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
-    logic [N*8-1:0] saved_capture;
     assign response_value=digest;
-    assign response_capture=compact_chain ? compact_capture : saved_capture;
+    assign response_capture=compact_capture;
+    // Capture both chain modes in the sponge's existing register bank, on
+    // the same final-round edge used by the former lane-local copy.
+    wire capture_single = request_capture
+        && !(RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1)
+        && (seed_phase ? request_capture_after==0 : request_capture_after==iteration+1);
     wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
     logic staged_valid, staged_last;
     logic [127:0] staged_data;
@@ -415,8 +425,8 @@ module mhbs_recipe_lane #(
         .chain_prefix_preserve_counter(request_step_recipe[55:48] == 3),
         .chain_prefix_domain(request_step_recipe[50:48]),
         .chain_count(request_steps+5'd1),
-        .capture_enable(compact_chain && request_capture),
-        .capture_after(request_capture_after+5'd1),
+        .capture_enable(compact_chain ? request_capture : capture_single),
+        .capture_after(compact_chain ? request_capture_after+5'd1 : 5'd1),
         .block_valid(staged_valid), .block_ready, .block_data(staged_data),
         .block_last(staged_last), .response_valid(digest_valid), .response_digest(digest),
         .chain_feedback_valid,.chain_feedback_counter,
@@ -432,7 +442,7 @@ module mhbs_recipe_lane #(
             state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
             seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
         end else begin
-            if(staged_valid && block_ready) staged_valid<=0;
+            if(STREAM_ENABLE && staged_valid && block_ready) staged_valid<=0;
             if (hash_error) begin error <= 1; state <= RESPONSE; end
             else case (state)
                 IDLE: if (request_valid) begin
@@ -440,7 +450,7 @@ module mhbs_recipe_lane #(
                     position<=0;
                     list_cursor<=0; list_remainder<=0;
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
-                    current_value <= request_left;
+                    legacy_value <= request_left;
                     rate_block <= 0; beat <= 0; stream_half<=0;
                     state <= START;
                 end
@@ -451,7 +461,7 @@ module mhbs_recipe_lane #(
                     end
                     state <= fixed_block ? WAIT_HASH : STREAM;
                 end
-                STREAM: if (stream_accept) begin
+                STREAM: if (STREAM_ENABLE && stream_accept) begin
                     position<=position+13'd8;
                     if(stream_half) staged_data[127:64]<=stream_data;
                     else staged_data[63:0]<=stream_data;
@@ -488,10 +498,7 @@ module mhbs_recipe_lane #(
                         state <= START;
                     end else begin
                         compound <= 0;
-                        current_value <= completed_value[N*8-1:0];
-                        if (request_capture && (seed_phase ? request_capture_after == 0
-                            : request_capture_after == iteration+1))
-                            saved_capture <= completed_value[N*8-1:0];
+                        legacy_value <= completed_value[N*8-1:0];
                         if (request_chain && (seed_phase ? request_steps != 0 : iteration+1 < request_steps)) begin
                             seed_phase <= 0;
                             if (!seed_phase) iteration <= iteration+1'b1;

@@ -45,6 +45,35 @@ for p in range(3):
         ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
          'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'],
         [f'-Ptb_mhbs_v42_recipe_lane.PROFILE={p}'])
+# Independent SHAKE vectors alternate compact and ordinary feedback chains,
+# including first/middle/final captures and backpressured consecutive requests.
+for profile,n in enumerate((16,24,32)):
+    vectors=[]
+    for steps,capture in ((0,0),(1,0),(1,1),(15,0),(15,7),(15,15)):
+        for shape in (1,2):
+            seed=(shape<<56)|((6 if shape==1 else 0)<<48)|(1<<40)
+            step=(2<<56)|(1<<40)
+            public=bytes(range(64,64+n));secret=bytes(range(n))
+            value=bytes(range(160,160+n));captured=None
+            for iteration in range(steps+1):
+                domain=6 if shape==1 and iteration==0 else 0
+                b=7 if iteration==0 else iteration-1
+                address=b''.join(x.to_bytes(4,'big') for x in (0,0,0,0,domain,5,3,b))
+                payload=public+address+(secret if shape==1 and iteration==0 else value)
+                digest=hashlib.shake_256(payload).digest(49)
+                value=digest[:n]
+                if iteration==capture:captured=value
+            vectors.append((seed<<960)|(step<<896)|(1<<895)|(steps<<890)|(capture<<885)|
+                           (3<<877)|(7<<845)|(n<<839)|
+                           (int.from_bytes(digest,'little')<<256)|int.from_bytes(captured,'little'))
+    path=OUT/f'chain_capture_{profile}.mem'
+    path.write_text(''.join(f'{v:0256x}\n' for v in vectors))
+    one('chain_capture_'+str(profile),'tb_mhbs_v42_recipe_lane',
+        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+         'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'],
+        [f'-Ptb_mhbs_v42_recipe_lane.PROFILE={profile}',
+         '-Ptb_mhbs_v42_recipe_lane.MASK=6',f'-Ptb_mhbs_v42_recipe_lane.CASES={len(vectors)}'],
+        runs=((f'+VECTORS={path.relative_to(ROOT)}',),))
 # Independent hashlib vectors exercise padding on both sides of the rate
 # boundary and change the cached request fields between consecutive hashes.
 padding=[]

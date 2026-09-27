@@ -1,6 +1,6 @@
 # mHBS v4.2：SLH 共同核、参数 Job 与外部消息
 
-本仓库从原 `Vivado/idea/slh-dsa-acceleration/projects/μHBS` 项目独立复制而来，原仓库提交为 `1bf8007917e67ab318385102f78cf9ce971928a2`，对应的项目子树提交为 `3e0f1408e50020f319a908948fb691c12292a91b`。保留项目 Git 历史、当前工作树和历史构建证据；论文复现所需资料在本仓库的 `references/papers/`。当前 RTL 模块及微码文件统一使用 `mhbs` 名称。历史构建证据保留当时的命名及哈希，以便原样复现。
+本仓库从原 `Vivado/idea/slh-dsa-acceleration/projects/μHBS` 项目独立复制而来，原仓库提交为 `1bf8007917e67ab318385102f78cf9ce971928a2`，对应的项目子树提交为 `3e0f1408e50020f319a908948fb691c12292a91b`。保留项目 Git 历史、当前工作树和历史构建证据；论文复现所需资料在本仓库的 `docs/references/papers/`。当前 RTL 模块及微码文件统一使用 `mhbs` 名称。历史构建证据保留当时的命名及哈希，以便原样复现。
 
 支持 **SLH-DSA SHAKE 128f、192f、256f**。唯一生产顶层 `mhbs_top` 保留高有效同步 `rst`，复位后自动执行一次 Keygen 或 Sign，然后停机。
 
@@ -12,17 +12,19 @@ Job 通过五个 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMI
 三个独立数组使用 `$readmemh`；每个参数点的一组镜像含 Keygen/Sign 两个入口，Job 和消息已移出 program。
 
 `mhbs_processor.sv` 已删除，启动控制并入顶层。构建时从顶层自动提取“启动控制＋执行核”作为共同综合区域，六种参数外壳链接同一网表。共同核受保护，外层常量连接允许不同。
-本轮分别测量共同核和完整顶层的 post-synth 资源，**没有新接口的 post-route 频率**。
+共同核与完整顶层分别测量 post-synth 资源；六个参数外壳分别布局布线，最终频率按 OOC 核内寄存器间时序统计，外部接口时序单列。最新测量与范围说明见 [当前面积与频率](docs/v4.2/Current_PPA.md)。
 
 ## 使用与验证
 
 ```bash
-make compile-microcode rtl-unit-test
-make rtl-all-profiles TAG=my_external
-make rtl-verification TAG=my_external
+make test TAG=my_external       # 模型、契约、lint、单元、六组 RTL
+make verify TAG=my_external     # 完整验收，包含 test + 扩展与共同核验证
 make synth-common TAG=my_external
+make route-common TAG=my_external
 make report-v42 reproduce-v42
 ```
+
+仿真依赖 Python 3.12、GNU Make、Icarus Verilog、Verilator 和 C++ 编译器，**不需要 Vivado**；只有综合需要 Vivado。完整流程与证据说明见 [验证指南](docs/Verification.md)。
 
 单点仿真：`make rtl-profile-test TAG=my_external PROFILE=slh_192f OPERATION=sign`。
 PPA 验收需要先完成同一源码的六组正常仿真、扩展验证及单元验证。捕获源码后修改文件需使用新候选名。
@@ -37,7 +39,10 @@ python3 scripts/convert_v42_external.py <旧布局2镜像目录> <新输出目�
 
 ## 文档与证据
 
-- [当前接口、实测资源和复现说明](docs/v4.2/External_Job_Message_Interface.md)
+- [当前架构](docs/Architecture.md)
+- [当前 Job 与流接口](docs/Job_Interface.md)
+- [构建与完整验证](docs/Verification.md)
+- [封存候选的接口、实测资源和复现说明](docs/v4.2/External_Job_Message_Interface.md)
 - [历史布局2架构](docs/v4.2/Architecture_and_Image.md)
 - [历史v4.2布线结果与论文对照](docs/v4.2/Optimization_and_Paper_Comparison.md)
 - 当前证据：`manifests/experiments/unified_hbs_v4.2/external_job_message/`

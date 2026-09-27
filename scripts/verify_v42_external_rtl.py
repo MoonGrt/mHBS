@@ -2,12 +2,13 @@
 """External-input integration: actual RTL root transfer and stalled message streams."""
 import concurrent.futures,json,shutil,sys
 from pathlib import Path
-from v42_external_flow import ROOT,BASE,BUILD,NAMES,identity,sha,write,simulate_case
+from v42_external_flow import ROOT,BASE,BUILD,NAMES,identity,sha,write,simulate_case,capture
 sys.path.insert(0,str(ROOT))
 from model.slh64_external import ExternalImage,ExternalMachine
 from model.reference import slh_dsa
 from tests.test_unified_hbs import default_job
-f=BUILD/sys.argv[1];normal=json.loads((f/'simulation.json').read_text());assert normal['passed'] and normal['rtl_sha256']==identity()
+f=capture(sys.argv[1]);normal=json.loads((f/'simulation.json').read_text());assert normal['passed'] and normal['rtl_sha256']==identity()
+assert set(normal['cases'])=={n+'_'+o for n in NAMES for o in ('keygen','sign')},'run rtl-all-profiles first'
 
 def vector(folder,name,job,root,msg):
  image=ExternalImage.read(BASE/'images'/name);m=ExternalMachine(image,job,root,msg,True);expected=m.run()

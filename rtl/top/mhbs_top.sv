@@ -3,6 +3,12 @@
 module mhbs_top #(
     parameter integer LANES=2,UNROLL=2,
     parameter bit SWAP_PHYSICAL_LANES=0,
+    // Statistics are observable in simulation, absent from production hardware.
+`ifdef SYNTHESIS
+    parameter bit PROFILE_ENABLE=0,
+`else
+    parameter bit PROFILE_ENABLE=1,
+`endif
     parameter [255:0] SECRET_SEED=256'h00000000000000000000000000000000d1d06dcbb9181a55aabce64467d6b81d,
     parameter [255:0] SECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7,
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
@@ -58,7 +64,7 @@ module mhbs_top #(
                                                : core_descriptor_addresses;
     assign result_kind=OPERATION;
     assign message_ready=(phase==RUN) && core_message_ready;
-    mhbs_hbs #(.UNROLL(UNROLL),.LANES(LANES),.PROFILE_ENABLE(1),
+    mhbs_hbs #(.UNROLL(UNROLL),.LANES(LANES),.PROFILE_ENABLE(PROFILE_ENABLE),
         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES)) core (
         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
         .program_address,.program_data,.template_address,.template_data,
@@ -80,7 +86,7 @@ module mhbs_top #(
             image_header<=0;profile_descriptor<=0;
         end else begin
             keygen_done<=0;
-            if(!core_released) boot_cycles<=boot_cycles+1;
+            if(PROFILE_ENABLE && !core_released) boot_cycles<=boot_cycles+1;
             if(core_released && core_error) begin
                 error<=1;error_code<=core_error_code;busy<=0;phase<=HALTED;
             end else case(phase)
@@ -93,8 +99,11 @@ module mhbs_top #(
                     end else if(core_job_ready) phase<=RUN;
                 end
                 RUN:if(core_done) begin
-                    if(OPERATION) sign_cycles<=core_cycles;
-                    else begin keygen_cycles<=core_cycles;keygen_done<=1;end
+                    if(PROFILE_ENABLE) begin
+                        if(OPERATION) sign_cycles<=core_cycles;
+                        else keygen_cycles<=core_cycles;
+                    end
+                    if(!OPERATION) keygen_done<=1;
                     done<=1;busy<=0;phase<=HALTED;
                 end
                 HALTED:begin end

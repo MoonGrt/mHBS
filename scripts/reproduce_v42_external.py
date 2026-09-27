@@ -27,4 +27,6 @@ if result.get('partition_equivalence_pass'):
  for name,row in partition['cases'].items():
   original=sim['cases'][name.removesuffix('_partition')]
   for key in ('boot_cycles','keygen_cycles','sign_cycles','hashes','permutations','total_cycles'):assert row[key]==original[key]
-print('EXTERNAL_REPRODUCE_PASS',final['candidate'],'functional+post_synth; post-route not measured')
+print('EXTERNAL_REPRODUCE_PASS',final['candidate'],
+      'functional+post_synth; see separate routed evidence' if final.get('post_route_pass')
+      else 'functional+post_synth; post-route not measured')
