@@ -31,7 +31,7 @@ def main():
     (GATE.parent/'software_gate.log').write_text(proc.stdout)
     print(proc.stdout,end='')
     ok=proc.returncode==0 and sources==source_hashes()
-    GATE.write_text(json.dumps(dict(schema='uhbs.software_gate.v4',pass_=ok,sources=sources),indent=2).replace('"pass_":','"pass":')+'\n')
+    GATE.write_text(json.dumps(dict(schema='mhbs.software_gate.v4',pass_=ok,sources=sources),indent=2).replace('"pass_":','"pass":')+'\n')
     if not ok: raise SystemExit(1)
 
 

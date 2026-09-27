@@ -13,11 +13,11 @@ from model.slh64 import CompactImage,CompactMachine,TO_PHYSICAL,pack
 from model.unified_hbs import field
 from model.reference import slh_dsa
 from tests.test_unified_hbs import default_job
-bench=out/'tb_uhbs_v42.sv';shutil.copy2(ROOT/'tb/integration/tb_uhbs_v42.sv',bench)
+bench=out/'tb_mhbs_v42.sv';shutil.copy2(ROOT/'tb/integration/tb_mhbs_v42.sv',bench)
 rtl=(workspace/'manifests/v42_sources.txt').read_text().split()
 for swap in (0,1):
- binary=out/f'obj_s{swap}/Vtb_uhbs_v42'
- run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT','--top-module','tb_uhbs_v42',f'-GSWAP={swap}',
+ binary=out/f'obj_s{swap}/Vtb_mhbs_v42'
+ run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT','--top-module','tb_mhbs_v42',f'-GSWAP={swap}',
       '--Mdir',str(binary.parent),*rtl,str(bench)],out/f'compile_s{swap}.log',workspace)
 
 def materialize(image,folder):
@@ -36,7 +36,7 @@ records={}
 def one(item):
  name,image,options,swap=item;folder=out/'images'/name;folder.mkdir(parents=True,exist_ok=True)
  count,expected=materialize(image,folder)
- cmd=[str(out/f'obj_s{swap}/Vtb_uhbs_v42'),'+IMAGE='+str(folder),'+TRACE='+str(folder/'commands.mem'),f'+TRACE_WORDS={count}',
+ cmd=[str(out/f'obj_s{swap}/Vtb_mhbs_v42'),'+IMAGE='+str(folder),'+TRACE='+str(folder/'commands.mem'),f'+TRACE_WORDS={count}',
       '+DUMP='+str(folder/'actual.mem'),*options]
  log=out/(name.replace('/','_')+'.log');run(cmd,log,workspace)
  token='V42_FAULT_PASS' if any(x.startswith('+FAULT=') for x in options) else 'V42_PASS'

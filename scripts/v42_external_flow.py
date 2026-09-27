@@ -31,8 +31,8 @@ def capture(tag):
  return f
 
 def build_binary(folder,cfg,swap=0,partitioned=False):
- key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,sha(ROOT/'tb/integration/tb_uhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
- d=folder/'binaries'/key;binary=d/'obj/Vtb_uhbs_external'
+ key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
+ d=folder/'binaries'/key;binary=d/'obj/Vtb_mhbs_external'
  if not binary.exists():
   d.mkdir(parents=True,exist_ok=True)
   parameters=[f"-G{k.upper()}=256'h{int.from_bytes(bytes.fromhex(cfg[k]),'little'):064x}" for k in PARAMS]
@@ -40,11 +40,11 @@ def build_binary(folder,cfg,swap=0,partitioned=False):
   sources=rtl();defines=[]
   if partitioned:
    from v42_common_partition import partition
-   common,shell=partition((ROOT/'rtl/top/uhbs_top.sv').read_text())
-   (d/'uhbs_common.sv').write_text(common);(d/'uhbs_top.sv').write_text(shell)
-   sources=[p for p in sources if p!='rtl/top/uhbs_top.sv']+[str(d/'uhbs_common.sv'),str(d/'uhbs_top.sv')]
-   defines=['-DUHBS_PARTITIONED']
-  run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_uhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_uhbs_external.sv'],d/'compile.log')
+   common,shell=partition((ROOT/'rtl/top/mhbs_top.sv').read_text())
+   (d/'mhbs_common.sv').write_text(common);(d/'mhbs_top.sv').write_text(shell)
+   sources=[p for p in sources if p!='rtl/top/mhbs_top.sv']+[str(d/'mhbs_common.sv'),str(d/'mhbs_top.sv')]
+   defines=['-DMHBS_PARTITIONED']
+  run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_mhbs_external.sv'],d/'compile.log')
  return binary
 
 def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False):

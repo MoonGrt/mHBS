@@ -1,4 +1,4 @@
-# 关于 μHBS 的 SLH-DSA 架构表述：事实、证据与建议措辞
+# 关于 mHBS 的 SLH-DSA 架构表述：事实、证据与建议措辞
 
 “宏操作级微程序架构”：本设计采用宏操作级微程序架构：program、template 和 descriptor 控制 SLH-DSA 的操作顺序、参数与数据路由，专用 RTL 状态机执行链迭代、树归约及双 Hash lane 调度。
 
@@ -26,7 +26,7 @@
 | “且有较高 ATP” | 用词错误，且当前阶段证据不足 | ATP 低才好。布局修订 3 的 100 MHz ATP 是归一化估算；最终值须使用该版本的布线面积和通过时序的频率。 |
 | “留有未来进一步扩展的可能性” | 可以作为架构潜力 | 扩展新配方、参数集或算法通常还需修改 RTL、软件模型和验证；不能保证仅换镜像即可支持。 |
 
-算法事实依据为 [NIST FIPS 205，第 4、5、9、11 章](https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.205.pdf)；项目实现依据为 [当前 ABI](../ABI.md)、[生产软件编译器](../../model/unified_hbs.py) 和 [当前顶层](../../rtl/top/uhbs_top.sv)。
+算法事实依据为 [NIST FIPS 205，第 4、5、9、11 章](https://nvlpubs.nist.gov/nistpubs/fips/nist.fips.205.pdf)；项目实现依据为 [当前 ABI](../ABI.md)、[生产软件编译器](../../model/unified_hbs.py) 和 [当前顶层](../../rtl/top/mhbs_top.sv)。
 
 ## 3. “哈希输入变化”到底解释了什么
 
@@ -66,10 +66,10 @@ T_ℓ     : PK.seed || ADRS     || ℓ 个 n 字节节点 → n 字节
 | program | SINGLE/RUN/LOOP/HALT、宏操作顺序、坐标和重复次数 | 决定“什么时候、对哪个叶/层”做计算 |
 | template | 一条宏的类别、descriptor 引用、路由引用和 CAPTURE/AUTH 等标志 | 把重复的算法步骤压缩为宏命令 |
 | descriptor | Hash shape、域、输入数、链数、树高、地址引用和结果路由 | 描述“当前哈希调用的输入如何构造，输出去哪” |
-| `uhbs_hbs` | 展开链/树循环、调度两个 Hash lane、管理节点及结果 | 执行超出单次 Hash 的依赖结构 |
+| `mhbs_hbs` | 展开链/树循环、调度两个 Hash lane、管理节点及结果 | 执行超出单次 Hash 的依赖结构 |
 | Hash lane / Keccak | 按配方准备短/长输入、SHAKE 吸收/填充、U2 置换和链反馈 | 共享高成本的数据通路 |
 
-具体映射不是“一种标准函数对应一种宏”。`PRF_msg`/`H_msg` 主要由 `MESSAGE_PRF`/`MESSAGE_DIGEST` 配方加 `HASH` 宏执行；`PRF`、`F`、`H` 使用地址型配方，并在 `CHAIN` 或 `TREE` 宏内重复调用；`T_ℓ` 则在 WOTS+ 端点列表或 FORS 根列表归约时由 `ADDRESS_LIST` 配方执行。也就是说，**宏控制调用关系，配方控制哈希输入**。源码对应 [镜像生成](../../model/unified_hbs.py)、[序列器](../../rtl/sequencer/uhbs_program_sequencer.sv)、[宏执行器](../../rtl/top/uhbs_hbs.sv)和 [Hash 输入配方 lane](../../rtl/hash_lane/uhbs_recipe_lane.sv)。
+具体映射不是“一种标准函数对应一种宏”。`PRF_msg`/`H_msg` 主要由 `MESSAGE_PRF`/`MESSAGE_DIGEST` 配方加 `HASH` 宏执行；`PRF`、`F`、`H` 使用地址型配方，并在 `CHAIN` 或 `TREE` 宏内重复调用；`T_ℓ` 则在 WOTS+ 端点列表或 FORS 根列表归约时由 `ADDRESS_LIST` 配方执行。也就是说，**宏控制调用关系，配方控制哈希输入**。源码对应 [镜像生成](../../model/unified_hbs.py)、[序列器](../../rtl/sequencer/mhbs_program_sequencer.sv)、[宏执行器](../../rtl/top/mhbs_hbs.sv)和 [Hash 输入配方 lane](../../rtl/hash_lane/mhbs_recipe_lane.sv)。
 
 这层抽象可以减少逐次 Hash 发指令的开销，允许链内反馈和宏内双 lane 并行，并复用相同的 Keccak 置换单元。它**不自动**保证最小面积或最短周期：配方选择器、宽状态、端点/根存储以及控制寄存器也占资源；最终效果必须靠候选综合和布线结果判断。
 

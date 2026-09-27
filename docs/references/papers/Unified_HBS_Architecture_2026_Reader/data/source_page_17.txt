@@ -1,0 +1,57 @@
+Yechu Zhang* , Yuxuan Chu* , Yaodong Wei, Yueqin Dai, Qiu Shen and Jing Tian(B) 17
+
+
+   The proposed architecture achieves a maximum clock frequency of 108 MHz. Detailed
+performance metrics—including clock cycle counts and total execution latency for key
+generation (Keygen) and signing (Sign)—are summarized in Table 5.
+
+                                Table 5: Latency of processor.
+             Algorithm       Param       Keygen(CCs/ms)           Sign(CCs/ms)
+                             n = 128          23,688/0.22            537,636/4.95
+             SPHINCS+        n = 192          34,687/0.32            926,398/8.52
+                             n = 256          91,510/0.84          1,929,154/17.75
+                              ω=2          3,808,440/35.04            3,572/0.03
+             LMS
+                              ω=4          5,843,438/53.76            5,429/0.05
+                              ω=2          7,829,494/72.03            7,334/0.07
+             XMSS
+                              ω=4         15,682,342/144.28          14,549/0.13
+
+    For SPHINCS+, with security parameters in n ∈ {128, 192, 256}, the Keygen/Sign
+execution times are 0.22/4.95 ms, 0.32/8.52 ms, and 0.84/17.75 ms, respectively. Because
+the number of hash invocations is fixed for a given parameter set, the Keygen/Sign latency
+is constant and does not vary with the public or private key values.
+    For LMS/XMSS with n = 256 and h = 10, the Keygen/Sign times for LMS with
+w ∈ 2, 4 are 35.04/0.03 ms and 53.76/0.05 ms, respectively. For XMSS with w ∈ {2, 4},
+the times are 72.03/0.07 ms and 144.28/0.13 ms. The signing procedures for LMS and
+XMSS rely on an OTS scheme where the number of hash computations in the Winternitz
+chains depends on the message digest being signed, so the signing latency varies within a
+bounded range. The signing times reported in Table II are the average values obtained
+over 1000 random signing operations to reflect expected real-world performance.
+
+                          Table 6: Resource utilization by module.
+      Modules                                   LUT                  FF            BRAM
+      Control unit                        4,222/17.4%          5,137/37.8%          16.5
+      Post Process                          895/3.7%           1,090/8.0%            0
+      Hash LOOP                           19,067/78.4%         7,432/54.8%           0
+        ⌞ HASH LOOP0                          9,657                3,717             0
+          ⌞ HASH LOOP0.HIL                    3,303                2,078             0
+          ⌞ HASH LOOP0.Keccak                 6,354                1,639             0
+        ⌞ HASH LOOP1                          9,410                3,715             0
+          ⌞ HASH LOOP1.HIL                    3,056                2,076             0
+          ⌞ HASH LOOP1.Keccak                 6,354                1,639             0
+      Sig RAM                                   0                    0               2
+      Data RAM                                  0                    0              14.5
+      Total                                    24,184             13,659            16.5
+      Note: LUT/FF percentages are normalized to the total resource usage of this design (the
+     “Total” row).
+
+
+    Table 6 presents the resource consumption of each module on the Artix-7 FPGA. The
+overall design utilizes 24,184 LUTs, 13,659 FFs, 16.5 BRAMs, and 0 DSPs. The Control
+Unit consumes 4,222 LUTs (17.4%) and 5,137 FFs (37.8%); its FF share exceeds 30% of the
+design because it integrates complex logic with numerous counters and state machines (e.g.,
+the ADRS generator and task-control unit), buffers diverse inputs for the two HASH LOOP
+modules, and maintains a 1088-bit mots register. The Post-Process unit—responsible for
+handshaking, task-status management, and precise BRAM writes—uses 895 LUTs (3.68%)
+

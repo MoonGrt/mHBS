@@ -1,1 +1,1 @@
-"""Independent executable models for μHBS."""
+"""Independent executable models for mHBS."""

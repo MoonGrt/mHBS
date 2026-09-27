@@ -9,9 +9,9 @@ workspace=f/'synth_source';workspace.mkdir(exist_ok=False)
 with tarfile.open(f/'source_snapshot.tar.gz') as t:t.extractall(workspace,filter='data')
 for p,h in inp['source_sha256'].items():assert sha(workspace/p)==h
 out=workspace/'build/v4.2/external_job_message'/f.name/'synthesis';out.mkdir(parents=True)
-src=(workspace/'rtl/top/uhbs_top.sv').read_text()
+src=(workspace/'rtl/top/mhbs_top.sv').read_text()
 common,base_shell=partition(src,stub=True)
-(out/'uhbs_common.sv').write_text(common)
+(out/'mhbs_common.sv').write_text(common)
 for n in NAMES:
  for op in ('keygen','sign'):
   cfg=json.loads((workspace/BASE.relative_to(ROOT)/'vectors'/n/op/'job.json').read_text())

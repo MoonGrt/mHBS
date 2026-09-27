@@ -21,13 +21,13 @@ REGRESSION={"slh_128f":BASELINE["slh"]["sign_atp"],"xmss_omega4":BASELINE["xmss"
 def capture(tag, family, unroll, lanes):
     family=get_profile(family).name
     sources=(ROOT/"manifests/unified_sources.txt").read_text().splitlines()
-    sources += [f"rtl/microcode/uhbs_{family}_{kind}.mem" for kind in ("tokens","templates","descriptors")]
+    sources += [f"rtl/microcode/mhbs_{family}_{kind}.mem" for kind in ("tokens","templates","descriptors")]
     sources += ["model/unified_hbs.py","manifests/experiments/unified_hbs_v4/model_gate.json", "manifests/experiments/unified_hbs_v4/software_gate.json",
-                "tb/integration/tb_uhbs_unified.sv", "tests/test_unified_hbs.py",
+                "tb/integration/tb_mhbs_unified.sv", "tests/test_unified_hbs.py",
                 "tests/test_unified_rtl_contract.py", "experiments/synth_unified_hbs.tcl",
                 "experiments/route_unified_hbs.tcl", "manifests/unified_sources.txt"]
     sources += [str(p.relative_to(ROOT)) for folder in ("model","scripts","tests","tb") for p in (ROOT/folder).rglob("*") if p.is_file() and (p.suffix in (".py",".json",".mem",".sv",".svh"))]
-    sources += ["manifests/experiments/unified_hbs_final.json", "Makefile","experiments/finalize_unified_clock.tcl","tb/vectors/uhbs_profile_constants.svh"]
+    sources += ["manifests/experiments/unified_hbs_final.json", "Makefile","experiments/finalize_unified_clock.tcl","tb/vectors/mhbs_profile_constants.svh"]
     sources=sorted(set(sources))
     hashes={p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sources}
     data=dict(family=family,unroll=unroll,lanes=lanes,part="xc7a200tffg1156-3",period_ns=10.0,

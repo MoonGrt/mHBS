@@ -6,7 +6,7 @@ OPERATION ?= all
 SWAP ?= 0
 TAG ?= external_v42
 SIM_TAG ?= $(TAG)
-UHBS_RTL := $(shell cat manifests/v42_sources.txt)
+MHBS_RTL := $(shell cat manifests/v42_sources.txt)
 
 .PHONY: all test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common route-common freeze-common report-v42 reproduce-v42
 all: rtl-test
@@ -14,7 +14,7 @@ test: compile-microcode
 compile-microcode:
 	$(PYTHON) scripts/verify_v42_external_models.py
 lint:
-	$(VERILATOR) --lint-only --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT --top-module uhbs_top $(UHBS_RTL)
+	$(VERILATOR) --lint-only --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT --top-module mhbs_top $(MHBS_RTL)
 rtl-unit-test:
 	$(PYTHON) scripts/verify_v42_external_units.py
 rtl-profile-test:

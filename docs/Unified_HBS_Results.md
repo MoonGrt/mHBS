@@ -27,7 +27,7 @@ with independent algorithm models. SLH-DSA matches ACVP SigGen tc137; stateful
 outputs match the committed KAT byte streams. Software checks messages of
 multiple lengths, q=0/1023, exhaustion, commit refusal and failure after commit.
 
-Production wrappers share `uhbs_hbs` and immutable ABI 3 images. The defaults
+Production wrappers share `mhbs_hbs` and immutable ABI 3 images. The defaults
 are complete Keygen/Sign fixtures with fixed keys, q and message length; message
 content is streamed. The candidates compare UNROLL=2/4, with two lanes for
 SLH-DSA and one lane for XMSS/LMS after lane-count screening. Icarus 12.0 units and Verilator 5.008

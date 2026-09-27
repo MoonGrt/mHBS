@@ -6,7 +6,7 @@ set_param general.maxThreads 4
 create_project -in_memory -part xc7a200tffg1156-3
 read_verilog -sv build/v4.2/probe_stub.sv
 read_verilog -sv build/v4.2/probe_shell.sv
-synth_design -top uhbs_top -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy none
+synth_design -top mhbs_top -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy none
 report_utilization -file $out/utilization.rpt
 write_checkpoint -force $out/probe.dcp
 set f [open $out/cells.tsv w]

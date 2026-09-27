@@ -1,1 +1,1 @@
-"""μHBS tests."""
+"""mHBS tests."""

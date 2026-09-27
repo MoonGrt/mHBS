@@ -2,10 +2,10 @@
 
 ## Product wrapper
 
-SLH-DSA、XMSS、LMS 顶层均直接实例化 `uhbs_hbs`。Job 数据来自综合参数：
+SLH-DSA、XMSS、LMS 顶层均直接实例化 `mhbs_hbs`。Job 数据来自综合参数：
 `SECRET`、`PRF`、`PUBLIC`、`RANDOM`、`IDENTIFIER`、`INITIAL_Q`、
 `MESSAGE_BYTES`；默认值由通过软件仿真的现有 KAT 生成。顶层没有 Job 数据端口，
-镜像 ROM 在运行时不可写。七点分别静态综合，顶层命名为 `uhbs_<profile>_top`。
+镜像 ROM 在运行时不可写。七点分别静态综合，顶层命名为 `mhbs_<profile>_top`。
 
 `start && ready` 启动一次 Keygen → 消息接收 → Sign；每次启动只签一次。
 `keygen_done` 和 `done` 是单周期脉冲，分别伴随锁存的 `keygen_cycles` 和
@@ -37,8 +37,8 @@ Sign 在获得 q+1 的提交确认之前不会输出签名字节。已确认的�
 
 ## 内部核接口
 
-`uhbs_hbs` 的 `job_valid/ready`、`job_operation` 和 Job 数据仅连接到固定参数
-与 `uhbs_job_sequence`。`job_operation=0/1` 选择同一镜像的 Keygen/Sign 入口。
+`mhbs_hbs` 的 `job_valid/ready`、`job_operation` 和 Job 数据仅连接到固定参数
+与 `mhbs_job_sequence`。`job_operation=0/1` 选择同一镜像的 Keygen/Sign 入口。
 算法顶层不需要理解宏操作、Hash 输入、树节点或 lane 调度。
 
 错误码：3001 镜像/profile；3002 消息；3003 缓存/索引不匹配；

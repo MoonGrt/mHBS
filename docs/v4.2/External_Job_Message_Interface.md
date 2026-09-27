@@ -1,16 +1,16 @@
-# μHBS v4.2：Job 参数与外部消息接口
+# mHBS v4.2：Job 参数与外部消息接口
 
 生产物理格式 `slh64_v4.2`，布局修订 **3**；保留 ABI 4 五类宏操作语义。当前为功能及 post-synth 验收，通过后不推定布线频率。
 
 ## 接口与执行
 
-`uhbs_top` 通过 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMIZER / PUBLIC_ROOT` 直接提供 Job。128f/192f/256f 使用低 128/192/256 位，节点第一个字节位于低 8 位。参数默认采用现有 128f 测试向量。
+`mhbs_top` 通过 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMIZER / PUBLIC_ROOT` 直接提供 Job。128f/192f/256f 使用低 128/192/256 位，节点第一个字节位于低 8 位。参数默认采用现有 128f 测试向量。
 `OPERATION=0/1` 分别为 Keygen/Sign；`message_length[6:0]` 是顶层输入，Keygen 必须为 0，Sign 范围 1–87。在 Job 提交沿检查并锁存合法长度；非法长度以错误码 `0x3002` 停机。Sign 的公钥根由调用方预先提供。
 消息使用 `message_data[63:0] / message_valid / message_ready`，低字节先传；只在 valid 与 ready 同时为 1 的时钟沿接收。尾拍多余字节忽略，无 last/keep 输入。发送端须在 valid=1、ready=0 时保持数据及 valid；Keygen、接收完成、完成停机及错误停机时 ready 为 0。消息长度在 Job 提交前保持稳定，此后可改变。
 全体 RTL 使用高有效同步 `rst`，仅在时钟上升沿复位，无复位同步器。每次复位自动执行一次操作，然后保持完成/错误状态。结果流保持无背压。Job 参数在一次运行中恒定。
 
 ```systemverilog
-uhbs_top #(
+mhbs_top #(
     .SECRET_SEED(256'h...), .SECRET_PRF(256'h...),
     .PUBLIC_SEED(256'h...), .RANDOMIZER(256'h...), .PUBLIC_ROOT(256'h...),
     .OPERATION(1),
@@ -31,8 +31,8 @@ uhbs_top #(
 program 为 **32×64** 纯指令；template 为 **16×64**；descriptor 为 **32×64、双读**。每个 SLH 参数点共用 Keygen/Sign 两个入口，只需一组三 ROM 镜像。Job 配置和测试消息在 `vectors/<profile>/<operation>/` 中单独记录。
 descriptor 0：bits17:0 为 Sign 输出字节数，bits35:18 为 Keygen 输出字节数，bits40:36 为 Keygen 入口，bits45:41 为 Sign 入口，其余为零。descriptor 1 保留参数集编号 0/1/2。软件验证入口与程序边界一致；生产硬件不扫描校验镜像。
 旧布局 2 转换：`python3 scripts/convert_v42_external.py <旧镜像目录> <输出目录>`，输出三份布局 3 镜像、独立 job.json 和 message.mem。旧数据及布局 2 模型保留，用于历史复现。
-`uhbs_processor.sv` 已删除；镜像读取、启动、入口选择、消息长度检查和操作周期统计位于 `uhbs_top`。Boot 为 2 拍。五类宏指令及 Hash 数据通路由 `uhbs_hbs` 执行。
-构建工具从顶层源码提取启动控制与执行核，生成仅用于构建的 `uhbs_common`，一起综合一次；Job、消息和 ROM 数据均为输入；六个参数外壳分别综合后链接同一份 EDIF。共同核设置 DONT_TOUCH，防止外层常量继续裁剪。核的单元配置与内部连接指纹一致；外部常量及边界连接允许不同，完整顶层不再承诺同一布局布线。
+`mhbs_processor.sv` 已删除；镜像读取、启动、入口选择、消息长度检查和操作周期统计位于 `mhbs_top`。Boot 为 2 拍。五类宏指令及 Hash 数据通路由 `mhbs_hbs` 执行。
+构建工具从顶层源码提取启动控制与执行核，生成仅用于构建的 `mhbs_common`，一起综合一次；Job、消息和 ROM 数据均为输入；六个参数外壳分别综合后链接同一份 EDIF。共同核设置 DONT_TOUCH，防止外层常量继续裁剪。核的单元配置与内部连接指纹一致；外部常量及边界连接允许不同，完整顶层不再承诺同一布局布线。
 
 ## 实测资源与周期
 
@@ -58,7 +58,7 @@ descriptor 0：bits17:0 为 Sign 输出字节数，bits35:18 为 Keygen 输出�
 | slh_256f_sign | 2 | 2,583,908 | 2,583,913 | 345,414/349,758 | 185,172.537 |
 
 旧布局 2 同阶段综合基线：23,073 LUT、12,195 FF、7,292.625 Slice。旧布线基线另列为 7,249.000 Slice、101.010101 MHz，不能把这个频率用于新顶层。
-前一版外部消息顶层（含 `uhbs_processor`）同阶段综合面积为 7,110.000 Slice；本候选将启动逻辑并入顶层，按完整顶层资源比较。本轮保持启动控制与核共同综合，内部固定连接继续参与优化；构建产物 `uhbs_common` 不属于生产 RTL。
+前一版外部消息顶层（含 `mhbs_processor`）同阶段综合面积为 7,110.000 Slice；本候选将启动逻辑并入顶层，按完整顶层资源比较。本轮保持启动控制与核共同综合，内部固定连接继续参与优化；构建产物 `mhbs_common` 不属于生产 RTL。
 100 MHz 仅用于 ATP 归一化，不是本轮已通过布线的频率。表中为现有固定向量、连续供数；Sign 周期包含消息接收和输入停顿，消息改变也可能改变链计算周期。上电总周期包含启停控制，无两拍复位同步器开销。
 
 ## 验证与复现

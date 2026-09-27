@@ -35,10 +35,10 @@ def main():
         for kind, words, width in (("tokens", image.tokens, 128),
                                   ("templates", image.templates, 128),
                                   ("descriptors", image.descriptors, 64)):
-            target = ROOT / f"rtl/microcode/uhbs_{name}_{kind}.mem"
+            target = ROOT / f"rtl/microcode/mhbs_{name}_{kind}.mem"
             target.write_text("".join(f"{x:0{width//4}x}\n" for x in words))
         for kind, data in (("keygen", kg), ("sign", sg), ("message", message)):
-            (ROOT / f"tb/vectors/uhbs_{name}_{kind}.mem").write_text("".join(f"{x:02x}\n" for x in data))
+            (ROOT / f"tb/vectors/mhbs_{name}_{kind}.mem").write_text("".join(f"{x:02x}\n" for x in data))
         results[name] = dict(n=image.n, stateful=image.stateful, family=p.family,
             omega=p.omega, chains=p.chains, len1=p.len1, len2=p.len2,
             h=p.h, hp=p.hp, d=p.d, k=p.k, a=p.a, m=p.m, target=p.target, lanes=p.lanes,

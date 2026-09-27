@@ -1,7 +1,7 @@
 # μHBS ABI 4 architecture
 
-The seven `uhbs_<profile>_top` wrappers all instantiate `uhbs_hbs`.
-Legacy `uhbs_slh_dsa_top`, `uhbs_xmss_top`, and `uhbs_lms_top` aliases
+The seven `mhbs_<profile>_top` wrappers all instantiate `mhbs_hbs`.
+Legacy `mhbs_slh_dsa_top`, `mhbs_xmss_top`, and `mhbs_lms_top` aliases
 retain the 128f / omega4 configurations. The authoritative production source
 closure is `manifests/unified_sources.txt`, consumed by Make and Vivado. Each product selects an immutable ABI 4
 image and is synthesized separately; it is not a runtime multi-profile
@@ -51,7 +51,7 @@ operations is reported separately from these operation counters.
 - Route only retained candidates with `experiments/route_unified_hbs.tcl`.
 
 See `Unified_HBS_ABI.md` for the executable image contract and ATP formula.
-The old `uhbs_stateless_hbs`/`uhbs_stateful_hbs` implementations and their
+The old `mhbs_stateless_hbs`/`mhbs_stateful_hbs` implementations and their
 standalone benches were removed from the working tree. Git history preserves
 them; `manifests/unified_sources.txt` is the current synthesis source list.
 

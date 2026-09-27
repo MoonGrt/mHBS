@@ -28,7 +28,7 @@ def main():
         logic={k:v for k,v in inp['logic_sha256'].items() if k.endswith('.sv')}
         if common is None:common=logic
         if common!=logic:raise RuntimeError('selected products do not share identical RTL sources')
-    final=dict(schema='uhbs.seven_profiles.v4',part='xc7a200tffg1156-3',comparison='NON_STRICT',profiles={},rtl_sha256=common)
+    final=dict(schema='mhbs.seven_profiles.v4',part='xc7a200tffg1156-3',comparison='NON_STRICT',profiles={},rtl_sha256=common)
     evidence=OUT/'candidates';evidence.mkdir(parents=True,exist_ok=True)
     # Retain screened candidates and partial attempts as such, without claiming acceptance.
     for directory in sorted((ROOT/'build/vivado').glob('v4*')):
@@ -79,7 +79,7 @@ def main():
         rel=file.relative_to(ROOT);target=OUT/'verification_sources'/rel
         target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(file,target)
         unit_sources[str(rel)]=sha(file)
-    verification=dict(schema='uhbs.verification.v4',simulations=sorted(set(records)),unit_log_sha256=sha(OUT/'icarus_units.log'),unit_sources=unit_sources,unit_rtl_sha256=current_rtl)
+    verification=dict(schema='mhbs.verification.v4',simulations=sorted(set(records)),unit_log_sha256=sha(OUT/'icarus_units.log'),unit_sources=unit_sources,unit_rtl_sha256=current_rtl)
     (OUT/'verification.json').write_text(json.dumps(verification,indent=2)+'\n')
     final['verification_sha256']=sha(OUT/'verification.json')
     (OUT/'final.json').write_text(json.dumps(final,indent=2)+'\n')

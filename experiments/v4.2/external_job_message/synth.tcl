@@ -9,16 +9,16 @@ set part xc7a200tffg1156-3
 set_param general.maxThreads 8
 create_project -in_memory -part $part
 set f [open manifests/v42_sources.txt];set sources [split [string trim [read $f]] \n];close $f
-foreach p $sources {if {$p ne "rtl/top/uhbs_top.sv"} {read_verilog -sv $p}}
+foreach p $sources {if {$p ne "rtl/top/mhbs_top.sv"} {read_verilog -sv $p}}
 set f [open [file join $out clock.xdc] w];puts $f {create_clock -name clk -period 10.0 [get_ports clk]};close $f
 read_xdc [file join $out clock.xdc]
-read_verilog -sv [file join $out uhbs_common.sv]
-synth_design -top uhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2
+read_verilog -sv [file join $out mhbs_common.sv]
+synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2
 report_utilization -file [file join $out core_utilization.rpt]
 report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
 report_timing_summary -file [file join $out core_timing.rpt]
 write_checkpoint -force [file join $out common.dcp]
-write_edif -force [file join $out uhbs_common.edf]
+write_edif -force [file join $out mhbs_common.edf]
 write_verilog -force -mode synth_stub [file join $out common_stub.v]
 set core_seconds [expr {[clock seconds]-$started}]
 close_project
@@ -51,12 +51,12 @@ foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_25
  create_project -in_memory -part $part
  read_verilog [file join $out common_stub.v]
  read_verilog -sv [file join $out ${name}_shell.sv]
- synth_design -top uhbs_top -part $part -mode out_of_context -flatten_hierarchy none
- write_edif -force [file join $d uhbs_top.edf]
+ synth_design -top mhbs_top -part $part -mode out_of_context -flatten_hierarchy none
+ write_edif -force [file join $d mhbs_top.edf]
  close_project
- read_edif [file join $out uhbs_common.edf]
- read_edif [file join $d uhbs_top.edf]
- link_design -top uhbs_top -part $part -mode out_of_context
+ read_edif [file join $out mhbs_common.edf]
+ read_edif [file join $d mhbs_top.edf]
+ link_design -top mhbs_top -part $part -mode out_of_context
  if {[llength [get_cells -hier -filter {IS_BLACKBOX == 1}]]} {error "unresolved blackbox"}
  set_property DONT_TOUCH true [get_cells common]
  create_clock -name clk -period 10.0 [get_ports clk]

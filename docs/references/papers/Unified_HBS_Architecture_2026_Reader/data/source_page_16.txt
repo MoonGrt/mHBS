@@ -1,0 +1,60 @@
+16 A Unified Hardware Architecture for Stateful and Stateless Hash-Based Key/Signature Generations
+
+
+    • Mid-level counter (num): Tracks and controls the node index within a specific
+      hierarchical level, such as the node index of a single OTS chain in task7 or the Merkle
+      tree node index of the current layer in task10.
+    • Top-level counter (index): Controls the high-level execution stage, such as the OTS
+      chain index in task7 or the layer index of the Merkle tree in task10.
+In terms of functionality, this multi-level counter hierarchy is fully equivalent to a deter-
+ministic finite-state machine (FSM). Its key advantage lies in decomposing a monolithic
+global state into a set of independent, logically decoupled local states.
+
+
+                                   +    1
+                                                       0               C
+                                  cnt =
+                                             A
+                      0                          B
+                                                              index
+                                                                      =
+                      0
+                                       +
+                                           num
+                                                 =     +
+                                                                   task_done
+
+                      Figure 11: Architecture of hierarchical counter.
+
+
+
+3.4     Memory
+The total memory footprint of this design is approximately 72 KB, utilizing 16.5 dual-
+port BRAMs in total. Of these, two BRAMs buffer signatures (SigRAM), and the
+remaining 14.5 BRAMs store intermediate data (DataRAM). To support LMS/XMSS
+key generation—which requires storing the entire Merkle tree with maximum height
+h = 10—the 256-bit-port DataRAM is configured with a maximum depth of 2(10+1) = 211 .
+Accordingly, the DataRAM is configured as 256 × 211 , which synthesizes to 14.5 BRAMs.
+For signature buffering, we adopt a segmented streaming strategy. The maximum signature
+length per tree is 143×256 bits, requiring a depth of 143; therefore, a SigRAM configured as
+256 × 28 suffices and synthesizes to 2 BRAMs. What’s more, BRAM read/write operations
+and the hash computations in the HASH LOOP are scheduled in different pipeline stages,
+enabling parallel execution. By overlapping memory access with computation, the memory
+controller prefetches data for the subsequent cycle while the hash core processes the current
+block, effectively hiding memory access latency.
+    To cope with limited on-chip storage and the intrinsically large signature-size overhead
+of SPHINCS+, we employ a segmented signature streaming strategy. The core principle of
+this strategy is to produce and output immediately. During the signing phase, upon the
+completion of each computational segment, such as a single FORS tree or a single Merkle
+tree, its result is immediately dispatched via the I/O interface, rather than awaiting the
+full signature generation. This streaming approach effectively reduces the peak storage
+requirement from full-signature buffering to only buffering the current computational
+segment, significantly conserving BRAM resources while also shortening the system’s
+response latency.
+
+
+4     Results And Comparisons
+4.1     Results
+The hardware architecture proposed in this paper is implemented using Xilinx Vivado
+2018.3. For fair comparison, the target device selected is an Artix-7 series xc7a200t FPGA.
+

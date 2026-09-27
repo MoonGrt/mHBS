@@ -40,7 +40,7 @@ def main():
         swap,bp=map(int,re.search(rb'swap=(\d+) backpressure=(\d+)',log).groups())
         if sim['unroll']==2:seen.add((sim['profile'],sim['lanes'],swap,bp,sim['q']))
     check(set(matrix())<=seen,'incomplete verification matrix')
-    tables=json.loads((ROOT.parents[2]/'references/papers/Unified_HBS_Architecture_2026_Reader/data/paper_tables.json').read_text())['tables']
+    tables=json.loads((ROOT/'references/papers/Unified_HBS_Architecture_2026_Reader/data/paper_tables.json').read_text())['tables']
     old=json.loads((ROOT/'manifests/experiments/unified_hbs_final.json').read_text())['profiles']
     regression={'slh_128f':old['slh']['sign_atp'],'xmss_omega4':old['xmss']['sign_atp'],'lms_omega4':old['lms']['sign_atp']}
     rows=[];report=(ROOT/'docs/Unified_HBS_Paper_Comparison.md').read_text()
@@ -58,7 +58,7 @@ def main():
             for path,digest in gate['sources'].items():check(sha(tar.extractfile(path).read())==digest,name+' gate source '+path)
             models=json.load(tar.extractfile('manifests/experiments/unified_hbs_v4/model_gate.json'))
             for kind in ('keygen','sign'):
-                data=bytes(int(x,16) for x in tar.extractfile(f'tb/vectors/uhbs_{name}_{kind}.mem').read().split())
+                data=bytes(int(x,16) for x in tar.extractfile(f'tb/vectors/mhbs_{name}_{kind}.mem').read().split())
                 check(sha(data)==models['profiles'][name][kind+'_sha256'],name+' '+kind+' vector')
             route=json.loads((directory/'route_inputs.json').read_text())
             check(sha(tar.extractfile('experiments/route_unified_hbs.tcl').read())==route['script_sha256'],name+' route flow')
@@ -101,7 +101,7 @@ def main():
         for value in (f'{atp:,.3f}',f'{sg:,}',f'{kg:,}'):check(value in report,name+' report '+value)
         rows.append(row)
         print(f'{name:14} area={area:9.3f} KG={kg:10,} Sign={sg:9,} MHz={1000/period:7.3f} ATP={atp:11,.3f} target={p.target:11,.3f} PASS')
-    expected=dict(schema='uhbs.seven_comparison.v4',final_sha256=sha((OUT/'final.json').read_bytes()),rows=rows)
+    expected=dict(schema='mhbs.seven_comparison.v4',final_sha256=sha((OUT/'final.json').read_bytes()),rows=rows)
     if '--write-comparison' in sys.argv:
         (OUT/'comparison.json').write_text(json.dumps(expected,indent=2)+'\n')
         with (OUT/'comparison.csv').open('w',newline='') as stream:

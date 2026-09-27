@@ -18,7 +18,7 @@ set source_list [split [string trim [read $source_manifest]] "\n"]
 close $source_manifest
 foreach source $source_list {read_verilog -sv [file join $root $source]}
 
-set top "uhbs_${family}_top"
+set top "mhbs_${family}_top"
 synth_design -top $top -part $part -mode out_of_context -flatten_hierarchy rebuilt \
     -directive AreaOptimized_high -max_dsp 0 -generic UNROLL=$unroll -generic LANES=$lanes -generic PROFILE_ENABLE=0
 set abort_registers [get_cells -hierarchical -filter {NAME =~ *abort_execution_reg}]

@@ -104,8 +104,8 @@
 
 作者：Yechu Zhang、Yuxuan Chu、Yaodong Wei、Yueqin Dai、Qiu Shen、Jing Tian。使用本地 IACR ePrint 2026/194 快照，不声称覆盖后续修订版。
 
-- [本地原始 PDF](../../../../references/papers/Unified_Stateful_Stateless_HBS_Architecture_2026.pdf)
-- [中英文阅读稿](../../../../references/papers/Unified_HBS_Architecture_2026_Reader/paper.md)
+- [本地原始 PDF](../references/papers/Unified_Stateful_Stateless_HBS_Architecture_2026.pdf)
+- [中英文阅读稿](../references/papers/Unified_HBS_Architecture_2026_Reader/paper.md)
 - PDF SHA-256：`40453c6ac61a703e812b447301ecdccf011adbd8a0c9eca088bdd6ffbe789802`
 
 主要取数位置：

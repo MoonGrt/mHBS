@@ -30,21 +30,21 @@ def one(name,top,files,params=(),runs=((),)):
     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
     print('SLH_UNIT_PASS',name,flush=True)
 
-one('endpoint_68','tb_uhbs_value_store',
-    ['rtl/memory/uhbs_value_store.sv','tb/unit/tb_uhbs_value_store.sv'],
-    ['-Ptb_uhbs_value_store.DEPTH=68'])
-one('fors_roots','tb_uhbs_root_store',
-    ['rtl/memory/uhbs_root_store.sv','tb/unit/tb_uhbs_root_store.sv'])
-one('slh64_sequencer','tb_uhbs_slh64_sequencer',
-    ['rtl/sequencer/uhbs_program_sequencer.sv','tb/unit/tb_uhbs_slh64_sequencer.sv'])
-one('sponge','tb_uhbs_compact_shake_context_lane',
-    ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
-     'tb/unit/tb_uhbs_compact_shake_context_lane.sv'])
+one('endpoint_68','tb_mhbs_value_store',
+    ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
+    ['-Ptb_mhbs_value_store.DEPTH=68'])
+one('fors_roots','tb_mhbs_root_store',
+    ['rtl/memory/mhbs_root_store.sv','tb/unit/tb_mhbs_root_store.sv'])
+one('slh64_sequencer','tb_mhbs_slh64_sequencer',
+    ['rtl/sequencer/mhbs_program_sequencer.sv','tb/unit/tb_mhbs_slh64_sequencer.sv'])
+one('sponge','tb_mhbs_compact_shake_context_lane',
+    ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+     'tb/unit/tb_mhbs_compact_shake_context_lane.sv'])
 for p in range(3):
-    one('recipe_'+str(p),'tb_uhbs_v42_recipe_lane',
-        ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
-         'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_v42_recipe_lane.sv'],
-        [f'-Ptb_uhbs_v42_recipe_lane.PROFILE={p}'])
+    one('recipe_'+str(p),'tb_mhbs_v42_recipe_lane',
+        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+         'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'],
+        [f'-Ptb_mhbs_v42_recipe_lane.PROFILE={p}'])
 # Independent hashlib vectors exercise padding on both sides of the rate
 # boundary and change the cached request fields between consecutive hashes.
 padding=[]
@@ -58,9 +58,9 @@ for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
                    int.from_bytes(digest,'little'))
 padding_file=OUT/'recipe_padding.mem'
 padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
-one('recipe_padding','tb_uhbs_recipe_padding',
-    ['rtl/hash_lane/uhbs_keccak.sv','rtl/hash_lane/uhbs_compact_shake_context_lane.sv',
-     'rtl/hash_lane/uhbs_recipe_lane.sv','tb/unit/tb_uhbs_recipe_padding.sv'],
+one('recipe_padding','tb_mhbs_recipe_padding',
+    ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+     'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_recipe_padding.sv'],
     runs=((f'+VECTORS={padding_file.relative_to(ROOT)}',),))
 assert logic()==identity
 (OUT/'results.json').write_text(json.dumps({'passed':True,'logic_sha256':identity,

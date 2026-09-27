@@ -85,7 +85,7 @@ def audit_frozen(folder,inputs):
     check(set(rows)==set(PROFILES),'frozen profile coverage')
     check(set(rows.values())=={hardware_sha(frozen)},'identical frozen structure')
     with tarfile.open(folder/'source_snapshot.tar.gz') as tar:
-        top=tar.extractfile('rtl/top/uhbs_top.sv').read().decode()
+        top=tar.extractfile('rtl/top/mhbs_top.sv').read().decode()
     packed=bool(re.search(r'\.PACKING\(1\)',top))
     identity=hashlib.sha256(json.dumps(inputs['logic_sha256'],sort_keys=True).encode()).hexdigest()[:16]
     boundary=BASE/'boundary'/identity
@@ -161,7 +161,7 @@ def audit_architecture():
 def audit_functional(inputs):
     logic=inputs['logic_sha256']
     identity=hashlib.sha256(json.dumps(logic,sort_keys=True).encode()).hexdigest()[:16]
-    source=inputs['source_sha256'];bench=source['tb/integration/tb_uhbs_autonomous.sv']
+    source=inputs['source_sha256'];bench=source['tb/integration/tb_mhbs_autonomous.sv']
     unit_folder=BASE/'unit'/identity
     unit=json.loads((unit_folder/'results.json').read_text())
     check(unit['pass_all'] and unit['logic_sha256']==logic and unit['bench_sha256']==bench,'functional units/source')
@@ -198,7 +198,7 @@ def audit_functional(inputs):
     for name,digest in arch['bench_sha256'].items():check(source[name]==digest,'architecture bench '+name)
     check(arch['script_sha256']==source['scripts/verify_microcode_architecture.py'],'architecture driver source')
     physical=json.loads((unit_folder/'physical_rom.json').read_text())
-    check(physical['passed'] and physical['rom_rtl_sha256']==logic['rtl/memory/uhbs_image_rom.sv'],'physical ROM source')
+    check(physical['passed'] and physical['rom_rtl_sha256']==logic['rtl/memory/mhbs_image_rom.sv'],'physical ROM source')
     check(physical['generator_sha256']==source['scripts/verify_physical_rom.py'],'physical ROM test generator source')
     for name,images in physical['image_sha256'].items():
         for kind,digest in images.items():check(sha(BASE/'images'/name/(kind+'.mem'))==digest,'physical ROM image '+name+'/'+kind)

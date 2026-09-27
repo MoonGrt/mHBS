@@ -14,7 +14,7 @@ from model.profiles import PROFILES
 
 def logic_hashes(profile):
     paths=(ROOT/'manifests/unified_sources.txt').read_text().splitlines()
-    paths += [f'rtl/microcode/uhbs_{profile}_{k}.mem' for k in ('tokens','templates','descriptors')]
+    paths += [f'rtl/microcode/mhbs_{profile}_{k}.mem' for k in ('tokens','templates','descriptors')]
     return {p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in sorted(paths)}
 
 

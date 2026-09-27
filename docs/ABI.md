@@ -1,25 +1,25 @@
-# μHBS 当前 ABI：SLH 专用 `slh64_v4.2`（布局修订 3）
+# mHBS 当前 ABI：SLH 专用 `slh64_v4.2`（布局修订 3）
 
 本文描述**当前生产 RTL**。工程版本为 v4.2，五类宏操作延续 **ABI 4 逻辑语义**，三份物理镜像采用 `slh64_v4.2` 的**布局修订 3**。物理镜像没有运行时 ABI 版本字；格式标识和修订号由构建元数据及离线工具管理。历史布局不能直接交给当前 RTL 使用。本文位号从最低位 0 开始，`[高:低]` 包含两端。
 
-编码与校验的依据是 [`model/slh64_external.py`](../model/slh64_external.py) 和 [`model/slh64.py`](../model/slh64.py)，宏执行语义见 [`model/unified_hbs.py`](../model/unified_hbs.py)。RTL 对应 [`uhbs_top.sv`](../rtl/top/uhbs_top.sv)、[`uhbs_program_sequencer.sv`](../rtl/sequencer/uhbs_program_sequencer.sv) 和 [`uhbs_hbs.sv`](../rtl/top/uhbs_hbs.sv)。
+编码与校验的依据是 [`model/slh64_external.py`](../model/slh64_external.py) 和 [`model/slh64.py`](../model/slh64.py)，宏执行语义见 [`model/unified_hbs.py`](../model/unified_hbs.py)。RTL 对应 [`mhbs_top.sv`](../rtl/top/mhbs_top.sv)、[`mhbs_program_sequencer.sv`](../rtl/sequencer/mhbs_program_sequencer.sv) 和 [`mhbs_hbs.sv`](../rtl/top/mhbs_hbs.sv)。
 
 ## 架构与运行接口
 
 ```text
 program（顺序、RUN/LOOP、坐标） ─┐
-template（宏、引用、标志）       ├─→ 单条 48 位宏命令 → uhbs_hbs → Hash lane／节点存储／结果流
+template（宏、引用、标志）       ├─→ 单条 48 位宏命令 → mhbs_hbs → Hash lane／节点存储／结果流
 descriptor（配方、参数、路由）  ─┘                         ↑
 Job 参数、message_length、消息流 ──────────────────────────┘
 ```
 
 - 生产核支持 **SLH-DSA-128f、192f、256f**。每个参数点有一组三份镜像，同一执行核支持三者。当前生产核不支持 XMSS/LMS、索引 `q`、有状态树缓存或索引 guard；历史七点证据保留在各自版本目录。
 - 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部仍可并行使用两个 Hash lane。
-- `uhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `uhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
+- `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
 - Job 和消息不占 program 地址。五个 256 位 Job 参数从顶层进入，按 profile 只取低 `n` 字节。Sign 的 `PUBLIC_ROOT` 由调用方配置，例如使用独立 Keygen 输出。
 - 镜像的完整格式和引用检查在离线工具中完成。RTL **不扫描或全面校验镜像**；非法镜像不属于硬件运行契约。顶层仍检查消息长度，执行器仍处理运行故障。
 
-[`uhbs_top`](../rtl/top/uhbs_top.sv) 的输入为 `clk`、高有效**同步**复位 `rst`、`message_length[6:0]`、`message_data[63:0]` 和 `message_valid`；输出包括 `message_ready`、无背压结果流 `out_valid/out_data[63:0]/out_keep[7:0]/out_last`、`result_kind`、`busy/done/keygen_done/error/error_code`，以及 Boot、Keygen、Sign 周期和 Hash/置换计数。五个 Job 参数是 `SECRET_SEED`、`SECRET_PRF`、`PUBLIC_SEED`、`RANDOMIZER`、`PUBLIC_ROOT`；`OPERATION=0/1` 分别选择 Keygen/Sign。三个文件参数是 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_FILE`。默认参数是 128f 测试配置；其他参数点需匹配镜像和 Job。
+[`mhbs_top`](../rtl/top/mhbs_top.sv) 的输入为 `clk`、高有效**同步**复位 `rst`、`message_length[6:0]`、`message_data[63:0]` 和 `message_valid`；输出包括 `message_ready`、无背压结果流 `out_valid/out_data[63:0]/out_keep[7:0]/out_last`、`result_kind`、`busy/done/keygen_done/error/error_code`，以及 Boot、Keygen、Sign 周期和 Hash/置换计数。五个 Job 参数是 `SECRET_SEED`、`SECRET_PRF`、`PUBLIC_SEED`、`RANDOMIZER`、`PUBLIC_ROOT`；`OPERATION=0/1` 分别选择 Keygen/Sign。三个文件参数是 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_FILE`。默认参数是 128f 测试配置；其他参数点需匹配镜像和 Job。
 
 复位释放后，顶层读取 descriptor 0/1，提交一次 Job，从指定入口运行一次，最后保持完成或错误状态直至复位。Keygen 要求 `message_length=0` 且不接收消息；Sign 要求 `1…87` 字节，长度非法时以 `0x3002` 停机。消息仅在 `message_valid && message_ready` 时接收，`message_data[7:0]` 是当前拍首字节；最后一拍超出声明长度的字节忽略。没有 `message_last/keep` 输入。配置的 `message_length` 应保持稳定直到 Job 被接收。未执行的操作周期计数保持零；Sign 周期包含消息接收和输入等待，Boot 单独统计。`out_keep` 标出最后一个 64 位输出字中的有效低字节。
 

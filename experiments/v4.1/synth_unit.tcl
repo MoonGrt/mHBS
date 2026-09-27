@@ -14,25 +14,25 @@ set started [clock seconds]
 set_param general.maxThreads 4
 create_project -in_memory -part xc7a200tffg1156-3
 switch $top {
-    uhbs_recipe_lane {
-        foreach f {uhbs_keccak uhbs_compact_shake_context_lane uhbs_recipe_lane} {read_verilog -sv rtl/hash_lane/$f.sv}
+    mhbs_recipe_lane {
+        foreach f {mhbs_keccak mhbs_compact_shake_context_lane mhbs_recipe_lane} {read_verilog -sv rtl/hash_lane/$f.sv}
         set params {N=32 DIGEST_BYTES=49 INDEX_BITS=8 UNROLL=2 MAX_MESSAGE_BYTES=87}
     }
-    uhbs_value_store {
-        read_verilog -sv rtl/memory/uhbs_value_store.sv
+    mhbs_value_store {
+        read_verilog -sv rtl/memory/mhbs_value_store.sv
         set params [list WIDTH=256 ADDRESS_BITS=8 DEPTH=$depth]
     }
-    uhbs_root_store {
-        read_verilog -sv rtl/memory/uhbs_root_store.sv
+    mhbs_root_store {
+        read_verilog -sv rtl/memory/mhbs_root_store.sv
         set params {}
     }
-    uhbs_program_sequencer {
-        read_verilog -sv rtl/sequencer/uhbs_event_scoreboard.sv
-        read_verilog -sv rtl/sequencer/uhbs_program_sequencer.sv
+    mhbs_program_sequencer {
+        read_verilog -sv rtl/sequencer/mhbs_event_scoreboard.sv
+        read_verilog -sv rtl/sequencer/mhbs_program_sequencer.sv
         set params {}
     }
-    uhbs_image_rom {
-        read_verilog -sv rtl/memory/uhbs_image_rom.sv
+    mhbs_image_rom {
+        read_verilog -sv rtl/memory/mhbs_image_rom.sv
         if {$depth==1} {set params {WIDTH=128 ADDRESS_BITS=6 PORTS=1 PACKING=1}} elseif {$depth==2} {set params {WIDTH=64 ADDRESS_BITS=7 PORTS=2 PACKING=2}} else {error "ROM packing must be 1 or 2"}
     }
     default {error "Unknown local unit $top"}

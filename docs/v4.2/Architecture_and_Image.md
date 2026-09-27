@@ -5,7 +5,7 @@
 
 ## 输入、运行和输出
 
-唯一顶层 `uhbs_top`，输入仅 `clk/rst`。rst 高有效，异步置位、同步释放。
+唯一顶层 `mhbs_top`，输入仅 `clk/rst`。rst 高有效，异步置位、同步释放。
 每次复位装载 descriptor 0/1、program 控制字及五个节点槽，然后从指定入口运行一次。
 控制字选择 Keygen 或 Sign，完成后停机。Keygen 输出 SK||PK；Sign 输出完整签名。
 Sign 公钥根从镜像装载，不依赖上次运行。Boot、操作周期分别计数，未运行的操作计数为零。

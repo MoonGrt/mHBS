@@ -4,8 +4,8 @@ import hashlib,json,shutil,subprocess
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,BUILD,identity,sha,write,run
 out=BUILD/'units';out.mkdir(exist_ok=True)
-files=['tb/unit/uhbs_external_core_stub.sv','rtl/top/uhbs_top.sv','tb/unit/tb_uhbs_external_boot.sv']
-run(['iverilog','-g2012','-s','tb_uhbs_external_boot','-o',str(out/'boot.vvp'),*files],out/'boot_compile.log')
+files=['tb/unit/mhbs_external_core_stub.sv','rtl/top/mhbs_top.sv','tb/unit/tb_mhbs_external_boot.sv']
+run(['iverilog','-g2012','-s','tb_mhbs_external_boot','-o',str(out/'boot.vvp'),*files],out/'boot_compile.log')
 run(['vvp',str(out/'boot.vvp')],out/'boot.log')
 assert 'EXTERNAL_BOOT_UNIT_PASS' in (out/'boot.log').read_text()
 logic=identity();lid=hashlib.sha256(json.dumps(logic,sort_keys=True).encode()).hexdigest()[:16]

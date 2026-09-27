@@ -24,7 +24,7 @@ def main():
             if suffix:
                 d.update(boundary[name][str(q)])
             for kind in ('keygen','sign'):
-                data=(ROOT/f'tb/vectors/uhbs_{name}_{kind}{suffix}.mem').read_bytes()
+                data=(ROOT/f'tb/vectors/mhbs_{name}_{kind}{suffix}.mem').read_bytes()
                 (directory/(kind+'.mem')).write_bytes(data)
                 digest=hashlib.sha256(bytes(int(x,16) for x in data.split())).hexdigest()
                 if not suffix:assert digest==baseline[name][kind+'_sha256']

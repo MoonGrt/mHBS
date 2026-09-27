@@ -16,7 +16,7 @@ def run(cmd,log,cwd=ROOT):
  with log.open('w') as f:subprocess.run(cmd,cwd=cwd,stdout=f,stderr=subprocess.STDOUT,check=True)
 def capture(tag):
  folder=BUILD/tag;folder.mkdir(parents=True,exist_ok=True)
- paths=set(sources()+['Makefile','manifests/v42_sources.txt','tb/integration/tb_uhbs_v42.sv','scripts/v42_flow.py','scripts/verify_v42_models.py','scripts/v42_rom.py','model/slh64.py'])
+ paths=set(sources()+['Makefile','manifests/v42_sources.txt','tb/integration/tb_mhbs_v42.sv','scripts/v42_flow.py','scripts/verify_v42_models.py','scripts/v42_rom.py','model/slh64.py'])
  for d in ('experiments/v4.2','model','tests','tb','scripts'):
   paths.update(str(p.relative_to(ROOT)) for p in (ROOT/d).rglob('*') if p.is_file() and '__pycache__' not in p.parts and p.suffix in ('.py','.sv','.svh','.mem','.json','.tcl'))
  paths.update(str(p.relative_to(ROOT)) for p in (BASE/'images').rglob('*') if p.is_file())
@@ -39,10 +39,10 @@ def capture(tag):
 def simulate(args):
  folder=capture(args.tag)
  out=folder/f'sim_s{args.swap}';out.mkdir(exist_ok=True)
- binary=out/'obj/Vtb_uhbs_v42'
+ binary=out/'obj/Vtb_mhbs_v42'
  if not binary.exists():
   run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',
-       '--top-module','tb_uhbs_v42',f'-GSWAP={args.swap}','--Mdir',str(binary.parent),*sources(),'tb/integration/tb_uhbs_v42.sv'],out/'compile.log')
+       '--top-module','tb_mhbs_v42',f'-GSWAP={args.swap}','--Mdir',str(binary.parent),*sources(),'tb/integration/tb_mhbs_v42.sv'],out/'compile.log')
  def one(case):
   name,op=case;log=out/f'{name}_{op}.log'
   image=BASE/'images'/name/op

@@ -9,7 +9,7 @@ program 指定宏操作顺序、SINGLE/RUN/LOOP/HALT 与入口；template 提供
 descriptor 指定配方、参数及结果路由。FSM 完成宏内部迭代、存储访问和 lane 调度。
 七种参数点均由镜像驱动同一个执行器，不增加按算法选择的完整 Keygen/Sign FSM。
 
-`uhbs_top` 的输入只有 `clk`、高有效 `rst`。复位异步置位、两级同步释放。
+`mhbs_top` 的输入只有 `clk`、高有效 `rst`。复位异步置位、两级同步释放。
 
 复位释放 → 校验三个镜像 → 装载 Job → Keygen → 从 program 读取消息 → Sign → 停机。
 

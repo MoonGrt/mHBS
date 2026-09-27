@@ -66,7 +66,7 @@ program ROM 校验的长路径消失，但 descriptor 校验仍成为最差路�
 复位中断/重放、12 项有状态故障、七组镜像驱动执行检查及物理 ROM INIT 映射。
 新增 Icarus 排空测试检查三个 ROM 的最后一字。测试自身曾在初始复位阶段
 过早采样错误信号；修正为复位释放后等待错误，生产 RTL 不受该测试修正影响。
-归档快照中的初版排空测试应使用当前 `tb_uhbs_boot_drain.sv` 修正后重跑；
+归档快照中的初版排空测试应使用当前 `tb_mhbs_boot_drain.sv` 修正后重跑；
 实际通过证据在 `unit/ee34210019bfac8c/`，记录独立测试源码哈希。
 
 吸收数据选择网络的局部候选已撤回：Default/rebuilt 同设置下，recipe lane

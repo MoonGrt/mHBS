@@ -47,4 +47,4 @@ for name,p in PROFILES.items():
         recipe,step,ch,steps,cap,a,b,value,capture=row
         return (recipe<<960)|(step<<896)|(ch<<895)|(steps<<890)|(cap<<885)|(a<<877)|(b<<845) \
             |(len(value)<<839)|(int.from_bytes(value,"little")<<256)|int.from_bytes(capture,"little")
-    (ROOT/f"tb/vectors/uhbs_{name}_lane.mem").write_text("".join(f"{encode(r):0256x}\n" for r in rows))
+    (ROOT/f"tb/vectors/mhbs_{name}_lane.mem").write_text("".join(f"{encode(r):0256x}\n" for r in rows))

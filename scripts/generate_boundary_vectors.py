@@ -20,6 +20,6 @@ for name,p in PROFILES.items():
         machine.q=q
         sg=machine.run(True,msg)
         for kind,data in (("keygen",q.to_bytes(4,'big')+kg[4:]),("sign",sg)):
-            (ROOT/f'tb/vectors/uhbs_{name}_{kind}_q{q}.mem').write_text(''.join(f'{b:02x}\n' for b in data))
+            (ROOT/f'tb/vectors/mhbs_{name}_{kind}_q{q}.mem').write_text(''.join(f'{b:02x}\n' for b in data))
         counts[name][str(q)]=dict(sign_hashes=machine.hashes,sign_permutations=machine.permutations)
 (ROOT/'manifests/experiments/unified_hbs_v4/boundary_counts.json').write_text(json.dumps(counts,indent=2)+'\n')

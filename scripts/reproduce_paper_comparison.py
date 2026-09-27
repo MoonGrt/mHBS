@@ -16,11 +16,11 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-REPO = ROOT.parents[2]
+REPO = ROOT
 READER = REPO / "references/papers/Unified_HBS_Architecture_2026_Reader"
 ARCHIVE = ROOT / "manifests/experiments"
 REPORT = ROOT / "docs/Unified_HBS_Paper_Comparison.md"
-BASELINE_COMMIT = "c8dedf8be45d345f642f34675692f2a94915be2c"
+BASELINE_COMMIT = "d7c5aea821c9e1488c73245034810ece1721d77b"
 GIT_PREFIX = subprocess.check_output(["git", "rev-parse", "--show-prefix"], cwd=ROOT, text=True).strip()
 
 def historical_source(path: str) -> bytes:

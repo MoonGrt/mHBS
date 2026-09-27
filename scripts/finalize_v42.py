@@ -8,7 +8,7 @@ f=BUILD/a.tag;r=json.loads((f/'ppa.json').read_text());inp=json.loads((f/'inputs
 assert r['stage']=='post_route'
 v=BUILD/a.verification_tag/'verification';vr=json.loads((v/'results.json').read_text())
 assert vr['passed'] and vr['rtl_sha256']==inp['rtl_sha256'] and len(vr['cases'])>=42
-assert sha(v/'tb_uhbs_v42.sv')==vr['bench_sha256']
+assert sha(v/'tb_mhbs_v42.sv')==vr['bench_sha256']
 for name,case in vr['cases'].items():
  assert case['passed'] and sha(v/(name.replace('/','_')+'.log'))==case['log_sha256']
  for filename,digest in case['image_sha256'].items():assert sha(v/'images'/name/filename)==digest
@@ -62,7 +62,7 @@ for path in v.rglob('*'):
   target=archive/'verification'/path.relative_to(v);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(path,target)
 # The current wrappers are provenance, not substitutions for the measured RTL snapshot.
 with tarfile.open(archive/'verification_tools.tar.gz','w:gz') as t:
- for path in [*ROOT.glob('scripts/*v42*.py'),*ROOT.glob('tests/*.py'),*ROOT.glob('experiments/v4.2/*.tcl'),ROOT/'tb/integration/tb_uhbs_v42.sv',ROOT/'Makefile']:
+ for path in [*ROOT.glob('scripts/*v42*.py'),*ROOT.glob('tests/*.py'),*ROOT.glob('experiments/v4.2/*.tcl'),ROOT/'tb/integration/tb_mhbs_v42.sv',ROOT/'Makefile']:
   t.add(path,arcname=str(path.relative_to(ROOT)))
 # Supplemental offline checks do not alter the measured RTL or image bytes.
 for filename in ('format_gate.json',):

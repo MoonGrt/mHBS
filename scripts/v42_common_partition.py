@@ -1,6 +1,6 @@
 """Extract the top's execution region for OOC synthesis without changing its scope.
 
-Production RTL keeps boot/control and uhbs_hbs in uhbs_top. The generated module
+Production RTL keeps boot/control and mhbs_hbs in mhbs_top. The generated module
 is a build artifact: its generic Job/ROM ports prevent algorithm specialization,
 while out_ready=1 and the boot/core connections remain inside the optimizer.
 """
@@ -30,9 +30,9 @@ def partition(source, *, stub=False):
     start=source.index(begin);stop=source.index(end)+len(end)
     body=source[source.index('\n',start)+1:source.index(end)]
     body=re.sub(r'\b('+'|'.join(JOBS)+r')\b',lambda m:JOBS[m[0]],body)
-    common='`timescale 1ns/1ps\n`default_nettype none\nmodule uhbs_common #(parameter integer LANES=2,UNROLL=2,parameter bit SWAP_PHYSICAL_LANES=0)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
+    common='`timescale 1ns/1ps\n`default_nettype none\nmodule mhbs_common #(parameter integer LANES=2,UNROLL=2,parameter bit SWAP_PHYSICAL_LANES=0)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
     params='' if stub else ' #(.LANES(LANES),.UNROLL(UNROLL),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES))'
-    instance='    (* DONT_TOUCH="yes" *) uhbs_common'+params+' common (\n'
+    instance='    (* DONT_TOUCH="yes" *) mhbs_common'+params+' common (\n'
     instance+=','.join('.'+v+'('+k+')' for k,v in JOBS.items())+',\n'
     instance+=' .clk,.rst,.message_length,.message_data,.message_valid,.message_ready,\n'
     instance+=' .program_address,.program_data,.template_address,.template_data,.descriptor_addresses,.descriptor_data,\n'

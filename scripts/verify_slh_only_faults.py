@@ -10,7 +10,7 @@ from autonomous_flow import ACTIVE,BUILD,ROOT,logic,logic_id
 
 rtl=logic()
 identity=logic_id(rtl)
-binary=BUILD/f'sim_u2_l2_s0_{identity}'/'Vtb_uhbs_autonomous'
+binary=BUILD/f'sim_u2_l2_s0_{identity}'/'Vtb_mhbs_autonomous'
 if not binary.is_file():
     subprocess.run(['python3','scripts/autonomous_flow.py','sim','--profile','slh_128f',
                     '--lanes','2','--unroll','2'],cwd=ROOT,check=True)

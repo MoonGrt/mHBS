@@ -50,7 +50,9 @@ def main():
         f'若共同频率为 100 MHz、周期保持不变，面积需降至约 **{area_at_100:,.3f} Slice**。',
         '这些是门槛反算值，不是可实现频率或面积预测。最终仍以 post-route 实测、时序裕量和原严格比较规则验收。']
     with tarfile.open(candidate/'source_snapshot.tar.gz') as snapshot:
-        core=snapshot.extractfile('rtl/top/uhbs_hbs.sv').read().decode()
+        core_path=next(name for name in snapshot.getnames()
+                       if name.startswith('rtl/top/') and name.endswith('_hbs.sv'))
+        core=snapshot.extractfile(core_path).read().decode()
     enum=re.search(r'typedef enum logic \[5:0\] \{(.*?)\} state_t;',core,re.S)
     states=[n.strip() for n in enum[1].split(',')]
     lines += ['', '## Hash 计数与 Sign 状态驻留', '',

@@ -24,7 +24,7 @@
 
 ### 2.1 RTL 源码是电路的描述
 
-当前统一核的源文件是 [uhbs_hbs.sv](../rtl/top/uhbs_hbs.sv)。它包含参数：
+当前统一核的源文件是 [mhbs_hbs.sv](../rtl/top/mhbs_hbs.sv)。它包含参数：
 
 ```systemverilog
 parameter integer N=16, UNROLL=2, LANES=2, MAX_MESSAGE_BYTES=87;
@@ -81,7 +81,7 @@ flowchart TD
     G[构建选择：LANES、UNROLL] --> H[Vivado 展开与综合]
     E --> H
     F --> H
-    I[公共 uhbs_hbs RTL 源码] --> H
+    I[公共 mhbs_hbs RTL 源码] --> H
     H --> J[该算法的专用网表]
     J --> K[布局布线与面积、时序报告]
 ```
@@ -90,7 +90,7 @@ flowchart TD
 
 1. [compile_unified_hbs.py](../scripts/compile_unified_hbs.py) 执行软件模型并检查完整 Keygen/Sign 输出。
 2. 该脚本导出三个 `.mem` 文件，并扫描 descriptor，提取 `recipe_mask` 和 `chain_recipe_mask`。
-3. [generate_unified_tops.py](../scripts/generate_unified_tops.py) 根据报告生成算法顶层，把这些掩码写成 `uhbs_hbs` 的参数。
+3. [generate_unified_tops.py](../scripts/generate_unified_tops.py) 根据报告生成算法顶层，把这些掩码写成 `mhbs_hbs` 的参数。
 4. Vivado 使用这些参数和镜像综合。
 
 **这里有一条明确的“镜像 → 生成脚本 → 参数 → 综合电路”的路径。**
@@ -103,7 +103,7 @@ flowchart TD
 
 三种算法都使用 SHAKE，但喂给 SHAKE 的字节串并不相同。有的需要拼接公开种子和地址，有的需要标识符及域分隔常量，有的还需要掩码和中间值。
 
-[uhbs_recipe_lane.sv](../rtl/hash_lane/uhbs_recipe_lane.sv) 将这些输入构造方式定义为不同的 recipe shape。例如：
+[mhbs_recipe_lane.sv](../rtl/hash_lane/mhbs_recipe_lane.sv) 将这些输入构造方式定义为不同的 recipe shape。例如：
 
 ```systemverilog
 ADDRESS_SEED=1, ADDRESS_VALUE=2,
@@ -231,7 +231,7 @@ ROM 输出 = f(运行中的地址)
 ```systemverilog
 generate
     for (physical=0; physical<LANES; physical=physical+1) begin: lanes
-        uhbs_recipe_lane #(...) lane (...);
+        mhbs_recipe_lane #(...) lane (...);
     end
 endgenerate
 ```
@@ -378,7 +378,7 @@ LUTRAM 是总 LUT 的子集，不应再重复加到总 LUT 上。
 (* ram_style="distributed" *) logic [N*8-1:0] auth_path [0:15];
 ```
 
-端点工作存储 [uhbs_value_store.sv](../rtl/memory/uhbs_value_store.sv) 也将偶数、奇数 bank 标为 `ram_style="distributed"`。
+端点工作存储 [mhbs_value_store.sv](../rtl/memory/mhbs_value_store.sv) 也将偶数、奇数 bank 标为 `ram_style="distributed"`。
 
 这些存储由 LUTRAM、相关选择逻辑或寄存器实现，所以会出现在 LUT/FF 统计里，而不是 BRAM 统计里。
 

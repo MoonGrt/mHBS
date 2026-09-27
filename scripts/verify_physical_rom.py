@@ -7,7 +7,7 @@ from rom_initialization import mapping
 from model.profiles import PROFILES
 out=BUILD/'physical_rom';out.mkdir(parents=True,exist_ok=True)
 names=list(PROFILES)
-lines=['`timescale 1ns/1ps','module tb_physical_rom;','reg clk=0;always #5 clk=~clk;reg [6:0] address=0;wire [13:0] da;','wire [127:0] pd[0:6],td[0:6];wire [127:0] dd[0:6];', 'reg [127:0] ep[0:447],et[0:447];reg [63:0] ed[0:895];', 'genvar g,p;generate for(p=0;p<2;p=p+1) begin: addresses assign da[p*7 +:7]=address+p;end', 'for(g=0;g<7;g=g+1) begin: images', 'uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1)) program_rom(.clk,.addresses(address[5:0]),.data(pd[g]));','uhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.PACKING(1)) template_rom(.clk,.addresses(address[5:0]),.data(td[g]));','uhbs_image_rom #(.WIDTH(64),.ADDRESS_BITS(7),.PORTS(2)) descriptor_rom(.clk,.addresses(da),.data(dd[g]));','end endgenerate']
+lines=['`timescale 1ns/1ps','module tb_physical_rom;','reg clk=0;always #5 clk=~clk;reg [6:0] address=0;wire [13:0] da;','wire [127:0] pd[0:6],td[0:6];wire [127:0] dd[0:6];', 'reg [127:0] ep[0:447],et[0:447];reg [63:0] ed[0:895];', 'genvar g,p;generate for(p=0;p<2;p=p+1) begin: addresses assign da[p*7 +:7]=address+p;end', 'for(g=0;g<7;g=g+1) begin: images', 'mhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1)) program_rom(.clk,.addresses(address[5:0]),.data(pd[g]));','mhbs_image_rom #(.WIDTH(128),.ADDRESS_BITS(6),.PORTS(1),.PACKING(1)) template_rom(.clk,.addresses(address[5:0]),.data(td[g]));','mhbs_image_rom #(.WIDTH(64),.ADDRESS_BITS(7),.PORTS(2)) descriptor_rom(.clk,.addresses(da),.data(dd[g]));','end endgenerate']
 for i,name in enumerate(names):
  for cell,value in mapping(name).items():lines.append(f"defparam images[{i}].{cell.replace('/','.')}.INIT={value};")
 lines+=['initial begin']
@@ -20,8 +20,8 @@ vendor=Path(shutil.which('vivado')).resolve().parents[1]/'data/verilog/src/unisi
 models=[vendor/'RAM64X1S.v',vendor/'RAM128X1S.v']
 log=BASE/'unit'/logic_id(logic())/'physical_rom.log';log.parent.mkdir(parents=True,exist_ok=True)
 with log.open('w') as f:
- subprocess.run(['iverilog','-g2012','-DSYNTHESIS','-s','tb_physical_rom','-o',str(out/'rom.vvp'),'rtl/memory/uhbs_image_rom.sv',str(tb),*map(str,models)],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
+ subprocess.run(['iverilog','-g2012','-DSYNTHESIS','-s','tb_physical_rom','-o',str(out/'rom.vvp'),'rtl/memory/mhbs_image_rom.sv',str(tb),*map(str,models)],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
  subprocess.run(['vvp',str(out/'rom.vvp')],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
 assert 'PHYSICAL_ROM_INIT_PASS' in log.read_text()
-write(log.with_suffix('.json'),dict(passed=True,log_sha256=sha(log),rom_rtl_sha256=sha(ROOT/'rtl/memory/uhbs_image_rom.sv'),generator_sha256=sha(__file__),vendor_model_sha256={str(p):sha(p) for p in models},image_sha256={name:{kind:sha(BASE/'images'/name/(kind+'.mem')) for kind in ('program','template','descriptor')} for name in names}))
+write(log.with_suffix('.json'),dict(passed=True,log_sha256=sha(log),rom_rtl_sha256=sha(ROOT/'rtl/memory/mhbs_image_rom.sv'),generator_sha256=sha(__file__),vendor_model_sha256={str(p):sha(p) for p in models},image_sha256={name:{kind:sha(BASE/'images'/name/(kind+'.mem')) for kind in ('program','template','descriptor')} for name in names}))
 print('PHYSICAL_ROM_INIT_PASS')

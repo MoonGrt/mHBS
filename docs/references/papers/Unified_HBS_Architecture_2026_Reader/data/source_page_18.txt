@@ -1,0 +1,56 @@
+18 A Unified Hardware Architecture for Stateful and Stateless Hash-Based Key/Signature Generations
+
+
+and 1,090 FFs (8.03%). The HASH LOOP module is the core computational engine and
+the primary resource consumer, requiring 19,067 LUTs (78.4%) and 7,432 FFs (54.8%);
+this concentration highlights the computation-centric simplicity of our architecture. To
+further optimize resources, we employ an asymmetric design: HASH LOOP0 executes
+both parallel and serial tasks, whereas HASH LOOP1 handles only parallel tasks; their
+utilizations are 9,657/9,410 LUTs and 3,717/3,715 FFs, respectively.
+    As summarized previously, this design utilizes a total of 16.5 BRAMs. Among them,
+14.5 BRAMs are dedicated to storing the extensive amount of intermediate data generated
+during the execution of the SPHINCS+, XMSS, and LMS algorithms, including but not
+limited to the nodes of each layer of the Merkle tree and OTS public keys. The remaining
+2 BRAMs are used exclusively as a signature buffer.
+
+4.2    Comparisons With Related Works
+To objectively position our design relative to the state of the art, we conduct quantitative
+comparisons against several advanced hardware implementations; results are summa-
+rized in Table 7. All results of the table were obtained on Artix-7 FPGA, except for
+[CWW+ 22], which was implemented on Virtex UltraScale+ FPGA. As the first hardware
+implementation to support both LMS and XMSS, and as the newest and most effective full
+implementation of XMSS, [THG24] uses SHA256 as the core hash function. It introduces a
+BDS algorithm with configurable parameter k. Compared to their most high-performance
+configuration with 8 hash cores and 7 WOTS+ chaining modules, our design exhibits
+speedup of 4.34× (LMS) and 8.97× (XMSS) for Sign with {h, ω} = {10, 4}. The speedup
+in Keygen is 2.60×(LMS)/5.43×(XMSS). In terms of ATP, the design in [THG24] is
+4.13× (LMS)/10.92× (XMSS) higher than this work for Sign and 2.47× (LMS)/6.61×
+(XMSS) higher for Keygen. Our design’s superior performance stems from two synergistic
+optimizations. First, the adoption of SHAKE256 provides a higher throughput baseline,
+as its larger rate (1088 bits) and sponge-based structure are more hardware-friendly than
+SHA-256. Second, our novel dual-path architecture provides single-cycle input latency for
+the OTS chain computations, a key performance bottleneck. Notably, we compare our
+SHAKE256-based design with prior SHA-256 implementations because, to the best of our
+knowledge, no other high-performance unified hardware architectures for XMSS and LMS
+currently leverage the SHA-3 family.
+     Apart from [THG24], the remaining works implement a single signature scheme and
+are analyzed separately. For SPHINCS+, the fastest existing hardware implementation
+is [ALCZ20]. They implemented a 12-stage Keccak permutation along with substantial
+register insertion to minimize the critical path. As a result, their Keccak core can operate at
+a maximum frequency of 500 MHz. Additionally, a multi-clock-domain scheme was designed,
+allowing the peripheral control circuit to function at 250 MHz. Compared to [ALCZ20], our
+design exhibits a higher latency for individual SHAKE256 operations due to our emphasis
+on resource efficiency. However, our solution demonstrates a substantial resource advantage,
+reducing LUT/FF/DSP consumption by 49.61%/81.16%/100%, respectively. The most
+area-efficient implementation, [DLK+ 25], uses about half our hardware resources but is
+more than 3× slower in signing and omits the key-generation functionality. Compared to
+[HLL+ 25], which exhibits the best area–time performance, our design uses 17.77% fewer
+LUTs and 3.06% fewer FFs. In BRAM usage, [HLL+ 25] employs a Group Subtree strategy
+for Merkle-tree computation that avoids storing an entire layer of a full tree, reducing
+BRAM to 48.48% of ours. However, our design requires an entire layer of tree nodes to be
+stored to be compatible with LMS/XMSS fast signatures. This is a necessary overhead
+due to architectural uniformity. In terms of Sign speed, the 8-unroll, 4-stage pipelined
+hash core and 180 MHz frequency in [HLL+ 25] make it 2 ∼ 3× faster than our 2-parallel,
+2-unroll architecture. While there is a gap for standalone SPHINCS+, our core advantage
+is lower LUT/FF usage while flexibly supporting all security parameters of the three HBS
+

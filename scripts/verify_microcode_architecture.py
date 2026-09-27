@@ -66,8 +66,8 @@ def main():
     assert records['route']['oracle_sha256']!=records['base']['oracle_sha256']
     write(out/'model_gate.json',dict(passed=True,probes=records))
     binary=BUILD/('architecture_'+logic_id(identity)+'.vvp')
-    benches=['tb/integration/tb_uhbs_autonomous.sv','tb/integration/tb_uhbs_microcode_probe.sv']
-    run(['iverilog','-g2012','-s','tb_uhbs_microcode_probe','-o',str(binary),*sources(),*benches],out/'compile.log')
+    benches=['tb/integration/tb_mhbs_autonomous.sv','tb/integration/tb_mhbs_microcode_probe.sv']
+    run(['iverilog','-g2012','-s','tb_mhbs_microcode_probe','-o',str(binary),*sources(),*benches],out/'compile.log')
     for variant,data in records.items():
         log=out/(variant+'.log')
         run(['vvp',str(binary),'+IMAGE='+str((out/'images'/variant).relative_to(ROOT))],log)

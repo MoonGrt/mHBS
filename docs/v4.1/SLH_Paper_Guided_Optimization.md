@@ -18,7 +18,7 @@ Huang 的四个 SHAKE 操作在交错运行时用 12 拍完成各自 24 轮；�
 
 Unified HBS 的快速 OTS 输入与灵活长输入分工也适合本核。已有短 Hash 装载、链反馈和小容量流式存储继续保留；删除 SHAKE 的填充或域分隔会改变算法输出，不能作为等价优化。
 
-原文：[Unified Reader](../../../../../references/papers/Unified_HBS_Architecture_2026_Reader/paper.md)；[Huang 论文](https://doi.org/10.1109/TCSI.2025.3544341)（III.B–D、表 II/V）。原文文件 SHA-256 与数据口径保存在 [来源记录](../../manifests/experiments/unified_hbs_v4.1/slh_only/paper_optimization_sources.json)。
+原文：[Unified Reader](../../references/papers/Unified_HBS_Architecture_2026_Reader/paper.md)；[Huang 论文](https://doi.org/10.1109/TCSI.2025.3544341)（III.B–D、表 II/V）。原文文件 SHA-256 与数据口径保存在 [来源记录](../../manifests/experiments/unified_hbs_v4.1/slh_only/paper_optimization_sources.json)。
 
 ## 2. 当前瓶颈与本轮改动
 

@@ -16,7 +16,7 @@ def sha(path):
 def sources():return (ROOT/'manifests/unified_sources.txt').read_text().splitlines()
 def logic():return {p:sha(ROOT/p) for p in sources()}
 def index_policy():
-    return 'guarded' if 'uhbs_stateful_index_guard guard' in (ROOT/'rtl/top/uhbs_hbs.sv').read_text() else 'fixed_q_no_guard'
+    return 'guarded' if 'mhbs_stateful_index_guard guard' in (ROOT/'rtl/top/mhbs_hbs.sv').read_text() else 'fixed_q_no_guard'
 def logic_id(hashes):return hashlib.sha256(json.dumps(hashes,sort_keys=True).encode()).hexdigest()[:16]
 def write(path,obj):Path(path).write_text(json.dumps(obj,indent=2)+'\n')
 def run(cmd,log):
@@ -26,12 +26,12 @@ def run(cmd,log):
     write(log.with_suffix('.execution.json'),dict(command=cmd,elapsed_seconds=time.monotonic()-started))
 def sim(args):
     tag=f'u{args.unroll}_l{args.lanes}_s{args.swap}'
-    identity=dict(logic=logic(),bench=sha(ROOT/'tb/integration/tb_uhbs_autonomous.sv'),unroll=args.unroll,lanes=args.lanes,swap=args.swap)
+    identity=dict(logic=logic(),bench=sha(ROOT/'tb/integration/tb_mhbs_autonomous.sv'),unroll=args.unroll,lanes=args.lanes,swap=args.swap)
     folder=BUILD/('sim_'+tag+'_'+logic_id(identity['logic']));folder.mkdir(parents=True,exist_ok=True)
-    binary=folder/'Vtb_uhbs_autonomous'
+    binary=folder/'Vtb_mhbs_autonomous'
     stamp=folder/'compile.json'
     if not binary.exists() or not stamp.exists() or json.loads(stamp.read_text())!=identity:
-        run(['verilator','--binary','--timing','-O3','-j',str(args.jobs),'-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT','--top-module','tb_uhbs_autonomous',f'-GUNROLL={args.unroll}',f'-GLANES={args.lanes}',f'-GSWAP={args.swap}','--Mdir',str(folder),*sources(),'tb/integration/tb_uhbs_autonomous.sv'],BUILD/('compile_'+tag+'.log'))
+        run(['verilator','--binary','--timing','-O3','-j',str(args.jobs),'-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT','--top-module','tb_mhbs_autonomous',f'-GUNROLL={args.unroll}',f'-GLANES={args.lanes}',f'-GSWAP={args.swap}','--Mdir',str(folder),*sources(),'tb/integration/tb_mhbs_autonomous.sv'],BUILD/('compile_'+tag+'.log'))
         write(stamp,identity)
     names=list(SLH_PROFILES) if args.profile=='all' else [args.profile]
     if args.message_cases:names += list(json.loads((BASE/'message_cases.json').read_text()))

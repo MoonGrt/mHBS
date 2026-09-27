@@ -14,7 +14,7 @@ for group in (sim['cases'],ext['cases']):
 for path,h in unit['logs'].items():assert sha(BASE/'unit'/path)==h
 s=f/'synthesis'
 partition=None
-if (s/'uhbs_common.sv').exists():
+if (s/'mhbs_common.sv').exists():
  partition=json.loads((sf/'simulation_partition.json').read_text())
  assert partition['passed'] and partition['rtl_sha256']==inp['rtl_sha256'] and len(partition['cases'])==6
  for name,row in partition['cases'].items():
