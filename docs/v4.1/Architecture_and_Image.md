@@ -43,7 +43,7 @@ descriptor 使用两个读取端口，通过物理存储复制实现；复制存
 `.mem` 每行一个十六进制逻辑字。Job/消息字节按低位到高位排列。
 算法定义的大端整数编码由配方单独处理。
 template 的物理压缩只在 INIT 生成和 ROM 展开处处理，逻辑 `.mem` 仍为 128 位。
-保留字段、非法值检查以及 descriptor 压缩淘汰记录见 [面积优先优化](Area_Optimization.md)。
+保留字段、非法值检查以及 descriptor 压缩淘汰记录可在 Git 历史中的 `Area_Optimization.md` 查阅。
 
 | program 地址 | 内容 |
 |---|---|

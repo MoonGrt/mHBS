@@ -8,8 +8,10 @@ TAG ?= external_v42
 SIM_TAG ?= $(TAG)
 MHBS_RTL := $(shell cat manifests/v42_sources.txt)
 
-.PHONY: all test verify contract-test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common route-common freeze-common report-v42 reproduce-v42 reproduce-paper-comparison reproduce-slh-only
+.PHONY: all test smoke verify contract-test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common route-common freeze-common report-v42 reproduce-v42 report-ku reproduce-ku
 all: test
+smoke:
+	$(PYTHON) scripts/smoke_current.py $(TAG)
 # Keep generation and unit evidence ahead of snapshot capture, including make -j.
 test:
 	$(MAKE) contract-test lint
@@ -46,16 +48,10 @@ route-common:
 	$(PYTHON) scripts/collect_v42_external_route.py $(TAG)
 freeze-common:
 	$(PYTHON) scripts/collect_v42_external_route.py $(TAG)
-report-v42:
-	$(PYTHON) scripts/report_v42_external_ppa.py
+report-v42 report-ku:
+	$(PYTHON) scripts/report_ku_sign_atp.py
 reproduce-v42:
-	$(PYTHON) scripts/reproduce_v42.py
 	$(PYTHON) scripts/reproduce_v42_external.py
 	$(PYTHON) scripts/reproduce_v42_external_route.py
-reproduce-paper-comparison:
-	$(PYTHON) scripts/reproduce_paper_comparison.py
-	$(PYTHON) scripts/reproduce_seven_profiles.py
-	$(PYTHON) scripts/reproduce_autonomous.py --allow-incomplete
-reproduce-slh-only:
-	$(PYTHON) scripts/reproduce_slh_only.py
-	$(PYTHON) scripts/report_slh_paper_optimization.py --check
+reproduce-ku:
+	$(PYTHON) scripts/verify_ku_archive.py

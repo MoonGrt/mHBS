@@ -1,0 +1,755 @@
+diff --git a/experiments/v4.2/external_job_message/synth.tcl b/experiments/v4.2/external_job_message/synth.tcl
+index 5429ee3..ec6e37f 100644
+--- a/experiments/v4.2/external_job_message/synth.tcl
++++ b/experiments/v4.2/external_job_message/synth.tcl
+@@ -1,6 +1,18 @@
+ set root [file normalize [file join [file dirname [info script]] ../../..]]
+ cd $root
+ set tag [lindex $argv 0]
++set lanes [lindex $argv 1]
++set unroll [lindex $argv 2]
++if {$lanes ni {1 2 4} || $unroll ni {1 2 3 4}} {error "invalid K/U"}
++set core_only 0
++set shells {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_256f_keygen slh_256f_sign}
++foreach option [lrange $argv 3 end] {
++ if {$option eq "--core-only"} {set core_only 1} elseif {[string match "--only=*" $option]} {
++  set selected [string range $option 7 end]
++  if {$selected ni $shells} {error "invalid shell selection"}
++  set shells [list $selected]
++ } else {error "unknown synthesis option $option"}
++}
+ if {![regexp {^[a-zA-Z0-9_.-]+$} $tag]} {error "invalid tag"}
+ set out [file join $root build v4.2 external_job_message $tag synthesis]
+ file mkdir $out
+@@ -13,7 +25,7 @@ foreach p $sources {if {$p ne "rtl/top/mhbs_top.sv"} {read_verilog -sv $p}}
+ set f [open [file join $out clock.xdc] w];puts $f {create_clock -name clk -period 10.0 [get_ports clk]};close $f
+ read_xdc [file join $out clock.xdc]
+ read_verilog -sv [file join $out mhbs_common.sv]
+-synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2 -generic PROFILE_ENABLE=0
++synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=$lanes -generic UNROLL=$unroll -generic PROFILE_ENABLE=0
+ report_utilization -file [file join $out core_utilization.rpt]
+ report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
+ report_timing_summary -file [file join $out core_timing.rpt]
+@@ -34,7 +46,7 @@ write_edif -force [file join $out mhbs_common.edf]
+ write_verilog -force -mode synth_stub [file join $out common_stub.v]
+ set core_seconds [expr {[clock seconds]-$started}]
+ close_project
+-if {[lindex $argv 1] eq "--core-only"} {
++if {$core_only} {
+  puts "EXTERNAL_CORE_SYNTH_PASS seconds=$core_seconds"
+  exit
+ }
+@@ -61,7 +73,7 @@ proc core_structure {path} {
+ source experiments/v4.2/external_job_message/rom_mapping.tcl
+ set previous_hash ""
+ set times [open [file join $out elapsed.tsv] w];puts $times "core\t$core_seconds"
+-foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_256f_keygen slh_256f_sign} {
++foreach name $shells {
+  set start [clock seconds]
+  set d [file join $out $name];file mkdir $d
+  create_project -in_memory -part $part
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+index abc55f9..5fef91d 100644
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -72,7 +72,7 @@ module mhbs_hbs #(
+     logic [1:0] operation;
+     wire verifying = operation==2;
+     state_t verify_return;
+-    logic verify_lane;
++    logic [$clog2(LANES+1)-1:0] verify_lane;
+     // Boot loader owns immutable Job registers for this reset epoch.
+     wire [255:0] secret_seed=job_secret_seed, secret_prf=job_secret_prf;
+     wire [255:0] public_seed=job_public_seed, randomizer=job_randomizer;
+@@ -102,15 +102,16 @@ module mhbs_hbs #(
+ 
+     logic [4:0] chain_id, parent_id;
+     wire [63:0] chain_descriptor = saved_chain_descriptor;
+-    logic standalone_chain, fors_pair_pending;
++    logic standalone_chain;
++    logic [$clog2(LANES+1)-1:0] fors_pending_index, output_lane;
+     logic [3:0] tree_height, node_level, auth_level;
+     logic [1:0] indexing;
+     logic [9:0] target, leaf_cursor, node_index;
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+-    logic [1:0] chain_batch_mask;
++    logic [LANES-1:0] chain_batch_mask;
+     always_comb begin
+         chain_batch_mask=0;
+-        for(int lane_index=0; lane_index<2; lane_index=lane_index+1)
++        for(int lane_index=0; lane_index<LANES; lane_index=lane_index+1)
+             if(indexing==1 || chain_cursor+lane_index<endpoint_count)
+                 chain_batch_mask[lane_index]=1;
+     end
+@@ -134,48 +135,61 @@ module mhbs_hbs #(
+     end
+     logic [63:0] task_recipe, task_step;
+     logic task_chain;
+-    logic [1:0] task_capture;
+-    logic [4:0] task_steps [0:1], task_capture_after [0:1];
+-    logic [9:0] task_leaf [0:1];
+-    logic [INDEX_BITS-1:0] task_a [0:1];
+-    logic [31:0] task_b [0:1];
+-    logic [255:0] task_left0, task_right [0:1];
++    logic [LANES-1:0] task_capture;
++    logic [4:0] task_steps [0:LANES-1], task_capture_after [0:LANES-1];
++    logic [9:0] task_leaf [0:LANES-1];
++    logic [INDEX_BITS-1:0] task_a [0:LANES-1];
++    logic [31:0] task_b [0:LANES-1];
++    logic [255:0] task_left0, task_right [0:LANES-1];
+     // Results stay stable for each outstanding request. Only verification
+     // leaf/chain hashes take their input from these existing result registers.
+     wire verify_chain_source = verifying &&
+         (hash_return==VERIFY_CHAIN_ADVANCE || (hash_return==LEAF_SETUP && indexing==1));
+-    logic [1:0] active_mask, launch_pending, response_pending;
+-    wire [1:0] verify_step_mask = {chain_batch_mask[1] && task_b[1][3:0]!=15,
+-                                 chain_batch_mask[0] && task_b[0][3:0]!=15};
+-    wire [1:0] lane_ready, lane_valid, lane_error;
+-    wire [V-1:0] lane_value [0:1];
+-    wire [255:0] lane_capture [0:1];
+-    wire [INDEX_BITS-1:0] lane_list0 [0:1], lane_list1 [0:1];
+-    wire [31:0] lane_hashes [0:1], lane_permutations [0:1];
++    logic [LANES-1:0] active_mask, launch_pending, response_pending;
++    logic [LANES-1:0] verify_step_mask;
++    always_comb for(int j=0;j<LANES;j=j+1)
++        verify_step_mask[j]=chain_batch_mask[j] && task_b[j][3:0]!=15;
++    wire [LANES-1:0] lane_ready, lane_valid, lane_error;
++    wire [V-1:0] lane_value [0:LANES-1];
++    wire [255:0] lane_capture [0:LANES-1];
++    wire [INDEX_BITS-1:0] lane_list0 [0:LANES-1], lane_list1 [0:LANES-1];
++    wire [31:0] lane_hashes [0:LANES-1], lane_permutations [0:LANES-1];
+     logic [31:0] hash_base, permutation_base;
+-    logic [V-1:0] result [0:1], route_value;
++    logic [V-1:0] result [0:LANES-1], route_value;
+     // The sponge retains capture through response and output stalls. No new
+     // request is issued before CHAIN_OUTPUT0/1 has consumed both captures.
+-    wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1];
+-    wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1];
++    logic [31:0] total_hashes, total_permutations;
++    always_comb begin
++        total_hashes=0; total_permutations=0;
++        for(int j=0;j<LANES;j=j+1) begin
++            total_hashes=total_hashes+lane_hashes[j];
++            total_permutations=total_permutations+lane_permutations[j];
++        end
++    end
+     assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+     assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
+ 
+-    logic endpoint_write0, endpoint_write1;
+-    logic [INDEX_BITS-1:0] endpoint_address0, endpoint_address1, endpoint_read0, endpoint_read1;
+-    logic [255:0] endpoint_data0, endpoint_data1;
++    logic [LANES-1:0] endpoint_write;
++    logic [INDEX_BITS-1:0] endpoint_address [0:LANES-1];
++    logic [255:0] endpoint_data [0:LANES-1];
++    wire [INDEX_BITS-1:0] endpoint_read0=lane_list0[0], endpoint_read1=lane_list1[0];
+     wire [255:0] endpoint_value0, endpoint_value1;
+     // FORS roots are consumed before WOTS endpoint production begins.
+     // Reuse the same parity banks; root writes use the matching physical
+     // write port so the even/odd address invariants remain static.
+     wire root_write=state==ROUTE && macro_route!=0 && route_descriptor[53];
+-    mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1)) endpoints (
+-        .clk, .write0(endpoint_write0), .write1(endpoint_write1),
+-        .address0(endpoint_address0), .address1(endpoint_address1),
+-        .data0(endpoint_data0), .data1(endpoint_data1),
+-        .read0(endpoint_read0), .read1(endpoint_read1),
+-        .value0(endpoint_value0), .value1(endpoint_value1)
+-    );
++    generate if(LANES==4) begin: endpoint_four_way
++        mhbs_ku_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.LANES(LANES)) endpoints (
++            .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
++            .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1));
++    end else begin: endpoint_one_two_way
++        mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1)) endpoints (
++            .clk, .write0(endpoint_write[0]), .write1(LANES==2 ? endpoint_write[LANES-1] : 1'b0),
++            .address0(endpoint_address[0]), .address1(endpoint_address[LANES-1]),
++            .data0(endpoint_data[0]), .data1(endpoint_data[LANES-1]),
++            .read0(endpoint_read0), .read1(endpoint_read1),
++            .value0(endpoint_value0), .value1(endpoint_value1));
++    end endgenerate
+     genvar physical;
+     generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
+         localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
+@@ -201,7 +215,8 @@ module mhbs_hbs #(
+         );
+     end
+     endgenerate
+-    initial if(LANES!=2 || UNROLL!=2) $error("Production core requires K2U2");
++    initial if((LANES!=1 && LANES!=2 && LANES!=4) || (UNROLL<1 || UNROLL>4))
++        $error("K must be 1, 2 or 4; U must be 1, 2, 3 or 4");
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+     logic [255:0] emit_value;
+@@ -281,7 +296,7 @@ module mhbs_hbs #(
+     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
+         begin emit_value<=v; emit_length<=length; output_return<=ret; enter_state(OUTPUT_CHUNK); end
+     endtask
+-    task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
++    task automatic start_hash(input [63:0] selected_recipe, input [LANES-1:0] mask, input state_t ret);
+         begin
+             task_recipe<=selected_recipe; active_mask<=mask;
+             launch_pending<=mask; response_pending<=mask;
+@@ -296,20 +311,18 @@ module mhbs_hbs #(
+     endtask
+ 
+     always_comb begin
+-        endpoint_write0=0; endpoint_write1=0;
+-        endpoint_address0=chain_cursor; endpoint_address1=chain_cursor+1'b1;
+-        endpoint_data0=result[0][W-1:0]; endpoint_data1=result[1][W-1:0];
+-        endpoint_read0=lane_list0[0]; endpoint_read1=lane_list1[0];
+-        if (state==CHAIN_STORE && indexing!=1) begin
+-            // FORS leaves go directly to the tree stack, not the list store.
+-            endpoint_write0=active_mask[0]; endpoint_write1=active_mask[1];
+-        end else if(root_write) begin
+-            endpoint_address0={1'b0,group_index[5:1],1'b0};
+-            endpoint_address1={1'b0,group_index[5:1],1'b1};
+-            endpoint_data0=route_value[W-1:0]; endpoint_data1=route_value[W-1:0];
+-            endpoint_write0=!group_index[0]; endpoint_write1=group_index[0];
++        for(int j=0;j<LANES;j=j+1) begin
++            endpoint_write[j]=0;
++            endpoint_address[j]=chain_cursor+j;
++            endpoint_data[j]=result[j][W-1:0];
++            if(state==CHAIN_STORE && indexing!=1)
++                endpoint_write[j]=active_mask[j];
++            else if(root_write && group_index%LANES==j) begin
++                endpoint_address[j]=group_index;
++                endpoint_data[j]=route_value[W-1:0];
++                endpoint_write[j]=1;
++            end
+         end
+-
+     end
+ 
+     // Validity is owned by the tree controller; data arrays have no reset.
+@@ -342,14 +355,14 @@ module mhbs_hbs #(
+             seq_start<=0; seq_complete<=0;
+             operation<=0; scalar_tree<=0; scalar_leaf<=0;
+             verify_pass<=0;
+-            verify_lane<=0; verify_return<=IDLE;
++            verify_lane<=0; verify_return<=IDLE; output_lane<=0;
+             macro_op<=0; macro_desc<=0; macro_route<=0; macro_flags<=0;
+             active_mask<=0; launch_pending<=0; response_pending<=0;
+             task_chain<=0; task_capture<=0;
+             hash_base<=0; permutation_base<=0; layer<=0;
+             task_recipe<=0; task_step<=0; message_received<=0;
+-            fors_pair_pending<=0;
+-            for(i=0;i<2;i=i+1) begin
++            fors_pending_index<=LANES;
++            for(i=0;i<LANES;i=i+1) begin
+                 task_steps[i]<=0; task_capture_after[i]<=0;
+                 task_leaf[i]<=0; task_a[i]<=0; task_b[i]<=0;
+             end
+@@ -390,7 +403,7 @@ module mhbs_hbs #(
+                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
+                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
+                         task_chain<=0; task_capture<=0;
+-                        for(i=0;i<2;i=i+1) task_steps[i]<=0;
++                        for(i=0;i<LANES;i=i+1) task_steps[i]<=0;
+                         enter_state(LOAD_DESCRIPTOR);
+                     end
+                 end
+@@ -404,7 +417,7 @@ module mhbs_hbs #(
+                            // supplies that R as the first external node.
+                            if(verifying && saved_descriptor[59:56]==3)
+                                read_verify_node(VERIFY_RANDOM);
+-                           else start_hash(saved_descriptor,2'b01,HASH_RESULT);
++                           else start_hash(saved_descriptor,{{(LANES-1){1'b0}},1'b1},HASH_RESULT);
+                        end
+                     2: begin
+                            chain_id<=macro_desc; standalone_chain<=1; indexing<=0;
+@@ -419,7 +432,7 @@ module mhbs_hbs #(
+                 end
+                 TREE_INIT: begin
+                     saved_chain_descriptor<=descriptors[6];
+-                    fors_pair_pending<=0;
++                    fors_pending_index<=LANES;
+                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+                     indexing<=descriptor[33:32]; standalone_chain<=0;
+                     target<=descriptor[37:36]==1 ? fors_target(group_index)
+@@ -433,7 +446,7 @@ module mhbs_hbs #(
+                     if(verifying) begin
+                         task_chain<=0; task_capture<=0; task_step<=descriptors[5];
+                         verify_lane<=0;
+-                        for(i=0;i<2;i=i+1) begin
++                        for(i=0;i<LANES;i=i+1) begin
+                             task_steps[i]<=0;
+                             task_leaf[i]<=scalar_leaf;
+                             task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
+@@ -442,7 +455,7 @@ module mhbs_hbs #(
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+                     end else begin
+                     task_chain<=1; task_step<=descriptors[5];
+-                    for(i=0;i<2;i=i+1) begin
++                    for(i=0;i<LANES;i=i+1) begin
+                         task_capture[i]<=(indexing==1 ? leaf_cursor+i==target : leaf_cursor==target) && macro_flags[0];
+                         task_leaf[i]<=indexing==1 ? scalar_leaf : leaf_cursor;
+                         task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
+@@ -457,13 +470,20 @@ module mhbs_hbs #(
+                 CHAIN_STORE: begin
+                     if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
+                     task_chain<=0;
+-                    if(!verifying && macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target))) enter_state(CHAIN_OUTPUT0);
+-                    else enter_state(CHAIN_NEXT);
++                    if(!verifying && macro_flags[0] &&
++                        (indexing!=1 ? leaf_cursor==target
++                        : target>=leaf_cursor && target<leaf_cursor+LANES && active_mask[target-leaf_cursor])) begin
++                        output_lane<=indexing==1 ? target-leaf_cursor : 0;
++                        enter_state(CHAIN_OUTPUT0);
++                    end else enter_state(CHAIN_NEXT);
++                end
++                CHAIN_OUTPUT0: start_output(lane_capture[output_lane],node_bytes,
++                    indexing!=1 && output_lane+1<LANES && active_mask[output_lane+1] ? CHAIN_OUTPUT1 : CHAIN_NEXT);
++                CHAIN_OUTPUT1: begin
++                    output_lane<=output_lane+1'b1;
++                    start_output(lane_capture[output_lane+1'b1],node_bytes,
++                        output_lane+2<LANES && active_mask[output_lane+2] ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+                 end
+-                CHAIN_OUTPUT0: start_output(indexing==1 && active_mask[1] && target[0]
+-                    ? lane_capture[1] : lane_capture[0],node_bytes,
+-                    active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+-                CHAIN_OUTPUT1: start_output(lane_capture[1],node_bytes,CHAIN_NEXT);
+                 CHAIN_NEXT: begin
+                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
+                     else if(standalone_chain && chain_descriptor[13:12]==0)
+@@ -471,7 +491,7 @@ module mhbs_hbs #(
+                     else if(!verifying && macro_flags[3] && leaf_cursor==target) begin
+                         node_value<=0; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
+                     end else if(chain_descriptor[13:12]==0) begin
+-                        fors_pair_pending<=indexing==1 && active_mask[1];
++                        fors_pending_index<=indexing==1 ? 1 : LANES;
+                         node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
+                     end else begin
+                         enter_state(REDUCE_SETUP);
+@@ -480,7 +500,7 @@ module mhbs_hbs #(
+                 REDUCE_SETUP: begin
+                     task_chain<=0; task_capture<=0; task_steps[0]<=0;
+                     task_leaf[0]<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
+-                    start_hash(descriptors[4],2'b01,LEAF_SETUP);
++                    start_hash(descriptors[4],{{(LANES-1){1'b0}},1'b1},LEAF_SETUP);
+                 end
+                 LEAF_SETUP: if(standalone_chain)route_result(result[0]);
+                     else begin node_value<=result[0][W-1:0]; node_level<=0;
+@@ -492,10 +512,10 @@ module mhbs_hbs #(
+                         else enter_state(TREE_FINISH);
+                     end else if(verifying) read_verify_node(PARENT_SETUP);
+                     else if(node_index[0]) enter_state(PARENT_SETUP);
+-                    else if(fors_pair_pending) begin
+-                        node_value<=result[1][W-1:0]; node_level<=0;
++                    else if(fors_pending_index<LANES) begin
++                        node_value<=result[fors_pending_index][W-1:0]; node_level<=0;
+                         node_index<=leaf_cursor+1'b1; leaf_cursor<=leaf_cursor+1'b1;
+-                        fors_pair_pending<=0;
++                        fors_pending_index<=fors_pending_index+1'b1;
+                     end else begin
+                         leaf_cursor<=leaf_cursor+1'b1; chain_cursor<=0; enter_state(CHAIN_SETUP);
+                     end
+@@ -511,7 +531,7 @@ module mhbs_hbs #(
+                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+                         task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
+                         task_right[0]<=verifying && !node_index[0] ? emit_value : node_value;
+-                        start_hash(descriptors[4],2'b01,PARENT_DONE);
++                        start_hash(descriptors[4],{{(LANES-1){1'b0}},1'b1},PARENT_DONE);
+                     end
+                 end
+                 PARENT_DONE: begin
+@@ -528,7 +548,7 @@ module mhbs_hbs #(
+                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
+                 end
+                 HASH_WAIT: begin
+-                    for(i=0;i<2;i=i+1) if(response_pending[i] && lane_valid[i]) begin
++                    for(i=0;i<LANES;i=i+1) if(response_pending[i] && lane_valid[i]) begin
+                         result[i]<=lane_value[i];
+                     end
+                     response_pending<=response_pending & ~lane_valid;
+@@ -574,9 +594,9 @@ module mhbs_hbs #(
+                 VERIFY_CHAIN_INPUT: begin
+                     // A WOTS digit of 15 already is an endpoint: zero hashes.
+                     result[verify_lane]<={{(V-W){1'b0}},emit_value};
+-                    if(indexing==1) start_hash(task_step,2'b01,LEAF_SETUP);
+-                    else if(!verify_lane && chain_batch_mask[1]) begin
+-                        verify_lane<=1; read_verify_node(VERIFY_CHAIN_INPUT);
++                    if(indexing==1) start_hash(task_step,{{(LANES-1){1'b0}},1'b1},LEAF_SETUP);
++                    else if(verify_lane+1<LANES && chain_batch_mask[verify_lane+1]) begin
++                        verify_lane<=verify_lane+1'b1; read_verify_node(VERIFY_CHAIN_INPUT);
+                     end else enter_state(VERIFY_CHAIN_RUN);
+                 end
+                 VERIFY_CHAIN_RUN: begin
+@@ -585,7 +605,7 @@ module mhbs_hbs #(
+                     end else start_hash(descriptors[0],verify_step_mask,VERIFY_CHAIN_ADVANCE);
+                 end
+                 VERIFY_CHAIN_ADVANCE: begin
+-                    for(i=0;i<2;i=i+1) if(active_mask[i]) begin
++                    for(i=0;i<LANES;i=i+1) if(active_mask[i]) begin
+                         task_b[i]<={28'd0,task_b[i][3:0]+4'd1};
+                     end
+                     enter_state(VERIFY_CHAIN_RUN);
+@@ -601,4 +621,31 @@ module mhbs_hbs #(
+         end
+     end
+ endmodule
++
++// Four independent residue banks allow four adjacent endpoint writes on the
++// same edge. Each bank has one physical write port and asynchronous reads.
++module mhbs_ku_store #(
++    parameter integer WIDTH=256, DEPTH=68, ADDRESS_BITS=7, LANES=4
++) (
++    input wire clk,
++    input wire [LANES-1:0] write_enable,
++    input wire [ADDRESS_BITS-1:0] write_address [0:LANES-1],
++    input wire [WIDTH-1:0] write_data [0:LANES-1],
++    input wire [ADDRESS_BITS-1:0] read0,read1,
++    output wire [WIDTH-1:0] value0,value1
++);
++    localparam integer BANK_DEPTH=DEPTH/LANES;
++    localparam integer BANK_BITS=$clog2(LANES);
++    localparam integer ROW_BITS=$clog2(BANK_DEPTH);
++    wire [WIDTH-1:0] bank_value0 [0:LANES-1], bank_value1 [0:LANES-1];
++    for(genvar bank=0;bank<LANES;bank=bank+1) begin: banks
++        (* ram_style="distributed" *) logic [WIDTH-1:0] words [0:BANK_DEPTH-1];
++        always_ff @(posedge clk)
++            if(write_enable[bank]) words[write_address[bank][BANK_BITS +: ROW_BITS]]<=write_data[bank];
++        assign bank_value0[bank]=words[read0[BANK_BITS +: ROW_BITS]];
++        assign bank_value1[bank]=words[read1[BANK_BITS +: ROW_BITS]];
++    end
++    assign value0=bank_value0[read0[BANK_BITS-1:0]];
++    assign value1=bank_value1[read1[BANK_BITS-1:0]];
++endmodule
+ `default_nettype wire
+diff --git a/scripts/v42_external_flow.py b/scripts/v42_external_flow.py
+index 09cbe39..bc67ca8 100644
+--- a/scripts/v42_external_flow.py
++++ b/scripts/v42_external_flow.py
+@@ -19,7 +19,8 @@ def tool_version(name, *args):
+   return subprocess.check_output([name,*args],text=True,stderr=subprocess.DEVNULL).splitlines()[0]
+  except (OSError,subprocess.CalledProcessError,IndexError) as exc:
+   raise RuntimeError(f'{name} is required for this operation and must run from PATH') from exc
+-def capture(tag):
++def capture(tag,lanes=2,unroll=2):
++ if lanes not in (1,2,4) or unroll not in (1,2,3,4):raise ValueError("K must be 1/2/4; U must be 1/2/3/4")
+  if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*',tag):
+   raise ValueError('tag must start with a letter, digit or underscore and contain only letters, digits, _, . or -')
+  f=BUILD/tag;f.mkdir(parents=True,exist_ok=True)
+@@ -32,19 +33,19 @@ def capture(tag):
+  paths.update(str(p.relative_to(ROOT)) for p in BASE.glob('*.json') if p.name in ('software_gate.json','rtl_start.json'))
+  source={p:sha(ROOT/p) for p in sorted(paths)}
+  if (f/'inputs.json').exists():
+-  old=json.loads((f/'inputs.json').read_text());assert old['source_sha256']==source,'use a fresh tag after changes';return f
++  old=json.loads((f/'inputs.json').read_text());assert old['source_sha256']==source and old.get('lanes',2)==lanes and old.get('unroll',2)==unroll,'use a fresh tag after changes';return f
+  with tarfile.open(f/'source_snapshot.tar.gz','w:gz') as t:
+   for p in source:t.add(ROOT/p,arcname=p)
+- write(f/'inputs.json',dict(version='v4.2',layout_revision=3,tag=tag,rtl_sha256=identity(),source_sha256=source,snapshot_sha256=sha(f/'source_snapshot.tar.gz'),software_gate_sha256=sha(BASE/'software_gate.json'),baseline_commit='366b614',tool_versions={'verilator':tool_version('verilator','--version'),'iverilog':tool_version('iverilog','-V')}))
++ write(f/'inputs.json',dict(version='v4.2',layout_revision=3,tag=tag,lanes=lanes,unroll=unroll,rtl_sha256=identity(),source_sha256=source,snapshot_sha256=sha(f/'source_snapshot.tar.gz'),software_gate_sha256=sha(BASE/'software_gate.json'),baseline_commit='366b614',tool_versions={'verilator':tool_version('verilator','--version'),'iverilog':tool_version('iverilog','-V')}))
+  return f
+ 
+-def build_binary(folder,cfg,swap=0,partitioned=False,profile_enable=True):
+- key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,profile_enable,sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
++def build_binary(folder,cfg,swap=0,partitioned=False,profile_enable=True,lanes=2,unroll=2):
++ key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,profile_enable,lanes,unroll,sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
+  d=folder/'binaries'/key;binary=d/'obj/Vtb_mhbs_external'
+  if not binary.exists():
+   d.mkdir(parents=True,exist_ok=True)
+   parameters=[f"-G{k.upper()}=256'h{int.from_bytes(bytes.fromhex(cfg[k]),'little'):064x}" for k in PARAMS]
+-  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(profile_enable)}']
++  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(profile_enable)}',f'-GLANES={lanes}',f'-GUNROLL={unroll}']
+   sources=rtl();defines=[]
+   if partitioned:
+    from v42_common_partition import partition
+@@ -55,8 +56,8 @@ def build_binary(folder,cfg,swap=0,partitioned=False,profile_enable=True):
+   run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_mhbs_external.sv'],d/'compile.log')
+  return binary
+ 
+-def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False,profile_enable=True):
+- cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,swap,partitioned,profile_enable)
++def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False,profile_enable=True,lanes=2,unroll=2):
++ cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,swap,partitioned,profile_enable,lanes,unroll)
+  log=folder/'logs'/(name+'.log');log.parent.mkdir(parents=True,exist_ok=True)
+  dump=log.with_suffix('.actual.mem')
+  cmd=[str(binary),'+IMAGE='+str(BASE/'images'/cfg['profile']),'+VECTOR='+str(vector),'+DUMP='+str(dump),*options]
+@@ -64,18 +65,18 @@ def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False,profile
+  hits=re.findall(r'EXTERNAL_PASS boot=(\d+) keygen=(\d+) sign=(\d+) hashes=(\d+) permutations=(\d+) swap=(\d+) run=(\d+) wait=(\d+) total=(\d+)',log.read_text())
+  assert len(hits)==(2 if '+REPLAYS=2' in options else 1),str(log)
+  result=dict(zip(('boot_cycles','keygen_cycles','sign_cycles','hashes','permutations','swap','run','wait_cycles','total_cycles'),map(int,hits[-1])))
+- result.update(passed=True,profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
++ result.update(passed=True,lanes=lanes,unroll=unroll,profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
+  write(log.with_suffix('.json'),result);print('EXTERNAL_SIM_PASS',name,result['keygen_cycles'],result['sign_cycles'],flush=True)
+  return name,result
+ 
+ def main():
+- p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--swap',type=int,choices=[0,1],default=0);p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');a=p.parse_args()
+- f=capture(a.tag)
++ p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--swap',type=int,choices=[0,1],default=0);p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');p.add_argument('--lanes',type=int,choices=[1,2,4],default=2);p.add_argument('--unroll',type=int,choices=[1,2,3,4],default=2);a=p.parse_args()
++ f=capture(a.tag,a.lanes,a.unroll)
+  if a.action=='sim':
+   def one(case):
+-   n,o=case;return simulate_case(f,n+'_'+o+('_swap' if a.swap else '')+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,a.swap,partitioned=a.partition,profile_enable=not a.no_profile)
++   n,o=case;return simulate_case(f,n+'_'+o+('_swap' if a.swap else '')+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,a.swap,partitioned=a.partition,profile_enable=not a.no_profile,lanes=a.lanes,unroll=a.unroll)
+   with concurrent.futures.ThreadPoolExecutor(3) as pool:r=dict(pool.map(one,[(n,o) for n in NAMES if a.profile in ('all',n) for o in ('keygen','sign') if a.operation in ('all',o)]))
+   filename='simulation_partition' if a.partition else 'simulation_s1' if a.swap else 'simulation'
+   if a.no_profile:filename+='_no_profile'
+-  write(f/(filename+'.json'),dict(passed=True,rtl_sha256=identity(),cases=r))
++  write(f/(filename+'.json'),dict(passed=True,lanes=a.lanes,unroll=a.unroll,rtl_sha256=identity(),cases=r))
+ if __name__=='__main__':main()
+diff --git a/scripts/v42_external_synth.py b/scripts/v42_external_synth.py
+index d1d5cfc..90a2de5 100644
+--- a/scripts/v42_external_synth.py
++++ b/scripts/v42_external_synth.py
+@@ -7,9 +7,12 @@ from v42_common_partition import partition
+ parser=argparse.ArgumentParser(description=__doc__)
+ parser.add_argument('tag')
+ parser.add_argument('--core-only',action='store_true')
++parser.add_argument('--only',choices=[n+'_'+op for n in NAMES for op in ('keygen','sign')])
+ args=parser.parse_args()
+ vivado_version=tool_version('vivado','-version')
+-f=capture(args.tag);inp=json.loads((f/'inputs.json').read_text())
++f=BUILD/args.tag;inp=json.loads((f/'inputs.json').read_text())
++assert inp['source_sha256']=={p:sha(ROOT/p) for p in inp['source_sha256']}
++assert sha(f/'source_snapshot.tar.gz')==inp['snapshot_sha256']
+ workspace=f/'synth_source';workspace.mkdir(exist_ok=False)
+ with tarfile.open(f/'source_snapshot.tar.gz') as t:t.extractall(workspace,filter='data')
+ for p,h in inp['source_sha256'].items():assert sha(workspace/p)==h
+@@ -28,8 +31,10 @@ for n in NAMES:
+    shell=re.sub(r'(parameter '+kind.upper()+r'_INIT_FILE=)"[^"]+"',lambda m:m[1]+f'"experiments/v4.2/external_job_message/{kind}_construction.mem"',shell)
+   (out/(n+'_'+op+'_shell.sv')).write_text(shell)
+ cmd=['vivado','-mode','batch','-nolog','-nojournal','-source','experiments/v4.2/external_job_message/synth.tcl','-tclargs',f.name]
++cmd.extend([str(inp['lanes']),str(inp['unroll'])])
+ if args.core_only:cmd.append('--core-only')
+-start=time.time();write(f/'synth_invocation.json',dict(command=cmd,started=start,driver_sha256=sha(Path(__file__)),core_only=args.core_only,profile_enable=False,statistics_ports='constant_zero',tool_versions={'vivado':vivado_version}))
++if args.only:cmd.append('--only='+args.only)
++start=time.time();write(f/'synth_invocation.json',dict(command=cmd,started=start,driver_sha256=sha(Path(__file__)),core_only=args.core_only,lanes=inp['lanes'],unroll=inp['unroll'],profile_enable=False,statistics_ports='constant_zero',tool_versions={'vivado':vivado_version}))
+ with (f/'synth.log').open('w') as log:subprocess.run(cmd,cwd=workspace,stdout=log,stderr=subprocess.STDOUT,check=True)
+ shutil.copytree(out,f/'synthesis')
+ write(f/'synth_elapsed.json',dict(seconds=time.time()-start))
+diff --git a/scripts/verify_v42_verify.py b/scripts/verify_v42_verify.py
+index e09cb1b..6a32f00 100644
+--- a/scripts/verify_v42_verify.py
++++ b/scripts/verify_v42_verify.py
+@@ -10,7 +10,9 @@ from model.reference import slh_dsa
+ def main():
+     parser=argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('tag');parser.add_argument('--quick',action='store_true')
+-    args=parser.parse_args();folder=capture(args.tag);out=folder/'verify';out.mkdir(exist_ok=True)
++    parser.add_argument('--lanes',type=int,choices=(1,2,4),default=2)
++    parser.add_argument('--unroll',type=int,choices=(1,2,4),default=2)
++    args=parser.parse_args();folder=capture(args.tag,args.lanes,args.unroll);out=folder/'verify';out.mkdir(exist_ok=True)
+     def profile(name):
+         source=BASE/'vectors'/name/'sign';cfg=json.loads((source/'job.json').read_text())
+         n=len(bytes.fromhex(cfg['public_seed']));params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{n*8}F')
+@@ -31,7 +33,7 @@ def main():
+                 sources=[x for x in sources if x!='rtl/top/mhbs_top.sv']+[str(d/'common.sv'),str(d/'top.sv')];defines=['-DMHBS_PARTITIONED']
+             root=int.from_bytes(bytes.fromhex(cfg['public_root']),'little')^(int(bad_root)<<root_bit)
+             if root_noise:root|=((1<<(256-8*n))-1)<<(8*n)
+-            options=[f"-GPUBLIC_SEED=256'h{int.from_bytes(bytes.fromhex(cfg['public_seed']),'little'):064x}",f"-GPUBLIC_ROOT=256'h{root:064x}",f'-GMESSAGE_BYTES={len(msg)}',f'-GNODE_BYTES={n}',f'-GNODES={len(sig)//n}',f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(stats)}']
++            options=[f"-GPUBLIC_SEED=256'h{int.from_bytes(bytes.fromhex(cfg['public_seed']),'little'):064x}",f"-GPUBLIC_ROOT=256'h{root:064x}",f'-GMESSAGE_BYTES={len(msg)}',f'-GNODE_BYTES={n}',f'-GNODES={len(sig)//n}',f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(stats)}',f'-GLANES={args.lanes}',f'-GUNROLL={args.unroll}']
+             exe=d/'obj/Vtb_mhbs_verify'
+             run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_verify',*options,'--Mdir',str(exe.parent),*sources,'tb/integration/tb_mhbs_verify.sv'],d/'compile.log')
+             binaries[key]=exe;return exe
+@@ -48,18 +50,19 @@ def main():
+             row['log_sha256']=sha(log);cases[label]=row
+             return row
+         reference=case('normal');assert reference['zero'] and reference['full']
+-        assert all(v for k,v in reference['coverage'].items() if k!='both_zero'),(name,reference['coverage'])
++        if args.lanes>1:assert all(v for k,v in reference['coverage'].items() if k!='both_zero'),(name,reference['coverage'])
+         if not args.quick:
+             # Find a deterministic malformed-message vector that exercises every
+             # pair boundary. It still uses the independent software verifier.
+-            for mask in range(2,256):
++            for mask in range(2,256) if args.lanes>1 else ():
+                 changed=bytes([msg[0]^mask])+msg[1:]
+                 assert not slh_dsa.verify_internal(params,changed,sig,pk)
+                 row=case('pair_boundaries',(f'+BAD_MESSAGE={mask}','+EXPECT=0'))
+                 if all(row['coverage'].values()):
+                     row['message_xor']=mask
+                     break
+-            else:raise AssertionError('pair boundary coverage')
++            else:
++                if args.lanes>1:raise AssertionError('pair boundary coverage')
+             tests=[('randomizer',0),('fors_secret',1),('fors_auth',2),('wots',1+params.k*(params.a+1)),('xmss_auth',1+params.k*(params.a+1)+params.wots_len),('last_auth',len(sig)//n-1)]
+             for label,index in tests:
+                 changed=bytearray(sig);changed[index*n]^=1;assert not slh_dsa.verify_internal(params,msg,changed,pk)
+@@ -89,6 +92,6 @@ def main():
+         write(vec/'results.json',dict(passed=True,cases=cases));print('VERIFY_PROFILE_PASS',name,len(cases),'cases',flush=True)
+         return name,cases
+     with concurrent.futures.ThreadPoolExecutor(3) as pool:results=dict(pool.map(profile,NAMES))
+-    write(out/'results.json',dict(passed=True,quick=args.quick,source_snapshot_sha256=sha(folder/'source_snapshot.tar.gz'),profiles=results))
++    write(out/'results.json',dict(passed=True,quick=args.quick,lanes=args.lanes,unroll=args.unroll,source_snapshot_sha256=sha(folder/'source_snapshot.tar.gz'),profiles=results))
+     print('VERIFY_RTL_PASS',sum(map(len,results.values())),'cases',flush=True)
+ if __name__=='__main__':main()
+diff --git a/tb/integration/mhbs_shared_store_check.svh b/tb/integration/mhbs_shared_store_check.svh
+index df67ba3..0fced94 100644
+--- a/tb/integration/mhbs_shared_store_check.svh
++++ b/tb/integration/mhbs_shared_store_check.svh
+@@ -3,13 +3,14 @@
+ reg [255:0] shared_expected[0:67];
+ reg [67:0] shared_initialized=0;
+ reg shared_roots_live=0;
+-wire shared_stream_read =
+- (`HBS_CORE.lanes[0].lane.state==2 && `HBS_CORE.lanes[0].lane.shapes[12] &&
+-  `HBS_CORE.lanes[0].lane.position>=`HBS_CORE.lanes[0].lane.prefix_bytes &&
+-  `HBS_CORE.lanes[0].lane.position<`HBS_CORE.lanes[0].lane.input_length) ||
+- (`HBS_CORE.lanes[1].lane.state==2 && `HBS_CORE.lanes[1].lane.shapes[12] &&
+-  `HBS_CORE.lanes[1].lane.position>=`HBS_CORE.lanes[1].lane.prefix_bytes &&
+-  `HBS_CORE.lanes[1].lane.position<`HBS_CORE.lanes[1].lane.input_length);
++wire [LANES-1:0] shared_stream_lane;
++generate for(genvar shared_lane=0;shared_lane<LANES;shared_lane=shared_lane+1) begin: shared_stream_observers
++ assign shared_stream_lane[shared_lane]=
++  `HBS_CORE.lanes[shared_lane].lane.state==2 && `HBS_CORE.lanes[shared_lane].lane.shapes[12] &&
++  `HBS_CORE.lanes[shared_lane].lane.position>=`HBS_CORE.lanes[shared_lane].lane.prefix_bytes &&
++  `HBS_CORE.lanes[shared_lane].lane.position<`HBS_CORE.lanes[shared_lane].lane.input_length;
++end endgenerate
++wire shared_stream_read=|shared_stream_lane;
+ always @(posedge clk) begin
+  if(`HBS_CORE.execution_rst) begin
+   shared_initialized=0; shared_roots_live=0;
+@@ -29,12 +30,12 @@ always @(posedge clk) begin
+   end
+   if(`HBS_CORE.state==8) begin
+    if(`HBS_CORE.indexing==1) begin
+-    if(`HBS_CORE.endpoint_write0 || `HBS_CORE.endpoint_write1)
++    if(|`HBS_CORE.endpoint_write)
+      $fatal(1,"FORS leaf overwrites shared root storage");
+    end else begin
+     if(shared_roots_live) $fatal(1,"WOTS starts before FORS root compression completes");
+     if(`HBS_CORE.chain_cursor==0) shared_initialized=0;
+-    for(integer i=0;i<2;i=i+1) if(`HBS_CORE.active_mask[i]) begin
++    for(integer i=0;i<LANES;i=i+1) if(`HBS_CORE.active_mask[i]) begin
+      shared_expected[`HBS_CORE.chain_cursor+i]=`HBS_CORE.result[i][255:0];
+      shared_initialized[`HBS_CORE.chain_cursor+i]=1;
+     end
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+index 4b8f72b..05cb314 100644
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -7,7 +7,7 @@
+ module tb_mhbs_external;
+  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
+  parameter integer OPERATION=1,MESSAGE_BYTES=1;
+- parameter integer SWAP=0;
++ parameter integer SWAP=0, LANES=2, UNROLL=2;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
+  wire verify_ready,verify_pass;
+@@ -22,7 +22,7 @@ module tb_mhbs_external;
+  reg [7:0] message_bytes[0:86];
+  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
+  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
+- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
++ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE), .SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
+  string directory,vector_directory,dump_path,trace_path;
+@@ -35,17 +35,23 @@ module tb_mhbs_external;
+  // Testbench-only observers keep production-disabled statistics independently
+  // checkable. Count completed permutations/hashes, not the RTL issue counters.
+  integer observed_boot=0,observed_cycles=0;
+- integer observed_hashes[0:1],observed_permutations[0:1];
+- wire [31:0] measured_hashes=observed_hashes[0]+observed_hashes[1];
+- wire [31:0] measured_permutations=observed_permutations[0]+observed_permutations[1];
++ integer observed_hashes[0:LANES-1],observed_permutations[0:LANES-1];
++ logic [31:0] measured_hashes,measured_permutations;
++ always_comb begin
++  measured_hashes=0;measured_permutations=0;
++  for(integer j=0;j<LANES;j=j+1)begin
++   measured_hashes=measured_hashes+observed_hashes[j];
++   measured_permutations=measured_permutations+observed_permutations[j];
++  end
++ end
+  wire [31:0] measured_keygen=OPERATION ? 0 : observed_cycles;
+  wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
+  genvar lane;
+- generate for(lane=0;lane<2;lane=lane+1)begin: observers
++ generate for(lane=0;lane<LANES;lane=lane+1)begin: observers
+   always @(posedge clk)begin
+    if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
+    else if(`HBS_CORE.lanes[lane].lane.sponge.lane_state==2 &&
+-           `HBS_CORE.lanes[lane].lane.sponge.round_index+2>=24)begin
++           `HBS_CORE.lanes[lane].lane.sponge.round_index+UNROLL>=24)begin
+     observed_permutations[lane]=observed_permutations[lane]+1;
+     if(`HBS_CORE.lanes[lane].lane.sponge.running_last)
+      observed_hashes[lane]=observed_hashes[lane]+1;
+diff --git a/tb/integration/tb_mhbs_verify.sv b/tb/integration/tb_mhbs_verify.sv
+index e9800b7..5424fc8 100644
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -6,7 +6,7 @@
+ `endif
+ module tb_mhbs_verify;
+  parameter [255:0] PUBLIC_SEED=0,PUBLIC_ROOT=0;
+- parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0;
++ parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0,LANES=2,UNROLL=2;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
+  wire busy,done,keygen_done,error,out_valid,verify_ready,verify_pass,message_ready;
+@@ -21,22 +21,24 @@ module tb_mhbs_verify;
+  integer expected=1,flip=-1,bad_message=0,abort_at=0;
+  integer delay_at=-1,delay_cycles=0,delay_left=0,poison_reset=0,abort_delay=7,noise=0;
+  integer asymmetric=0,zero_left=0,zero_right=0,both_zero=0,auth_left=0,auth_right=0;
+- reg [1:0] bypass_expected=0;reg [255:0] bypass_node[0:1];
+- integer hashes[0:1],permutations[0:1],zero_steps=0,full_steps=0;
++ reg [LANES-1:0] bypass_expected=0;reg [255:0] bypass_node[0:LANES-1];
++ integer hashes[0:LANES-1],permutations[0:LANES-1],zero_steps=0,full_steps=0;
++ integer total_hashes,total_permutations;
++ always_comb begin total_hashes=0;total_permutations=0;for(integer h=0;h<LANES;h=h+1)begin total_hashes=total_hashes+hashes[h];total_permutations=total_permutations+permutations[h];end end
+  reg [31:0] rng=32'h15c0ffee;
+  string image_dir,vector_dir;
+  mhbs_top #(.PUBLIC_SEED(PUBLIC_SEED),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(2),
+- .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),
++ .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.LANES(LANES),.UNROLL(UNROLL),
+  .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
+  task tick;begin @(posedge clk);#1;end endtask
+  genvar l;
+- generate for(l=0;l<2;l=l+1)begin: observe
++ generate for(l=0;l<LANES;l=l+1)begin: observe
+   always @(posedge clk)begin
+    if(`HBS_CORE.execution_rst)begin hashes[l]=0;permutations[l]=0;end
+    else if(`HBS_CORE.lanes[l].lane.sponge.lane_state==2 &&
+-           `HBS_CORE.lanes[l].lane.sponge.round_index+2>=24)begin
++           `HBS_CORE.lanes[l].lane.sponge.round_index+UNROLL>=24)begin
+     permutations[l]=permutations[l]+1;
+     if(`HBS_CORE.lanes[l].lane.sponge.running_last)hashes[l]=hashes[l]+1;
+    end
+@@ -73,7 +75,7 @@ module tb_mhbs_verify;
+    if(out_valid || keygen_done)$fatal(1,"verify generated a signing output");
+    if(error && !fault)$fatal(1,"verify error %h",error_code);
+    if(`HBS_CORE.state==8 /* CHAIN_STORE */ && `HBS_CORE.indexing!=1)begin
+-    for(integer i=0;i<2;i=i+1)if(`HBS_CORE.active_mask[i] && bypass_expected[i])
++    for(integer i=0;i<LANES;i=i+1)if(`HBS_CORE.active_mask[i] && bypass_expected[i])
+      for(integer b=0;b<NODE_BYTES;b=b+1)
+       if(`HBS_CORE.result[i][8*b +:8]!==bypass_node[i][8*b +:8])$fatal(1,"zero-step endpoint changed lane=%0d",i);
+    end
+@@ -83,7 +85,7 @@ module tb_mhbs_verify;
+     bypass_node[`HBS_CORE.verify_lane]=nodes[node_sent-1];
+     if(`HBS_CORE.task_b[`HBS_CORE.verify_lane]==15)zero_steps=zero_steps+1;
+     if(`HBS_CORE.task_b[`HBS_CORE.verify_lane]==0)full_steps=full_steps+1;
+-    if(`HBS_CORE.verify_lane)begin
++    if(`HBS_CORE.verify_lane==1 && LANES>=2)begin
+      if(`HBS_CORE.task_b[0]!=`HBS_CORE.task_b[1])asymmetric=asymmetric+1;
+      if(`HBS_CORE.task_b[0]==15 && `HBS_CORE.task_b[1]!=15)zero_left=zero_left+1;
+      if(`HBS_CORE.task_b[1]==15 && `HBS_CORE.task_b[0]!=15)zero_right=zero_right+1;
+@@ -143,10 +145,10 @@ module tb_mhbs_verify;
+    if(verify_pass!==expected[0] || node_sent!=NODES || result_kind!=2 || error)
+     $fatal(1,"verify result=%0d expected=%0d nodes=%0d/%0d",verify_pass,expected,node_sent,NODES);
+    if(PROFILE_ENABLE)begin
+-    if(hash_count!=hashes[0]+hashes[1] || permutation_count!=permutations[0]+permutations[1])$fatal(1,"verify statistics");
++    if(hash_count!=total_hashes || permutation_count!=total_permutations)$fatal(1,"verify statistics");
+    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)$fatal(1,"statistics not pruned");
+    if(keygen_cycles!=0 || sign_cycles!=0)$fatal(1,"verify polluted sign/keygen cycles");
+-   $display("VERIFY_PASS accepted=%0d nodes=%0d cycles=%0d waits=%0d hashes=%0d permutations=%0d zero=%0d full=%0d",verify_pass,node_sent,cycles,wait_cycles,hashes[0]+hashes[1],permutations[0]+permutations[1],zero_steps,full_steps);
++   $display("VERIFY_PASS accepted=%0d nodes=%0d cycles=%0d waits=%0d hashes=%0d permutations=%0d zero=%0d full=%0d",verify_pass,node_sent,cycles,wait_cycles,total_hashes,total_permutations,zero_steps,full_steps);
+    $display("VERIFY_COVERAGE asymmetric=%0d zero_left=%0d zero_right=%0d both_zero=%0d auth_left=%0d auth_right=%0d",asymmetric,zero_left,zero_right,both_zero,auth_left,auth_right);
+    repeat(40)begin tick();if(!done || busy || verify_ready || message_ready)$fatal(1,"completion halt");end
+    if(run<replay)begin rst=1;repeat(4)tick();rst=0;end
+diff --git a/tests/test_v42_external_route.py b/tests/test_v42_external_route.py
+index 3efac83..59bbb74 100644
+--- a/tests/test_v42_external_route.py
++++ b/tests/test_v42_external_route.py
+@@ -47,7 +47,7 @@ class ExternalRouteTests(unittest.TestCase):
+         lines = []
+         for kind in ('program', 'template', 'descriptor'):
+             data = [int(x, 16) for x in (images / (kind + '.mem')).read_text().split()]
+-            bits = 4 if kind == 'template' else 5
++            bits = 4 if kind in ('program', 'template') else 5
+             for port in range(2 if kind == 'descriptor' else 1):
+                 for bit in range(64):
+                     # Reverse address pin order to model a legal LUT pin permutation.

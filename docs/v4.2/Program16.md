@@ -42,7 +42,7 @@ PC、循环返回 PC、程序地址及内部入口地址从 5 位缩为 4 位。
 
 ## 证据
 
-- [当前 PPA](Current_PPA.md)
+- [最新 K/U 实验报告](KU_Sign_ATP_151_112_67_48.md)
 - [分层面积](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/program16_20260927_v1/synthesis/core_hierarchical.rpt)
 - [布线结果](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/program16_20260927_v1/route/result.json)
 - [输出与周期对照](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/program16_20260927_v1/program16_comparison.json)

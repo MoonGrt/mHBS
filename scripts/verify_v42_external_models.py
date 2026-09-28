@@ -7,8 +7,8 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 from model.slh64 import CompactImage,CompactMachine
 from model.slh64_external import ExternalImage,ExternalMachine,compile_external,convert_legacy
 from model.reference import slh_dsa
-from tests.test_unified_hbs import default_job,KAT
-from scripts.verify_v42_models import Observation
+from tests.slh_fixtures import default_job,KAT
+from tests.slh_fixtures import Observation
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.2/external_job_message'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def write(p,x):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,indent=2)+'\n')
@@ -64,5 +64,5 @@ for name in ('slh_128f','slh_192f','slh_256f'):
         try:ExternalMachine(image,job,root,message,sign)
         except ValueError:negative.append(name+'/length/'+str(len(message)))
         else:raise AssertionError('invalid length')
-write(BASE/'software_gate.json',dict(passed=True,layout_revision=3,profiles=records,rejected_cases=negative,source_sha256={str(p.relative_to(ROOT)):sha(p) for p in [*ROOT.glob('model/**/*.py'),Path(__file__),ROOT/'tests/test_unified_hbs.py']}))
+write(BASE/'software_gate.json',dict(passed=True,layout_revision=3,profiles=records,rejected_cases=negative,source_sha256={str(p.relative_to(ROOT)):sha(p) for p in [*ROOT.glob('model/**/*.py'),Path(__file__),ROOT/'tests/slh_fixtures.py']}))
 print('EXTERNAL_SOFTWARE_GATE_PASS',len(records),flush=True)

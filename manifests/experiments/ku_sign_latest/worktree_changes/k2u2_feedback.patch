@@ -1,0 +1,849 @@
+diff --git a/docs/Architecture.md b/docs/Architecture.md
+index ab7e08f..1731bca 100644
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -43,3 +43,7 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+ 当前生产核要求 `LANES=2, UNROLL=2`，任务数组、掩码及输出控制按双通道构建；保留物理 lane 交换验证。配方形状和长度解码受各 lane 的 `RECIPE_MASK` 静态约束，链专用 lane 不构建流式输入路径。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。旧 masked 配方仅在模块参数允许它时保留跨中间哈希的值寄存器，不进入生产网表。
+ 
+ 统计开关沿 top/common/core/lane 传递，生产综合关闭，仿真保留。综合阶段检查实际网表，禁止统计寄存器和被替代的重复值/capture 寄存器残留。
++
++## 固定双轮实验
++
++双物理 lane 使用显式实例并保留逻辑交换。sponge 以 0～11 的轮对计数器驱动显式偶/奇轮，每次 permutation 仍用 12 个计算周期。轮对共享固定常量译码，轮间无寄存器或强制保留层次；位映射和状态字更新仍为静态 generate。统计配置与外部接口不变。实验须对照 prune_k2u2_20260927_v1 的 6206 等效 Slice、104.166667 MHz 门槛验收。
+diff --git a/docs/Verification.md b/docs/Verification.md
+index 8e456e2..271e589 100644
+--- a/docs/Verification.md
++++ b/docs/Verification.md
+@@ -63,3 +63,5 @@ make report-v42
+ `make rtl-verification TAG=<tag>` 还运行 `scripts/verify_v42_pruning.py`：对照 `current_complete_20260927_v2` 的六组输出、操作/总周期和计数；分别验证直接顶层、提取共同核在统计关闭时的六组结果，以及关闭统计的停顿、复位重放和六项故障退出。独立 SHAKE 向量检查普通链/compact chain 的首、中、末捕获及连续请求与响应停顿。`pruning_verification.json` 和综合网表 `pruning_audit.json` 一并归档。
+ 
+ Vivado 的完整输出保存到候选目录的 `synth.log` 和各外壳 `route.log`，终端仅展示阶段摘要。面积采用统计关闭的网表；周期由统计开启仿真测得，并由关闭统计的 testbench 观察器复核。
++
++固定双轮新增 792 项组合等价检查，覆盖全部 12 个轮对、零值、全一及 64 个确定性随机状态；参考模块冻结自 b4816c0。生产回归的统计观察器和故障注入使用显式 lane0/lane1 层次。实验周期比较基线为 prune_k2u2_20260927_v1。
+diff --git a/experiments/v4.2/external_job_message/synth.tcl b/experiments/v4.2/external_job_message/synth.tcl
+index 010d9ca..2a7c134 100644
+--- a/experiments/v4.2/external_job_message/synth.tcl
++++ b/experiments/v4.2/external_job_message/synth.tcl
+@@ -34,6 +34,12 @@ write_edif -force [file join $out mhbs_common.edf]
+ write_verilog -force -mode synth_stub [file join $out common_stub.v]
+ set core_seconds [expr {[clock seconds]-$started}]
+ close_project
++# Optional experiment gate: do not build six shells for an oversized core.
++if {[llength $argv]>1} {
++ set limit [lindex $argv 1]
++ set eligible [exec python3 -c {import json,sys;from pathlib import Path;sys.path.insert(0,'scripts');from v42_external_route import resources;r=resources(Path(sys.argv[1])/'core_utilization.rpt');ok=r['equivalent_slice']<=float(sys.argv[2]);(Path(sys.argv[1])/'area_gate.json').write_text(json.dumps(dict(eligible=ok,max_core_slices=float(sys.argv[2]),core=r),indent=2)+'\n');print(int(ok))} $out $limit]
++ if {!$eligible} {puts "EXTERNAL_SYNTH_AREA_REJECT limit=$limit";exit 0}
++}
+ # Fingerprint internal cell configuration and connections. Boundary nets are
+ # excluded because their constant drivers belong to the parameterized shell.
+ proc core_structure {path} {
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/existing_units.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/existing_units.log
+index 06b65a2..365d2c8 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/existing_units.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/existing_units.log
+@@ -1,3 +1,4 @@
++SLH_UNIT_PASS keccak_u2_equivalence
+ SLH_UNIT_PASS endpoint_68
+ SLH_UNIT_PASS fors_roots
+ SLH_UNIT_PASS slh64_sequencer
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_0.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_0.log
+index 50615da..696f6ce 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_0.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_0.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_1.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_1.log
+index 7d1fb93..4f71141 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_1.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_1.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_2.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_2.log
+index 42a4f88..b62763f 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_2.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/chain_capture_2.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_0.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_0.log
+index d10441a..e075b5b 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_0.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_0.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_1.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_1.log
+index f80939d..d66a09b 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_1.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_1.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_2.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_2.log
+index 4122566..c6bc10b 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_2.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_2.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_padding.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_padding.log
+index b078a96..db0b0b0 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_padding.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/recipe_padding.log
+@@ -1,3 +1,8 @@
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ rtl/hash_lane/mhbs_recipe_lane.sv:266: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/results.json b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/results.json
+index a3b86c7..cadc8c4 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/results.json
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/results.json
+@@ -1,23 +1,25 @@
+ {
+   "passed": true,
+   "logic_sha256": {
+-    "rtl/hash_lane/mhbs_keccak.sv": "c940e1102cccfd510d541280c9870ad96d56d194293d7afb307d37f687b1c117",
+-    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "4977a1669e1030ce29bbb24bd825b1a1ed38617116dbdc11f351006083f2b955",
+-    "rtl/hash_lane/mhbs_recipe_lane.sv": "7ce6078cef5b52d68911929e7f72f572fc7dc396f9d4318bdd741c3eeb7d7643",
++    "rtl/hash_lane/mhbs_keccak.sv": "8a15b90f310047b16346d794b01fc922d2e5d090880ba73b866dbc23a6f2611f",
++    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "439a940709b4a758877cef65406044d823786fbf3378457bb1c9731bfe1ea8f8",
++    "rtl/hash_lane/mhbs_recipe_lane.sv": "1290d20094e605ba2249c1de24002ac434b174af306df163e78f5f6e9919215b",
+     "rtl/memory/mhbs_value_store.sv": "5131a2d8140651816340d7eac967ed79527d3e7b1e398a847cba782691376991",
+     "rtl/memory/mhbs_root_store.sv": "cfe34c4be68d91329b1f02da3084f3ba49170f001c39a77b2d2b197f5ff7a46a",
+     "rtl/sequencer/mhbs_program_sequencer.sv": "14f50e857ba8cd10df714de250f3cfd8fdabf4ba869210f0a3e5d3ef6fda2db5",
+-    "rtl/top/mhbs_hbs.sv": "e858e83b3eb39d195d0c4e80fd74314fb36d0c5b8745c06c76b3cfcfa9fc50a0",
++    "rtl/top/mhbs_hbs.sv": "b8429d71f8d024cf59a490d091292cc9cfa8b79cc89865ef814b8e0acc698ad7",
+     "rtl/top/mhbs_top.sv": "7767112e9d8651ca31e5e6b8e43022474a5d5cd494edc48baa2b33eb27feb3c2"
+   },
+   "test_source_sha256": {
+-    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "4977a1669e1030ce29bbb24bd825b1a1ed38617116dbdc11f351006083f2b955",
+-    "rtl/hash_lane/mhbs_keccak.sv": "c940e1102cccfd510d541280c9870ad96d56d194293d7afb307d37f687b1c117",
+-    "rtl/hash_lane/mhbs_recipe_lane.sv": "7ce6078cef5b52d68911929e7f72f572fc7dc396f9d4318bdd741c3eeb7d7643",
++    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "439a940709b4a758877cef65406044d823786fbf3378457bb1c9731bfe1ea8f8",
++    "rtl/hash_lane/mhbs_keccak.sv": "8a15b90f310047b16346d794b01fc922d2e5d090880ba73b866dbc23a6f2611f",
++    "rtl/hash_lane/mhbs_recipe_lane.sv": "1290d20094e605ba2249c1de24002ac434b174af306df163e78f5f6e9919215b",
+     "rtl/memory/mhbs_root_store.sv": "cfe34c4be68d91329b1f02da3084f3ba49170f001c39a77b2d2b197f5ff7a46a",
+     "rtl/memory/mhbs_value_store.sv": "5131a2d8140651816340d7eac967ed79527d3e7b1e398a847cba782691376991",
+     "rtl/sequencer/mhbs_program_sequencer.sv": "14f50e857ba8cd10df714de250f3cfd8fdabf4ba869210f0a3e5d3ef6fda2db5",
++    "tb/reference/mhbs_keccak_baseline.sv": "b6d122a98a62fec4cc6986a7f774a7bd1815fc6d60214651d011f7d3f3ae8079",
+     "tb/unit/tb_mhbs_compact_shake_context_lane.sv": "a53be5a3d822f1e6dc92f1d3d739f47de5702a24304358663c6b47e79d731e62",
++    "tb/unit/tb_mhbs_keccak_u2.sv": "810d88800ae34d5aeafa108ee825ab6eefc507be728177e2ca661b0fc10a0e67",
+     "tb/unit/tb_mhbs_recipe_padding.sv": "a553ab3edc8fccc119e365069bc5018c799cb793e417bb49f68dddbe9587529f",
+     "tb/unit/tb_mhbs_root_store.sv": "bd2448a5c827e90c36439efb54a36b0fd9683d142ec1c04b58faa5cc053ed912",
+     "tb/unit/tb_mhbs_slh64_sequencer.sv": "1e9b6633730ef9a89a615bd37d7cc03874c5849276e6c339fa87fc1302b1e5fa",
+@@ -26,16 +28,17 @@
+   },
+   "tool": "Icarus Verilog version 12.0 (stable) ()",
+   "logs": {
++    "keccak_u2_equivalence": "e9901c2b400950e07e867b9a33ff207eca62f53698d289fc79c44b530c706fe8",
+     "endpoint_68": "b1afc0c01497d715df7a17a32252d26e567baab4fba663a207b5f8a6f5d7f391",
+     "fors_roots": "c5d475f674c47e459c418745ca0fcd2ca96e1495473406fab15dc72d81c28dc0",
+     "slh64_sequencer": "fc60728bbed49686e78a338e82c71eb9a9a170d92c5bc7a5b378d35146c00cbb",
+-    "sponge": "470f3edf0c656d0afd484acc39b533b996afa32b28b52e42887a65dd91157bff",
+-    "recipe_0": "b388ccb53cd9ae12462c19ea05012bdf97e74795827300bbf7593ec77a3e3650",
+-    "recipe_1": "21e861edb130d210120ddd7582e8e8a554f5b9bbcae6a55e81093b802d397719",
+-    "recipe_2": "fd0c3f6c7ef18874d00c7008e37e0a889498a28266f7e1aef3b362fe797d6396",
+-    "chain_capture_0": "8939f8a618f2b93e158bf58623d6358a6a8dd070b1155390f417137aa2b7ba69",
+-    "chain_capture_1": "c2eb3ed81fad427b0f63dde411630fbec286efa14bc23e304aa9bc4044c636f5",
+-    "chain_capture_2": "6d11c6414d1b2f7e26ee73976e55b1ce6721740c9e2fa130ff50ff5f41df56b4",
+-    "recipe_padding": "28363cd2036afa67d31a47eb52f9126a21c9e939ffdce868ce3f5b53d5e3817d"
++    "sponge": "aa85cfce55d104b22ff9e2ae99f1982f0690d3fc38dd1f006a7e877829f4a7d4",
++    "recipe_0": "5cf974fd223f57dd66f23b5e78cafc23a45ee74345eabba8da2633b7c49fc6e2",
++    "recipe_1": "9755312a5e01185e39255c96c5fcb3e7b029f94dd28e4c35cb044d461c8832a8",
++    "recipe_2": "58f6bcc89770385cb25fb7f7309b0bf7699f2085571ecf9ad8f02d88c830ab15",
++    "chain_capture_0": "c4cb4388bc7aaf28506c54265e88296f1fd841d2aa4dd5b69f217af1989d6f58",
++    "chain_capture_1": "c4415c4e2fdb5d77d60e347e9aee32d1f5cadae2c6726a9d8cecc9bc153c3a7d",
++    "chain_capture_2": "847cf6652b3d3e3f3371e2c7f8a2f99f0a5b17fdf2efbc08fd50997c79491e5f",
++    "recipe_padding": "3fe911e7694a01f625c06e392f265eed0e87d693f683f28fd0433b0038fa8362"
+   }
+ }
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/sponge.log b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/sponge.log
+index b35b560..ee412dd 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/sponge.log
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/macro_hash/sponge.log
+@@ -1,7 +1,7 @@
+-rtl/hash_lane/mhbs_compact_shake_context_lane.sv:191: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+-rtl/hash_lane/mhbs_compact_shake_context_lane.sv:191: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+-rtl/hash_lane/mhbs_compact_shake_context_lane.sv:191: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+-rtl/hash_lane/mhbs_compact_shake_context_lane.sv:191: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+-rtl/hash_lane/mhbs_compact_shake_context_lane.sv:191: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv:78: sorry: constant selects in always_* processes are not currently supported (all bits will be included).
+ COMPACT_SHAKE_CONTEXT_LANE_PASS
+ tb/unit/tb_mhbs_compact_shake_context_lane.sv:191: $finish called at 3126000 (1ps)
+diff --git a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/results.json b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/results.json
+index 5691218..6bab0e2 100644
+--- a/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/results.json
++++ b/manifests/experiments/unified_hbs_v4.2/external_job_message/unit/results.json
+@@ -1,13 +1,13 @@
+ {
+   "passed": true,
+   "rtl_sha256": {
+-    "rtl/hash_lane/mhbs_keccak.sv": "c940e1102cccfd510d541280c9870ad96d56d194293d7afb307d37f687b1c117",
+-    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "4977a1669e1030ce29bbb24bd825b1a1ed38617116dbdc11f351006083f2b955",
+-    "rtl/hash_lane/mhbs_recipe_lane.sv": "7ce6078cef5b52d68911929e7f72f572fc7dc396f9d4318bdd741c3eeb7d7643",
++    "rtl/hash_lane/mhbs_keccak.sv": "8a15b90f310047b16346d794b01fc922d2e5d090880ba73b866dbc23a6f2611f",
++    "rtl/hash_lane/mhbs_compact_shake_context_lane.sv": "439a940709b4a758877cef65406044d823786fbf3378457bb1c9731bfe1ea8f8",
++    "rtl/hash_lane/mhbs_recipe_lane.sv": "1290d20094e605ba2249c1de24002ac434b174af306df163e78f5f6e9919215b",
+     "rtl/memory/mhbs_value_store.sv": "5131a2d8140651816340d7eac967ed79527d3e7b1e398a847cba782691376991",
+     "rtl/memory/mhbs_root_store.sv": "cfe34c4be68d91329b1f02da3084f3ba49170f001c39a77b2d2b197f5ff7a46a",
+     "rtl/sequencer/mhbs_program_sequencer.sv": "14f50e857ba8cd10df714de250f3cfd8fdabf4ba869210f0a3e5d3ef6fda2db5",
+-    "rtl/top/mhbs_hbs.sv": "e858e83b3eb39d195d0c4e80fd74314fb36d0c5b8745c06c76b3cfcfa9fc50a0",
++    "rtl/top/mhbs_hbs.sv": "b8429d71f8d024cf59a490d091292cc9cfa8b79cc89865ef814b8e0acc698ad7",
+     "rtl/top/mhbs_top.sv": "7767112e9d8651ca31e5e6b8e43022474a5d5cd494edc48baa2b33eb27feb3c2"
+   },
+   "boot_sources": {
+@@ -17,19 +17,20 @@
+   },
+   "logs": {
+     "boot_compile.log": "ad85ec765ce2174610092086aa18f1825939aadb53e1c259001222cbbc8ab9fe",
+-    "existing_units.log": "4667a8952b6ed88a39684ed1a2be52248b296d986a9cbc737fb83a3026bdfcfd",
++    "existing_units.log": "3ff17a6c32503163a5a72c398d11e8028971389ed2d1e5bcbd6672c8a8d31c36",
+     "boot.log": "31626547779950a0208f42b57890037b2e0d32fe87e68de5eda210799886d8f0",
+-    "macro_hash/recipe_1.log": "21e861edb130d210120ddd7582e8e8a554f5b9bbcae6a55e81093b802d397719",
+-    "macro_hash/recipe_0.log": "b388ccb53cd9ae12462c19ea05012bdf97e74795827300bbf7593ec77a3e3650",
+-    "macro_hash/chain_capture_0.log": "8939f8a618f2b93e158bf58623d6358a6a8dd070b1155390f417137aa2b7ba69",
++    "macro_hash/recipe_1.log": "9755312a5e01185e39255c96c5fcb3e7b029f94dd28e4c35cb044d461c8832a8",
++    "macro_hash/recipe_0.log": "5cf974fd223f57dd66f23b5e78cafc23a45ee74345eabba8da2633b7c49fc6e2",
++    "macro_hash/chain_capture_0.log": "c4cb4388bc7aaf28506c54265e88296f1fd841d2aa4dd5b69f217af1989d6f58",
+     "macro_hash/fors_roots.log": "c5d475f674c47e459c418745ca0fcd2ca96e1495473406fab15dc72d81c28dc0",
+     "macro_hash/slh64_sequencer.log": "fc60728bbed49686e78a338e82c71eb9a9a170d92c5bc7a5b378d35146c00cbb",
+-    "macro_hash/chain_capture_1.log": "c2eb3ed81fad427b0f63dde411630fbec286efa14bc23e304aa9bc4044c636f5",
+-    "macro_hash/chain_capture_2.log": "6d11c6414d1b2f7e26ee73976e55b1ce6721740c9e2fa130ff50ff5f41df56b4",
++    "macro_hash/chain_capture_1.log": "c4415c4e2fdb5d77d60e347e9aee32d1f5cadae2c6726a9d8cecc9bc153c3a7d",
++    "macro_hash/chain_capture_2.log": "847cf6652b3d3e3f3371e2c7f8a2f99f0a5b17fdf2efbc08fd50997c79491e5f",
+     "macro_hash/endpoint_68.log": "b1afc0c01497d715df7a17a32252d26e567baab4fba663a207b5f8a6f5d7f391",
+-    "macro_hash/sponge.log": "470f3edf0c656d0afd484acc39b533b996afa32b28b52e42887a65dd91157bff",
+-    "macro_hash/recipe_2.log": "fd0c3f6c7ef18874d00c7008e37e0a889498a28266f7e1aef3b362fe797d6396",
+-    "macro_hash/recipe_padding.log": "28363cd2036afa67d31a47eb52f9126a21c9e939ffdce868ce3f5b53d5e3817d"
++    "macro_hash/sponge.log": "aa85cfce55d104b22ff9e2ae99f1982f0690d3fc38dd1f006a7e877829f4a7d4",
++    "macro_hash/keccak_u2_equivalence.log": "e9901c2b400950e07e867b9a33ff207eca62f53698d289fc79c44b530c706fe8",
++    "macro_hash/recipe_2.log": "58f6bcc89770385cb25fb7f7309b0bf7699f2085571ecf9ad8f02d88c830ab15",
++    "macro_hash/recipe_padding.log": "3fe911e7694a01f625c06e392f265eed0e87d693f683f28fd0433b0038fa8362"
+   },
+-  "macro_hash_gate_sha256": "5649f77ecdb30dd5ed0eded30b0ce8ca886b091d394c2abec9d2231105cdecc3"
++  "macro_hash_gate_sha256": "0d966b5d3978d8714c2a204be21ec0a8703b3ac279b85ea810fbf6769172bbf9"
+ }
+diff --git a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+index 11c1b1d..88e60fa 100644
+--- a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++++ b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+@@ -2,7 +2,7 @@
+ `default_nettype none
+ 
+ // Signer-specialized SHAKE lane: one sponge/permutation state and a compact
+-// statically sized chain template.  The two top-level instances remain identical.
++// statically sized chain template and a fixed two-round datapath.
+ module mhbs_compact_shake_context_lane #(
+     parameter integer UNROLL = 2, N = 16, DIGEST_BYTES = 34,
+     parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
+@@ -62,131 +62,18 @@ module mhbs_compact_shake_context_lane #(
+     logic [3:0] chain_counter;
+     logic [4:0] chain_iteration;
+     logic [N*8-1:0] captured_value;
+-    logic [4:0] round_index;
+-    wire [1599:0] round_state [0:UNROLL];
+-    wire [1599:0] advanced_state = round_state[UNROLL];
++    logic [3:0] pair_index;
++    wire [4:0] round_index={pair_index,1'b0}; // Simulation observer compatibility.
++    wire last_pair=pair_index==4'd11;
++    wire [1599:0] advanced_state;
+     logic [1599:0] next_chain_state;
+     wire [3:0] counter_next = chain_counter + 1'b1;
+     wire [3:0] transition_counter =
+         saved_chain_prefix && chain_iteration == 1
+             ? chain_counter : counter_next;
+-    genvar round_step;
+-
+-    function automatic [63:0] rotl64;
+-        input [63:0] value;
+-        input integer amount;
+-        begin
+-            rotl64 = amount == 0 ? value
+-                : (value << amount) | (value >> (64-amount));
+-        end
+-    endfunction
+-
+-    function automatic integer rho_offset;
+-        input integer x;
+-        input integer y;
+-        begin
+-            case (x + 5*y)
+-                 0: rho_offset =  0;  1: rho_offset =  1;
+-                 2: rho_offset = 62;  3: rho_offset = 28;
+-                 4: rho_offset = 27;  5: rho_offset = 36;
+-                 6: rho_offset = 44;  7: rho_offset =  6;
+-                 8: rho_offset = 55;  9: rho_offset = 20;
+-                10: rho_offset =  3; 11: rho_offset = 10;
+-                12: rho_offset = 43; 13: rho_offset = 25;
+-                14: rho_offset = 39; 15: rho_offset = 41;
+-                16: rho_offset = 45; 17: rho_offset = 15;
+-                18: rho_offset = 21; 19: rho_offset =  8;
+-                20: rho_offset = 18; 21: rho_offset =  2;
+-                22: rho_offset = 61; 23: rho_offset = 56;
+-                24: rho_offset = 14;
+-                default: rho_offset = 0;
+-            endcase
+-        end
+-    endfunction
+-
+-    function automatic [63:0] round_constant;
+-        input [4:0] index;
+-        begin
+-            case (index)
+-                 0: round_constant = 64'h0000000000000001;
+-                 1: round_constant = 64'h0000000000008082;
+-                 2: round_constant = 64'h800000000000808a;
+-                 3: round_constant = 64'h8000000080008000;
+-                 4: round_constant = 64'h000000000000808b;
+-                 5: round_constant = 64'h0000000080000001;
+-                 6: round_constant = 64'h8000000080008081;
+-                 7: round_constant = 64'h8000000000008009;
+-                 8: round_constant = 64'h000000000000008a;
+-                 9: round_constant = 64'h0000000000000088;
+-                10: round_constant = 64'h0000000080008009;
+-                11: round_constant = 64'h000000008000000a;
+-                12: round_constant = 64'h000000008000808b;
+-                13: round_constant = 64'h800000000000008b;
+-                14: round_constant = 64'h8000000000008089;
+-                15: round_constant = 64'h8000000000008003;
+-                16: round_constant = 64'h8000000000008002;
+-                17: round_constant = 64'h8000000000000080;
+-                18: round_constant = 64'h000000000000800a;
+-                19: round_constant = 64'h800000008000000a;
+-                20: round_constant = 64'h8000000080008081;
+-                21: round_constant = 64'h8000000000008080;
+-                22: round_constant = 64'h0000000080000001;
+-                23: round_constant = 64'h8000000080008008;
+-                default: round_constant = 64'h0;
+-            endcase
+-        end
+-    endfunction
+-
+-    function automatic [1599:0] keccak_round;
+-        input [1599:0] input_state;
+-        input [4:0] index;
+-        reg [63:0] a [0:24];
+-        reg [63:0] b [0:24];
+-        reg [63:0] c [0:4];
+-        reg [63:0] d [0:4];
+-        reg [1599:0] result;
+-        integer x;
+-        integer y;
+-        integer destination;
+-        begin
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = input_state[64*(x+5*y) +: 64];
+-            for (x = 0; x < 5; x = x + 1)
+-                c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
+-            for (x = 0; x < 5; x = x + 1)
+-                d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = a[x+5*y] ^ d[x];
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1) begin
+-                    destination = y + 5*((2*x+3*y)%5);
+-                    b[destination] = rotl64(a[x+5*y], rho_offset(x,y));
+-                end
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = b[x+5*y]
+-                        ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y]);
+-            a[0] = a[0] ^ round_constant(index);
+-            result = '0;
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    result[64*(x+5*y) +: 64] = a[x+5*y];
+-            keccak_round = result;
+-        end
+-    endfunction
+-
+-    assign round_state[0] = sponge_state;
+-    generate for (round_step = 0; round_step < UNROLL;
+-                  round_step = round_step + 1) begin : generated_rounds
+-        localparam logic [4:0] ROUND_OFFSET = round_step;
+-        (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
+-            .state_in(round_state[round_step]),
+-            .round_index(round_index + ROUND_OFFSET),
+-            .state_out(round_state[round_step+1])
+-        );
+-    end endgenerate
++    mhbs_keccak_u2 round_pair (
++        .state_in(sponge_state),.pair_index,.state_out(advanced_state)
++    );
+ 
+     always_comb begin
+         next_chain_state='0;
+@@ -241,15 +128,15 @@ module mhbs_compact_shake_context_lane #(
+         || (lane_state == WAIT_BLOCK && first_block && append_index == 0);
+     assign response_digest = sponge_state[DIGEST_BYTES*8-1:0];
+     assign finish_valid = lane_state == RUN
+-        && round_index + UNROLL >= 24
++        && last_pair
+         && (!saved_chain_enable || chains_remaining <= 1)
+         && running_last;
+     assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+     assign capture_digest = captured_value;
+ 
+     initial begin
+-        if (UNROLL < 1 || UNROLL > 24 || (24 % UNROLL) != 0)
+-            $error("compact SHAKE lane UNROLL must divide 24");
++        if (UNROLL != 2)
++            $error("Production sponge requires U2");
+     end
+ 
+     // Mutually exclusive word updates expose one data mux instead of a
+@@ -258,7 +145,7 @@ module mhbs_compact_shake_context_lane #(
+         || (lane_state==WAIT_BLOCK && fast_block_valid && fast_block_ready);
+     wire take_stream=lane_state==WAIT_BLOCK && !take_fast && block_valid;
+     wire clear_stream=take_stream && first_block && append_index==0;
+-    wire take_feedback=lane_state==RUN && round_index+UNROLL>=24
++    wire take_feedback=lane_state==RUN && last_pair
+         && saved_chain_enable && chains_remaining>1;
+     assign chain_feedback_valid=REUSE_FAST_FEEDBACK && take_feedback;
+     assign chain_feedback_counter=transition_counter;
+@@ -321,7 +208,7 @@ module mhbs_compact_shake_context_lane #(
+             chains_remaining <= '0;
+             chain_counter <= '0;
+             chain_iteration <= '0;
+-            round_index <= '0;
++            pair_index <= '0;
+             response_valid <= 1'b0;
+             capture_valid <= 1'b0;
+             error <= 1'b0;
+@@ -348,7 +235,7 @@ module mhbs_compact_shake_context_lane #(
+                             ? chain_count : 5'd1;
+                         chain_counter <= 0;
+                         chain_iteration <= 1;
+-                        round_index <= 0;
++                        pair_index <= 0;
+                         lane_state <= RUN;
+                     end else
+                         lane_state <= WAIT_BLOCK;
+@@ -363,7 +250,7 @@ module mhbs_compact_shake_context_lane #(
+                         ? saved_chain_count : 5'd1;
+                     chain_counter <= 0;
+                     chain_iteration <= 1;
+-                    round_index <= 0;
++                    pair_index <= 0;
+                     lane_state <= RUN;
+                 end else if (block_valid) begin
+                     if(STREAM_CHAIN_ENABLE && saved_chain_enable) begin
+@@ -385,7 +272,7 @@ module mhbs_compact_shake_context_lane #(
+                                 ? saved_chain_count : 5'd1;
+                             chain_counter <= 0;
+                             chain_iteration <= 1;
+-                            round_index <= 0;
++                            pair_index <= 0;
+                             lane_state <= RUN;
+                         end
+                     end else begin
+@@ -393,7 +280,7 @@ module mhbs_compact_shake_context_lane #(
+                     end
+                 end
+                 RUN: begin
+-                    if (round_index + UNROLL >= 24) begin
++                    if (last_pair) begin
+                         if (saved_capture_enable
+                             && saved_capture_after == chain_iteration)
+                             captured_value <= advanced_state[N*8-1:0];
+@@ -405,7 +292,7 @@ module mhbs_compact_shake_context_lane #(
+                                      && chain_iteration == 1))
+                                 chain_counter <= chain_counter + 1'b1;
+                             chain_iteration <= chain_iteration + 1'b1;
+-                            round_index <= 0;
++                            pair_index <= 0;
+                         end else begin
+                             if (running_last) begin
+                                 response_valid <= 1'b1;
+@@ -417,7 +304,7 @@ module mhbs_compact_shake_context_lane #(
+                             end
+                         end
+                     end else begin
+-                        round_index <= round_index + UNROLL;
++                        pair_index <= pair_index + 1'b1;
+                     end
+                 end
+                 default: lane_state <= IDLE;
+diff --git a/rtl/hash_lane/mhbs_keccak.sv b/rtl/hash_lane/mhbs_keccak.sv
+index 6ec696c..51c4211 100644
+--- a/rtl/hash_lane/mhbs_keccak.sv
++++ b/rtl/hash_lane/mhbs_keccak.sv
+@@ -3,9 +3,9 @@
+ 
+ // Structurally explicit Keccak-f[1600] round used to compare Vivado mapping
+ // against the function-inlined implementation.
+-module mhbs_keccak (
++module mhbs_keccak_round (
+     input  wire [1599:0] state_in,
+-    input  wire [4:0]    round_index,
++    input  wire [63:0]   rc,
+     output wire [1599:0] state_out
+ );
+     wire [63:0] a [0:24];
+@@ -13,7 +13,6 @@ module mhbs_keccak (
+     wire [63:0] d [0:4];
+     wire [63:0] theta [0:24];
+     wire [63:0] b [0:24];
+-    wire [63:0] rc;
+     genvar x, y;
+ 
+     function automatic [63:0] rotl64;
+@@ -43,6 +42,32 @@ module mhbs_keccak (
+         end
+     endfunction
+ 
++    generate
++        for (y=0; y<5; y=y+1) begin : map_y
++            for (x=0; x<5; x=x+1) begin : map_x
++                localparam integer I = x + 5*y;
++                localparam integer DEST = y + 5*((2*x + 3*y) % 5);
++                assign a[I] = state_in[64*I +: 64];
++                assign theta[I] = a[I] ^ d[x];
++                assign b[DEST] = rotl64(theta[I], rho_offset(I));
++                assign state_out[64*I +: 64] = b[I]
++                    ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y])
++                    ^ (I == 0 ? rc : 64'd0);
++            end
++        end
++        for (x=0; x<5; x=x+1) begin : columns
++            assign c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
++            assign d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
++        end
++    endgenerate
++endmodule
++
++
++module mhbs_keccak (
++    input wire [1599:0] state_in,
++    input wire [4:0] round_index,
++    output wire [1599:0] state_out
++);
+     function automatic [63:0] round_constant;
+         input [4:0] index;
+         begin
+@@ -76,25 +101,37 @@ module mhbs_keccak (
+         end
+     endfunction
+ 
+-    assign rc = round_constant(round_index);
+-    generate
+-        for (y=0; y<5; y=y+1) begin : map_y
+-            for (x=0; x<5; x=x+1) begin : map_x
+-                localparam integer I = x + 5*y;
+-                localparam integer DEST = y + 5*((2*x + 3*y) % 5);
+-                assign a[I] = state_in[64*I +: 64];
+-                assign theta[I] = a[I] ^ d[x];
+-                assign b[DEST] = rotl64(theta[I], rho_offset(I));
+-                assign state_out[64*I +: 64] = b[I]
+-                    ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y])
+-                    ^ (I == 0 ? rc : 64'd0);
+-            end
+-        end
+-        for (x=0; x<5; x=x+1) begin : columns
+-            assign c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
+-            assign d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
+-        end
+-    endgenerate
++    mhbs_keccak_round round_logic(.state_in,.rc(round_constant(round_index)),.state_out);
++endmodule
++
++// Fixed U2 combinational datapath. Both rounds may be optimized together;
++// there is no register or preserved hierarchy between them.
++module mhbs_keccak_u2 (
++    input wire [1599:0] state_in,
++    input wire [3:0] pair_index,
++    output wire [1599:0] state_out
++);
++    logic [127:0] constants;
++    wire [1599:0] middle;
++    always_comb begin
++        case(pair_index)
++            4'd0: constants=128'h00000000000080820000000000000001;
++            4'd1: constants=128'h8000000080008000800000000000808a;
++            4'd2: constants=128'h0000000080000001000000000000808b;
++            4'd3: constants=128'h80000000000080098000000080008081;
++            4'd4: constants=128'h0000000000000088000000000000008a;
++            4'd5: constants=128'h000000008000000a0000000080008009;
++            4'd6: constants=128'h800000000000008b000000008000808b;
++            4'd7: constants=128'h80000000000080038000000000008089;
++            4'd8: constants=128'h80000000000000808000000000008002;
++            4'd9: constants=128'h800000008000000a000000000000800a;
++            4'd10: constants=128'h80000000000080808000000080008081;
++            4'd11: constants=128'h80000000800080080000000080000001;
++            default: constants=128'd0;
++        endcase
++    end
++    mhbs_keccak_round even_round(.state_in,.rc(constants[63:0]),.state_out(middle));
++    mhbs_keccak_round odd_round(.state_in(middle),.rc(constants[127:64]),.state_out);
+ endmodule
+ 
+ `default_nettype wire
+diff --git a/rtl/hash_lane/mhbs_recipe_lane.sv b/rtl/hash_lane/mhbs_recipe_lane.sv
+index 624b11b..3c83a67 100644
+--- a/rtl/hash_lane/mhbs_recipe_lane.sv
++++ b/rtl/hash_lane/mhbs_recipe_lane.sv
+@@ -417,7 +417,7 @@ module mhbs_recipe_lane #(
+             default:live_chain_prefix[511:0]={address,public_seed};
+         endcase
+     end
+-    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
++    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(0)) sponge (
+         .clk, .rst, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
+         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
+         .fast_block_data(fast_block), .chain_enable(compact_chain),
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+index bced6d8..de38ba7 100644
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -161,38 +161,53 @@ module mhbs_hbs #(
+         .read0(endpoint_read0), .read1(endpoint_read1),
+         .value0(endpoint_value0), .value1(endpoint_value1)
+     );
+-    generate begin: g_roots
+     mhbs_root_store roots (
+         .clk, .write(state==ROUTE && macro_route!=0 && route_descriptor[53]),
+         .address(group_index), .data(route_value[W-1:0]),
+         .read0(root_read0[5:0]), .read1(root_read1[5:0]), .value0(root_value0), .value1(root_value1)
+     );
+-    end endgenerate
+-    genvar physical;
+-    generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
+-        localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
++    localparam integer L0=SWAP_PHYSICAL_LANES ? 1 : 0;
++    localparam integer L1=SWAP_PHYSICAL_LANES ? 0 : 1;
+         mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+-            .RECIPE_MASK(L==0 ? 16'h101e : 16'h0006),
+-            .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+-            .clk,.rst(execution_rst),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L]),
+-            .request_ready(lane_ready[L]), .request_recipe(task_recipe), .request_step_recipe(task_step),
+-            .request_chain(task_chain), .request_steps(task_steps[L]),
+-            .request_capture_after(task_capture_after[L]),
+-            .request_capture(task_capture[L]),
++            .RECIPE_MASK(L0==0 ? 16'h101e : 16'h0006),
++            .PROFILE_ENABLE(PROFILE_ENABLE)) lane0 (
++            .clk,.rst(execution_rst),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L0]),
++            .request_ready(lane_ready[L0]), .request_recipe(task_recipe), .request_step_recipe(task_step),
++            .request_chain(task_chain), .request_steps(task_steps[L0]),
++            .request_capture_after(task_capture_after[L0]),
++            .request_capture(task_capture[L0]),
+             .secret_seed,.secret_prf,.public_seed,.root(value[3][W-1:0]),
+             .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
+             .identifier(128'd0),.message_buffer,.message_length,
+-            .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
+-            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(task_left[L]),.request_right(task_right[L]),
+-            .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
++            .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L0]),
++            .request_a(task_a[L0]),.request_b(task_b[L0]),.request_left(task_left[L0]),.request_right(task_right[L0]),
++            .list_index0(lane_list0[L0]),.list_index1(lane_list1[L0]),
+             .list_data0(list_roots ? root_value0 : endpoint_value0),
+             .list_data1(list_roots ? root_value1 : endpoint_value1),
+-            .response_valid(lane_valid[L]),.response_ready(state==HASH_WAIT && response_pending[L]),
+-            .response_value(lane_value[L]),.response_capture(lane_capture[L]),.error(lane_error[L]),
+-            .hash_count(lane_hashes[L]),.permutation_count(lane_permutations[L])
++            .response_valid(lane_valid[L0]),.response_ready(state==HASH_WAIT && response_pending[L0]),
++            .response_value(lane_value[L0]),.response_capture(lane_capture[L0]),.error(lane_error[L0]),
++            .hash_count(lane_hashes[L0]),.permutation_count(lane_permutations[L0])
++        );
++        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
++            .RECIPE_MASK(L1==0 ? 16'h101e : 16'h0006),
++            .PROFILE_ENABLE(PROFILE_ENABLE)) lane1 (
++            .clk,.rst(execution_rst),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L1]),
++            .request_ready(lane_ready[L1]), .request_recipe(task_recipe), .request_step_recipe(task_step),
++            .request_chain(task_chain), .request_steps(task_steps[L1]),
++            .request_capture_after(task_capture_after[L1]),
++            .request_capture(task_capture[L1]),
++            .secret_seed,.secret_prf,.public_seed,.root(value[3][W-1:0]),
++            .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
++            .identifier(128'd0),.message_buffer,.message_length,
++            .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L1]),
++            .request_a(task_a[L1]),.request_b(task_b[L1]),.request_left(task_left[L1]),.request_right(task_right[L1]),
++            .list_index0(lane_list0[L1]),.list_index1(lane_list1[L1]),
++            .list_data0(list_roots ? root_value0 : endpoint_value0),
++            .list_data1(list_roots ? root_value1 : endpoint_value1),
++            .response_valid(lane_valid[L1]),.response_ready(state==HASH_WAIT && response_pending[L1]),
++            .response_value(lane_value[L1]),.response_capture(lane_capture[L1]),.error(lane_error[L1]),
++            .hash_count(lane_hashes[L1]),.permutation_count(lane_permutations[L1])
+         );
+-    end
+-    endgenerate
+     initial if(LANES!=2 || UNROLL!=2) $error("Production core requires K2U2");
+ 
+     logic [255:0] emit_value;
+diff --git a/scripts/v42_external_synth.py b/scripts/v42_external_synth.py
+index 3c20f2f..40cfb53 100644
+--- a/scripts/v42_external_synth.py
++++ b/scripts/v42_external_synth.py
+@@ -1,11 +1,15 @@
+ #!/usr/bin/env python3
+ """Synthesize one generic body and six parameter shells from a sealed snapshot."""
+-import json,re,shutil,subprocess,sys,tarfile,time
++import argparse,json,re,shutil,subprocess,sys,tarfile,time
+ from pathlib import Path
+ from v42_external_flow import ROOT,BASE,BUILD,NAMES,PARAMS,capture,sha,write,tool_version
+ from v42_common_partition import partition
++parser=argparse.ArgumentParser(description=__doc__)
++parser.add_argument('tag')
++parser.add_argument('--max-core-slices',type=float)
++args=parser.parse_args()
+ vivado_version=tool_version('vivado','-version')
+-f=capture(sys.argv[1]);inp=json.loads((f/'inputs.json').read_text())
++f=capture(args.tag);inp=json.loads((f/'inputs.json').read_text())
+ workspace=f/'synth_source';workspace.mkdir(exist_ok=False)
+ with tarfile.open(f/'source_snapshot.tar.gz') as t:t.extractall(workspace,filter='data')
+ for p,h in inp['source_sha256'].items():assert sha(workspace/p)==h
+@@ -24,8 +28,10 @@ for n in NAMES:
+    shell=re.sub(r'(parameter '+kind.upper()+r'_INIT_FILE=)"[^"]+"',lambda m:m[1]+f'"experiments/v4.2/external_job_message/{kind}_construction.mem"',shell)
+   (out/(n+'_'+op+'_shell.sv')).write_text(shell)
+ cmd=['vivado','-mode','batch','-nolog','-nojournal','-source','experiments/v4.2/external_job_message/synth.tcl','-tclargs',f.name]
++if args.max_core_slices is not None:cmd.append(str(args.max_core_slices))
+ start=time.time();write(f/'synth_invocation.json',dict(command=cmd,started=start,driver_sha256=sha(Path(__file__)),profile_enable=False,statistics_ports='constant_zero',tool_versions={'vivado':vivado_version}))
+ with (f/'synth.log').open('w') as log:subprocess.run(cmd,cwd=workspace,stdout=log,stderr=subprocess.STDOUT,check=True)
+ shutil.copytree(out,f/'synthesis')
+ write(f/'synth_elapsed.json',dict(seconds=time.time()-start))
+-print('EXTERNAL_SYNTH_PASS',f.name)
++gate=json.loads((f/'synthesis/area_gate.json').read_text()) if (f/'synthesis/area_gate.json').exists() else None
++print('EXTERNAL_SYNTH_AREA_REJECT' if gate and not gate['eligible'] else 'EXTERNAL_SYNTH_PASS',f.name)
+diff --git a/scripts/verify_v42_pruning.py b/scripts/verify_v42_pruning.py
+index dfab019..c97a919 100644
+--- a/scripts/verify_v42_pruning.py
++++ b/scripts/verify_v42_pruning.py
+@@ -7,7 +7,7 @@ import json
+ from v42_external_flow import BASE, NAMES, build_binary, capture, identity, run, sha, simulate_case, write
+ 
+ 
+-def verify(tag, baseline='current_complete_20260927_v2'):
++def verify(tag, baseline='prune_k2u2_20260927_v1'):
+     folder = capture(tag)
+     normal = json.loads((folder / 'simulation.json').read_text())
+     old_file = BASE / 'candidates' / baseline / 'simulation.json'
+@@ -72,6 +72,6 @@ def verify(tag, baseline='current_complete_20260927_v2'):
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('tag')
+-    parser.add_argument('--baseline', default='current_complete_20260927_v2')
++    parser.add_argument('--baseline', default='prune_k2u2_20260927_v1')
+     args = parser.parse_args()
+     verify(args.tag, args.baseline)
+diff --git a/scripts/verify_v42_units.py b/scripts/verify_v42_units.py
+index 2ea0d9e..398b41d 100644
+--- a/scripts/verify_v42_units.py
++++ b/scripts/verify_v42_units.py
+@@ -30,6 +30,9 @@ def one(name,top,files,params=(),runs=((),)):
+     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
+     print('SLH_UNIT_PASS',name,flush=True)
+ 
++one('keccak_u2_equivalence','tb_mhbs_keccak_u2',
++    ['rtl/hash_lane/mhbs_keccak.sv','tb/reference/mhbs_keccak_baseline.sv',
++     'tb/unit/tb_mhbs_keccak_u2.sv'])
+ one('endpoint_68','tb_mhbs_value_store',
+     ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
+     ['-Ptb_mhbs_value_store.DEPTH=68'])
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+index 40aa6d8..c7b4520 100644
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -36,18 +36,24 @@ module tb_mhbs_external;
+  wire [31:0] measured_permutations=observed_permutations[0]+observed_permutations[1];
+  wire [31:0] measured_keygen=OPERATION ? 0 : observed_cycles;
+  wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
+- genvar lane;
+- generate for(lane=0;lane<2;lane=lane+1)begin: observers
+   always @(posedge clk)begin
+-   if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
+-   else if(`HBS_CORE.lanes[lane].lane.sponge.lane_state==2 &&
+-           `HBS_CORE.lanes[lane].lane.sponge.round_index+2>=24)begin
+-    observed_permutations[lane]=observed_permutations[lane]+1;
+-    if(`HBS_CORE.lanes[lane].lane.sponge.running_last)
+-     observed_hashes[lane]=observed_hashes[lane]+1;
++   if(`HBS_CORE.execution_rst)begin observed_hashes[0]=0;observed_permutations[0]=0;end
++   else if(`HBS_CORE.lane0.sponge.lane_state==2 &&
++           `HBS_CORE.lane0.sponge.round_index+2>=24)begin
++    observed_permutations[0]=observed_permutations[0]+1;
++    if(`HBS_CORE.lane0.sponge.running_last)
++     observed_hashes[0]=observed_hashes[0]+1;
++   end
++  end
++  always @(posedge clk)begin
++   if(`HBS_CORE.execution_rst)begin observed_hashes[1]=0;observed_permutations[1]=0;end
++   else if(`HBS_CORE.lane1.sponge.lane_state==2 &&
++           `HBS_CORE.lane1.sponge.round_index+2>=24)begin
++    observed_permutations[1]=observed_permutations[1]+1;
++    if(`HBS_CORE.lane1.sponge.running_last)
++     observed_hashes[1]=observed_hashes[1]+1;
+    end
+   end
+- end endgenerate
+  always @(posedge clk)begin
+   if(rst)observed_boot=0;
+   else if(`HBS_CORE.rst)observed_boot=observed_boot+1;
+@@ -118,7 +124,7 @@ module tb_mhbs_external;
+   if(fault)begin
+    if(fault==2)while(cursor<metadata[4])tick();
+    while(!(`HBS_CORE.lane_valid[0] && `HBS_CORE.response_pending[0]))tick();
+-   force `HBS_CORE.lanes[0].lane.error=1;
++   force `HBS_CORE.lane0.error=1;
+    while(!error)tick();
+    repeat(40)begin tick();if(out_valid || busy || done)$fatal(1,"fault halt");end
+    $display("V42_FAULT_PASS mode=%0d prefix=%0d",fault,cursor);$finish;
+diff --git a/tb/integration/tb_mhbs_v42.sv b/tb/integration/tb_mhbs_v42.sv
+index 6e26ce2..f044333 100644
+--- a/tb/integration/tb_mhbs_v42.sv
++++ b/tb/integration/tb_mhbs_v42.sv
+@@ -59,7 +59,7 @@ module tb_mhbs_v42;
+   if(fault)begin
+    if(fault==2)while(cursor<metadata[4])tick();
+    while(!(dut.processor.core.lane_valid[0] && dut.processor.core.response_pending[0]))tick();
+-   force dut.processor.core.lanes[0].lane.error=1;
++   force dut.processor.core.lane0.error=1;
+    while(!error)tick();
+    repeat(40)begin tick();if(out_valid || busy || done)$fatal(1,"fault halt");end
+    $display("V42_FAULT_PASS mode=%0d prefix=%0d",fault,cursor);$finish;

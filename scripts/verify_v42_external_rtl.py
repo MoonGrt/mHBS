@@ -6,7 +6,7 @@ from v42_external_flow import ROOT,BASE,BUILD,NAMES,identity,sha,write,simulate_
 sys.path.insert(0,str(ROOT))
 from model.slh64_external import ExternalImage,ExternalMachine
 from model.reference import slh_dsa
-from tests.test_unified_hbs import default_job
+from tests.slh_fixtures import default_job
 f=capture(sys.argv[1]);normal=json.loads((f/'simulation.json').read_text());assert normal['passed'] and normal['rtl_sha256']==identity()
 assert set(normal['cases'])=={n+'_'+o for n in NAMES for o in ('keygen','sign')},'run rtl-all-profiles first'
 

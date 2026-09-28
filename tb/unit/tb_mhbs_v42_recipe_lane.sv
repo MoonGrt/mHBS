@@ -4,8 +4,8 @@ module tb_mhbs_v42_recipe_lane;
     parameter [15:0] MASK=16'h101e;
     parameter integer CASES=7;
     localparam integer N=PROFILE==0 ? 16 : PROFILE==1 ? 24 : 32;
-    localparam integer M=PROFILE==0 ? 34 : PROFILE==1 ? 42 : PROFILE==2 ? 49 : 32;
-    localparam integer IB=PROFILE==3 || PROFILE==5 ? 8 : 7;
+    localparam integer M=PROFILE==0 ? 34 : PROFILE==1 ? 42 : 49;
+    localparam integer IB=7;
     wire [5:0] node_bytes=N;
     logic clk=0,rst=1,request_valid=0;
     wire request_ready,response_valid,error;
@@ -39,15 +39,12 @@ module tb_mhbs_v42_recipe_lane;
     task tick; begin @(posedge clk); #1; end endtask
     string vector_path;
     initial begin
+        if(PROFILE<0 || PROFILE>2) $fatal(1,"unsupported SLH profile");
         if($value$plusargs("VECTORS=%s",vector_path)) $readmemh(vector_path,vectors);
         else case(PROFILE)
             0: $readmemh("tb/vectors/mhbs_slh_128f_lane.mem",vectors);
             1: $readmemh("tb/vectors/mhbs_slh_192f_lane.mem",vectors);
             2: $readmemh("tb/vectors/mhbs_slh_256f_lane.mem",vectors);
-            3: $readmemh("tb/vectors/mhbs_xmss_omega2_lane.mem",vectors);
-            4: $readmemh("tb/vectors/mhbs_xmss_omega4_lane.mem",vectors);
-            5: $readmemh("tb/vectors/mhbs_lms_omega2_lane.mem",vectors);
-            6: $readmemh("tb/vectors/mhbs_lms_omega4_lane.mem",vectors);
         endcase
         for(i=0;i<N;i=i+1) begin
             secret_seed[i*8 +: 8]=i; secret_prf[i*8 +: 8]=32+i;

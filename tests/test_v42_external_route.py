@@ -47,7 +47,7 @@ class ExternalRouteTests(unittest.TestCase):
         lines = []
         for kind in ('program', 'template', 'descriptor'):
             data = [int(x, 16) for x in (images / (kind + '.mem')).read_text().split()]
-            bits = 4 if kind == 'template' else 5
+            bits = 4 if kind in ('program', 'template') else 5
             for port in range(2 if kind == 'descriptor' else 1):
                 for bit in range(64):
                     # Reverse address pin order to model a legal LUT pin permutation.

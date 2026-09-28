@@ -4,6 +4,12 @@
 
 在仓库根目录运行。已验证环境：Python 3.12、GNU Make、Icarus Verilog 12.0（iverilog/vvp）、Verilator 5.008、C++ 编译器。Python 模型仅使用标准库。仿真流程不调用 Vivado，也不要求 Vivado 安装或许可证；综合另外要求 Vivado（已有流程使用 2025.2）。工具须位于 PATH。
 
+## 快速精简检查
+
+`make smoke TAG=<新标签>` 从当前源码重新编译，执行 14 项契约测试、lint、六组模型/KAT、启动与 13 组核心单元、六组 Keygen/Sign RTL、三个参数集的正常 Verify RTL，并校验生产与 KU 封存证据。输出、计算周期和 Hash/置换次数须与 Program16 基线一致；源码快照逐文件校验。结果写入 `build/smoke_<标签>.json`。
+
+此入口不调用 Vivado，不等同于下方包含异常、停顿、复位及共同核提取的完整 `make verify`。
+
 ## 推荐入口
 
 ```bash
@@ -51,7 +57,7 @@ make rtl-profile-test TAG=probe_192f PROFILE=slh_192f OPERATION=sign
 ```bash
 make synth-common TAG=my_current
 make route-common TAG=my_current
-make report-v42
+make report-ku                 # 更新独立归档的 KU 汇总
 ```
 
 该步骤要求 Vivado，记录实际综合工具版本，完成共同核及六个外壳的 post-synth 资源、ROM 映射与结构指纹验收。`route-common` 对六个参数外壳分别布线，并检查核内 setup/hold/脉宽、布线完整性、时序覆盖及 ROM 内容，再封存结果。`freeze-common` 可单独封存已完成的布线结果。100 MHz 是初始布线目标，最终频率只覆盖 OOC 核内寄存器间路径，外部输入/输出路径排除。0 ns 输入假设下的端口 hold 违例单独保留；接口没有完成时序签核，需要系统级 I/O 约束。该频率不代表板级或整接口工作频率。
@@ -72,3 +78,7 @@ Vivado 的完整输出保存到候选目录的 `synth.log` 和各外壳 `route.l
 当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
 
 共享列表存储检查：两个集成 testbench 均启用 `mhbs_shared_store_check.svh`，从宏结果独立维护期望节点，检查实际列表读取、读前初始化、FORS 叶写入禁止，以及根压缩完成前不得覆盖为 WOTS 端点。检查同时覆盖 lane 交换、停顿、复位和 Verify 异常场景。
+
+## KU 独立归档
+
+`make report-ku` 从 `manifests/experiments/ku_sign_latest/` 生成最新报告；`make reproduce-ku` 验证全部归档文件和报告证据哈希。两个命令均无需 `build/` 和 Vivado。原始运行路径仅作为来源元数据保留。旧历史候选已清理，`make reproduce-v42` 仅检查当前生产 Program16 的封存证据。

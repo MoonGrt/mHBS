@@ -1,6 +1,6 @@
 # 外部节点 Verify
 
-当前版本为 `shared_list_store_20260927_v1`：**6310.750 等效 Slice**，65 项 Verify 检查与完整回归通过。FORS 根和 WOTS 端点共享存储，接口及周期不变。见 [最新合并报告](Shared_List_Store.md)。下文保留初始 Verify 版本基线记录。
+本文记录 Verify 节点接口及初始验证基线。当前生产版本采用 Program16；最新 K/U 实验资源与频率见 [KU Sign ATP 报告](KU_Sign_ATP_151_112_67_48.md)。
 
 当前实现支持 SLH-DSA SHAKE 128f、192f、256f 的 Verify。它复用原 sign 镜像、Keccak、配方 lane、端点/根存储及父节点 Hash，未增加标准签名字节流解析器或整签名缓存。
 
@@ -46,4 +46,4 @@ Vivado 2025.2，`xc7a200tffg1156-3`，共同核 OOC，`PROFILE_ENABLE=0`：
 
 BRAM/DSP 均为 0；实际综合网表的统计寄存器裁剪审计通过。代码复用不意味着面积零增长：新增节点输入、数据选择、控制与结果比较仍需硬件。本轮未布局布线，**没有新的频率测量**；原 104.166667 MHz 只属于旧基线。
 
-源码快照、完整日志、向量和结果在 [候选归档](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/verify_nodes_20260927_v1/result.json)。复测使用新标签运行 `make verify TAG=<标签>`，综合可使用 `python3 scripts/v42_external_synth.py <标签> --core-only`。
+源码快照、完整日志、向量和结果在 Git 历史中的 `verify_nodes_20260927_v1` 候选归档。复测使用新标签运行 `make verify TAG=<标签>`，综合可使用 `python3 scripts/v42_external_synth.py <标签> --core-only`。

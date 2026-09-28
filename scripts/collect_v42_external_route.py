@@ -28,7 +28,7 @@ def collect(tag):
         for path, digest in row['evidence_sha256'].items():
             assert sha(build / 'route' / name / path) == digest, (name, path)
     shutil.copytree(build / 'route', candidate / 'route', dirs_exist_ok=True)
-    for name in ('v42_external_route.py', 'collect_v42_external_route.py', 'report_v42_external_ppa.py', 'reproduce_v42_external_route.py', 'finalize_v42_external_core.py'):
+    for name in ('v42_external_route.py', 'collect_v42_external_route.py', 'reproduce_v42_external_route.py'):
         shutil.copy2(ROOT / 'scripts' / name, candidate / 'route' / name)
     # Keep the corrected implementation/recovery tools separate from the
     # immutable RTL synthesis snapshot and the original route attempt scripts.
