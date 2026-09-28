@@ -1,0 +1,180 @@
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -8,7 +8,7 @@
+ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+   └─ mhbs_hbs：宏操作调度、树归约、消息缓冲、结果输出
+       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
+-      ├─ mhbs_value_store / mhbs_root_store：链端点与 FORS 根
++      ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
+       └─ 两个 mhbs_recipe_lane：Hash 输入构造与局部链反馈
+           └─ mhbs_compact_shake_context_lane：SHAKE 状态与吸收控制
+               └─ mhbs_keccak：默认每拍展开两轮（U2）
+@@ -16,7 +16,7 @@
+ 
+ 五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；双 lane 并行位于宏操作内部。逻辑 lane 0 支持完整 recipe 集，逻辑 lane 1 主要执行链计算；`SWAP_PHYSICAL_LANES` 可交换物理位置，逻辑能力不变。
+ 
+-核使用 256 位节点存储，由 descriptor 中的 profile 编码选择有效的 16/24/32 字节。链端点存储深度为 68；树栈和认证路径各为 16 个节点。消息缓冲上限为 87 字节。
++核使用 256 位节点存储，由 descriptor 中的 profile 编码选择有效的 16/24/32 字节。FORS 根与 WOTS 链端点共享深度为 68 的存储；树栈和认证路径各为 16 个节点。消息缓冲上限为 87 字节。
+ 
+ ## 镜像与启动
+ 
+@@ -52,3 +52,5 @@
+ WOTS 按两个链一组输入，复用普通单次 Hash 请求执行 digit 到 14 的后缀链；digit=15 直接存端点。这样保持现有 compact chain 语义和 Hash lane 源码不变，Verify 每步有控制调度开销。所有节点长度与地址来自受信任镜像；签名字节流拆分位于外部。
+ 
+ 当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
++
++共享列表存储按阶段复用：FORS 根压缩完成后才允许 WOTS 端点覆盖。FORS 叶节点直接进入树计算，不写入共享列表；根按地址奇偶进入对应写端口，保留双链同时写入能力。生产层次不再实例化 mhbs_root_store，该源文件仅保留供兼容单元测试。
+--- a/docs/Verification.md
++++ b/docs/Verification.md
+@@ -70,3 +70,5 @@
+ 在模型、单元门禁完成并捕获新标签后执行 `python3 scripts/verify_v42_verify.py <标签>`。覆盖三个 f 参数集的有效签名、R/FORS/WOTS/认证节点篡改、错误消息和公钥根、输入停顿、复位重放、供应不足等待后复位、lane 交换、关闭统计、共同核提取及异常退出。软件参考 `verify_internal` 判定正反向向量；测试平台仅负责按 n 字节拆分外部节点。六组 Keygen/Sign 与旧基线逐字节一致，周期差必须精确符合节点输出减少的拍数（Sign 的 R 与 sequencer 重叠，扣除 min(n/8,3)−1；Keygen 不扣除）；Verify 周期不变。
+ 
+ 当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
++
++共享列表存储检查：两个集成 testbench 均启用 `mhbs_shared_store_check.svh`，从宏结果独立维护期望节点，检查实际列表读取、读前初始化、FORS 叶写入禁止，以及根压缩完成前不得覆盖为 WOTS 端点。检查同时覆盖 lane 交换、停顿、复位和 Verify 异常场景。
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -165,10 +165,10 @@
+     logic [INDEX_BITS-1:0] endpoint_address0, endpoint_address1, endpoint_read0, endpoint_read1;
+     logic [255:0] endpoint_data0, endpoint_data1;
+     wire [255:0] endpoint_value0, endpoint_value1;
+-    logic task_list_roots;
+-    wire list_roots = task_list_roots;
+-    wire [255:0] root_value0, root_value1;
+-    wire [INDEX_BITS-1:0] root_read0 = lane_list0[0], root_read1 = lane_list1[0];
++    // FORS roots are consumed before WOTS endpoint production begins.
++    // Reuse the same parity banks; root writes use the matching physical
++    // write port so the even/odd address invariants remain static.
++    wire root_write=state==ROUTE && macro_route!=0 && route_descriptor[53];
+     mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1)) endpoints (
+         .clk, .write0(endpoint_write0), .write1(endpoint_write1),
+         .address0(endpoint_address0), .address1(endpoint_address1),
+@@ -176,13 +176,6 @@
+         .read0(endpoint_read0), .read1(endpoint_read1),
+         .value0(endpoint_value0), .value1(endpoint_value1)
+     );
+-    generate begin: g_roots
+-    mhbs_root_store #(.SINGLE_READ(1)) roots (
+-        .clk, .write(state==ROUTE && macro_route!=0 && route_descriptor[53]),
+-        .address(group_index), .data(route_value[W-1:0]),
+-        .read0(root_read0[5:0]), .read1(root_read1[5:0]), .value0(root_value0), .value1(root_value1)
+-    );
+-    end endgenerate
+     genvar physical;
+     generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
+         localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
+@@ -200,8 +193,8 @@
+             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
+             .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(task_right[L]),
+             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
+-            .list_data0(list_roots ? root_value0 : endpoint_value0),
+-            .list_data1(list_roots ? root_value1 : endpoint_value1),
++            .list_data0(endpoint_value0),
++            .list_data1(endpoint_value1),
+             .response_valid(lane_valid[L]),.response_ready(state==HASH_WAIT && response_pending[L]),
+             .response_value(lane_value[L]),.response_capture(lane_capture[L]),.error(lane_error[L]),
+             .hash_count(lane_hashes[L]),.permutation_count(lane_permutations[L])
+@@ -291,7 +284,6 @@
+     task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
+         begin
+             task_recipe<=selected_recipe; active_mask<=mask;
+-            task_list_roots<=selected_recipe[59:56]==12 && selected_recipe[55:48]==4;
+             launch_pending<=mask; response_pending<=mask;
+             hash_return<=ret; enter_state(HASH_ISSUE);
+         end
+@@ -308,8 +300,14 @@
+         endpoint_address0=chain_cursor; endpoint_address1=chain_cursor+1'b1;
+         endpoint_data0=result[0][W-1:0]; endpoint_data1=result[1][W-1:0];
+         endpoint_read0=lane_list0[0]; endpoint_read1=lane_list1[0];
+-        if (state==CHAIN_STORE) begin
++        if (state==CHAIN_STORE && indexing!=1) begin
++            // FORS leaves go directly to the tree stack, not the list store.
+             endpoint_write0=active_mask[0]; endpoint_write1=active_mask[1];
++        end else if(root_write) begin
++            endpoint_address0={1'b0,group_index[5:1],1'b0};
++            endpoint_address1={1'b0,group_index[5:1],1'b1};
++            endpoint_data0=route_value[W-1:0]; endpoint_data1=route_value[W-1:0];
++            endpoint_write0=!group_index[0]; endpoint_write1=group_index[0];
+         end
+ 
+     end
+@@ -349,7 +347,7 @@
+             active_mask<=0; launch_pending<=0; response_pending<=0;
+             task_chain<=0; task_capture<=0;
+             hash_base<=0; permutation_base<=0; layer<=0;
+-            task_recipe<=0; task_step<=0; task_list_roots<=0; message_received<=0;
++            task_recipe<=0; task_step<=0; message_received<=0;
+             fors_pair_pending<=0;
+             for(i=0;i<2;i=i+1) begin
+                 task_steps[i]<=0; task_capture_after[i]<=0;
+--- a/tb/integration/mhbs_shared_store_check.svh
++++ b/tb/integration/mhbs_shared_store_check.svh
+@@ -0,0 +1,48 @@
++// Independent logical list scoreboard. Include inside either integration TB.
++// Derive expected nodes from completed macros, not the physical write ports.
++reg [255:0] shared_expected[0:67];
++reg [67:0] shared_initialized=0;
++reg shared_roots_live=0;
++wire shared_stream_read =
++ (`HBS_CORE.lanes[0].lane.state==2 && `HBS_CORE.lanes[0].lane.shapes[12] &&
++  `HBS_CORE.lanes[0].lane.position>=`HBS_CORE.lanes[0].lane.prefix_bytes &&
++  `HBS_CORE.lanes[0].lane.position<`HBS_CORE.lanes[0].lane.input_length) ||
++ (`HBS_CORE.lanes[1].lane.state==2 && `HBS_CORE.lanes[1].lane.shapes[12] &&
++  `HBS_CORE.lanes[1].lane.position>=`HBS_CORE.lanes[1].lane.prefix_bytes &&
++  `HBS_CORE.lanes[1].lane.position<`HBS_CORE.lanes[1].lane.input_length);
++always @(posedge clk) begin
++ if(`HBS_CORE.execution_rst) begin
++  shared_initialized=0; shared_roots_live=0;
++ end else begin
++  if(shared_stream_read) begin
++   if(`HBS_CORE.endpoint_read0>=68 || !shared_initialized[`HBS_CORE.endpoint_read0])
++    $fatal(1,"shared list read before write address=%0d",`HBS_CORE.endpoint_read0);
++   for(integer b=0;b<32;b=b+1) if(b<`HBS_CORE.node_bytes)
++    if(`HBS_CORE.endpoint_value0[b*8 +:8]!==shared_expected[`HBS_CORE.endpoint_read0][b*8 +:8])
++     $fatal(1,"shared list mismatch address=%0d byte=%0d",`HBS_CORE.endpoint_read0,b);
++  end
++  if(`HBS_CORE.state==25 && `HBS_CORE.macro_route!=0 && `HBS_CORE.route_descriptor[53]) begin
++   if(`HBS_CORE.group_index==0) shared_initialized=0;
++   shared_roots_live=1;
++   shared_expected[`HBS_CORE.group_index]=`HBS_CORE.route_value[255:0];
++   shared_initialized[`HBS_CORE.group_index]=1;
++  end
++  if(`HBS_CORE.state==8) begin
++   if(`HBS_CORE.indexing==1) begin
++    if(`HBS_CORE.endpoint_write0 || `HBS_CORE.endpoint_write1)
++     $fatal(1,"FORS leaf overwrites shared root storage");
++   end else begin
++    if(shared_roots_live) $fatal(1,"WOTS starts before FORS root compression completes");
++    if(`HBS_CORE.chain_cursor==0) shared_initialized=0;
++    for(integer i=0;i<2;i=i+1) if(`HBS_CORE.active_mask[i]) begin
++     shared_expected[`HBS_CORE.chain_cursor+i]=`HBS_CORE.result[i][255:0];
++     shared_initialized[`HBS_CORE.chain_cursor+i]=1;
++    end
++   end
++  end
++  if(`HBS_CORE.state==23 && `HBS_CORE.response_pending[0] && `HBS_CORE.lane_valid[0] &&
++     `HBS_CORE.task_recipe[59:56]==12 && `HBS_CORE.task_recipe[55:48]==4) begin
++   shared_roots_live=0; shared_initialized=0;
++  end
++ end
++end
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -24,6 +24,7 @@
+  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
+  .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
++ `include "tb/integration/mhbs_shared_store_check.svh"
+  string directory,vector_directory,dump_path,trace_path;
+  integer trace_words=0,trace_cursor=0,fault=0;
+  reg [47:0] trace_expected[0:2047];
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -29,6 +29,7 @@
+  .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),
+  .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
++ `include "tb/integration/mhbs_shared_store_check.svh"
+  task tick;begin @(posedge clk);#1;end endtask
+  genvar l;
+  generate for(l=0;l<2;l=l+1)begin: observe

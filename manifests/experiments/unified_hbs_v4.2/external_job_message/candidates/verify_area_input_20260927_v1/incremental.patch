@@ -1,0 +1,57 @@
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -71,7 +71,6 @@
+     wire execution_rst=rst || abort_execution;
+     logic [1:0] operation;
+     wire verifying = operation==2;
+-    logic [255:0] verify_node;
+     state_t verify_return;
+     logic verify_lane;
+     // Boot loader owns immutable Job registers for this reset epoch.
+@@ -207,6 +206,7 @@
+     endgenerate
+     initial if(LANES!=2 || UNROLL!=2) $error("Production core requires K2U2");
+ 
++    // Verify never emits output: share its input-node latch with the output latch.
+     logic [255:0] emit_value;
+     logic [5:0] emit_length, emit_offset;
+     logic [7:0] emit_base;
+@@ -345,7 +345,7 @@
+             seq_start<=0; seq_complete<=0;
+             operation<=0; scalar_tree<=0; scalar_leaf<=0;
+             verify_pass<=0;
+-            verify_node<=0; verify_lane<=0; verify_return<=IDLE;
++            verify_lane<=0; verify_return<=IDLE;
+             macro_op<=0; macro_desc<=0; macro_route<=0; macro_flags<=0;
+             active_mask<=0; launch_pending<=0; response_pending<=0;
+             task_chain<=0; task_capture<=0;
+@@ -513,8 +513,8 @@
+                         task_a[0]<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
+                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+-                        task_left[0]<=verifying ? (node_index[0] ? verify_node : node_value) : stack[node_level];
+-                        task_right[0]<=verifying && !node_index[0] ? verify_node : node_value;
++                        task_left[0]<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
++                        task_right[0]<=verifying && !node_index[0] ? emit_value : node_value;
+                         start_hash(descriptors[4],2'b01,PARENT_DONE);
+                     end
+                 end
+@@ -571,14 +571,14 @@
+                     else complete_macro();
+                 end
+                 VERIFY_INPUT: if(verify_valid) begin
+-                    verify_node<=verify_data;
++                    emit_value<=verify_data;
+                     enter_state(verify_return);
+                 end
+-                VERIFY_RANDOM: route_result({{(V-W){1'b0}},verify_node});
++                VERIFY_RANDOM: route_result({{(V-W){1'b0}},emit_value});
+                 VERIFY_CHAIN_INPUT: begin
+-                    task_left[verify_lane]<=verify_node;
++                    task_left[verify_lane]<=emit_value;
+                     // A WOTS digit of 15 already is an endpoint: zero hashes.
+-                    result[verify_lane]<={{(V-W){1'b0}},verify_node};
++                    result[verify_lane]<={{(V-W){1'b0}},emit_value};
+                     if(indexing==1) start_hash(task_step,2'b01,LEAF_SETUP);
+                     else if(!verify_lane && chain_batch_mask[1]) begin
+                         verify_lane<=1; read_verify_node(VERIFY_CHAIN_INPUT);

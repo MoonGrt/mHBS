@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check 32-word program inference and every initialized address/data bit."""
+"""Check 16-word program inference and every initialized address/data bit."""
 import json,sys
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]

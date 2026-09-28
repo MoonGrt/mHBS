@@ -2,20 +2,20 @@
 `default_nettype none
 // slh64_v4.2: offline-validated image, one outstanding macro.
 module mhbs_program_sequencer (
- input wire clk,rst,start,input wire [4:0] entry,output wire ready,output logic done,
- output wire [4:0] program_address,input wire [63:0] program_data,
+ input wire clk,rst,start,input wire [3:0] entry,output wire ready,output logic done,
+ output wire [3:0] program_address,input wire [63:0] program_data,
  output wire [3:0] template_address,input wire [63:0] template_data,
  output wire command_valid,input wire command_ready,command_done,output wire [47:0] command
 );
  typedef enum logic [2:0] {IDLE,FETCH,LOAD,ISSUE,WAIT_MACRO} state_t;
  state_t state;
- logic [4:0] pc;
+ logic [3:0] pc;
  logic [63:0] token;
  logic [15:0] template_word;
  logic [10:0] coordinate,stride;
  logic [5:0] remaining;
  logic [1:0] sp;
- logic [4:0] loop_pc[0:1];
+ logic [3:0] loop_pc[0:1];
  logic [5:0] loop_remaining[0:1];
  logic [10:0] loop_bias[0:1],loop_delta[0:1];
  wire [1:0] kind=token[63:62];

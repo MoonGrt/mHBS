@@ -2,7 +2,10 @@
 module tb_mhbs_v42;
  parameter integer SWAP=0;
  logic clk=0,rst=1;
- wire busy,done,keygen_done,error,out_valid,out_last,result_kind;
+ wire verify_ready,verify_pass;
+ wire verify_valid=0;wire [255:0] verify_data=0;
+ wire busy,done,keygen_done,error,out_valid,out_last;
+ wire [1:0] result_kind;
  wire [15:0] error_code;
  wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
  wire [63:0] out_data;wire [7:0] out_keep;
@@ -28,7 +31,7 @@ module tb_mhbs_v42;
     trace_cursor=trace_cursor+1;
    end
    if(out_valid)begin
-    if(result_kind!==metadata[3][0])$fatal(1,"wrong operation");
+    if(result_kind!==metadata[3][1:0])$fatal(1,"wrong operation");
     for(integer i=0;i<8;i=i+1)if(out_keep[i])begin
      if(cursor>=metadata[0] || out_data[i*8 +:8]!==expected_bytes[cursor])
       $fatal(1,"byte=%0d got=%h expected=%h state=%0d",cursor,out_data[i*8 +:8],expected_bytes[cursor],dut.processor.core.state);

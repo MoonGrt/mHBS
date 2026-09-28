@@ -1,0 +1,340 @@
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -50,3 +50,5 @@
+ Verify 使用同一 sign 镜像：PRF_msg 宏读取外部 R；TREE 宏读取 FORS/WOTS 签名节点并恢复叶节点，随后输入认证路径，复用父节点 Hash；其余 H_msg、FORS 根压缩、WOTS checksum、层切换和结果路由沿用原流程。顶层树的 EXTERNAL_ROOT 快捷路径在 Verify 下关闭，最终必须计算并比较真实根。没有第二套 Keccak、配方 lane 或整签名缓存。
+ 
+ WOTS 按两个链一组输入，复用普通单次 Hash 请求执行 digit 到 14 的后缀链；digit=15 直接存端点。这样保持现有 compact chain 语义和 Hash lane 源码不变，Verify 每步有控制调度开销。所有节点长度与地址来自受信任镜像；签名字节流拆分位于外部。
++
++当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+--- a/docs/Job_Interface.md
++++ b/docs/Job_Interface.md
+@@ -16,12 +16,11 @@
+ | `message_length[6:0]` | Keygen 为 0；Sign/Verify 为 1–87，在内部 Job 接受时锁存 |
+ | `message_data[63:0]` | 低字节先传，尾拍多余字节忽略 |
+ | `message_valid` / `message_ready` | 上升沿两者同时为 1 时接收一拍；等待 ready 时保持 valid 和 data |
+-| `out_valid` / `out_data[63:0]` | 结果流，无 out_ready；接收方必须及时接收 |
+-| `out_keep[7:0]` | 有效字节掩码，按低字节到高字节顺序拼接；非末拍也可能不足 8 字节 |
+-| `out_last` | 当前结果的最后一拍，与 out_valid 一起判断 |
++| `out_valid` / `out_data[255:0]` | 每个有效拍直接输出一个完整节点，无 out_ready；接收方必须及时接收 |
++| `out_bytes[5:0]` | 有效低位字节数（16/24/32），按低字节到高字节拼接；未用高位忽略 |
+ | `result_kind[1:0]` | 0 为 Keygen 的 SK\|\|PK；1 为签名；2 为 Verify |
+ | `busy` | 复位时置 1，完成或错误时清零 |
+-| `done` | 操作完成后保持为 1，直到复位 |
++| `done` | 整项结果输出结束后保持为 1，直到复位；不再提供 out_last/out_keep |
+ | `keygen_done` | Keygen 完成单周期脉冲 |
+ | `error` / `error_code[15:0]` | 错误状态保持到复位，错误操作不产生 done |
+ | `boot_cycles` | header/profile 读取计数，正常为 2 |
+@@ -32,7 +31,7 @@
+ 
+ 同步复位可以中断运行；重新释放复位后从头执行。顶层不自动将 Keygen 根接入随后一次 Sign，也不在完成后自动接受下一项任务。
+ 
+-错误码 `0x3002` 表示消息长度非法，`0x3005` 表示输出长度不匹配，`0x3006` 表示宏操作错误，`0x3007` 表示 Hash lane 错误。镜像的全面合法性检查由软件生成阶段完成。
++错误码 `0x3002` 表示消息长度非法，`0x3006` 表示宏操作错误，`0x3007` 表示 Hash lane 错误。镜像的全面合法性检查由软件生成阶段完成。
+ 
+ 验证命令及验收边界见 [Verification.md](Verification.md)。
+ 
+--- a/docs/Verification.md
++++ b/docs/Verification.md
+@@ -60,11 +60,13 @@
+ 
+ ## 冗余裁剪回归
+ 
+-`make rtl-verification TAG=<tag>` 还运行 `scripts/verify_v42_pruning.py`：对照 `current_complete_20260927_v2` 的六组输出、操作/总周期和计数；分别验证直接顶层、提取共同核在统计关闭时的六组结果，以及关闭统计的停顿、复位重放和六项故障退出。独立 SHAKE 向量检查普通链/compact chain 的首、中、末捕获及连续请求与响应停顿。`pruning_verification.json` 和综合网表 `pruning_audit.json` 一并归档。
++`make rtl-verification TAG=<tag>` 还运行 `scripts/verify_v42_pruning.py`：使用 `--baseline verify_area_compare_20260927_v1 --node-output` 对照旧 64 位输出的六组结果和计数，操作/总周期须精确减少 `输出节点数 × (n/8−1) − 重叠差额`；分别验证直接顶层、提取共同核在统计关闭时的六组结果，以及关闭统计的停顿、复位重放和六项故障退出。独立 SHAKE 向量检查普通链/compact chain 的首、中、末捕获及连续请求与响应停顿。`pruning_verification.json` 和综合网表 `pruning_audit.json` 一并归档。
+ 
+ Vivado 的完整输出保存到候选目录的 `synth.log` 和各外壳 `route.log`，终端仅展示阶段摘要。面积采用统计关闭的网表；周期由统计开启仿真测得，并由关闭统计的 testbench 观察器复核。
+ 
+ 
+ ## 外部节点 Verify
+ 
+-在模型、单元门禁完成并捕获新标签后执行 `python3 scripts/verify_v42_verify.py <标签>`。覆盖三个 f 参数集的有效签名、R/FORS/WOTS/认证节点篡改、错误消息和公钥根、输入停顿、复位重放、供应不足等待后复位、lane 交换、关闭统计、共同核提取及异常退出。软件参考 `verify_internal` 判定正反向向量；测试平台仅负责按 n 字节拆分外部节点。现有六组 Keygen/Sign 仍须与基线逐字节及逐周期比较。
++在模型、单元门禁完成并捕获新标签后执行 `python3 scripts/verify_v42_verify.py <标签>`。覆盖三个 f 参数集的有效签名、R/FORS/WOTS/认证节点篡改、错误消息和公钥根、输入停顿、复位重放、供应不足等待后复位、lane 交换、关闭统计、共同核提取及异常退出。软件参考 `verify_internal` 判定正反向向量；测试平台仅负责按 n 字节拆分外部节点。六组 Keygen/Sign 与旧基线逐字节一致，周期差必须精确符合节点输出减少的拍数（Sign 的 R 与 sequencer 重叠，扣除 min(n/8,3)−1；Keygen 不扣除）；Verify 周期不变。
++
++当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -21,8 +21,8 @@
+     input wire verify_valid, output wire verify_ready,
+     input wire [255:0] verify_data,
+     output logic verify_pass,
+-    output wire out_valid, input wire out_ready, output wire [63:0] out_data,
+-    output wire [7:0] out_keep, output wire out_last,
++    output wire out_valid, output wire [255:0] out_data,
++    output wire [5:0] out_bytes,
+     output wire busy, output logic done, error, output logic [15:0] error_code,
+     output wire [31:0] hash_count, permutation_count,
+     output logic [31:0] cycles
+@@ -83,7 +83,6 @@
+     logic [9:0] scalar_leaf;
+     logic [11:0] checksum;
+     logic [6:0] transform_index;
+-    logic [17:0] output_bytes, emitted;
+     logic [4:0] layer;
+     logic [5:0] group_index;
+     logic [3:0] macro_op, macro_flags;
+@@ -213,20 +212,15 @@
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+     logic [255:0] emit_value;
+-    logic [5:0] emit_length, emit_offset;
++    logic [5:0] emit_length;
+     logic [7:0] emit_base;
+     logic [3:0] emit_count, emit_cursor;
+     wire [63:0] emit_descriptor = descriptors[3];
+-    wire [5:0] emit_remaining=emit_length-emit_offset;
+-    wire [3:0] emit_chunk_bytes = emit_remaining>8 ? 8 : emit_remaining[3:0];
+-    wire pack_ready, pack_idle;
+-    // Each result chunk is transferred directly; keep marks its valid bytes.
+-    assign pack_ready=out_ready;
+-    assign pack_idle=1'b1;
++    // One node per valid cycle, low byte first. The receiver uses done to
++    // delimit the job and out_bytes to discard unused high bytes.
+     assign out_valid=state==OUTPUT_CHUNK;
+-    assign out_data=emit_value[{emit_offset[4:3],6'b0} +:64];
+-    assign out_keep=8'hff >> (8-emit_chunk_bytes);
+-    assign out_last=emitted+emit_chunk_bytes==output_bytes;
++    assign out_data=emit_value;
++    assign out_bytes=emit_length;
+     assign job_ready=state==IDLE;
+     assign message_ready=state==MESSAGE;
+     assign verify_ready=verifying && state==VERIFY_INPUT;
+@@ -292,7 +286,7 @@
+         begin route_value<=v; enter_state(ROUTE); end
+     endtask
+     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
+-        begin emit_value<=v; emit_length<=length; emit_offset<=0; output_return<=ret; enter_state(OUTPUT_CHUNK); end
++        begin emit_value<=v; emit_length<=length; output_return<=ret; enter_state(OUTPUT_CHUNK); end
+     endtask
+     task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
+         begin
+@@ -354,7 +348,7 @@
+             macro_op<=0; macro_desc<=0; macro_route<=0; macro_flags<=0;
+             active_mask<=0; launch_pending<=0; response_pending<=0;
+             task_chain<=0; task_capture<=0;
+-            hash_base<=0; permutation_base<=0; emitted<=0; layer<=0;
++            hash_base<=0; permutation_base<=0; layer<=0;
+             task_recipe<=0; task_step<=0; task_list_roots<=0; message_received<=0;
+             fors_pair_pending<=0;
+             for(i=0;i<2;i=i+1) begin
+@@ -370,7 +364,6 @@
+                     verify_pass<=0;
+                     message_length<=job_message_length; message_received<=0;
+                     scalar_tree<=0; scalar_leaf<=0; layer<=0; group_index<=0;
+-                    emitted<=0; output_bytes<=job_operation ? image_header[17:0] : image_header[35:18];
+                     if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
+                     value[3]<={{(V-W){1'b0}},job_public_root};
+                     if(job_operation) begin
+@@ -394,8 +387,7 @@
+                                     && (node_bytes==16 || value[2][191:128]==job_public_root[191:128])
+                                     && (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
+                                 enter_state(DRAIN);
+-                        end else if(emitted!=output_bytes) fail(16'h3005);
+-                        else enter_state(DRAIN);
++                        end else enter_state(DRAIN);
+                     end else if(cmd_valid) begin
+                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
+                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
+@@ -600,12 +592,8 @@
+                     end
+                     enter_state(VERIFY_CHAIN_RUN);
+                 end
+-                OUTPUT_CHUNK: if(pack_ready) begin
+-                    emitted<=emitted+emit_chunk_bytes;
+-                    if(emit_remaining<=8) enter_state(output_return);
+-                    else emit_offset<=emit_offset+8;
+-                end
+-                DRAIN: if(pack_idle) enter_state(FINISH);
++                OUTPUT_CHUNK: enter_state(output_return);
++                DRAIN: enter_state(FINISH);
+                 FINISH: begin
+                     done<=1; enter_state(IDLE);
+                 end
+--- a/rtl/top/mhbs_top.sv
++++ b/rtl/top/mhbs_top.sv
+@@ -27,8 +27,8 @@
+     output logic busy,done,keygen_done,error,output logic [15:0] error_code,
+     output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
+     output wire [31:0] hash_count,permutation_count,
+-    output wire out_valid,output wire [63:0] out_data,output wire [7:0] out_keep,
+-    output wire out_last,output wire [1:0] result_kind
++    output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
++    output wire [1:0] result_kind
+ );
+     wire [4:0] program_address;
+     wire [3:0] template_address;
+@@ -77,7 +77,7 @@
+         .job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),
+         .message_valid(message_valid && phase==RUN),.message_ready(core_message_ready),.message_data,
+         .verify_valid(verify_valid && phase==RUN),.verify_ready,.verify_data,.verify_pass,
+-        .out_valid,.out_ready(1'b1),.out_data,.out_keep,.out_last,
++        .out_valid,.out_data,.out_bytes,
+         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
+         .hash_count,.permutation_count,.cycles(core_cycles)
+     );
+--- a/scripts/v42_common_partition.py
++++ b/scripts/v42_common_partition.py
+@@ -2,7 +2,7 @@
+ 
+ Production RTL keeps boot/control and mhbs_hbs in mhbs_top. The generated module
+ is a build artifact: its generic Job/ROM ports prevent algorithm specialization,
+-while out_ready=1 and the boot/core connections remain inside the optimizer.
++while the node output and boot/core connections remain inside the optimizer.
+ """
+ import re
+ 
+@@ -19,8 +19,8 @@
+  input wire verify_valid,output wire verify_ready,
+  input wire [255:0] verify_data,output wire verify_pass,
+  input wire [63:0] message_data,input wire message_valid,output wire message_ready,
+- output wire out_valid,output wire [63:0] out_data,output wire [7:0] out_keep,
+- output wire out_last,output wire [1:0] result_kind,output logic busy,done,keygen_done,error,
++ output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
++ output wire [1:0] result_kind,output logic busy,done,keygen_done,error,
+  output logic [15:0] error_code,output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
+  output wire [31:0] hash_count,permutation_count
+ '''
+@@ -40,5 +40,5 @@
+     instance+=' .verify_valid,.verify_ready,.verify_data,.verify_pass,\n'
+     instance+=' .program_address,.program_data,.template_address,.template_data,.descriptor_addresses,.descriptor_data,\n'
+     instance+=' .busy,.done,.keygen_done,.error,.error_code,.boot_cycles,.keygen_cycles,.sign_cycles,\n'
+-    instance+=' .hash_count,.permutation_count,.out_valid,.out_data,.out_keep,.out_last,.result_kind\n    );'
++    instance+=' .hash_count,.permutation_count,.out_valid,.out_data,.out_bytes,.result_kind\n    );'
+     return common,source[:start]+instance+source[stop:]
+--- a/scripts/verify_v42_pruning.py
++++ b/scripts/verify_v42_pruning.py
+@@ -7,7 +7,7 @@
+ from v42_external_flow import BASE, NAMES, build_binary, capture, identity, run, sha, simulate_case, write
+ 
+ 
+-def verify(tag, baseline='current_complete_20260927_v2'):
++def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
+     folder = capture(tag)
+     normal = json.loads((folder / 'simulation.json').read_text())
+     old_file = BASE / 'candidates' / baseline / 'simulation.json'
+@@ -17,8 +17,18 @@
+             'permutations', 'total_cycles', 'output_sha256')
+     assert set(normal['cases']) == set(old['cases']) and len(normal['cases']) == 6
+     for name, row in normal['cases'].items():
++        reference=old['cases'][name]
++        n=len(bytes.fromhex(row['config']['secret_seed']))
++        vector=BASE/'vectors'/row['config']['profile']/('sign' if row['config']['operation'] else 'keygen')
++        byte_count=int((vector/'metadata.mem').read_text().split()[0],16)
++        # R's old output overlapped up to three sequencer cycles; one remains.
++        overlap=max(min(n//8,3)-1,0) if row['config']['operation'] else 0
++        saved=(byte_count//n)*(n//8-1)-overlap if node_output else 0
+         for key in keys:
+-            assert row[key] == old['cases'][name][key], (name, key)
++            expected=reference[key]
++            if key in ('total_cycles', 'sign_cycles' if row['config']['operation'] else 'keygen_cycles'):
++                expected-=saved
++            assert row[key]==expected,(name,key,row[key],expected)
+ 
+     evidence = {}
+     for partitioned in (False, True):
+@@ -63,15 +73,17 @@
+     evidence['faults.json'] = sha(folder/'faults.json')
+     write(folder/'pruning_verification.json', dict(
+         passed=True, rtl_sha256=identity(), baseline=baseline, baseline_sha256=sha(old_file),
+-        cycle_equivalence_pass=True, statistics_equivalence_pass=True,
++        cycle_equivalence_pass=not node_output, node_output_cycle_formula_pass=node_output,
++        statistics_equivalence_pass=True,
+         baseline_cases=6, statistics_disabled_cases=12, statistics_disabled_extended=2,
+         fault_cases=6, evidence_sha256=evidence))
+-    print('PRUNING_VERIFICATION_PASS', tag, 'same cycles / statistics off / faults', flush=True)
++    print('PRUNING_VERIFICATION_PASS', tag, 'node-output cycle formula / statistics off / faults' if node_output else 'same cycles / statistics off / faults', flush=True)
+ 
+ 
+ if __name__ == '__main__':
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('tag')
+     parser.add_argument('--baseline', default='current_complete_20260927_v2')
++    parser.add_argument('--node-output', action='store_true', help='expect one beat per node instead of 64-bit serialization')
+     args = parser.parse_args()
+-    verify(args.tag, args.baseline)
++    verify(args.tag, args.baseline, args.node_output)
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -12,11 +12,11 @@
+  logic clk=0,rst=1;
+  wire verify_ready,verify_pass;
+  wire verify_valid=0;wire [255:0] verify_data=0;
+- wire busy,done,keygen_done,error,out_valid,out_last;
++ wire busy,done,keygen_done,error,out_valid;
+  wire [1:0] result_kind;
+  wire [15:0] error_code;
+  wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+- wire [63:0] out_data;wire [7:0] out_keep;
++ wire [255:0] out_data;wire [5:0] out_bytes;
+  logic [63:0] message_data=0;logic message_valid=0;wire message_ready;
+  logic [6:0] message_length=MESSAGE_BYTES[6:0];
+  reg [7:0] message_bytes[0:86];
+@@ -86,13 +86,13 @@
+    end
+    if(out_valid)begin
+     if(result_kind!==metadata[3][1:0])$fatal(1,"wrong operation");
+-    for(integer i=0;i<8;i=i+1)if(out_keep[i])begin
++    if(out_bytes!=metadata[4] || out_bytes==0 || out_bytes>32)$fatal(1,"output node width");
++    for(integer i=0;i<32;i=i+1)if(i<out_bytes)begin
+      if(cursor>=metadata[0] || out_data[i*8 +:8]!==expected_bytes[cursor])
+       $fatal(1,"byte=%0d got=%h expected=%h state=%0d",cursor,out_data[i*8 +:8],expected_bytes[cursor],`HBS_CORE.state);
+      if(dump_file)$fwrite(dump_file,"%02x\n",out_data[i*8 +:8]);
+      cursor=cursor+1;
+     end
+-    if(out_last!==(cursor==metadata[0]))$fatal(1,"out_last");
+    end
+   end
+  end
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -9,10 +9,10 @@
+  parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
+- wire busy,done,keygen_done,error,out_valid,out_last,verify_ready,verify_pass,message_ready;
++ wire busy,done,keygen_done,error,out_valid,verify_ready,verify_pass,message_ready;
+  wire [1:0] result_kind;
+  wire [15:0] error_code;wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+- wire [63:0] out_data;wire [7:0] out_keep;
++ wire [255:0] out_data;wire [5:0] out_bytes;
+  logic [63:0] message_data=0;logic message_valid=0,verify_valid=0;
+  logic [255:0] verify_data=0;
+  wire [6:0] message_length=MESSAGE_BYTES;
+--- a/tb/unit/mhbs_external_core_stub.sv
++++ b/tb/unit/mhbs_external_core_stub.sv
+@@ -20,8 +20,8 @@
+     input wire [63:0] message_data,
+     input wire verify_valid, output wire verify_ready,
+     input wire [255:0] verify_data, output wire verify_pass,
+-    output wire out_valid, input wire out_ready, output wire [63:0] out_data,
+-    output wire [7:0] out_keep, output wire out_last,
++    output wire out_valid, output wire [255:0] out_data,
++    output wire [5:0] out_bytes,
+     output wire busy, output logic done, error, output logic [15:0] error_code,
+     output wire [31:0] hash_count, permutation_count,
+     output logic [31:0] cycles
+@@ -33,7 +33,7 @@
+     logic [63:0] first_word,last_word;
+     assign program_address=0;assign template_address=0;assign descriptor_addresses=0;
+     assign job_ready=!active;assign message_ready=active && job_operation && received<accepted_length;
+-    assign busy=active;assign out_valid=0;assign out_data=0;assign out_keep=0;assign out_last=0;
++    assign busy=active;assign out_valid=0;assign out_data=0;assign out_bytes=0;
+     assign hash_count=0;assign permutation_count=0;
+     always_ff @(posedge clk)begin
+      if(rst)begin active<=0;accepted_length<=0;received<=0;starts<=0;done<=0;error<=0;error_code<=0;cycles<=0;end
+--- a/tests/test_unified_rtl_contract.py
++++ b/tests/test_unified_rtl_contract.py
+@@ -22,6 +22,14 @@
+                 text = (ROOT / path).read_text()
+                 self.assertNotRegex(text, r'\b(?:posedge|negedge)\s+rst\b')
+                 self.assertNotRegex(text, r'\bnegedge\s+clk\b')
++
++    def test_node_output_contract(self):
++        top=(ROOT/'rtl/top/mhbs_top.sv').read_text()
++        ports=top.split(')(',1)[1].split(');',1)[0]
++        self.assertRegex(ports,r'\[255:0\]\s+out_data')
++        self.assertRegex(ports,r'\[5:0\]\s+out_bytes')
++        for name in ('out_keep','out_last','out_ready'):
++            self.assertNotIn(name,ports)
+ 
+     def test_fixed_job_and_separate_images(self):
+         top = (ROOT / 'rtl/top/mhbs_top.sv').read_text()

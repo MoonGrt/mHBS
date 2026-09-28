@@ -66,19 +66,37 @@ def audit(tag):
     assert pruning['passed'] and pruning['rtl_sha256']==identity()
     for path,digest in pruning['evidence_sha256'].items():
         assert sha(folder/path)==digest,path
+    verify_file = folder / 'verify/results.json'
+    verify = json.loads(verify_file.read_text())
+    assert verify['passed'] and not verify['quick']
+    assert verify['source_snapshot_sha256'] == inputs['snapshot_sha256']
+    assert set(verify['profiles']) == set(NAMES)
+    for profile, cases in verify['profiles'].items():
+        expected_cases = {'normal', 'randomizer', 'fors_secret', 'fors_auth',
+            'wots', 'xmss_auth', 'last_auth', 'message', 'root', 'stall',
+            'reset_replay', 'truncated_wait_reset', 'swap', 'no_profile', 'partition', 'fault', 'node_padding', 'second_node_delay', 'poison_reset', 'pair_boundaries'}
+        if profile!='slh_128f':expected_cases.add('root_middle')
+        if profile=='slh_256f':expected_cases.add('root_upper')
+        else:expected_cases.add('root_padding')
+        assert set(cases)==expected_cases
+        assert all(cases['pair_boundaries']['coverage'].values())
+        for label, row in cases.items():
+            assert row['passed']
+            assert sha(folder / 'verify' / profile / (label + '.log')) == row['log_sha256']
     evidence = [folder / name for name in ('inputs.json', 'simulation.json',
                 'extended.json', 'simulation_partition.json', 'pruning_verification.json')]
-    evidence += [BASE / 'software_gate.json', BASE / 'unit/results.json']
+    evidence += [BASE / 'software_gate.json', BASE / 'unit/results.json', verify_file]
     receipt = dict(
         passed=True, scope='current-source functional verification', tag=tag,
         rtl_sha256=identity(), source_snapshot_sha256=inputs['snapshot_sha256'],
         software_cases=len(software['profiles']), macro_units=len(macro['logs']), boot_units=1,
         normal_cases=len(normal_names), extended_cases=len(extended_names), partition_cases=len(normal_names),
-        partition_equivalence_pass=True, post_synth_measured=False, post_route_measured=False,
+        partition_equivalence_pass=True, verify_node_cases=sum(len(x) for x in verify['profiles'].values()),
+        verify_nodes_pass=True, post_synth_measured=False, post_route_measured=False,
         evidence_sha256={str(path.relative_to(ROOT)): sha(path) for path in evidence},
     )
     write(folder / 'verification.json', receipt)
-    print('CURRENT_VERIFICATION_PASS', tag, f"6 model / {len(macro['logs'])+1} unit / 6 RTL / 33 extended / 6 partition / statistics-off + faults")
+    print('CURRENT_VERIFICATION_PASS', tag, f"6 model / {len(macro['logs'])+1} unit / 6 RTL / 33 extended / 6 partition / statistics-off + faults / {receipt['verify_node_cases']} verify-node cases")
     return receipt
 
 

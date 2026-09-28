@@ -12,6 +12,15 @@ assert sim['rtl_sha256']==ext['rtl_sha256']==unit['rtl_sha256']==inp['rtl_sha256
 for group in (sim['cases'],ext['cases']):
  for name,row in group.items():assert sha(sf/'logs'/(name+'.log'))==row['log_sha256']
 for path,h in unit['logs'].items():assert sha(BASE/'unit'/path)==h
+verification=json.loads((sf/'verification.json').read_text())
+assert verification['passed'] and verification['verify_nodes_pass']
+assert verification['rtl_sha256']==inp['rtl_sha256']
+assert verification['source_snapshot_sha256']==inp['snapshot_sha256']
+for path,h in verification['evidence_sha256'].items():assert sha(ROOT/path)==h,path
+verify=json.loads((sf/'verify/results.json').read_text())
+assert verify['passed'] and not verify['quick']
+for profile,cases in verify['profiles'].items():
+ for label,row in cases.items():assert row['passed'] and sha(sf/'verify'/profile/(label+'.log'))==row['log_sha256']
 s=f/'synthesis'
 pruning=json.loads((sf/'pruning_verification.json').read_text())
 assert pruning['passed'] and pruning['rtl_sha256']==inp['rtl_sha256']
@@ -61,6 +70,7 @@ for name in ('simulation.json','simulation_partition.json','extended.json','exte
  if (sf/name).exists():shutil.copy2(sf/name,out/name)
 for sub in ('logs','extended_vectors'):
  shutil.copytree(sf/sub,out/sub)
+shutil.copytree(sf/'verify',out/'verify',ignore=shutil.ignore_patterns('obj*','__pycache__'))
 shutil.copytree(BASE/'unit',out/'unit')
 for name in ('software_gate.json','rtl_start.json'):shutil.copy2(BASE/name,out/name)
 shutil.copytree(BASE/'images',out/'images');shutil.copytree(BASE/'vectors',out/'vectors')
@@ -68,7 +78,7 @@ with tarfile.open(out/'verification_tools.tar.gz','w:gz') as t:
  for name in ('Makefile','README.md'):t.add(ROOT/name,arcname=name)
  for directory in ('scripts','tb','tests','experiments/v4.2','manifests/experiments/unified_hbs_v4.2/images'):
   for path in (ROOT/directory).rglob('*'):
-   if path.is_file() and '__pycache__' not in path.parts and path.suffix in ('.py','.sv','.tcl','.json','.mem'):t.add(path,arcname=str(path.relative_to(ROOT)))
+   if path.is_file() and '__pycache__' not in path.parts and path.suffix in ('.py','.sv','.svh','.tcl','.json','.mem'):t.add(path,arcname=str(path.relative_to(ROOT)))
 write(out/'evidence_sha256.json',{str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('*')) if p.is_file() and p.name!='evidence_sha256.json'})
 write(BASE/'final.json',dict(candidate=a.tag,functional_pass=True,post_synth_acceptance=True,post_route_pass=False,result_sha256=sha(out/'result.json')))
 print('EXTERNAL_ACCEPTED_POST_SYNTH',a.tag,core,flush=True)

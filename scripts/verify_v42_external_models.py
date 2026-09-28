@@ -46,6 +46,20 @@ for name in ('slh_128f','slh_192f','slh_256f'):
         try:replace(image,descriptors=tuple(words)).decode()
         except ValueError:negative.append(name+'/'+label)
         else:raise AssertionError(label)
+    for label,invalid in (
+        ('program_capacity',replace(image,program=image.program+(0,))),
+        ('keygen_entry16',replace(image,descriptors=(image.descriptors[0]|(1<<40),)+image.descriptors[1:])),
+        ('sign_entry16',replace(image,descriptors=(image.descriptors[0]|(1<<45),)+image.descriptors[1:])),
+    ):
+        try:invalid.decode()
+        except ValueError:negative.append(name+'/'+label)
+        else:raise AssertionError(label)
+    words=list(old.program);words[16]=1
+    try:convert_legacy(replace(old,program=tuple(words)))
+    except ValueError as e:
+        assert '16-word capacity' in str(e)
+        negative.append(name+'/legacy_program_overflow')
+    else:raise AssertionError('legacy program silently truncated')
     for sign,message in [(True,b''),(True,bytes(88)),(False,b'x')]:
         try:ExternalMachine(image,job,root,message,sign)
         except ValueError:negative.append(name+'/length/'+str(len(message)))

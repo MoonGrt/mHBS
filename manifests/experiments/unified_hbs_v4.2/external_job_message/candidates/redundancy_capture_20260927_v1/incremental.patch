@@ -1,0 +1,33 @@
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -155,7 +155,8 @@
+     wire [31:0] lane_hashes [0:1], lane_permutations [0:1];
+     logic [31:0] hash_base, permutation_base;
+     logic [V-1:0] result [0:1], route_value;
+-    logic [255:0] capture [0:1];
++    // The sponge retains capture through response and output stalls. No new
++    // request is issued before CHAIN_OUTPUT0/1 has consumed both captures.
+     wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1];
+     wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1];
+     assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+@@ -470,9 +471,9 @@
+                     else enter_state(CHAIN_NEXT);
+                 end
+                 CHAIN_OUTPUT0: start_output(indexing==1 && active_mask[1] && target[0]
+-                    ? capture[1] : capture[0],node_bytes,
++                    ? lane_capture[1] : lane_capture[0],node_bytes,
+                     active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+-                CHAIN_OUTPUT1: start_output(capture[1],node_bytes,CHAIN_NEXT);
++                CHAIN_OUTPUT1: start_output(lane_capture[1],node_bytes,CHAIN_NEXT);
+                 CHAIN_NEXT: begin
+                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
+                     else if(standalone_chain && chain_descriptor[13:12]==0)
+@@ -538,7 +539,7 @@
+                 end
+                 HASH_WAIT: begin
+                     for(i=0;i<2;i=i+1) if(response_pending[i] && lane_valid[i]) begin
+-                        result[i]<=lane_value[i]; capture[i]<=lane_capture[i];
++                        result[i]<=lane_value[i];
+                     end
+                     response_pending<=response_pending & ~lane_valid;
+                     if((lane_error & response_pending & lane_valid)!=0) fail(16'h3007);

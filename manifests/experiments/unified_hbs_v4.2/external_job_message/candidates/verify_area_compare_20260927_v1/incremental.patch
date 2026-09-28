@@ -1,0 +1,14 @@
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -389,8 +389,9 @@
+                 FETCH: begin
+                     if(seq_done) begin
+                         if(verifying) begin
+-                                verify_pass <= ((value[2][W-1:0] ^ job_public_root)
+-                                    & ({256{1'b1}} >> ((32-node_bytes)*8)))==0;
++                                verify_pass <= value[2][127:0]==job_public_root[127:0]
++                                    && (node_bytes==16 || value[2][191:128]==job_public_root[191:128])
++                                    && (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
+                                 enter_state(DRAIN);
+                         end else if(emitted!=output_bytes) fail(16'h3005);
+                         else enter_state(DRAIN);

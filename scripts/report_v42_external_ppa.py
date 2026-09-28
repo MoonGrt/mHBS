@@ -31,7 +31,7 @@ else:
     lines += ['', '尚无此候选的完整布线验收，不声明频率。']
 lines += ['', '## 证据与复现', '',
           f'源码快照 SHA-256：`{synth["source_snapshot_sha256"]}`。', '',
-          f'完整证据：`manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/{final["candidate"]}/`。功能证据包含 6 组正常执行、33 项扩展验证和 6 组共同核等价仿真。', '',
+          f'完整证据：`manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/{final["candidate"]}/`。功能证据包含 6 组正常执行、33 项扩展验证、6 组共同核等价、65 项 verify 节点测试，以及统计关闭和异常退出回归。', '',
           '```bash', 'python3 scripts/reproduce_v42_external.py', 'python3 scripts/reproduce_v42_external_route.py', 'make report-v42', '```', '']
 (ROOT / 'docs/v4.2/Current_PPA.md').write_text('\n'.join(lines))
 print('EXTERNAL_PPA_REPORT_PASS', final['candidate'], 'rtl_matches=', fresh)

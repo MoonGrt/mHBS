@@ -2,10 +2,11 @@
 module tb_mhbs_slh64_sequencer;
  logic clk=0,rst=1,start=0,command_ready=0,command_done=0;
  wire ready,done,command_valid;
- wire [5:0] program_address;wire [3:0] template_address;wire [47:0] command;
- logic [63:0] prog[0:63],tpl[0:15];
+ logic [3:0] entry=0;
+ wire [3:0] program_address;wire [3:0] template_address;wire [47:0] command;
+ logic [63:0] prog[0:15],tpl[0:15];
  wire [63:0] program_data=prog[program_address],template_data=tpl[template_address];
- mhbs_program_sequencer dut(.clk,.rst,.start,.entry(5'd0),.ready,.done,.program_address,.program_data,
+ mhbs_program_sequencer dut(.clk,.rst,.start,.entry,.ready,.done,.program_address,.program_data,
   .template_address,.template_data,.command_valid,.command_ready,.command_done,.command);
  always #5 clk=~clk;
  integer count=0,delay_count=0,cycles=0;
@@ -22,7 +23,7 @@ module tb_mhbs_slh64_sequencer;
   if(delay_count>0)begin delay_count=delay_count-1;if(delay_count==0)command_done<=1;end
  end
  initial begin
-  for(integer i=0;i<64;i=i+1)prog[i]=0;
+  for(integer i=0;i<16;i=i+1)prog[i]=0;
   for(integer i=0;i<16;i=i+1)tpl[i]=0;
   tpl[0]=64'd9;
   prog[0]=0;
@@ -33,6 +34,13 @@ module tb_mhbs_slh64_sequencer;
   while(!done)tick();
   if(count!=6 || delay_count!=0)$fatal(1,"macro completion count");
   repeat(10)tick();if(!ready || command_valid)$fatal(1,"halt");
-  $display("SLH64_SEQUENCER_PASS nested_loop delayed_ready delayed_completion halt");$finish;
+  // Replay the nested loops at the top of the 16-word address space.
+  rst=1;tick();count=0;delay_count=0;cycles=0;
+  for(integer i=0;i<4;i=i+1)prog[12+i]=prog[i];
+  entry=12;rst=0;tick();start=1;tick();start=0;
+  while(!done)tick();
+  if(count!=6 || delay_count!=0 || program_address!=15)$fatal(1,"upper program boundary");
+  repeat(10)tick();if(!ready || command_valid)$fatal(1,"upper boundary halt");
+  $display("SLH64_SEQUENCER_PASS nested_loop delayed_ready delayed_completion halt address15");$finish;
  end
 endmodule

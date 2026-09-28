@@ -60,6 +60,15 @@ make report-v42
 
 ## 冗余裁剪回归
 
-`make rtl-verification TAG=<tag>` 还运行 `scripts/verify_v42_pruning.py`：对照 `current_complete_20260927_v2` 的六组输出、操作/总周期和计数；分别验证直接顶层、提取共同核在统计关闭时的六组结果，以及关闭统计的停顿、复位重放和六项故障退出。独立 SHAKE 向量检查普通链/compact chain 的首、中、末捕获及连续请求与响应停顿。`pruning_verification.json` 和综合网表 `pruning_audit.json` 一并归档。
+`make rtl-verification TAG=<tag>` 还运行 `scripts/verify_v42_pruning.py`：使用 `--baseline verify_area_compare_20260927_v1 --node-output` 对照旧 64 位输出的六组结果和计数，操作/总周期须精确减少 `输出节点数 × (n/8−1) − 重叠差额`；分别验证直接顶层、提取共同核在统计关闭时的六组结果，以及关闭统计的停顿、复位重放和六项故障退出。独立 SHAKE 向量检查普通链/compact chain 的首、中、末捕获及连续请求与响应停顿。`pruning_verification.json` 和综合网表 `pruning_audit.json` 一并归档。
 
 Vivado 的完整输出保存到候选目录的 `synth.log` 和各外壳 `route.log`，终端仅展示阶段摘要。面积采用统计关闭的网表；周期由统计开启仿真测得，并由关闭统计的 testbench 观察器复核。
+
+
+## 外部节点 Verify
+
+在模型、单元门禁完成并捕获新标签后执行 `python3 scripts/verify_v42_verify.py <标签>`。覆盖三个 f 参数集的有效签名、R/FORS/WOTS/认证节点篡改、错误消息和公钥根、输入停顿、复位重放、供应不足等待后复位、lane 交换、关闭统计、共同核提取及异常退出。软件参考 `verify_internal` 判定正反向向量；测试平台仅负责按 n 字节拆分外部节点。六组 Keygen/Sign 与旧基线逐字节一致，周期差必须精确符合节点输出减少的拍数（Sign 的 R 与 sequencer 重叠，扣除 min(n/8,3)−1；Keygen 不扣除）；Verify 周期不变。
+
+当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+
+共享列表存储检查：两个集成 testbench 均启用 `mhbs_shared_store_check.svh`，从宏结果独立维护期望节点，检查实际列表读取、读前初始化、FORS 叶写入禁止，以及根压缩完成前不得覆盖为 WOTS 端点。检查同时覆盖 lane 交换、停顿、复位和 Verify 异常场景。

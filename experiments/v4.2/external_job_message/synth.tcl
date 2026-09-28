@@ -34,6 +34,10 @@ write_edif -force [file join $out mhbs_common.edf]
 write_verilog -force -mode synth_stub [file join $out common_stub.v]
 set core_seconds [expr {[clock seconds]-$started}]
 close_project
+if {[lindex $argv 1] eq "--core-only"} {
+ puts "EXTERNAL_CORE_SYNTH_PASS seconds=$core_seconds"
+ exit
+}
 # Fingerprint internal cell configuration and connections. Boundary nets are
 # excluded because their constant drivers belong to the parameterized shell.
 proc core_structure {path} {

@@ -14,7 +14,7 @@ module mhbs_top #(
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
     parameter [255:0] RANDOMIZER=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
     parameter [255:0] PUBLIC_ROOT=256'h000000000000000000000000000000003d774653892d5f3695b370c7cdab63ff,
-    parameter bit OPERATION=1'b1,
+    parameter [1:0] OPERATION=2'd1,
     parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/program.mem",
     parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/template.mem",
     parameter DESCRIPTOR_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/descriptor.mem"
@@ -22,13 +22,15 @@ module mhbs_top #(
     input wire clk,rst,
     input wire message_valid,output wire message_ready,
     input wire [6:0] message_length,input wire [63:0] message_data,
+    input wire verify_valid,output wire verify_ready,
+    input wire [255:0] verify_data,output wire verify_pass,
     output logic busy,done,keygen_done,error,output logic [15:0] error_code,
     output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
     output wire [31:0] hash_count,permutation_count,
-    output wire out_valid,output wire [63:0] out_data,output wire [7:0] out_keep,
-    output wire out_last,result_kind
+    output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
+    output wire [1:0] result_kind
 );
-    wire [4:0] program_address;
+    wire [3:0] program_address;
     wire [3:0] template_address;
     wire [63:0] program_data,template_data;
     wire [9:0] descriptor_addresses;
@@ -36,7 +38,7 @@ module mhbs_top #(
     // Inferred arrays, no explicit ROM module or vendor memory primitive.
     // Hardware synthesis uses algorithm-independent construction images;
     // real images are applied to INIT only after the common netlist is frozen.
-    (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] program_memory[0:31];
+    (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] program_memory[0:15];
     (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] template_memory[0:15];
     (* rom_style="distributed", DONT_TOUCH="yes" *) logic [63:0] descriptor_memory[0:31];
     initial begin
@@ -56,9 +58,9 @@ module mhbs_top #(
     wire core_message_ready,core_job_ready,core_done,core_error;
     wire [15:0] core_error_code;
     wire [31:0] core_cycles;
-    wire [4:0] entry=OPERATION ? image_header[45:41] : image_header[40:36];
-    wire message_length_valid=OPERATION ? (message_length>=7'd1 && message_length<=7'd87)
-                                        : (message_length==7'd0);
+    wire [3:0] entry=OPERATION ? image_header[44:41] : image_header[39:36];
+    wire message_length_valid=OPERATION<=2 && (OPERATION ? (message_length>=7'd1 && message_length<=7'd87)
+                                        : (message_length==7'd0));
     wire core_rst=rst || !core_released;
     assign descriptor_addresses=!core_released ? {5'd0,(phase==HEADER ? 5'd0 : 5'd1)}
                                                : core_descriptor_addresses;
@@ -74,7 +76,8 @@ module mhbs_top #(
         .job_secret_seed(SECRET_SEED),.job_secret_prf(SECRET_PRF),
         .job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),
         .message_valid(message_valid && phase==RUN),.message_ready(core_message_ready),.message_data,
-        .out_valid,.out_ready(1'b1),.out_data,.out_keep,.out_last,
+        .verify_valid(verify_valid && phase==RUN),.verify_ready,.verify_data,.verify_pass,
+        .out_valid,.out_data,.out_bytes,
         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
         .hash_count,.permutation_count,.cycles(core_cycles)
     );
@@ -100,8 +103,8 @@ module mhbs_top #(
                 end
                 RUN:if(core_done) begin
                     if(PROFILE_ENABLE) begin
-                        if(OPERATION) sign_cycles<=core_cycles;
-                        else keygen_cycles<=core_cycles;
+                        if(OPERATION==1) sign_cycles<=core_cycles;
+                        else if(OPERATION==0) keygen_cycles<=core_cycles;
                     end
                     if(!OPERATION) keygen_done<=1;
                     done<=1;busy<=0;phase<=HALTED;

@@ -2,8 +2,8 @@
 proc export_rom_mapping {path} {
  set f [open $path w]
  foreach kind {program template descriptor} {
-  set depth [dict get {program 32 template 16 descriptor 32} $kind]
-  set abits [dict get {program 5 template 4 descriptor 5} $kind]
+  set depth [dict get {program 16 template 16 descriptor 32} $kind]
+  set abits [dict get {program 4 template 4 descriptor 5} $kind]
   set ports [expr {$kind eq "descriptor" ? 2 : 1}]
   set signal [expr {$kind eq "descriptor" ? "descriptor_addresses" : "${kind}_address"}]
   for {set p 0} {$p<$ports} {incr p} {

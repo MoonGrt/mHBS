@@ -13,17 +13,18 @@ class ExternalImage:
     descriptors: tuple[int, ...]
 
     def decode(self):
-        if len(self.program)!=32 or len(self.templates)!=16 or len(self.descriptors)!=32:
+        if len(self.program)!=16 or len(self.templates)!=16 or len(self.descriptors)!=32:
             raise ValueError('layout 3 capacity')
         if any(w<0 or w>=1<<64 for a in (self.program,self.templates,self.descriptors) for w in a):
             raise ValueError('word width')
         h=self.descriptors[0]
         if h>>46:raise ValueError('header reserved')
         kg=(h>>36)&31;sg=(h>>41)&31
+        if kg>=16 or sg>=16:raise ValueError('entry exceeds program capacity')
         desc=list(self.descriptors);desc[0]&=(1<<36)-1
         # Reuse the independently checked ABI-4 expansion and reference checks.
         # The legacy decoder receives synthetic zero inputs, never caller data.
-        program=list(self.program)+[0]*32
+        program=list(self.program)+[0]*48
         logical=CompactImage(tuple(program),self.templates,tuple(desc)).decode()[0]
         if (kg,sg)!=(logical.entry(False),logical.entry(True)):
             raise ValueError('entry table does not match program boundaries')
@@ -40,10 +41,11 @@ class ExternalImage:
 
 
 def convert_legacy(image):
+    if any(image.program[16:32]):raise ValueError('program exceeds 16-word capacity')
     logical,job,root,message,sign=image.decode()
     d=list(image.descriptors)
     d[0]|=(logical.entry(False)<<36)|(logical.entry(True)<<41)
-    result=ExternalImage(image.program[:32],image.templates,tuple(d));result.decode()
+    result=ExternalImage(image.program[:16],image.templates,tuple(d));result.decode()
     return result,job,root,message,sign
 
 

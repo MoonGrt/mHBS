@@ -14,7 +14,7 @@ class UnifiedRtlContractTests(unittest.TestCase):
             r'\binput\s+(?:wire|logic)\s+(?:\[[^]]+\]\s*)?'
             r'(.+?)(?=,\s*(?:input|output)|$)', ports, re.S)
         inputs = {name.strip() for group in declarations for name in group.split(',')}
-        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data'})
+        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data', 'verify_valid', 'verify_data'})
         self.assertRegex(ports, r'\[6:0\]\s+message_length')
         self.assertRegex(ports, r'\[63:0\]\s+message_data')
         for path in (ROOT / 'manifests/v42_sources.txt').read_text().split():
@@ -23,12 +23,20 @@ class UnifiedRtlContractTests(unittest.TestCase):
                 self.assertNotRegex(text, r'\b(?:posedge|negedge)\s+rst\b')
                 self.assertNotRegex(text, r'\bnegedge\s+clk\b')
 
+    def test_node_output_contract(self):
+        top=(ROOT/'rtl/top/mhbs_top.sv').read_text()
+        ports=top.split(')(',1)[1].split(');',1)[0]
+        self.assertRegex(ports,r'\[255:0\]\s+out_data')
+        self.assertRegex(ports,r'\[5:0\]\s+out_bytes')
+        for name in ('out_keep','out_last','out_ready'):
+            self.assertNotIn(name,ports)
+
     def test_fixed_job_and_separate_images(self):
         top = (ROOT / 'rtl/top/mhbs_top.sv').read_text()
         for name in ('SECRET_SEED', 'SECRET_PRF', 'PUBLIC_SEED', 'RANDOMIZER', 'PUBLIC_ROOT'):
             self.assertRegex(top, rf'parameter\s+\[255:0\]\s+{name}\s*=')
-        self.assertRegex(top, r'parameter\s+bit\s+OPERATION\s*=')
-        for kind, last in (('program', 31), ('template', 15), ('descriptor', 31)):
+        self.assertRegex(top, r'parameter\s+\[1:0\]\s+OPERATION\s*=')
+        for kind, last in (('program', 15), ('template', 15), ('descriptor', 31)):
             self.assertRegex(top, rf'logic\s+\[63:0\]\s+{kind}_memory\[0:{last}\]')
             self.assertRegex(top, rf'\$readmemh\({kind.upper()}_INIT_FILE,\s*{kind}_memory\)')
 

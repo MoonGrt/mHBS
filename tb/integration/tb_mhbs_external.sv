@@ -10,10 +10,13 @@ module tb_mhbs_external;
  parameter integer SWAP=0;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
- wire busy,done,keygen_done,error,out_valid,out_last,result_kind;
+ wire verify_ready,verify_pass;
+ wire verify_valid=0;wire [255:0] verify_data=0;
+ wire busy,done,keygen_done,error,out_valid;
+ wire [1:0] result_kind;
  wire [15:0] error_code;
  wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
- wire [63:0] out_data;wire [7:0] out_keep;
+ wire [255:0] out_data;wire [5:0] out_bytes;
  logic [63:0] message_data=0;logic message_valid=0;wire message_ready;
  logic [6:0] message_length=MESSAGE_BYTES[6:0];
  reg [7:0] message_bytes[0:86];
@@ -21,6 +24,7 @@ module tb_mhbs_external;
  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
  .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
+ `include "tb/integration/mhbs_shared_store_check.svh"
  string directory,vector_directory,dump_path,trace_path;
  integer trace_words=0,trace_cursor=0,fault=0;
  reg [47:0] trace_expected[0:2047];
@@ -82,14 +86,14 @@ module tb_mhbs_external;
     trace_cursor=trace_cursor+1;
    end
    if(out_valid)begin
-    if(result_kind!==metadata[3][0])$fatal(1,"wrong operation");
-    for(integer i=0;i<8;i=i+1)if(out_keep[i])begin
+    if(result_kind!==metadata[3][1:0])$fatal(1,"wrong operation");
+    if(out_bytes!=metadata[4] || out_bytes==0 || out_bytes>32)$fatal(1,"output node width");
+    for(integer i=0;i<32;i=i+1)if(i<out_bytes)begin
      if(cursor>=metadata[0] || out_data[i*8 +:8]!==expected_bytes[cursor])
       $fatal(1,"byte=%0d got=%h expected=%h state=%0d",cursor,out_data[i*8 +:8],expected_bytes[cursor],`HBS_CORE.state);
      if(dump_file)$fwrite(dump_file,"%02x\n",out_data[i*8 +:8]);
      cursor=cursor+1;
     end
-    if(out_last!==(cursor==metadata[0]))$fatal(1,"out_last");
    end
   end
  end

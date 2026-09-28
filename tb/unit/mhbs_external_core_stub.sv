@@ -6,31 +6,34 @@ module mhbs_hbs #(
     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
 ) (
     input wire [63:0] image_header, profile_descriptor,
-    output wire [4:0] program_address,
+    output wire [3:0] program_address,
     output wire [3:0] template_address,
     input wire [63:0] program_data, template_data,
-    input wire [4:0] job_entry,
+    input wire [3:0] job_entry,
     output wire [9:0] descriptor_addresses,
     input wire [127:0] descriptor_data,
     input wire clk, rst,
-    input wire job_valid, output wire job_ready, input wire job_operation,
+    input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
     input wire [6:0] job_message_length,
     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
     input wire message_valid, output wire message_ready,
     input wire [63:0] message_data,
-    output wire out_valid, input wire out_ready, output wire [63:0] out_data,
-    output wire [7:0] out_keep, output wire out_last,
+    input wire verify_valid, output wire verify_ready,
+    input wire [255:0] verify_data, output wire verify_pass,
+    output wire out_valid, output wire [255:0] out_data,
+    output wire [5:0] out_bytes,
     output wire busy, output logic done, error, output logic [15:0] error_code,
     output wire [31:0] hash_count, permutation_count,
     output logic [31:0] cycles
 );
+    assign verify_ready=0;assign verify_pass=0;
     logic active;
     logic [6:0] accepted_length;
     integer received,starts;
     logic [63:0] first_word,last_word;
     assign program_address=0;assign template_address=0;assign descriptor_addresses=0;
     assign job_ready=!active;assign message_ready=active && job_operation && received<accepted_length;
-    assign busy=active;assign out_valid=0;assign out_data=0;assign out_keep=0;assign out_last=0;
+    assign busy=active;assign out_valid=0;assign out_data=0;assign out_bytes=0;
     assign hash_count=0;assign permutation_count=0;
     always_ff @(posedge clk)begin
      if(rst)begin active<=0;accepted_length<=0;received<=0;starts<=0;done<=0;error<=0;error_code<=0;cycles<=0;end

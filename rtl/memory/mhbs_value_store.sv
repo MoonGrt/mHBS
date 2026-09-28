@@ -1,6 +1,6 @@
 `timescale 1ns/1ps
 `default_nettype none
-module mhbs_value_store #(parameter integer WIDTH=128, DEPTH=128, ADDRESS_BITS=7) (
+module mhbs_value_store #(parameter integer WIDTH=128, DEPTH=128, ADDRESS_BITS=7, parameter bit SINGLE_READ=0) (
     input wire clk,
     input wire write0, write1,
     input wire [ADDRESS_BITS-1:0] address0, address1,
@@ -49,11 +49,11 @@ module mhbs_value_store #(parameter integer WIDTH=128, DEPTH=128, ADDRESS_BITS=7
     end
     // Readers request adjacent values; one read per parity bank avoids
     // duplicating distributed RAM for two independent read ports.
-    wire [AW-1:0] even_read = read0[0] ? read1[AW:1] : read0[AW:1];
-    wire [AW-1:0] odd_read = read0[0] ? read0[AW:1] : read1[AW:1];
+    wire [AW-1:0] even_read = SINGLE_READ ? read0[AW:1] : read0[0] ? read1[AW:1] : read0[AW:1];
+    wire [AW-1:0] odd_read = SINGLE_READ ? read0[AW:1] : read0[0] ? read0[AW:1] : read1[AW:1];
     wire [WIDTH-1:0] even_value=even_bank[even_read], odd_value=odd_bank[odd_read];
     assign value0 = read0[0] ? odd_value : even_value;
-    assign value1 = read0[0] ? even_value : odd_value;
+    assign value1 = SINGLE_READ ? {WIDTH{1'b0}} : read0[0] ? even_value : odd_value;
     end endgenerate
 endmodule
 `default_nettype wire

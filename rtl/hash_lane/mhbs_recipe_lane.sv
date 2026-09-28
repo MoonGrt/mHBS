@@ -258,8 +258,11 @@ module mhbs_recipe_lane #(
             default:list_word_window=list_pair[271:192];
         endcase
     end
-    wire [63:0] list_window=list_remainder[1]
-        ? list_word_window[79:16] : list_word_window[63:0];
+    // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
+    // a node boundary; do not retain the legacy two-node byte window.
+    wire [63:0] list_window=RECIPE_MASK[PREFIX_LIST]
+        ? (list_remainder[1] ? list_word_window[79:16] : list_word_window[63:0])
+        : node_word(list_data0,{4'd0,list_remainder[4:3]});
     wire [5:0] stream_word_index=position[8:3];
     logic [63:0] stream_payload;
     logic [127:0] source_window;

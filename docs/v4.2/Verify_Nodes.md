@@ -1,0 +1,49 @@
+# 外部节点 Verify
+
+当前版本为 `shared_list_store_20260927_v1`：**6310.750 等效 Slice**，65 项 Verify 检查与完整回归通过。FORS 根和 WOTS 端点共享存储，接口及周期不变。见 [最新合并报告](Shared_List_Store.md)。下文保留初始 Verify 版本基线记录。
+
+当前实现支持 SLH-DSA SHAKE 128f、192f、256f 的 Verify。它复用原 sign 镜像、Keccak、配方 lane、端点/根存储及父节点 Hash，未增加标准签名字节流解析器或整签名缓存。
+
+## 接口与改动范围
+
+- `OPERATION=2`；0/1 的 Keygen/Sign 语义不变。`result_kind` 扩为两位。
+- 新增 `verify_valid/verify_ready/verify_data[255:0]`。一拍提交一个 n 字节节点，低字节在先，未用高位忽略。
+- 外部顺序供应 R、每棵 FORS 的秘密节点和认证路径、每层 XMSS 的 WOTS 签名节点和认证路径。原始签名长度及分段由外部负责；不需要外部提供摘要、链起点索引或其他中间运算结果。
+- `done && !error` 时读取 `verify_pass`。验签不匹配返回 0，执行故障通过 error 报告。供应不足时等待，不把输入停顿判为无效签名。
+- 控制器增加五个状态。PRF_msg 宏切换为读取 R；TREE 宏切换为恢复叶节点和沿认证路径向上合并；顶层根必须实际计算，不使用 Sign 的 EXTERNAL_ROOT 快捷路径。
+- WOTS 两条链一组，按 digit～14 执行普通 Hash 请求；digit=15 直接写端点。保留原 compact chain 实现，因此 Verify 有单次 Hash 的调度开销。
+- 不新增调试计数器。Verify 的 keygen/sign 周期输出保持零，hash/permutation 统计仍受 PROFILE_ENABLE 控制，生产综合关闭。
+
+详细时序约定见 [Job_Interface.md](../Job_Interface.md)。消息范围沿用 1～87 字节，仍为每次复位执行一项操作。
+
+## 验证
+
+标签 `verify_nodes_20260927_v1`：
+
+- 三个参数集共 48 项 Verify 测试通过：正常，R/FORS 秘密节点/FORS 认证路径/WOTS/XMSS 认证路径/末端路径篡改，错误消息、公钥根，停顿、复位重放、供应不足等待后复位、lane 交换、统计关闭、共同核提取及故障退出。
+- 有效及篡改向量均由现有软件 `verify_internal` 对照；每个参数集实际覆盖 WOTS 0 步和 15 步恢复。
+- 原有 6 组正常执行、33 项扩展、6 组共同核对照、12 组关闭统计对照、2 项关闭统计扩展及 6 项异常退出通过；原 Keygen/Sign 的输出、操作周期、Hash 和置换次数均与 `prune_k2u2_20260927_v1` 一致。
+- 13 项 Python 合约检查、lint、6 组模型及 12 项 RTL 单元门禁通过。
+
+以下仅为仓库默认签名向量，周期是测试平台从复位释放起计数的总周期，包含启动，节点与消息均无输入等待；不是所有签名的固定时延。
+
+| 参数集 | 输入节点数 | 总周期 | Hash 次数 | 置换次数 |
+|---|---:|---:|---:|---:|
+| 128f | 1068 | 84040 | 6441 | 6533 |
+| 192f | 1486 | 118019 | 8922 | 9126 |
+| 256f | 1558 | 123463 | 9152 | 9432 |
+
+## 综合
+
+Vivado 2025.2，`xc7a200tffg1156-3`，共同核 OOC，`PROFILE_ENABLE=0`：
+
+| 资源 | 原基线 | 新增 Verify | 差值 |
+|---|---:|---:|---:|
+| LUT | 20154 | 22138 | +1984 |
+| FF | 9340 | 9869 | +529 |
+| LUTRAM | 1456 | 1456 | 0 |
+| 等效 Slice | 6206 | 6768.125 | +562.125（9.06%） |
+
+BRAM/DSP 均为 0；实际综合网表的统计寄存器裁剪审计通过。代码复用不意味着面积零增长：新增节点输入、数据选择、控制与结果比较仍需硬件。本轮未布局布线，**没有新的频率测量**；原 104.166667 MHz 只属于旧基线。
+
+源码快照、完整日志、向量和结果在 [候选归档](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/verify_nodes_20260927_v1/result.json)。复测使用新标签运行 `make verify TAG=<标签>`，综合可使用 `python3 scripts/v42_external_synth.py <标签> --core-only`。

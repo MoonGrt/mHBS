@@ -36,7 +36,8 @@ rtl-test:
 rtl-verification:
 	$(PYTHON) scripts/verify_v42_external_rtl.py $(TAG)
 	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --partition
-	$(PYTHON) scripts/verify_v42_pruning.py $(TAG)
+	$(PYTHON) scripts/verify_v42_pruning.py $(TAG) --baseline verify_area_compare_20260927_v1 --node-output
+	$(PYTHON) scripts/verify_v42_verify.py $(TAG)
 synth-common:
 	$(PYTHON) scripts/v42_external_synth.py $(TAG)
 	$(PYTHON) scripts/collect_v42_external.py $(TAG) --sim-tag $(SIM_TAG)
