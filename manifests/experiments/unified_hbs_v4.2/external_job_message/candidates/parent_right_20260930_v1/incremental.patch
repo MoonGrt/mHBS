@@ -1,0 +1,810 @@
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -144,7 +144,11 @@
+     logic [9:0] task_leaf [0:1];
+     logic [INDEX_BITS-1:0] task_a [0:1];
+     logic [31:0] task_b [0:1];
+-    logic [255:0] task_left0, task_right [0:1];
++    logic [255:0] task_left0;
++    // Parent operands stay unchanged through HASH_ISSUE/HASH_WAIT and are
++    // updated only in PARENT_DONE. Other recipes do not consume the right
++    // input, so no duplicate parent-right register is needed.
++    wire [255:0] parent_right = verifying && !node_index[0] ? emit_value : node_value;
+     // Results stay stable for each outstanding request. Only verification
+     // leaf/chain hashes take their input from these existing result registers.
+     wire verify_chain_source = verifying &&
+@@ -196,7 +200,7 @@
+             .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
+             .identifier(128'd0),.message_buffer,.message_length,
+             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
+-            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(task_right[L]),
++            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(L==0 ? parent_right : 256'd0),
+             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
+             .list_data0(endpoint_value0),
+             .list_data1(endpoint_value1),
+@@ -542,7 +546,6 @@
+                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+                         task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
+-                        task_right[0]<=verifying && !node_index[0] ? emit_value : node_value;
+                         start_hash(descriptors[4],2'b01,PARENT_DONE);
+                     end
+                 end
+--- a/scripts/verify_v42_units.py
++++ b/scripts/verify_v42_units.py
+@@ -31,6 +31,15 @@
+     print('SLH_UNIT_PASS',name,flush=True)
+ 
+ one('s_parameters','tb_mhbs_s_parameters',rtl+['tb/unit/tb_mhbs_s_parameters.sv'])
++
++# Compare the consumed fixed blocks against the frozen pre-specialization
++# implementation for both production masks and the generic compatibility path.
++for mask in (0x101e,0x0006,0xffff):
++    one('slh_fixed_block_'+format(mask,'04x'),'tb_mhbs_slh_fixed_block',
++        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
++         'rtl/hash_lane/mhbs_recipe_lane.sv','tb/reference/mhbs_recipe_lane_value_narrow_ref.sv',
++         'tb/unit/tb_mhbs_slh_fixed_block.sv'],
++        [f'-Ptb_mhbs_slh_fixed_block.MASK={mask}'])
+ 
+ one('endpoint_68','tb_mhbs_value_store',
+     ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -25,6 +25,7 @@
+  .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
++ `include "tb/integration/mhbs_parent_input_check.svh"
+  string directory,vector_directory,dump_path,trace_path;
+  integer trace_words=0,trace_cursor=0,fault=0;
+  reg [47:0] trace_expected[0:2047];
+@@ -138,6 +139,7 @@
+        hash_count!=measured_hashes || permutation_count!=measured_permutations)$fatal(1,"statistics observer mismatch");
+    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)
+     $fatal(1,"production statistics must be zero");
++   check_parent_input_coverage();
+    $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
+    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
+    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -30,6 +30,7 @@
+  .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
++ `include "tb/integration/mhbs_parent_input_check.svh"
+  task tick;begin @(posedge clk);#1;end endtask
+  genvar l;
+  generate for(l=0;l<2;l=l+1)begin: observe
+@@ -146,6 +147,7 @@
+     if(hash_count!=hashes[0]+hashes[1] || permutation_count!=permutations[0]+permutations[1])$fatal(1,"verify statistics");
+    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)$fatal(1,"statistics not pruned");
+    if(keygen_cycles!=0 || sign_cycles!=0)$fatal(1,"verify polluted sign/keygen cycles");
++   check_parent_input_coverage();
+    $display("VERIFY_PASS accepted=%0d nodes=%0d cycles=%0d waits=%0d hashes=%0d permutations=%0d zero=%0d full=%0d",verify_pass,node_sent,cycles,wait_cycles,hashes[0]+hashes[1],permutations[0]+permutations[1],zero_steps,full_steps);
+    $display("VERIFY_COVERAGE asymmetric=%0d zero_left=%0d zero_right=%0d both_zero=%0d auth_left=%0d auth_right=%0d",asymmetric,zero_left,zero_right,both_zero,auth_left,auth_right);
+    repeat(40)begin tick();if(!done || busy || verify_ready || message_ready)$fatal(1,"completion halt");end
+--- /dev/null
++++ b/tb/integration/mhbs_parent_input_check.svh
+@@ -0,0 +1,58 @@
++// Freeze the old PARENT_SETUP operands in the testbench and compare the
++// actual lane pins until PARENT_DONE, including request/response stalls.
++// Reset/abort invalidates the scoreboard without clearing datapath storage.
++localparam integer PARENT_PHYSICAL_LANE = SWAP ? 1 : 0;
++reg parent_inputs_live=0;
++reg [255:0] parent_expected_left,parent_expected_right;
++integer parent_input_cycles=0,parent_input_requests=0;
++integer parent_verify_left=0,parent_verify_right=0;
++wire [255:0] parent_observed_left =
++ `HBS_CORE.lanes[PARENT_PHYSICAL_LANE].lane.request_left;
++wire [255:0] parent_observed_right =
++ `HBS_CORE.lanes[PARENT_PHYSICAL_LANE].lane.request_right;
++always @(posedge clk)begin
++ if(`HBS_CORE.execution_rst)begin
++  parent_inputs_live=0;parent_input_cycles=0;parent_input_requests=0;
++  parent_verify_left=0;parent_verify_right=0;
++ end else begin
++  if(parent_inputs_live)begin
++   // Controller states: HASH_ISSUE=22, HASH_WAIT=23, PARENT_DONE=19.
++   if(`HBS_CORE.state!=22 && `HBS_CORE.state!=23 && `HBS_CORE.state!=19)
++    $fatal(1,"parent hash left its request window unexpectedly");
++   if(parent_observed_left!==parent_expected_left || parent_observed_right!==parent_expected_right)
++    $fatal(1,"parent operand changed or reordered state=%0d index=%0d level=%0d",
++     `HBS_CORE.state,`HBS_CORE.node_index,`HBS_CORE.node_level);
++   parent_input_cycles=parent_input_cycles+1;
++   if(`HBS_CORE.state==19)parent_inputs_live=0;
++  end
++  // PARENT_SETUP=18; signing can bypass the selected root's parent path.
++  if(`HBS_CORE.state==18 && !(!`HBS_CORE.verifying && `HBS_CORE.macro_flags[3] &&
++      (`HBS_CORE.node_index>>1)==(`HBS_CORE.target>>(`HBS_CORE.node_level+1))))begin
++   if(`HBS_CORE.verifying)begin
++    if(`HBS_CORE.node_index[0])begin
++     parent_expected_left=`HBS_CORE.emit_value;
++     parent_expected_right=`HBS_CORE.node_value;
++     parent_verify_left=parent_verify_left+1;
++    end else begin
++     parent_expected_left=`HBS_CORE.node_value;
++     parent_expected_right=`HBS_CORE.emit_value;
++     parent_verify_right=parent_verify_right+1;
++    end
++   end else begin
++    parent_expected_left=`HBS_CORE.stack[`HBS_CORE.node_level];
++    parent_expected_right=`HBS_CORE.node_value;
++   end
++   parent_inputs_live=1;parent_input_requests=parent_input_requests+1;
++  end
++ end
++end
++task check_parent_input_coverage;
++ begin
++  if(parent_input_requests==0 || parent_input_cycles==0 || parent_inputs_live)
++   $fatal(1,"parent operand coverage missing or unfinished");
++  if(`HBS_CORE.verifying && (parent_verify_left==0 || parent_verify_right==0))
++   $fatal(1,"verify parent operand ordering coverage missing");
++  $display("PARENT_INPUT_CHECK_PASS requests=%0d stable_cycles=%0d auth_left=%0d auth_right=%0d",
++   parent_input_requests,parent_input_cycles,parent_verify_left,parent_verify_right);
++ end
++endtask
+--- /dev/null
++++ b/tb/unit/tb_mhbs_slh_fixed_block.sv
+@@ -0,0 +1,94 @@
++`timescale 1ns/1ps
++module tb_mhbs_slh_fixed_block;
++ parameter [15:0] MASK=16'h101e;
++ logic [5:0] node_bytes;
++ logic [63:0] request_recipe,request_step_recipe,request_tree;
++ logic request_chain;
++ logic [255:0] secret_seed,secret_prf,public_seed,root,randomizer;
++ logic [255:0] request_left,request_right;
++ logic [127:0] identifier;
++ logic [4:0] request_layer;
++ logic [9:0] request_leaf;
++ logic [6:0] request_a;
++ logic [31:0] request_b;
++ reg feedback;
++ reg [391:0] retained_digest,final_digest;
++ integer checked=0,feedback_checked=0,stream_skipped=0,parents=0;
++ mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(MASK)) dut(
++  .clk(1'b0),.rst(1'b0),.node_bytes,.request_recipe,.request_step_recipe,
++  .request_chain,.secret_seed,.secret_prf,.public_seed,.root,.randomizer,
++  .identifier,.request_layer,.request_tree,.request_leaf,.request_a,.request_b,
++  .request_left,.request_right,.request_valid(1'b0),.response_ready(1'b0),
++  .request_steps(5'd15),.request_capture_after(5'd7),.request_capture(1'b1),
++  .message_buffer(696'd0),.message_length(7'd0),
++  .list_data0(256'd0),.list_data1(256'd0));
++ mhbs_recipe_lane_value_narrow_ref #(.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(MASK)) reference_lane(
++  .clk(1'b0),.rst(1'b0),.node_bytes,.request_recipe,.request_step_recipe,
++  .request_chain,.secret_seed,.secret_prf,.public_seed,.root,.randomizer,
++  .identifier,.request_layer,.request_tree,.request_leaf,.request_a,.request_b,
++  .request_left,.request_right,.request_valid(1'b0),.response_ready(1'b0),
++  .request_steps(5'd15),.request_capture_after(5'd7),.request_capture(1'b1),
++  .message_buffer(696'd0),.message_length(7'd0),
++  .list_data0(256'd0),.list_data1(256'd0));
++ function automatic [391:0] pattern(input integer kind);
++  for(integer j=0;j<49;j=j+1)
++   pattern[j*8 +:8]=kind==0 ? 0 : kind==1 ? 255 : $random;
++ endfunction
++ initial begin
++  // Isolate the combinational constructor. Sequential request/capture/stall
++  // behavior is exercised by the existing SHAKE-vector and integration tests.
++  force dut.chain_feedback_valid=feedback;
++  force reference_lane.chain_feedback_valid=feedback;
++  force dut.chain_feedback_counter=4'd13;
++  force reference_lane.chain_feedback_counter=4'd13;
++  force dut.digest=retained_digest;
++  force reference_lane.digest=retained_digest;
++  force dut.finish_digest=final_digest;
++  force reference_lane.finish_digest=final_digest;
++  for(integer n=0;n<3;n=n+1)begin
++   node_bytes=16+8*n;
++   for(integer shape=1;shape<16;shape=shape+1)if(MASK[shape])
++   for(integer count=0;count<4;count=count+1)
++   for(integer mode=0;mode<8;mode=mode+1)
++   for(integer t=0;t<6;t=t+1)begin
++    secret_seed=pattern(t);secret_prf=pattern(t);public_seed=pattern(t);
++    root=pattern(t);randomizer=pattern(t);identifier=pattern(t);
++    request_left=pattern(t);request_right=pattern(t);
++    retained_digest=pattern(t);final_digest=pattern(t);
++    request_layer=pattern(t);request_tree=pattern(t);request_leaf=pattern(t);
++    request_a=pattern(t);request_b=pattern(t);
++    request_recipe=0;request_recipe[59:56]=4'(shape);
++    request_recipe[55:48]=t[0] ? 8'd6 : 8'd0;
++    request_recipe[47:40]=count==3 ? 8'd255 : 8'(count);
++    request_step_recipe=64'h0200010000000000;
++    request_step_recipe[55:48]=t[0] ? 8'd3 : 8'd0;
++    request_chain=mode[0];feedback=mode[2];
++    dut.seed_phase=mode[1];reference_lane.seed_phase=mode[1];
++    dut.iteration=5'd7;reference_lane.iteration=5'd7;
++    dut.compound=2'(t);reference_lane.compound=2'(t);
++    dut.seed_shapes=(16'b1<<shape)&MASK;reference_lane.seed_shapes=(16'b1<<shape)&MASK;
++    dut.step_shapes=16'h0004&MASK;reference_lane.step_shapes=16'h0004&MASK;
++    dut.legacy_value=pattern(t);reference_lane.legacy_value=dut.legacy_value;
++    dut.temporary_key=pattern(t);reference_lane.temporary_key=dut.temporary_key;
++    dut.mask0=pattern(t);reference_lane.mask0=dut.mask0;
++    dut.mask1=pattern(t);reference_lane.mask1=dut.mask1;
++    #1;
++    if(dut.fixed_block!==reference_lane.fixed_block)$fatal(1,"fixed-block classification changed");
++    // STREAM does not consume fast_block. Its arbitrary data may differ in
++    // the specialized path; compare every bit whenever the block is used.
++    if(dut.fixed_block)begin
++     if(dut.fast_block!==reference_lane.fast_block)
++      $fatal(1,"fixed-block mismatch mask=%h n=%0d shape=%0d arity=%0d mode=%0d pattern=%0d",MASK,node_bytes,shape,count,mode,t);
++     if(dut.fast_block[1087]!==1'b1)$fatal(1,"missing final SHAKE padding bit");
++     checked=checked+1;
++     if(feedback)feedback_checked=feedback_checked+1;
++     if(dut.shapes[2] && dut.arity==2 && !feedback)parents=parents+1;
++    end else stream_skipped=stream_skipped+1;
++   end
++  end
++  if(checked==0 || feedback_checked==0 || parents==0)$fatal(1,"missing fixed-block coverage");
++  if(MASK==16'h101e && stream_skipped==0)$fatal(1,"missing stream exclusion coverage");
++  $display("SLH_FIXED_BLOCK_EQ_PASS mask=%h blocks=%0d feedback=%0d parents=%0d stream_skipped=%0d",MASK,checked,feedback_checked,parents,stream_skipped);
++  $finish;
++ end
++endmodule
+--- /dev/null
++++ b/tb/reference/mhbs_recipe_lane_value_narrow_ref.sv
+@@ -0,0 +1,522 @@
++// Frozen from value_narrow_20260930_v1; only the module name was changed.
++// Original SHA-256: e156a8720de1ba220f4dad3dc455226a4d7016f37dd870fc3594f5a21c72271b
++`timescale 1ns/1ps
++`default_nettype none
++// ABI 4 byte recipes and local chain feedback. Both physical lanes use this
++// module. The dispatcher keeps all request fields stable through response.
++module mhbs_recipe_lane_value_narrow_ref #(
++    parameter integer N = 16,
++    parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
++    parameter integer UNROLL = 2,
++    parameter integer MAX_MESSAGE_BYTES = 87,
++    parameter [15:0] RECIPE_MASK = 16'hffff,
++    parameter bit PROFILE_ENABLE = 0
++) (
++    input wire clk, rst,
++    input wire [5:0] node_bytes,
++    input wire request_valid, output wire request_ready,
++    input wire [63:0] request_recipe, request_step_recipe,
++    input wire request_chain,
++    input wire [4:0] request_steps, request_capture_after,
++    input wire request_capture,
++    input wire [N*8-1:0] secret_seed, secret_prf, public_seed, root, randomizer,
++    input wire [127:0] identifier,
++    input wire [MAX_MESSAGE_BYTES*8-1:0] message_buffer,
++    input wire [6:0] message_length,
++    input wire [4:0] request_layer,
++    input wire [63:0] request_tree,
++    input wire [9:0] request_leaf,
++    input wire [INDEX_BITS-1:0] request_a,
++    input wire [31:0] request_b,
++    input wire [N*8-1:0] request_left, request_right,
++    output wire [INDEX_BITS-1:0] list_index0, list_index1,
++    input wire [N*8-1:0] list_data0, list_data1,
++    output wire response_valid, input wire response_ready,
++    output wire [DIGEST_BYTES*8-1:0] response_value,
++    output wire [N*8-1:0] response_capture,
++    output logic error,
++    output logic [31:0] hash_count, permutation_count
++);
++    localparam [3:0] ADDRESS_SEED=1, ADDRESS_VALUE=2, MESSAGE_PRF=3,
++        MESSAGE_DIGEST=4, INDEX_PRF=5, ROOT_MESSAGE=6, MASKED_SEED=7,
++        MASKED_VALUE=8, PREFIX_SEED=9, PREFIX_VALUE=10, PREFIX_MESSAGE=11,
++        ADDRESS_LIST=12, PREFIX_LIST=13, PREFIX_LEAF=14, PREFIX_PARENT=15;
++    typedef enum logic [2:0] {IDLE, START, STREAM, WAIT_HASH, RESPONSE} state_t;
++    state_t state;
++    wire chain_feedback_valid;
++    wire [3:0] chain_feedback_counter;
++    logic seed_phase;
++    logic [4:0] iteration;
++    logic [1:0] compound;
++    // Masked legacy recipes need a value across intermediate hashes. SLH
++    // chains instead reuse the sponge's retained digest at the next START.
++    logic [N*8-1:0] legacy_value, temporary_key, mask0, mask1;
++    wire [N*8-1:0] current_value = RECIPE_MASK[MASKED_VALUE] ? legacy_value
++        : seed_phase ? request_left : digest[N*8-1:0];
++    localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858)!=0;
++    logic [4:0] rate_block;
++    logic [3:0] beat;
++    logic stream_half;
++    wire [63:0] recipe = request_chain && !seed_phase
++        ? request_step_recipe : request_recipe;
++    wire [3:0] shape = recipe[59:56];
++    logic [15:0] seed_shapes,step_shapes;
++    logic [12:0] seed_length,step_length;
++    logic [2:0] stream_node_words;
++    wire [15:0] shapes=request_chain && !seed_phase ? step_shapes : seed_shapes;
++    // Decode lengths once in the existing request stage. In particular the
++    // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
++    // byte comparator during STREAM. Request fields remain stable until the
++    // response, but their registered decode cuts that wide data-path cone.
++    function automatic [12:0] decode_length(input [63:0] desc);
++        reg [12:0] nodes;
++        begin
++            nodes=node_bytes==16 ? {1'b0,desc[47:40],4'b0}
++                : node_bytes==24 ? ({1'b0,desc[47:40],4'b0}+{2'b0,desc[47:40],3'b0})
++                : {desc[47:40],5'b0};
++            if(!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length=0;
++            else case(desc[59:56])
++                ADDRESS_SEED: decode_length=node_bytes+32+node_bytes;
++                ADDRESS_VALUE,ADDRESS_LIST: decode_length=node_bytes+32+nodes;
++                MESSAGE_PRF: decode_length=2*node_bytes+message_length;
++                MESSAGE_DIGEST: decode_length=3*node_bytes+message_length;
++                INDEX_PRF: decode_length=96;
++                ROOT_MESSAGE: decode_length=128+message_length;
++                MASKED_SEED: decode_length=128;
++                MASKED_VALUE: decode_length=13'd64+{desc[47:40],5'd0};
++                PREFIX_SEED,PREFIX_VALUE: decode_length=55;
++                PREFIX_MESSAGE: decode_length=54+message_length;
++                PREFIX_LIST: decode_length=13'd22+{desc[47:40],5'd0};
++                PREFIX_LEAF: decode_length=54;
++                PREFIX_PARENT: decode_length=86;
++                default: decode_length=0;
++            endcase
++        end
++    endfunction
++    always_ff @(posedge clk) begin
++        if(!rst && state==IDLE && request_valid) begin
++            seed_shapes<=(16'b1 << request_recipe[59:56]) & RECIPE_MASK;
++            step_shapes<=(16'b1 << request_step_recipe[59:56]) & RECIPE_MASK;
++            seed_length<=decode_length(request_recipe);
++            step_length<=decode_length(request_step_recipe);
++            stream_node_words<=node_bytes[5:3];
++        end
++    end
++    wire [7:0] domain = recipe[55:48];
++    wire [7:0] arity = recipe[47:40];
++    wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
++    wire [31:0] a = request_a;
++    wire [31:0] b = chain_feedback_valid
++        ? (request_step_recipe[55:48]==3 ? request_b : {28'd0,chain_feedback_counter})
++        : request_chain && !seed_phase
++        ? (request_step_recipe[55:48] == 3 && request_step_recipe[59:56] == ADDRESS_VALUE
++            ? request_b : {27'd0, iteration}) : request_b;
++    wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
++    wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
++    wire [31:0] leaf = {22'd0, request_leaf};
++    wire [12:0] input_length = RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE]
++        && compound < arity+1 ? 13'd96
++        : request_chain && !seed_phase ? step_length : seed_length;
++    wire [5:0] stream_node_bytes={stream_node_words,3'b0};
++    logic [1087:0] fast_block;
++    logic [63:0] stream_data;
++    logic [255:0] address, masked_address;
++    wire fixed_block = (RECIPE_MASK & 16'h3858)==0 || shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]
++        || shapes[INDEX_PRF] || shapes[MASKED_SEED] || shapes[MASKED_VALUE]
++        || shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]
++        || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT];
++    wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
++    wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
++    wire stream_last = rate_offset+13'd136 > input_length;
++    wire hash_ready, block_ready, fast_ready, digest_valid, finish_valid;
++    wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
++    wire [N*8-1:0] compact_capture;
++    wire compact_capture_valid, hash_error;
++    wire completed = finish_valid;
++    wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
++    assign response_value=digest;
++    assign response_capture=compact_capture;
++    // Capture both chain modes in the sponge's existing register bank, on
++    // the same final-round edge used by the former lane-local copy.
++    wire capture_single = request_capture
++        && !(RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1)
++        && (seed_phase ? request_capture_after==0 : request_capture_after==iteration+1);
++    wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
++    logic staged_valid, staged_last;
++    logic [127:0] staged_data;
++    wire stream_accept = !staged_valid || block_ready;
++    // The producer emits exactly eight bytes per accepted STREAM cycle.
++    // Keeping that cursor avoids a rate_block*136 + beat*16 adder chain
++    // ahead of the source selector and each padding-byte comparator.
++    logic [12:0] position;
++    wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
++    logic [INDEX_BITS-1:0] list_cursor;
++    logic [5:0] list_remainder;
++    wire [4:0] stream_advance = 5'd8;
++    wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
++    assign list_index0 = list_cursor;
++    assign list_index1 = list_index0+1'b1;
++    assign request_ready = state == IDLE;
++    assign response_valid = state == RESPONSE;
++
++    function automatic [31:0] be32(input [31:0] value);
++        be32 = {value[7:0],value[15:8],value[23:16],value[31:24]};
++    endfunction
++    // All sponge beats start on an eight-byte boundary. Select two words
++    // directly instead of shifting a maximum-size concatenated message frame.
++    wire [2:0] node_words=stream_node_words;
++    wire [703:0] padded_message={8'd0,message_buffer};
++    function automatic [63:0] node_word(input [255:0] data,input [5:0] index);
++        begin
++            case(index)
++                0:node_word=data[63:0];1:node_word=data[127:64];
++                2:node_word=data[191:128];3:node_word=data[255:192];
++                default:node_word=0;
++            endcase
++        end
++    endfunction
++    function automatic [63:0] message_word(input [5:0] index);
++        begin
++            message_word=index<11 ? padded_message[index*64 +:64] : 64'd0;
++        end
++    endfunction
++    // Select a source and a small word address BEFORE the wide data mux.
++    // All recipes share the same message/seed selectors instead of each
++    // recipe instantiating its own variable 64-bit extraction network.
++    function automatic [63:0] source_word(input [5:0] index,input bit lms_only);
++        reg [2:0] source;
++        reg [5:0] selected_index;
++        reg [63:0] literal;
++        begin
++            source=0;selected_index=index;literal=0;
++            (* parallel_case *) case(1'b1)
++                shapes[MESSAGE_PRF]: if(!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
++                    if(index<node_words) source=1;
++                    else if(index<2*node_words) begin source=2;selected_index=index-node_words;end
++                    else begin source=5;selected_index=index-2*node_words;end
++                end
++                shapes[MESSAGE_DIGEST]: if(!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
++                    if(index<node_words) source=2;
++                    else if(index<2*node_words) begin source=3;selected_index=index-node_words;end
++                    else if(index<3*node_words) begin source=4;selected_index=index-2*node_words;end
++                    else begin source=5;selected_index=index-3*node_words;end
++                end
++                shapes[ROOT_MESSAGE]: if(!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
++                    if(index==3) literal=64'h0200000000000000;
++                    else if(index<4) literal=0;
++                    else if(index<8) begin source=2;selected_index=index-4;end
++                    else if(index<12) begin source=4;selected_index=index-8;end
++                    else if(index==15) literal={be32(leaf),32'd0};
++                    else if(index>=16) begin source=5;selected_index=index-16;end
++                end
++                shapes[PREFIX_MESSAGE]: if(RECIPE_MASK[PREFIX_MESSAGE]) begin
++                    // Unaligned 22-byte prefix: assemble three aligned words,
++                    // then retain the fixed window starting two bytes later.
++                    if(index>=3 && index<7) begin source=2;selected_index=index-3;end
++                    else if(index>=7) begin source=5;selected_index=index-7;end
++                end
++                shapes[ADDRESS_LIST]: if(!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
++                    if(index<node_words) source=3;
++                    else if(index<node_words+4) begin source=6;selected_index=index-node_words;end
++                    else begin source=7;selected_index=index-node_words-4;end
++                end
++                shapes[PREFIX_LIST]: if(!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
++                    case(index)
++                        0:literal=identifier[63:0];1:literal=identifier[127:64];
++                        2:literal={list_data0[15:0],16'h8080,be32(leaf)};
++                        3:literal=list_data0[79:16];default:literal=0;
++                    endcase
++                end
++                default:begin end
++            endcase
++            case(source)
++                1:source_word=node_word(secret_prf,selected_index);
++                2:source_word=node_word(randomizer,selected_index);
++                3:source_word=node_word(public_seed,selected_index);
++                4:source_word=node_word(root,selected_index);
++                5:source_word=message_word(selected_index);
++                6:source_word=node_word(address,selected_index);
++                7:source_word=node_word(list_data0,selected_index);
++                default:source_word=literal;
++            endcase
++        end
++    endfunction
++    logic [511:0] list_pair;
++    always @* begin
++        case(stream_node_bytes)
++            16:list_pair={256'd0,list_data1[127:0],list_data0[127:0]};
++            24:list_pair={128'd0,list_data1[191:0],list_data0[191:0]};
++            default:list_pair={list_data1,list_data0};
++        endcase
++    end
++    // Legal list offsets are whole 64-bit words (SLH), or two bytes
++    // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
++    logic [79:0] list_word_window;
++    always @* begin
++        case(list_remainder[4:3])
++            0:list_word_window=list_pair[79:0];
++            1:list_word_window=list_pair[143:64];
++            2:list_word_window=list_pair[207:128];
++            default:list_word_window=list_pair[271:192];
++        endcase
++    end
++    // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
++    // a node boundary; do not retain the legacy two-node byte window.
++    wire [63:0] list_window=RECIPE_MASK[PREFIX_LIST]
++        ? (list_remainder[1] ? list_word_window[79:16] : list_word_window[63:0])
++        : node_word(list_data0,{4'd0,list_remainder[4:3]});
++    wire [5:0] stream_word_index=position[8:3];
++    logic [63:0] stream_payload;
++    logic [127:0] source_window;
++    always_comb begin
++        source_window={source_word(stream_word_index+6'd1,1'b1),source_word(stream_word_index,1'b0)};
++        stream_payload=source_window[63:0];
++        if(shapes[PREFIX_MESSAGE]) begin
++            stream_payload=source_window[79:16];
++            if(position==0) stream_payload=identifier[63:0];
++            else if(position==8) stream_payload=identifier[127:64];
++            else if(position==16) stream_payload[47:0]={16'h8181,be32(leaf)};
++        end else if((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position>=prefix_bytes)
++            stream_payload=list_window;
++    end
++
++    integer i, absolute;
++    always @* begin
++        address = {be32(b),be32(a),be32(leaf),be32({24'd0,address_domain}),
++            be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
++        masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
++    end
++    // Select shared frame fields before alignment. This avoids replicating
++    // every seed/value/key/mask selector for all three node lengths.
++    logic [255:0] frame0,frame1,frame2,frame3;
++    logic [183:0] frame_prefix;
++    logic [7:0] frame_domain;
++    logic frame_two;
++    logic [2:0] frame_layout;
++    always @* begin
++        frame0=0;frame1=0;frame2=0;frame3=0;frame_prefix=0;
++        frame_domain=0;frame_two=0;frame_layout=7;
++        (* parallel_case *) case(1'b1)
++            shapes[ADDRESS_SEED],shapes[ADDRESS_VALUE]: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
++                frame_layout=0;frame0=public_seed;frame1=address;
++                frame2=chain_feedback_valid ? finish_digest[N*8-1:0] : shapes[ADDRESS_SEED] ? secret_seed : left_value;
++                frame_two=!chain_feedback_valid && shapes[ADDRESS_VALUE] && arity==2;
++                frame3=frame_two ? request_right : 256'd0;
++            end
++            shapes[INDEX_PRF]: if(RECIPE_MASK[INDEX_PRF]) begin
++                frame_layout=1;frame_domain=3;frame1=secret_prf;frame2={be32(leaf),224'd0};
++            end
++            shapes[MASKED_SEED]: if(RECIPE_MASK[MASKED_SEED]) begin
++                frame_layout=2;frame_domain=4;frame1=secret_seed;frame2=public_seed;frame3=masked_address;
++            end
++            shapes[MASKED_VALUE]: if(RECIPE_MASK[MASKED_VALUE]) begin
++                if(compound<arity+1) begin
++                    frame_layout=1;frame_domain=3;frame1=public_seed;frame2=masked_address;
++                end else begin
++                    frame_layout=3;frame_domain=arity-1'b1;frame1=temporary_key;
++                    frame2=left_value^mask0;frame_two=arity==2;
++                    frame3=frame_two ? request_right^mask1 : 256'd0;
++                end
++            end
++            shapes[PREFIX_SEED],shapes[PREFIX_VALUE]: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
++                frame_layout=4;
++                frame_prefix={shapes[PREFIX_SEED] ? 8'hff : b[7:0],8'(request_a),8'd0,be32(leaf),identifier};
++                frame1=shapes[PREFIX_SEED] ? secret_seed : left_value;
++            end
++            shapes[PREFIX_LEAF],shapes[PREFIX_PARENT]: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
++                frame_layout=5;
++                frame_prefix={8'd0,shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,be32(request_b),identifier};
++                frame1=left_value;frame_two=shapes[PREFIX_PARENT];
++                frame2=frame_two ? request_right : 256'd0;
++            end
++            default:begin end
++        endcase
++    end
++    always @* begin
++        fast_block=0;
++        case(node_bytes)
++            16: begin
++                fast_block[0 +:128]=public_seed[127:0];
++                fast_block[128 +:256]=address;
++                fast_block[384 +:128]=chain_feedback_valid ? finish_digest[127:0] : shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
++                if(shapes[ADDRESS_VALUE] && arity==2) begin
++                    fast_block[512 +:128]=request_right[127:0];
++                    fast_block[640 +:8]=8'h1f;
++                end else fast_block[512 +:8]=8'h1f;
++            end
++            24: begin
++                fast_block[0 +:192]=public_seed[191:0];
++                fast_block[192 +:256]=address;
++                fast_block[448 +:192]=chain_feedback_valid ? finish_digest[191:0] : shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
++                if(shapes[ADDRESS_VALUE] && arity==2) begin
++                    fast_block[640 +:192]=request_right[191:0];
++                    fast_block[832 +:8]=8'h1f;
++                end else fast_block[640 +:8]=8'h1f;
++            end
++            32: case(frame_layout)
++                0: begin
++                    fast_block[0 +:256]=frame0[255:0];
++                    fast_block[256 +:256]=frame1;
++                    fast_block[512 +:256]=frame2[255:0];
++                    fast_block[768 +:256]=frame3[255:0];
++                    if(frame_two) fast_block[1024 +:8]=8'h1f;
++                    else fast_block[768 +:8]=8'h1f;
++                end
++                1: begin
++                    fast_block[248 +:8]=frame_domain;
++                    fast_block[256 +:256]=frame1[255:0];
++                    fast_block[512 +:256]=frame2;
++                    fast_block[768 +:8]=8'h1f;
++                end
++                2: begin
++                    fast_block[248 +:8]=frame_domain;
++                    fast_block[256 +:256]=frame1[255:0];
++                    fast_block[512 +:256]=frame2[255:0];
++                    fast_block[768 +:256]=frame3;
++                    fast_block[1024 +:8]=8'h1f;
++                end
++                3: begin
++                    fast_block[248 +:8]=frame_domain;
++                    fast_block[256 +:256]=frame1[255:0];
++                    fast_block[512 +:256]=frame2[255:0];
++                    fast_block[768 +:256]=frame3[255:0];
++                    if(frame_two) fast_block[1024 +:8]=8'h1f;
++                    else fast_block[768 +:8]=8'h1f;
++                end
++                4: begin
++                    fast_block[183:0]=frame_prefix;
++                    fast_block[184 +:256]=frame1[255:0];
++                    fast_block[440 +:8]=8'h1f;
++                end
++                5: begin
++                    fast_block[175:0]=frame_prefix[175:0];
++                    fast_block[176 +:256]=frame1[255:0];
++                    fast_block[432 +:256]=frame2[255:0];
++                    if(frame_two) fast_block[688 +:8]=8'h1f;
++                    else fast_block[432 +:8]=8'h1f;
++                end
++                default:begin end
++            endcase
++            default:begin end
++        endcase
++        fast_block[1087]=1'b1;
++    end
++    always_comb begin
++        stream_data = stream_payload;
++        for (i=0; i<8; i=i+1) begin
++            absolute = position+i;
++            if (beat*16+stream_half*8+i < 136) begin
++                if (absolute >= input_length) stream_data[i*8 +: 8] = 0;
++                if (absolute == input_length) stream_data[i*8 +: 8] = 8'h1f;
++                if (stream_last && beat*16+stream_half*8+i == 135) stream_data[i*8+7] = 1'b1;
++            end else stream_data[i*8 +: 8] = 0;
++        end
++    end
++
++    logic [(N+32)*8-1:0] live_chain_prefix;
++    always @* begin
++        live_chain_prefix=0;
++        case(node_bytes)
++            16:live_chain_prefix[383:0]={address,public_seed[127:0]};
++            24:live_chain_prefix[447:0]={address,public_seed[191:0]};
++            default:live_chain_prefix[511:0]={address,public_seed};
++        endcase
++    end
++    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
++        .clk, .rst, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
++        .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
++        .fast_block_data(fast_block), .chain_enable(compact_chain),
++        .chain_prefix(compact_chain),
++        .chain_prefix_preserve_counter(request_step_recipe[55:48] == 3),
++        .chain_prefix_domain(request_step_recipe[50:48]),
++        .chain_count(request_steps+5'd1),
++        .capture_enable(compact_chain ? request_capture : capture_single),
++        .capture_after(compact_chain ? request_capture_after+5'd1 : 5'd1),
++        .block_valid(staged_valid), .block_ready, .block_data(staged_data),
++        .block_last(staged_last), .response_valid(digest_valid), .response_digest(digest),
++        .chain_feedback_valid,.chain_feedback_counter,
++        .finish_valid, .finish_digest, .capture_digest(compact_capture),
++        .capture_valid(compact_capture_valid), .error(hash_error)
++    );
++
++    always_ff @(posedge clk) begin
++        if (rst) begin
++            staged_valid<=0; staged_last<=0; staged_data<=0;
++            position<=0;
++            list_cursor<=0; list_remainder<=0;
++            state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
++            seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
++        end else begin
++            if(STREAM_ENABLE && staged_valid && block_ready) staged_valid<=0;
++            if (hash_error) begin error <= 1; state <= RESPONSE; end
++            else case (state)
++                IDLE: if (request_valid) begin
++                    staged_valid<=0;
++                    position<=0;
++                    list_cursor<=0; list_remainder<=0;
++                    error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
++                    legacy_value <= request_left;
++                    rate_block <= 0; beat <= 0; stream_half<=0;
++                    state <= START;
++                end
++                START: if (hash_ready) begin
++                    if (PROFILE_ENABLE) begin
++                        hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
++                        if (fixed_block) permutation_count <= permutation_count+(compact_chain ? request_steps+1 : 1);
++                    end
++                    state <= fixed_block ? WAIT_HASH : STREAM;
++                end
++                STREAM: if (STREAM_ENABLE && stream_accept) begin
++                    position<=position+13'd8;
++                    if(stream_half) staged_data[127:64]<=stream_data;
++                    else staged_data[63:0]<=stream_data;
++                    staged_valid<=stream_half || beat==8;
++                    staged_last<=stream_last;
++                    if(beat==8) staged_data[127:64]<=0;
++                    stream_half<=beat==8 ? 1'b0 : !stream_half;
++                    begin
++                        if(position < prefix_bytes) begin
++                            if(position+stream_advance >= prefix_bytes)
++                                list_remainder <= position+stream_advance-prefix_bytes;
++                        end else if(next_remainder >= stream_node_bytes) begin
++                            list_remainder <= next_remainder-stream_node_bytes;
++                            list_cursor <= list_cursor+1'b1;
++                        end else list_remainder <= next_remainder;
++                    end
++                    if (beat == 8) begin
++                        beat <= 0;
++                        if (PROFILE_ENABLE) permutation_count <= permutation_count+1;
++                        if (stream_last) state <= WAIT_HASH;
++                        else rate_block <= rate_block+1'b1;
++                    end else if(stream_half) beat <= beat+1'b1;
++                end
++                WAIT_HASH: if (completed) begin
++                    if (compact_chain) begin
++                        state <= RESPONSE;
++                    end else if (RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1) begin
++                        case (compound)
++                            0: temporary_key <= completed_value[N*8-1:0];
++                            1: mask0 <= completed_value[N*8-1:0];
++                            default: mask1 <= completed_value[N*8-1:0];
++                        endcase
++                        compound <= compound+1'b1;
++                        state <= START;
++                    end else begin
++                        compound <= 0;
++                        legacy_value <= completed_value[N*8-1:0];
++                        if (request_chain && (seed_phase ? request_steps != 0 : iteration+1 < request_steps)) begin
++                            seed_phase <= 0;
++                            if (!seed_phase) iteration <= iteration+1'b1;
++                            state <= START;
++                        end else begin
++                            state <= RESPONSE;
++                        end
++                    end
++                end
++                RESPONSE: if (response_ready) state <= IDLE;
++                default: state <= IDLE;
++            endcase
++        end
++    end
++endmodule
++`default_nettype wire
+--- /dev/null
++++ b/docs/v4.2/LUT20900.md
+@@ -0,0 +1,38 @@
++# 20.9k LUT 面积优化实验
++
++目标为共同核总 LUT（含 LUTRAM）不超过 20,900。最近已验收基线为 `value_narrow_20260930_v1`：21,158 LUT、8,582 FF、1,112 LUTRAM、6362.250 等效 Slice。保持六种 f/s 参数的 Keygen/Sign/Verify、外部接口和计算周期不变；不测新频率。
++
++## 候选 1：SLH 固定块构造
++
++候选标签：`slh_fixed_block_20260930_v1`，因面积增加已拒绝，并恢复基线 recipe lane。正式当前核指针仍为 `value_narrow_20260930_v1`。
++
++| 候选 | LUT | FF | 等效 Slice | 结论 |
++|---|---:|---:|---:|---|
++| 已验收基线 | 21158 | 8582 | 6362.250 | 保留 |
++| SLH 固定块专用路径 | 22155 | 8614 | 6615.500 | 撤回 |
++
++专用路径增加 997 LUT、32 FF，增长主要集中于 lane 0（该层级增加 1039 LUT，其他层级有增减）。综合前 18 组单元、8784 次有效固定块等价、12 组正常执行和 6 组正常 Verify 均通过，但面积门槛未通过，因此未运行完整回归。完整证据保留于 `candidates/slh_fixed_block_20260930_v1/`；固定块等价测试及冻结对照保留，作为后续测试资产。
++
++对 `N=32` 且 `RECIPE_MASK` 为 SLH 配方子集的实例，直接构造 32 字节节点的单块 SHAKE 输入：public seed、地址、左节点或链反馈摘要、可选右节点和原 SHAKE 填充。消除这一路对通用 `frame_layout` 及已选择字段的再次选择。16/24 字节路径、完整通用配方路径、Keccak、compact chain、存储和控制状态均不变。
++
++固定块只在相应配方消费时有意义；消息和列表流式配方不读取该数据。专用路径保持原反馈优先级：反馈摘要优先于 seed/left，反馈时 32 字节路径不拼接右节点。未新增寄存器、状态或流水级。
++
++## 验证与暂停
++
++- 冻结 `value_narrow_20260930_v1` 的旧 recipe lane，仅重命名模块，作为独立 RTL 对照。
++- 新增三组固定块等价测试，覆盖生产掩码 `101e`、`0006` 和通用掩码 `ffff`，三种节点宽度、seed/value/parent、链起始/恢复/反馈、零值/全一/随机字段和完整 1088 位块及填充比较。流式请求检查分类，不要求未消费的固定块数据相同。
++- 综合前执行接口合同/lint、18 组单元、12 组正常 Keygen/Sign、6 组正常 Verify，并与冻结基线比较输出、周期及 Hash/置换次数。具体结果以候选的 `pre_synth_checks.json` 为准。
++- 保存源码快照、增量补丁及完整日志，后台启动 `PROFILE_ENABLE=0` 的共同核综合后立即停止；不轮询，不自动启动下一个候选。
++- 用户通知综合完成后，先检查总 LUT 不增加且等效 Slice 严格下降，再执行完整回归；通过才保留并更新当前核，否则撤回本项。后续依次尝试父节点右暂存、左暂存和 20 位地址运算；达到 LUT 目标后停止。
++
++工作目录：`build/v4.2/external_job_message/slh_fixed_block_20260930_v1/`。完整 Vivado 日志为 `synth.log`，驱动日志为 `progress/synthesis_driver.log`；面积报告完成后位于 `synthesis/core_hierarchical.rpt`。不提交、不推送，不将历史频率标为新版本测量值。
++
++## 候选 2：删除父节点右输入暂存
++
++候选标签：`parent_right_20260930_v1`，独立基于已验收的 `value_narrow_20260930_v1`，尚未验收。
++
++删除 `task_right[0]` 的 256 位寄存器，逻辑 lane 0 的右输入直接选择父节点合并期间稳定的 `node_value` 或 `emit_value`。逻辑 lane 1 不消费右输入，连接常零；物理 lane 交换继续使用原逻辑 lane 映射。保留 `task_left0`、verify 链恢复反馈选择、PARENT_SETUP/HASH_ISSUE/HASH_WAIT/PARENT_DONE 状态及所有周期。其余 RTL 与已验收基线一致。
++
++新增仿真 scoreboard：在原 PARENT_SETUP 时刻保存左右操作数，从请求到 PARENT_DONE 逐周期检查实际 lane 输入的值、顺序和稳定性，复位/异常时清除检查上下文。正常 Keygen/Sign 和 Verify 均要求父节点覆盖；Verify 还检查认证节点位于左右两侧的覆盖。综合前运行 18 组单元、12 组正常 Keygen/Sign 及 130 项 Verify，以覆盖 lane 交换、节点等待、复位、异常和连续合并；面积合格后再完成剩余完整回归。
++
++工作目录为 `build/v4.2/external_job_message/parent_right_20260930_v1/`，保存独立快照、补丁、基线对比及日志。仍采用后台提交综合后立即停止的流程；保留标准为总 LUT ≤21158 且等效 Slice <6362.250，并通过完整回归。父节点左暂存和 20 位地址运算未开始。

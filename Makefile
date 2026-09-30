@@ -8,7 +8,7 @@ TAG ?= external_v42
 SIM_TAG ?= $(TAG)
 MHBS_RTL := $(shell cat manifests/v42_sources.txt)
 
-.PHONY: all test smoke verify contract-test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common route-common freeze-common report-v42 reproduce-v42 report-ku reproduce-ku
+.PHONY: all test smoke verify contract-test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common synth-core route-common freeze-common report-v42 reproduce-v42 report-ku reproduce-ku
 all: test
 smoke:
 	$(PYTHON) scripts/smoke_current.py $(TAG)
@@ -40,6 +40,9 @@ rtl-verification:
 	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --partition
 	$(PYTHON) scripts/verify_v42_pruning.py $(TAG) --baseline verify_area_compare_20260927_v1 --node-output
 	$(PYTHON) scripts/verify_v42_verify.py $(TAG)
+synth-core:
+	$(PYTHON) scripts/v42_external_synth.py $(TAG) --core-only
+	$(PYTHON) scripts/collect_v42_external.py $(TAG) --sim-tag $(SIM_TAG) --core-only
 synth-common:
 	$(PYTHON) scripts/v42_external_synth.py $(TAG)
 	$(PYTHON) scripts/collect_v42_external.py $(TAG) --sim-tag $(SIM_TAG)

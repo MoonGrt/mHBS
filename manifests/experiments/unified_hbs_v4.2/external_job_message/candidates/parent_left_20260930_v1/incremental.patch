@@ -1,0 +1,36 @@
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -144,11 +144,15 @@
+     logic [9:0] task_leaf [0:1];
+     logic [INDEX_BITS-1:0] task_a [0:1];
+     logic [31:0] task_b [0:1];
+-    logic [255:0] task_left0;
+     // Parent operands stay unchanged through HASH_ISSUE/HASH_WAIT and are
+     // updated only in PARENT_DONE. Other recipes do not consume the right
+     // input, so no duplicate parent-right register is needed.
+     wire [255:0] parent_right = verifying && !node_index[0] ? emit_value : node_value;
++    // The tree stack is not written during a parent hash. Verification uses
++    // the same stable node/output latches, with the authentication side set
++    // by node_index. Keep chain recovery's result override at the lane input.
++    wire [255:0] parent_left = verifying
++        ? (node_index[0] ? emit_value : node_value) : stack[node_level];
+     // Results stay stable for each outstanding request. Only verification
+     // leaf/chain hashes take their input from these existing result registers.
+     wire verify_chain_source = verifying &&
+@@ -200,7 +204,7 @@
+             .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
+             .identifier(128'd0),.message_buffer,.message_length,
+             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
+-            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(L==0 ? parent_right : 256'd0),
++            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? parent_left : 256'd0)),.request_right(L==0 ? parent_right : 256'd0),
+             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
+             .list_data0(endpoint_value0),
+             .list_data1(endpoint_value1),
+@@ -545,7 +549,6 @@
+                         task_a[0]<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
+                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+-                        task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
+                         start_hash(descriptors[4],2'b01,PARENT_DONE);
+                     end
+                 end

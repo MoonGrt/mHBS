@@ -4,7 +4,8 @@ import hashlib,json,sys
 from dataclasses import replace
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
-from model.slh64 import CompactImage,CompactMachine
+from model.slh64 import CompactImage,CompactMachine,pack
+from model.profiles import SLH_NAMES
 from model.slh64_external import ExternalImage,ExternalMachine,compile_external,convert_legacy
 from model.reference import slh_dsa
 from tests.slh_fixtures import default_job,KAT
@@ -13,15 +14,15 @@ BASE=ROOT/'manifests/experiments/unified_hbs_v4.2/external_job_message'
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def write(p,x):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,indent=2)+'\n')
 records={};negative=[]
-for name in ('slh_128f','slh_192f','slh_256f'):
+for name in SLH_NAMES:
     image=compile_external(name);image.write(BASE/'images'/name)
-    job,msg=default_job(name);n=len(job.secret);params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{n*8}F')
+    job,msg=default_job(name);n=len(job.secret);params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{n*8}{name[-1].upper()}')
     sk,pk=slh_dsa.keygen_internal(params,job.secret,job.prf,job.public);root=pk[n:]
     kat=json.loads(next(KAT.glob(f'slh_dsa_shake_{n*8}f_siggen_acvp_tc*.json')).read_text())
-    assert sk+pk==bytes.fromhex(kat['sk']+kat['pk'])
+    if name.endswith('f'):assert sk+pk==bytes.fromhex(kat['sk']+kat['pk'])
     for sign in (False,True):
         op='sign' if sign else 'keygen';message=msg if sign else b'';supplied_root=root if sign else bytes(n)
-        old=CompactImage.read(ROOT/'manifests/experiments/unified_hbs_v4.2/images'/name/op)
+        old=CompactImage.read(ROOT/'manifests/experiments/unified_hbs_v4.2/images'/name/op) if name.endswith('f') else pack(name,job,message,supplied_root,sign)
         converted,j,r,m,s=convert_legacy(old);assert converted==image
         assert image.decode().words(sign)==old.decode()[0].words(sign)
         obs=Observation(n);legacy_obs=Observation(n)
@@ -29,7 +30,9 @@ for name in ('slh_128f','slh_192f','slh_256f'):
         expected=CompactMachine(old,legacy_obs).run();assert actual==expected and obs.record()==legacy_obs.record()
         ref=slh_dsa.sign_internal(params,message,sk) if sign else sk+pk
         assert actual==ref
-        if sign:assert hashlib.sha256(actual).hexdigest()==kat['signature_sha256'] and slh_dsa.verify_internal(params,message,actual,pk)
+        if sign:
+            assert slh_dsa.verify_internal(params,message,actual,pk)
+            if name.endswith('f'):assert hashlib.sha256(actual).hexdigest()==kat['signature_sha256']
         try:machine.run()
         except ValueError:pass
         else:raise AssertionError('repeat operation')

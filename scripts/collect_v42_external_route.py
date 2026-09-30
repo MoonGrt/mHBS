@@ -18,7 +18,7 @@ def collect(tag):
     assert routed['passed'] and routed['stage'] == 'post_route'
     assert routed['rtl_sha256'] == synth['rtl_sha256']
     assert routed['source_snapshot_sha256'] == synth['source_snapshot_sha256']
-    assert set(routed['tops']) == set(synth['tops']) and len(routed['tops']) == 6
+    assert set(routed['tops']) == set(synth['tops']) and len(routed['tops']) in (6,12)
     for path, digest in routed['rtl_sha256'].items():
         assert sha(ROOT / path) == digest, path
     for name, row in routed['tops'].items():

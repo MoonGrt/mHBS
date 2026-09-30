@@ -24,7 +24,7 @@ def main():
     status = ROOT / 'build' / ('smoke_' + args.tag + '.json')
     started = time.time()
     result = dict(tag=args.tag, passed=False, status='running', stages=[],
-                  scope='6 software cases, 14 unit groups, 6 Keygen/Sign RTL cases, 3 normal Verify RTL cases',
+                  scope='12 software cases, current unit groups, 12 Keygen/Sign RTL cases, 6 normal Verify RTL cases',
                   full_extended_regression=False, vivado_run=False)
 
     def save():
@@ -57,7 +57,7 @@ def main():
         for name, row in normal['cases'].items():
             assert row['passed']
             for key in ('output_sha256', 'boot_cycles', 'keygen_cycles', 'sign_cycles', 'hashes', 'permutations', 'total_cycles'):
-                assert row[key] == baseline['cases'][name][key], (name, key)
+                if name in baseline['cases']:assert row[key] == baseline['cases'][name][key], (name, key)
             assert sha(folder / 'logs' / (name + '.actual.mem')) == row['output_sha256']
             assert sha(folder / 'logs' / (name + '.log')) == row['log_sha256']
         verify = json.loads((folder / 'verify/results.json').read_text())

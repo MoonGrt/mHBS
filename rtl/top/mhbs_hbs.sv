@@ -29,14 +29,18 @@ module mhbs_hbs #(
 );
     localparam integer N=32, W=256, V=392, INDEX_BITS=7, MAX_MESSAGE_BYTES=87;
     localparam integer DIGEST_BYTES=49;
+    // Six supported profiles need at most ceil(35*9/8)=40 FORS bytes.
+    // Tree/leaf indices still consume the full V-bit transient Hmsg result.
+    localparam integer FORS_DIGEST_BITS=320;
     wire [1:0] profile_code=profile_descriptor[1:0];
+    wire small_signature=profile_descriptor[2];
     wire [5:0] node_bytes=profile_code==0 ? 6'd16
         : profile_code==1 ? 6'd24 : 6'd32;
-    wire [3:0] FORS_A=profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
-    wire [3:0] HP=profile_code[1] ? 4'd4 : 4'd3;
+    wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
+        : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
+    wire [3:0] HP=small_signature ? (profile_code[1] ? 4'd8 : 4'd9)
+        : profile_code[1] ? 4'd4 : 4'd3;
     wire [7:0] LEN1={1'b0,node_bytes,1'b0};
-    wire [5:0] FORS_BYTES=node_bytes==16 ? 25 : node_bytes==24 ? 33 : 40;
-    localparam integer TREE_BYTES=8;
     wire [63:0] descriptors [0:7];
     // Two reads are sufficient: request recipe plus chain-step recipe.
     // Macro and tree/chain descriptors are already latched in setup states.
@@ -78,7 +82,8 @@ module mhbs_hbs #(
     wire [255:0] public_seed=job_public_seed, randomizer=job_randomizer;
     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
     logic [6:0] message_length, message_received;
-    logic [V-1:0] value [0:3];
+    logic [W-1:0] value [0:3];
+    logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
     logic [63:0] scalar_tree;
     logic [9:0] scalar_leaf;
     logic [11:0] checksum;
@@ -105,7 +110,7 @@ module mhbs_hbs #(
     logic standalone_chain, fors_pair_pending;
     logic [3:0] tree_height, node_level, auth_level;
     logic [1:0] indexing;
-    logic [9:0] target, leaf_cursor, node_index;
+    logic [13:0] target, leaf_cursor, node_index;
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
     logic [1:0] chain_batch_mask;
     always_comb begin
@@ -139,7 +144,11 @@ module mhbs_hbs #(
     logic [9:0] task_leaf [0:1];
     logic [INDEX_BITS-1:0] task_a [0:1];
     logic [31:0] task_b [0:1];
-    logic [255:0] task_left0, task_right [0:1];
+    logic [255:0] task_left0;
+    // Parent operands stay unchanged through HASH_ISSUE/HASH_WAIT and are
+    // updated only in PARENT_DONE. Other recipes do not consume the right
+    // input, so no duplicate parent-right register is needed.
+    wire [255:0] parent_right = verifying && !node_index[0] ? emit_value : node_value;
     // Results stay stable for each outstanding request. Only verification
     // leaf/chain hashes take their input from these existing result registers.
     wire verify_chain_source = verifying &&
@@ -191,7 +200,7 @@ module mhbs_hbs #(
             .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
             .identifier(128'd0),.message_buffer,.message_length,
             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
-            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(task_right[L]),
+            .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(L==0 ? parent_right : 256'd0),
             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
             .list_data0(endpoint_value0),
             .list_data1(endpoint_value1),
@@ -237,22 +246,30 @@ module mhbs_hbs #(
             end
         end
     endfunction
-    wire [V-1:0] fors_bitstream;
+    wire [FORS_DIGEST_BITS-1:0] fors_digest={fors_digest_tail,value[1]};
+    wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
     genvar fb;
-    generate for(fb=0;fb<V;fb=fb+1) begin: fors_bit_order
-        assign fors_bitstream[fb]=value[1][(fb/8)*8+7-(fb%8)];
+    generate for(fb=0;fb<FORS_DIGEST_BITS;fb=fb+1) begin: fors_bit_order
+        assign fors_bitstream[fb]=fors_digest[(fb/8)*8+7-(fb%8)];
     end endgenerate
-    function automatic [8:0] fors_target(input [5:0] group_number);
+    function automatic [13:0] fors_target(input [5:0] group_number);
         reg [9:0] offset;
-        reg [8:0] segment;
+        reg [13:0] segment;
         begin
-            offset=FORS_A==6 ? ({group_number,2'b0}+{group_number,1'b0})
-                : FORS_A==8 ? {group_number,3'b0} : ({group_number,3'b0}+group_number);
+            case(FORS_A)
+                6:offset=({group_number,2'b0}+{group_number,1'b0});
+                8:offset={group_number,3'b0};
+                9:offset=({group_number,3'b0}+group_number);
+                12:offset=({group_number,3'b0}+{group_number,2'b0});
+                default:offset=({group_number,4'b0}-{group_number,1'b0});
+            endcase
             segment=fors_bitstream >> offset;
             case(FORS_A)
-                6:fors_target={3'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5]};
-                8:fors_target={1'b0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7]};
-                default:fors_target={segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8]};
+                6:fors_target={8'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5]};
+                8:fors_target={6'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7]};
+                9:fors_target={5'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8]};
+                12:fors_target={2'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11]};
+                default:fors_target={segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11],segment[12],segment[13]};
             endcase
         end
     endfunction
@@ -260,13 +277,32 @@ module mhbs_hbs #(
         reg [63:0] bytes;
         integer j;
         begin
-            case(node_bytes)
+            if(small_signature) begin
+                case(node_bytes)
+                    16:bytes={digest[168 +:56],8'd0};
+                    24:bytes={digest[240 +:56],8'd0};
+                    default:bytes={digest[312 +:56],8'd0};
+                endcase
+            end else case(node_bytes)
                 16:bytes=digest[200 +:64];
                 24:bytes=digest[264 +:64];
                 default:bytes=digest[320 +:64];
             endcase
             for(j=0;j<8;j=j+1) parsed_tree[(7-j)*8 +:8]=bytes[j*8 +:8];
-            if(node_bytes!=32) parsed_tree[63]=0;
+            if(small_signature && node_bytes!=32) parsed_tree[63:54]=0;
+            else if(!small_signature && node_bytes!=32) parsed_tree[63]=0;
+        end
+    endfunction
+    function automatic [9:0] parsed_leaf(input [V-1:0] digest);
+        begin
+            if(small_signature) begin
+                case(node_bytes)
+                    16:parsed_leaf={1'b0,digest[224],digest[232 +:8]};
+                    24:parsed_leaf={1'b0,digest[296],digest[304 +:8]};
+                    default:parsed_leaf={2'b0,digest[368 +:8]};
+                endcase
+            end else parsed_leaf=node_bytes==16 ? {7'b0,digest[264 +:3]}
+                : node_bytes==24 ? {7'b0,digest[328 +:3]} : {6'b0,digest[384 +:4]};
         end
     endfunction
     task automatic fail(input [15:0] code);
@@ -363,7 +399,7 @@ module mhbs_hbs #(
                     message_length<=job_message_length; message_received<=0;
                     scalar_tree<=0; scalar_leaf<=0; layer<=0; group_index<=0;
                     if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
-                    value[3]<={{(V-W){1'b0}},job_public_root};
+                    value[3]<=job_public_root;
                     if(job_operation) begin
                         enter_state(MESSAGE);
                     end else begin
@@ -510,7 +546,6 @@ module mhbs_hbs #(
                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
                         task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
-                        task_right[0]<=verifying && !node_index[0] ? emit_value : node_value;
                         start_hash(descriptors[4],2'b01,PARENT_DONE);
                     end
                 end
@@ -522,7 +557,8 @@ module mhbs_hbs #(
                         start_output(auth_path[auth_level],node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
                     end else enter_state(TREE_FINISH);
                 end
-                TREE_FINISH: route_result(!verifying && macro_flags[3] ? value[3] : {{(V-W){1'b0}},node_value});
+                TREE_FINISH: route_result({{(V-W){1'b0}},
+                    (!verifying && macro_flags[3] ? value[3] : node_value)});
                 HASH_ISSUE: begin
                     launch_pending<=launch_pending & ~lane_ready;
                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
@@ -539,10 +575,14 @@ module mhbs_hbs #(
                 ROUTE: begin
                     if(macro_route==0) complete_macro();
                     else begin
-                        if(!route_descriptor[53]) value[route_descriptor[57:56]]<=route_value;
+                        if(!route_descriptor[53]) begin
+                            value[route_descriptor[57:56]]<=route_value[W-1:0];
+                            if(route_descriptor[57:56]==1)
+                                fors_digest_tail<=route_value[FORS_DIGEST_BITS-1:W];
+                        end
                         if(route_descriptor[54]) begin
                             scalar_tree <= parsed_tree(route_value);
-                            scalar_leaf <= node_bytes==16 ? {7'b0,route_value[264 +:3]} : node_bytes==24 ? {7'b0,route_value[328 +:3]} : {6'b0,route_value[384 +:4]};
+                            scalar_leaf <= parsed_leaf(route_value);
                         end
                         if(!verifying && route_descriptor[55]) start_output(route_value[W-1:0],node_bytes,FETCH);
                         else enter_state(FETCH);

@@ -5,7 +5,8 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 BASE=ROOT/'manifests/experiments/unified_hbs_v4.2/external_job_message'
 BUILD=ROOT/'build/v4.2/external_job_message'
-NAMES=('slh_128f','slh_192f','slh_256f')
+from model.profiles import SLH_NAMES
+NAMES=SLH_NAMES
 PARAMS=('secret_seed','secret_prf','public_seed','randomizer','public_root')
 def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
 def write(p,x):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,indent=2)+'\n')

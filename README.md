@@ -2,7 +2,7 @@
 
 本仓库从原 `Vivado/idea/slh-dsa-acceleration/projects/μHBS` 项目独立复制而来，原仓库提交为 `1bf8007917e67ab318385102f78cf9ce971928a2`，对应的项目子树提交为 `3e0f1408e50020f319a908948fb691c12292a91b`。保留项目 Git 历史、当前源码和最新实验原始证据；论文复现所需资料在本仓库的 `docs/references/papers/`。当前 RTL 模块及微码文件统一使用 `mhbs` 名称。过时构建输出与旧报告已精简，历史源码和已提交资料可从 Git 恢复。
 
-支持 **SLH-DSA SHAKE 128f、192f、256f**。唯一生产顶层 `mhbs_top` 保留高有效同步 `rst`，复位后自动执行一次 Keygen、Sign 或 Verify，然后停机。
+支持 **SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s**。唯一生产顶层 `mhbs_top` 保留高有效同步 `rst`，复位后自动执行一次 Keygen、Sign 或 Verify，然后停机。
 
 Job 通过五个 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMIZER / PUBLIC_ROOT` 提供；`OPERATION=0/1/2` 选择 Keygen/Sign/Verify。
 消息使用 **64 位 message_data + valid/ready** 外部输入，长度由 `message_length[6:0]` 输入给出（Keygen 为 0，Sign/Verify 为 1–87）。低字节先传，尾拍多余字节忽略。Sign/Verify 的公钥根须预先配置，结果流无背压。Verify 使用外部节点 `verify_data[255:0] + valid/ready`，完成时读取 `verify_pass`，不使用签名字节流解析器。接口与实测见 [Verify 节点扩展](docs/v4.2/Verify_Nodes.md)。
@@ -11,13 +11,13 @@ Job 通过五个 256 位参数 `SECRET_SEED / SECRET_PRF / PUBLIC_SEED / RANDOMI
 物理格式为 **`slh64_v4.2`，布局修订 3**，宏语义沿用 ABI 4：program **16×64** 只存指令；template **16×64**；descriptor **32×64、双读**。
 三个独立数组使用 `$readmemh`；每个参数点的一组镜像含 Keygen/Sign 两个入口，Job 和消息已移出 program。
 
-`mhbs_processor.sv` 已删除，启动控制并入顶层。构建时从顶层自动提取“启动控制＋执行核”作为共同综合区域，六种参数外壳链接同一网表。共同核受保护，外层常量连接允许不同。
-共同核与完整顶层分别测量 post-synth 资源；六个参数外壳分别布局布线，最终频率按 OOC 核内寄存器间时序统计，外部接口时序单列。最新测量与范围说明见 [最新 K/U Sign ATP 报告](docs/v4.2/KU_Sign_ATP_151_112_67_48.md)。
+`mhbs_processor.sv` 已删除，启动控制并入顶层。构建时从顶层自动提取“启动控制＋执行核”作为共同综合区域，十二种 Keygen/Sign 参数外壳链接同一网表。共同核受保护，外层常量连接允许不同。
+共同核与完整顶层分别测量 post-synth 资源；十二个 Keygen/Sign 参数外壳分别布局布线，最终频率按 OOC 核内寄存器间时序统计，外部接口时序单列。当前六参数扩展与面积见 [s 参数扩展](docs/v4.2/S_Parameters.md)；独立 K/U 历史测量见 [K/U Sign ATP 报告](docs/v4.2/KU_Sign_ATP_151_112_67_48.md)。
 
 ## 使用与验证
 
 ```bash
-make test TAG=my_external       # 模型、契约、lint、单元、六组 RTL
+make test TAG=my_external       # 模型、契约、lint、单元、十二组 RTL
 make verify TAG=my_external     # 完整验收，包含 test + 扩展与共同核验证
 make synth-common TAG=my_external
 make route-common TAG=my_external

@@ -75,8 +75,8 @@ def audit(tag):
         expected_cases = {'normal', 'randomizer', 'fors_secret', 'fors_auth',
             'wots', 'xmss_auth', 'last_auth', 'message', 'root', 'stall',
             'reset_replay', 'truncated_wait_reset', 'swap', 'no_profile', 'partition', 'fault', 'node_padding', 'second_node_delay', 'poison_reset', 'pair_boundaries'}
-        if profile!='slh_128f':expected_cases.add('root_middle')
-        if profile=='slh_256f':expected_cases.add('root_upper')
+        if not profile.startswith('slh_128'):expected_cases.add('root_middle')
+        if profile.startswith('slh_256'):expected_cases.add('root_upper')
         else:expected_cases.add('root_padding')
         assert set(cases)==expected_cases
         assert all(cases['pair_boundaries']['coverage'].values())
@@ -96,7 +96,7 @@ def audit(tag):
         evidence_sha256={str(path.relative_to(ROOT)): sha(path) for path in evidence},
     )
     write(folder / 'verification.json', receipt)
-    print('CURRENT_VERIFICATION_PASS', tag, f"6 model / {len(macro['logs'])+1} unit / 6 RTL / 33 extended / 6 partition / statistics-off + faults / {receipt['verify_node_cases']} verify-node cases")
+    print('CURRENT_VERIFICATION_PASS', tag, f"{len(software['profiles'])} model / {len(macro['logs'])+1} unit / {len(normal_names)} RTL / {len(extended_names)} extended / {len(normal_names)} partition / statistics-off + faults / {receipt['verify_node_cases']} verify-node cases")
     return receipt
 
 

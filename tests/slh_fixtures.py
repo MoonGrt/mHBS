@@ -12,6 +12,7 @@ def default_job(name):
     profile = get_profile(name)
     if profile.family != 'slh':
         raise ValueError('Only SLH profiles are supported by current fixtures')
+    # For s profiles these are deterministic seeds, not claimed s ACVP vectors.
     vector = json.loads(next(KAT.glob(f'slh_dsa_shake_{profile.n*8}f_siggen_acvp_tc*.json')).read_text())
     secret_key, n = bytes.fromhex(vector['sk']), profile.n
     return Job(secret_key[:n], secret_key[n:2*n], secret_key[2*n:3*n], secret_key[2*n:3*n]), bytes.fromhex(vector['message'])

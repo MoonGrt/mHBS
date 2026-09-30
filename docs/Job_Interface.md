@@ -1,6 +1,6 @@
 # mHBS 当前 Job 与流接口
 
-唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f，每次复位执行一次 Keygen、Sign 或 Verify。
+唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，每次复位执行一次 Keygen、Sign 或 Verify。
 
 ## 配置
 

@@ -18,12 +18,12 @@ for name,r in [('core',result['core']),*result['tops'].items()]:
    for block in iter(lambda:stream.read(1<<20),b''):h.update(block)
   assert h.hexdigest()==result['common_core_sha256']==r['core_sha256']
   assert json.loads((f/'synthesis'/name/'rom_audit.json').read_text())['passed']
-assert len(result['tops'])==6 and len(json.loads((f/'extended.json').read_text())['cases'])==33
+assert len(result['tops']) in (6,12) and len(json.loads((f/'extended.json').read_text())['cases'])==len(result['tops'])*11//2
 assert json.loads((f/'unit/results.json').read_text())['passed']
 assert json.loads((f/'software_gate.json').read_text())['passed']
 if result.get('partition_equivalence_pass'):
  partition=json.loads((f/'simulation_partition.json').read_text());sim=json.loads((f/'simulation.json').read_text())
- assert partition['passed'] and len(partition['cases'])==6
+ assert partition['passed'] and len(partition['cases'])==len(result['tops'])
  for name,row in partition['cases'].items():
   original=sim['cases'][name.removesuffix('_partition')]
   for key in ('boot_cycles','keygen_cycles','sign_cycles','hashes','permutations','total_cycles'):assert row[key]==original[key]

@@ -12,7 +12,7 @@ assert set(normal['cases'])=={n+'_'+o for n in NAMES for o in ('keygen','sign')}
 
 def vector(folder,name,job,root,msg):
  image=ExternalImage.read(BASE/'images'/name);m=ExternalMachine(image,job,root,msg,True);expected=m.run()
- params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{len(root)*8}F');sk=job.secret+job.prf+job.public+root
+ params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{len(root)*8}{name[-1].upper()}');sk=job.secret+job.prf+job.public+root
  assert expected==slh_dsa.sign_internal(params,msg,sk)
  folder.mkdir(parents=True,exist_ok=True)
  cfg=json.loads((BASE/'vectors'/name/'sign/job.json').read_text());cfg.update(public_root=root.hex(),message_bytes=len(msg))

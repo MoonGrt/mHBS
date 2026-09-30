@@ -25,6 +25,7 @@ module tb_mhbs_external;
  .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
+ `include "tb/integration/mhbs_parent_input_check.svh"
  string directory,vector_directory,dump_path,trace_path;
  integer trace_words=0,trace_cursor=0,fault=0;
  reg [47:0] trace_expected[0:2047];
@@ -78,7 +79,7 @@ module tb_mhbs_external;
     if(sent>=MESSAGE_BYTES)$fatal(1,"accepted excess data");sent=sent+8;
    end
    if(`HBS_CORE.state==1 && !message_valid)wait_cycles=wait_cycles+1;
-   if(cycles>15000000)$fatal(1,"timeout");
+   if(cycles>150000000)$fatal(1,"timeout");
    if(error && !fault)$fatal(1,"V42_ERROR code=%h cycle=%0d",error_code,cycles);
    residency[`HBS_CORE.state]=residency[`HBS_CORE.state]+1;
    if(trace_words && `HBS_CORE.cmd_valid && `HBS_CORE.state==3)begin
@@ -138,6 +139,7 @@ module tb_mhbs_external;
        hash_count!=measured_hashes || permutation_count!=measured_permutations)$fatal(1,"statistics observer mismatch");
    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)
     $fatal(1,"production statistics must be zero");
+   check_parent_input_coverage();
    $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end

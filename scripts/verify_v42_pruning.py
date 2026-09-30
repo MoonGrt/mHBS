@@ -15,8 +15,10 @@ def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
     assert normal['passed'] and normal['rtl_sha256'] == identity()
     keys = ('boot_cycles', 'keygen_cycles', 'sign_cycles', 'hashes',
             'permutations', 'total_cycles', 'output_sha256')
-    assert set(normal['cases']) == set(old['cases']) and len(normal['cases']) == 6
+    assert set(normal['cases']) == {n+'_'+op for n in NAMES for op in ('keygen','sign')}
+    assert set(old['cases']) <= set(normal['cases'])
     for name, row in normal['cases'].items():
+        if name not in old['cases']:continue
         reference=old['cases'][name]
         n=len(bytes.fromhex(row['config']['secret_seed']))
         vector=BASE/'vectors'/row['config']['profile']/('sign' if row['config']['operation'] else 'keygen')
@@ -75,8 +77,8 @@ def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
         passed=True, rtl_sha256=identity(), baseline=baseline, baseline_sha256=sha(old_file),
         cycle_equivalence_pass=not node_output, node_output_cycle_formula_pass=node_output,
         statistics_equivalence_pass=True,
-        baseline_cases=6, statistics_disabled_cases=12, statistics_disabled_extended=2,
-        fault_cases=6, evidence_sha256=evidence))
+        baseline_cases=len(old['cases']), statistics_disabled_cases=4*len(NAMES), statistics_disabled_extended=2,
+        fault_cases=2*len(NAMES), evidence_sha256=evidence))
     print('PRUNING_VERIFICATION_PASS', tag, 'node-output cycle formula / statistics off / faults' if node_output else 'same cycles / statistics off / faults', flush=True)
 
 

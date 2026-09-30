@@ -61,7 +61,7 @@ proc core_structure {path} {
 source experiments/v4.2/external_job_message/rom_mapping.tcl
 set previous_hash ""
 set times [open [file join $out elapsed.tsv] w];puts $times "core\t$core_seconds"
-foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_256f_keygen slh_256f_sign} {
+foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_256f_keygen slh_256f_sign slh_128s_keygen slh_128s_sign slh_192s_keygen slh_192s_sign slh_256s_keygen slh_256s_sign} {
  set start [clock seconds]
  set d [file join $out $name];file mkdir $d
  create_project -in_memory -part $part

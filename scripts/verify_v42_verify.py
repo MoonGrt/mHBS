@@ -13,7 +13,7 @@ def main():
     args=parser.parse_args();folder=capture(args.tag);out=folder/'verify';out.mkdir(exist_ok=True)
     def profile(name):
         source=BASE/'vectors'/name/'sign';cfg=json.loads((source/'job.json').read_text())
-        n=len(bytes.fromhex(cfg['public_seed']));params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{n*8}F')
+        n=len(bytes.fromhex(cfg['public_seed']));params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{n*8}{name[-1].upper()}')
         sig=bytes(int(x,16) for x in (source/'expected.mem').read_text().split())
         msg=bytes(int(x,16) for x in (source/'message.mem').read_text().split())[:cfg['message_bytes']]
         pk=bytes.fromhex(cfg['public_seed']+cfg['public_root']);assert slh_dsa.verify_internal(params,msg,sig,pk)

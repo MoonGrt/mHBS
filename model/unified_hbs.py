@@ -315,7 +315,8 @@ def validate(image: Image) -> None:
     if image.stateful and (image.n != 32 or image.h != 10 or image.hp != 10):
         raise ValueError("unsupported stateful profile")
     if not image.stateful and (image.omega != 4 or (image.n,image.h,image.hp,image.k,image.a,image.m) not in
-            ((16,66,3,33,6,34),(24,66,3,33,8,42),(32,68,4,35,9,49))):
+            ((16,66,3,33,6,34),(24,66,3,33,8,42),(32,68,4,35,9,49),
+             (16,63,9,14,12,30),(24,63,9,17,14,39),(32,64,8,22,14,47))):
         raise ValueError("unsupported stateless profile")
     if not 0 <= image.entry(False) < image.entry(True) < len(image.tokens):
         raise ValueError("invalid entry table")
@@ -342,7 +343,7 @@ def validate(image: Image) -> None:
         elif kind == Kind.TREE:
             ref(field(w, 52, 8), Kind.CHAIN)
             ref(field(w, 44, 8), Kind.HASH)
-            if not 1 <= field(w, 40, 4) <= 10:
+            if not 1 <= field(w, 40, 4) <= (10 if image.stateful else 14):
                 raise ValueError("tree height")
             if field(w, 36, 2) > 2 or field(w, 32, 2) > 2:
                 raise ValueError("tree addressing mode")
@@ -604,7 +605,8 @@ class Machine:
                         fb = (self.image.k*self.image.a+7)//8
                         tb = (self.image.h-self.image.hp+7)//8
                         self.scalar_tree = int.from_bytes(result[fb:fb+tb], "big") & ((1 << (self.image.h-self.image.hp))-1)
-                        self.scalar_leaf = result[fb+tb] & ((1<<self.image.hp)-1)
+                        lb = (self.image.hp+7)//8
+                        self.scalar_leaf = int.from_bytes(result[fb+tb:fb+tb+lb], "big") & ((1<<self.image.hp)-1)
             if len(self.output) != self.image.output_bytes(sign):
                 raise ValueError("output length")
             return bytes(self.output)

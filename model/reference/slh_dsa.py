@@ -1,7 +1,7 @@
 """Small dependency-free FIPS 205 SLH-DSA reference model.
 
 The supported boundary is deterministic internal key generation, signing and
-verification for SLH-DSA-SHAKE-128f.  The implementation follows the final
+verification for all six SLH-DSA-SHAKE parameter sets.  The implementation follows the final
 FIPS 205 algorithms and deliberately favors auditable byte strings over
 performance.
 """
@@ -60,6 +60,10 @@ SLH_DSA_SHAKE_128F = SlhDsaParams(
 
 SLH_DSA_SHAKE_192F = SlhDsaParams("SLH-DSA-SHAKE-192f",24,66,22,3,8,33,4,16,48,3,51,42)
 SLH_DSA_SHAKE_256F = SlhDsaParams("SLH-DSA-SHAKE-256f",32,68,17,4,9,35,4,16,64,3,67,49)
+
+SLH_DSA_SHAKE_128S = SlhDsaParams("SLH-DSA-SHAKE-128s",16,63,7,9,12,14,4,16,32,3,35,30)
+SLH_DSA_SHAKE_192S = SlhDsaParams("SLH-DSA-SHAKE-192s",24,63,7,9,14,17,4,16,48,3,51,39)
+SLH_DSA_SHAKE_256S = SlhDsaParams("SLH-DSA-SHAKE-256s",32,64,8,8,14,22,4,16,64,3,67,47)
 
 
 def _to_bytes(value: int, length: int) -> bytes:

@@ -18,7 +18,7 @@ assert routed['passed'] and routed['rtl_sha256'] == synth['rtl_sha256']
 assert routed['source_snapshot_sha256'] == synth['source_snapshot_sha256'] == sha(candidate / 'source_snapshot.tar.gz')
 for path, digest in json.loads((candidate / 'evidence_sha256.json').read_text()).items():
     assert sha(candidate / path) == digest, path
-assert set(routed['tops']) == set(synth['tops']) and len(routed['tops']) == 6
+assert set(routed['tops']) == set(synth['tops']) and len(routed['tops']) in (6,12)
 for name, row in routed['tops'].items():
     folder = candidate / 'route' / name
     assert row['passed'] and row['wns_ns'] >= .0999 and row['whs_ns'] >= 0

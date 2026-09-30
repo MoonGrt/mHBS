@@ -1,13 +1,13 @@
 """v4.2 physical images, retaining the five ABI 4 macro semantics.
 
 There is no hardware admission path. decode() is the offline trust boundary.
-Bit allocations are intentionally identical for all three SLH parameter sets.
+Bit allocations are intentionally identical for all six SLH parameter sets.
 """
 from dataclasses import dataclass
 from pathlib import Path
 from model.unified_hbs import Image, Job, Machine, compile_image, field, validate
 from model.static_task_microcode import StaticTaskToken as Token, issue_word
-from model.profiles import get_profile
+from model.profiles import get_profile, SLH_PROFILE_CODES
 
 FORMAT = 'slh64_v4.2'
 LAYOUT_REVISION = 2
@@ -62,8 +62,8 @@ class CompactImage:
         # The physical header stores output sizes only, profile omits family/w.
         if self.descriptors[0]>>36: raise ValueError('header reserved')
         code=self.descriptors[1]
-        if code not in (0,1,2):raise ValueError('SLH profile code')
-        d[1]=compile_image(('slh_128f','slh_192f','slh_256f')[code]).descriptors[1]
+        if code not in SLH_PROFILE_CODES:raise ValueError('SLH profile code')
+        d[1]=compile_image(SLH_PROFILE_CODES[code]).descriptors[1]
         n=field(d[1],48,8)
         if n not in (16,24,32): raise ValueError('node width')
         templates=[]
@@ -147,7 +147,7 @@ def pack(name, job, message, root, sign):
     for i,(old,kind) in enumerate(zip(ADDRESSES,KINDS)):
         desc[i]=remap(image.descriptors[old]&((1<<60)-1),kind)
     desc[0] &= (1<<36)-1
-    desc[1] = (16,24,32).index(p.n)
+    desc[1] = next(code for code,profile in SLH_PROFILE_CODES.items() if profile==p.name)
     for start,data in zip(range(32,52,4),(job.secret,job.prf,job.public,job.random,root if sign else bytes(p.n))):
         if len(data)!=p.n: raise ValueError('node size')
         data=data.ljust(32,b'\0')

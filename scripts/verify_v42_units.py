@@ -30,6 +30,18 @@ def one(name,top,files,params=(),runs=((),)):
     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
     print('SLH_UNIT_PASS',name,flush=True)
 
+one('s_parameters','tb_mhbs_s_parameters',rtl+['tb/unit/tb_mhbs_s_parameters.sv'])
+one('address_width','tb_mhbs_address_width',rtl+['tb/unit/tb_mhbs_address_width.sv'])
+
+# Compare the consumed fixed blocks against the frozen pre-specialization
+# implementation for both production masks and the generic compatibility path.
+for mask in (0x101e,0x0006,0xffff):
+    one('slh_fixed_block_'+format(mask,'04x'),'tb_mhbs_slh_fixed_block',
+        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+         'rtl/hash_lane/mhbs_recipe_lane.sv','tb/reference/mhbs_recipe_lane_value_narrow_ref.sv',
+         'tb/unit/tb_mhbs_slh_fixed_block.sv'],
+        [f'-Ptb_mhbs_slh_fixed_block.MASK={mask}'])
+
 one('endpoint_68','tb_mhbs_value_store',
     ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
     ['-Ptb_mhbs_value_store.DEPTH=68'])

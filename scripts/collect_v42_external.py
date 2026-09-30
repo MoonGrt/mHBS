@@ -3,11 +3,11 @@
 import argparse,gzip,json,re,shutil,tarfile
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,BUILD,NAMES,sha,write
-p=argparse.ArgumentParser();p.add_argument('tag');p.add_argument('--sim-tag',required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('tag');p.add_argument('--sim-tag',required=True);p.add_argument('--core-only',action='store_true');a=p.parse_args()
 f=BUILD/a.tag;sf=BUILD/a.sim_tag;inp=json.loads((f/'inputs.json').read_text())
 assert inp['rtl_sha256']==json.loads((sf/'inputs.json').read_text())['rtl_sha256']
 sim=json.loads((sf/'simulation.json').read_text());ext=json.loads((sf/'extended.json').read_text());unit=json.loads((BASE/'unit/results.json').read_text())
-assert sim['passed'] and len(sim['cases'])==6 and ext['passed'] and len(ext['cases'])==33 and unit['passed']
+assert sim['passed'] and len(sim['cases'])==2*len(NAMES) and ext['passed'] and len(ext['cases'])==11*len(NAMES) and unit['passed']
 assert sim['rtl_sha256']==ext['rtl_sha256']==unit['rtl_sha256']==inp['rtl_sha256']
 for group in (sim['cases'],ext['cases']):
  for name,row in group.items():assert sha(sf/'logs'/(name+'.log'))==row['log_sha256']
@@ -31,7 +31,7 @@ assert hardware_pruning['redundant_registers']==0
 partition=None
 if (s/'mhbs_common.sv').exists():
  partition=json.loads((sf/'simulation_partition.json').read_text())
- assert partition['passed'] and partition['rtl_sha256']==inp['rtl_sha256'] and len(partition['cases'])==6
+ assert partition['passed'] and partition['rtl_sha256']==inp['rtl_sha256'] and len(partition['cases'])==2*len(NAMES)
  for name,row in partition['cases'].items():
   assert sha(sf/'logs'/(name+'.log'))==row['log_sha256']
   original=sim['cases'][name.removesuffix('_partition')]
@@ -43,7 +43,7 @@ def resources(path):
  d['equivalent_slice']=d['lut']/4+d['ff']/8+d['bram36']*232.4+d['dsp']*102.4
  return d
 core=resources(s/'core_utilization.rpt');tops={};fingerprints=set()
-for name,row in sim['cases'].items():
+for name,row in ({} if a.core_only else sim['cases']).items():
  d=s/name;h=(d/'core_sha256.txt').read_text().strip();assert sha(d/'core_structure.txt')==h;fingerprints.add(h)
  assert json.loads((d/'rom_audit.json').read_text())['passed']
  r=resources(d/'utilization.rpt')
@@ -51,9 +51,9 @@ for name,row in sim['cases'].items():
  r.update(boot_cycles=row['boot_cycles'],operation_cycles=cycles,total_cycles=row['total_cycles'],hashes=row['hashes'],permutations=row['permutations'],normalized_100mhz_atp=r['equivalent_slice']*cycles/100000,
           operation=op,config=row['config'],core_sha256=h)
  tops[name]=r
-assert len(fingerprints)==1
-result=dict(version='v4.2',layout_revision=3,stage='post_synth',functional_pass=True,common_core_pass=True,rom_mapping_pass=True,post_synth_acceptance=True,post_route_pass=False,frequency_mhz=None,
- tag=a.tag,simulation_tag=a.sim_tag,simulation_profile_enable=True,synthesis_profile_enable=False,pruning_verification_pass=True,core=core,tops=tops,common_core_sha256=next(iter(fingerprints)),rtl_sha256=inp['rtl_sha256'],source_snapshot_sha256=sha(f/'source_snapshot.tar.gz'))
+assert a.core_only or len(fingerprints)==1
+result=dict(version='v4.2',layout_revision=3,stage='post_synth_core_only' if a.core_only else 'post_synth',functional_pass=True,common_core_pass=not a.core_only,core_synthesis_pass=True,rom_mapping_pass=not a.core_only,post_synth_acceptance=not a.core_only,post_route_pass=False,frequency_mhz=None,
+ tag=a.tag,simulation_tag=a.sim_tag,simulation_profile_enable=True,synthesis_profile_enable=False,pruning_verification_pass=True,core=core,tops=tops,common_core_sha256=next(iter(fingerprints),None),rtl_sha256=inp['rtl_sha256'],source_snapshot_sha256=sha(f/'source_snapshot.tar.gz'))
 write(f/'result.json',result)
 if partition:
  result.update(reset='active_high_synchronous',common_execution_scope='boot_and_core',partition_equivalence_pass=True)
@@ -80,5 +80,5 @@ with tarfile.open(out/'verification_tools.tar.gz','w:gz') as t:
   for path in (ROOT/directory).rglob('*'):
    if path.is_file() and '__pycache__' not in path.parts and path.suffix in ('.py','.sv','.svh','.tcl','.json','.mem'):t.add(path,arcname=str(path.relative_to(ROOT)))
 write(out/'evidence_sha256.json',{str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('*')) if p.is_file() and p.name!='evidence_sha256.json'})
-write(BASE/'final.json',dict(candidate=a.tag,functional_pass=True,post_synth_acceptance=True,post_route_pass=False,result_sha256=sha(out/'result.json')))
+write(BASE/('current_core.json' if a.core_only else 'final.json'),dict(candidate=a.tag,functional_pass=True,core_synthesis_pass=True,post_synth_acceptance=not a.core_only,post_route_pass=False,result_sha256=sha(out/'result.json')))
 print('EXTERNAL_ACCEPTED_POST_SYNTH',a.tag,core,flush=True)
