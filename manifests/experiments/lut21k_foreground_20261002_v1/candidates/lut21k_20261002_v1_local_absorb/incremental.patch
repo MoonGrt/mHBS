@@ -1,0 +1,38 @@
+--- a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++++ b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+@@ -263,23 +263,8 @@
+     assign chain_feedback_valid=REUSE_FAST_FEEDBACK && take_feedback;
+     assign chain_feedback_counter=transition_counter;
+     wire take_round=lane_state==RUN && !take_feedback;
+-    // One selected rate pair is absorbed per stream beat. Share that XOR
+-    // before distributing the result to the enabled state words.
+-    logic [127:0] previous_rate;
+-    always @* begin
+-        case(append_index)
+-            0:previous_rate=sponge_state[0 +:128];
+-            1:previous_rate=sponge_state[128 +:128];
+-            2:previous_rate=sponge_state[256 +:128];
+-            3:previous_rate=sponge_state[384 +:128];
+-            4:previous_rate=sponge_state[512 +:128];
+-            5:previous_rate=sponge_state[640 +:128];
+-            6:previous_rate=sponge_state[768 +:128];
+-            7:previous_rate=sponge_state[896 +:128];
+-            default:previous_rate={64'd0,sponge_state[1024 +:64]};
+-        endcase
+-    end
+-    wire [127:0] absorbed_block=block_data ^ (previous_rate & {128{!clear_stream}});
++    // Absorb at each destination word so the input mux can merge its XOR.
++    // The word enable selects the same pair and preserves all other words.
+     genvar word_index;
+     generate for(word_index=0;word_index<25;word_index=word_index+1) begin: state_words
+         wire select_stream=word_index<17 && take_stream && append_index==word_index/2;
+@@ -290,7 +275,8 @@
+         // therefore be the permutation result without a 1,600-bit RUN mask.
+         wire [63:0] round_or_clear=clear_stream ? 64'd0
+             : advanced_state[word_index*64 +:64];
+-        wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
++        wire [63:0] stream_word=word_index%2==0 ? block_data[63:0] : block_data[127:64];
++        wire [63:0] absorb_word=stream_word ^ (sponge_state[word_index*64 +:64] & {64{!clear_stream}});
+         wire [63:0] next_word;
+         if(REUSE_FAST_FEEDBACK) begin: common_fast_data
+             assign next_word=(take_fast || take_feedback) ? fast_word

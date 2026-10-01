@@ -21,7 +21,7 @@ module tb_mhbs_s_parameters;
   begin
    control=0;control[57:56]=slot;control[53]=discard;control[54]=parse;
    descriptor_data={control,64'd0};
-   dut.state=dut.ROUTE;dut.macro_route=1;dut.route_value=digest;
+   dut.state=dut.ROUTE;dut.macro_route=1;dut.route_source=dut.ROUTE_HASH;dut.result[0]=digest;
    if(!discard)begin
     expected_value[slot]=digest[255:0];
     if(slot==1)expected_tail=digest[319:256];

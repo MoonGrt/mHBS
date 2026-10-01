@@ -162,7 +162,14 @@ module mhbs_hbs #(
     wire [INDEX_BITS-1:0] lane_list0 [0:1], lane_list1 [0:1];
     wire [31:0] lane_hashes [0:1], lane_permutations [0:1];
     logic [31:0] hash_base, permutation_base;
-    logic [V-1:0] result [0:1], route_value;
+    logic [V-1:0] result [0:1];
+    // ROUTE consumes these registers before it can update any source. Keep
+    // the original staging cycle, but remember only the source selection.
+    localparam logic [1:0] ROUTE_HASH=0, ROUTE_NODE=1, ROUTE_SAVED=2, ROUTE_EMIT=3;
+    logic [1:0] route_source;
+    wire [V-1:0] route_value = route_source==ROUTE_HASH ? result[0]
+        : {{(V-W){1'b0}}, (route_source==ROUTE_NODE ? node_value
+                        : route_source==ROUTE_SAVED ? value[3] : emit_value)};
     // The sponge retains capture through response and output stalls. No new
     // request is issued before CHAIN_OUTPUT0/1 has consumed both captures.
     wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1];
@@ -178,7 +185,7 @@ module mhbs_hbs #(
     // Reuse the same parity banks; root writes use the matching physical
     // write port so the even/odd address invariants remain static.
     wire root_write=state==ROUTE && macro_route!=0 && route_descriptor[53];
-    mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1)) endpoints (
+    mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1),.FIXED_BANK_WRITES(1),.SPLIT_TAIL(0)) endpoints (
         .clk, .write0(endpoint_write0), .write1(endpoint_write1),
         .address0(endpoint_address0), .address1(endpoint_address1),
         .data0(endpoint_data0), .data1(endpoint_data1),
@@ -311,8 +318,8 @@ module mhbs_hbs #(
     task automatic complete_macro;
         begin seq_complete<=1; enter_state(FETCH); end
     endtask
-    task automatic route_result(input [V-1:0] v);
-        begin route_value<=v; enter_state(ROUTE); end
+    task automatic route_result(input [1:0] source);
+        begin route_source<=source; enter_state(ROUTE); end
     endtask
     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
         begin emit_value<=v; emit_length<=length; output_return<=ret; enter_state(OUTPUT_CHUNK); end
@@ -503,7 +510,7 @@ module mhbs_hbs #(
                 CHAIN_NEXT: begin
                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
                     else if(standalone_chain && chain_descriptor[13:12]==0)
-                        route_result({{(V-W){1'b0}},node_value});
+                        route_result(ROUTE_NODE);
                     else if(!verifying && macro_flags[3] && leaf_cursor==target) begin
                         node_value<=0; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
                     end else if(chain_descriptor[13:12]==0) begin
@@ -518,7 +525,7 @@ module mhbs_hbs #(
                     task_leaf[0]<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
                     start_hash(descriptors[4],2'b01,LEAF_SETUP);
                 end
-                LEAF_SETUP: if(standalone_chain)route_result(result[0]);
+                LEAF_SETUP: if(standalone_chain)route_result(ROUTE_HASH);
                     else begin node_value<=result[0][W-1:0]; node_level<=0;
                         node_index<=verifying ? target : leaf_cursor; enter_state(PUSH_NODE); end
                 PUSH_NODE: begin
@@ -557,8 +564,7 @@ module mhbs_hbs #(
                         start_output(auth_path[auth_level],node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
                     end else enter_state(TREE_FINISH);
                 end
-                TREE_FINISH: route_result({{(V-W){1'b0}},
-                    (!verifying && macro_flags[3] ? value[3] : node_value)});
+                TREE_FINISH: route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
                 HASH_ISSUE: begin
                     launch_pending<=launch_pending & ~lane_ready;
                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
@@ -571,7 +577,7 @@ module mhbs_hbs #(
                     if((lane_error & response_pending & lane_valid)!=0) fail(16'h3007);
                     else if((response_pending & ~lane_valid)==0) enter_state(hash_return);
                 end
-                HASH_RESULT: route_result(result[0]);
+                HASH_RESULT: route_result(ROUTE_HASH);
                 ROUTE: begin
                     if(macro_route==0) complete_macro();
                     else begin
@@ -610,7 +616,7 @@ module mhbs_hbs #(
                     emit_value<=verify_data;
                     enter_state(verify_return);
                 end
-                VERIFY_RANDOM: route_result({{(V-W){1'b0}},emit_value});
+                VERIFY_RANDOM: route_result(ROUTE_EMIT);
                 VERIFY_CHAIN_INPUT: begin
                     // A WOTS digit of 15 already is an endpoint: zero hashes.
                     result[verify_lane]<={{(V-W){1'b0}},emit_value};

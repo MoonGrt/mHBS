@@ -26,6 +26,7 @@ module tb_mhbs_external;
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
  `include "tb/integration/mhbs_parent_input_check.svh"
+ `include "tb/integration/mhbs_route_source_check.svh"
  string directory,vector_directory,dump_path,trace_path;
  integer trace_words=0,trace_cursor=0,fault=0;
  reg [47:0] trace_expected[0:2047];
@@ -140,6 +141,7 @@ module tb_mhbs_external;
    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)
     $fatal(1,"production statistics must be zero");
    check_parent_input_coverage();
+   check_route_source_coverage();
    $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end
