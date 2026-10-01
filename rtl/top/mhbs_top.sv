@@ -3,6 +3,7 @@
 module mhbs_top #(
     parameter integer LANES=2,UNROLL=2,
     parameter bit SWAP_PHYSICAL_LANES=0,
+    parameter bit SIGNATURE_STORE_ENABLE=1,
     // Statistics are observable in simulation, absent from production hardware.
 `ifdef SYNTHESIS
     parameter bit PROFILE_ENABLE=0,
@@ -28,7 +29,12 @@ module mhbs_top #(
     output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
     output wire [31:0] hash_count,permutation_count,
     output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
-    output wire [1:0] result_kind
+    output wire [1:0] result_kind,
+    input wire signature_read_enable,input wire [10:0] signature_read_address,
+    output wire signature_read_valid,output wire [255:0] signature_read_data,
+    output wire [5:0] signature_node_bytes,
+    output wire signature_valid,signature_error,
+    output wire [10:0] signature_nodes,output wire [15:0] signature_length
 );
     wire [3:0] program_address;
     wire [3:0] template_address;
@@ -115,5 +121,23 @@ module mhbs_top #(
         end
     end
     // COMMON_EXECUTION_END
+    generate if(SIGNATURE_STORE_ENABLE && OPERATION==1) begin: stored_signature
+        mhbs_signature_store storage (
+            .clk,.rst,.finish(done),.abort(error),
+            .write_valid(out_valid),.write_data(out_data),.write_bytes(out_bytes),
+            .read_enable(signature_read_enable),.read_address(signature_read_address),
+            .read_valid(signature_read_valid),.read_data(signature_read_data),
+            .node_bytes(signature_node_bytes),.complete(signature_valid),
+            .error(signature_error),.nodes(signature_nodes),.length(signature_length)
+        );
+    end else begin: no_signature_store
+        assign signature_read_valid=0;
+        assign signature_read_data=0;
+        assign signature_node_bytes=0;
+        assign signature_valid=0;
+        assign signature_error=0;
+        assign signature_nodes=0;
+        assign signature_length=0;
+    end endgenerate
 endmodule
 `default_nettype wire

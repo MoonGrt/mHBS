@@ -35,6 +35,34 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
 
 验证命令及验收边界见 [Verification.md](Verification.md)。
 
+## 完整签名缓存与读回
+
+`SIGNATURE_STORE_ENABLE=1`（默认）且 `OPERATION=1` 时，顶层自动保存全部签名输出。
+缓存位于共同核之外，不改变原输出流、计算周期或微码。Keygen、Verify 或显式关闭该参数时，
+缓存不实例化，下面所有输出恒为零。新增输入不用时接零。
+
+| 端口 | 语义 |
+|---|---|
+| `signature_valid` | `done=1` 且签名缓存无错误时为 1；保持至复位 |
+| `signature_length[15:0]` | 已保存的有效字节总数；签名完成后使用 |
+| `signature_nodes[10:0]` | 已保存节点数；签名完成后使用 |
+| `signature_node_bytes[5:0]` | 每节点有效低位字节数，16/24/32 |
+| `signature_read_enable` / `signature_read_address[10:0]` | 同步读请求，地址为节点索引，从 0 开始 |
+| `signature_read_valid` / `signature_read_data[255:0]` | 请求采样上升沿之后返回数据及有效标志；可每拍请求一个节点，无响应背压 |
+| `signature_error` | 缓存溢出、节点宽度非法/不一致或执行错误；保持至复位 |
+
+只有 `signature_valid=1` 且地址小于 `signature_nodes` 的请求产生读响应；其余请求的
+`signature_read_valid=0`。读数据仅在 valid 为 1 时有意义，未使用高位忽略。
+按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，即为完整签名。
+缓存可重复随机读取，读操作不影响 `done` 或原输出。缓存错误不改变原核心 `error`，调用方
+须检查 `signature_valid` 和 `signature_error` 后再使用缓存。
+
+存储为 1558 × 256 bit，同一存储覆盖全部六参数，最长签名为 256f 的 49,856 字节。
+128/192 位节点在 256 位槽中留空高位，以省去打包逻辑。存储拆为 1024 项 BRAM、512 项 BRAM
+和 22 项 LUTRAM 尾区，统一为同步读接口，不复位 RAM 内容；
+同步复位清除计数与有效状态，因此运行中复位会丢弃本次签名，旧 RAM 内容不可读回。
+本模块用于功能性保存，不提供物理存储擦除。历史共同核的 0 BRAM 面积不包含此顶层缓存。
+
 ## 仿真统计与综合裁剪
 
 `PROFILE_ENABLE` 在仿真默认开启，在定义 `SYNTHESIS` 时默认关闭；生产共同核综合也显式设置为 0。关闭后 `boot_cycles`、`keygen_cycles`、`sign_cycles`、`hash_count` 和 `permutation_count` 保留端口但恒为零，内部计数寄存器、基准寄存器及统计加减逻辑裁除。此开关不影响签名/公钥输出、握手、错误处理和完成周期。仿真 testbench 另从实际完成的 permutation 和 hash 事件观察统计，用于检查两种配置行为一致。

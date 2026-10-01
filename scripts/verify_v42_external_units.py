@@ -4,7 +4,7 @@ import hashlib,json,shutil,subprocess,sys
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,BUILD,identity,sha,write,run
 out=BUILD/'units';out.mkdir(parents=True,exist_ok=True)
-files=['tb/unit/mhbs_external_core_stub.sv','rtl/top/mhbs_top.sv','tb/unit/tb_mhbs_external_boot.sv']
+files=['rtl/memory/mhbs_signature_store.sv','tb/unit/mhbs_external_core_stub.sv','rtl/top/mhbs_top.sv','tb/unit/tb_mhbs_external_boot.sv']
 run(['iverilog','-g2012','-s','tb_mhbs_external_boot','-o',str(out/'boot.vvp'),*files],out/'boot_compile.log')
 run(['vvp',str(out/'boot.vvp')],out/'boot.log')
 assert 'EXTERNAL_BOOT_UNIT_PASS' in (out/'boot.log').read_text()

@@ -30,6 +30,9 @@ def one(name,top,files,params=(),runs=((),)):
     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
     print('SLH_UNIT_PASS',name,flush=True)
 
+one('signature_store','tb_mhbs_signature_store',
+    ['rtl/memory/mhbs_signature_store.sv','tb/unit/tb_mhbs_signature_store.sv'])
+
 one('s_parameters','tb_mhbs_s_parameters',rtl+['tb/unit/tb_mhbs_s_parameters.sv'])
 one('address_width','tb_mhbs_address_width',rtl+['tb/unit/tb_mhbs_address_width.sv'])
 

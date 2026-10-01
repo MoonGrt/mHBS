@@ -6,6 +6,7 @@
 
 ```text
 mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+  ├─ mhbs_signature_store：Sign 完整签名缓存，完成后同步节点读回（可编译关闭）
   └─ mhbs_hbs：宏操作调度、树归约、消息缓冲、结果输出
       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
       ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
@@ -52,6 +53,13 @@ Verify 使用同一 sign 镜像：PRF_msg 宏读取外部 R；TREE 宏读取 FOR
 WOTS 按两个链一组输入，复用普通单次 Hash 请求执行 digit 到 14 的后缀链；digit=15 直接存端点。这样保持现有 compact chain 语义和 Hash lane 源码不变，Verify 每步有控制调度开销。所有节点长度与地址来自受信任镜像；签名字节流拆分位于外部。
 
 当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+
+Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保存后可随机或顺序读回；
+`SIGNATURE_STORE_ENABLE=0` 可关闭。缓存位于共同核提取区域之外，Keygen/Verify 不实例化。
+缓存单独综合实测为 484 LUT（含 172 LUTRAM）、293 FF、11 RAMB36E1 + 1 RAMB18E1；当前尚未重新测量带缓存
+整机的布线面积和频率，历史共同核资源与时序结论不等同于新增缓存后的完整顶层。
+接口见 [Job_Interface.md](Job_Interface.md)，验证与资源证据见
+[完整签名缓存报告](report/Signature_Storage.md)。
 
 共享列表存储按阶段复用：FORS 根压缩完成后才允许 WOTS 端点覆盖。FORS 叶节点直接进入树计算，不写入共享列表；根按地址奇偶进入对应写端口，保留双链同时写入能力。独立 mhbs_root_store 及其闲置测试已删除。
 

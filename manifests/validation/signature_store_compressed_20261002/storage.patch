@@ -1,0 +1,46 @@
+--- manifests/validation/signature_store_compressed_20261002/baseline/mhbs_signature_store.sv	2026-10-02 20:34:39.650593574 +0800
++++ rtl/memory/mhbs_signature_store.sv	2026-10-02 20:34:39.677784197 +0800
+@@ -11,7 +11,12 @@
+     output wire complete,output logic error,
+     output logic [10:0] nodes,output logic [15:0] length
+ );
+-    (* ram_style="block" *) logic [255:0] memory[0:1557];
++    // Split the address space to avoid rounding all 1558 words up to 2048.
++    (* ram_style="block" *) logic [255:0] main_memory[0:1023];
++    (* ram_style="block" *) logic [255:0] middle_memory[0:511];
++    (* ram_style="distributed" *) logic [255:0] tail_memory[0:21];
++    logic [255:0] main_data,middle_data,tail_data;
++    logic [1:0] read_bank;
+     wire size_ok=(write_bytes==16 || write_bytes==24 || write_bytes==32) &&
+                  (nodes==0 || write_bytes==node_bytes);
+     wire writing=write_valid && !rst && !finish && !abort && !error;
+@@ -19,8 +24,27 @@
+     assign complete=finish && !rst && !abort && !error && nodes!=0;
+     // Do not reset the array or data register: infer synchronous block RAM.
+     always_ff @(posedge clk) begin
+-        if(writing && nodes<1558 && size_ok) memory[nodes]<=write_data;
+-        if(reading) read_data<=memory[read_address];
++        if(writing && nodes<1558 && size_ok) begin
++            if(!nodes[10]) main_memory[nodes[9:0]]<=write_data;
++            else if(!nodes[9]) middle_memory[nodes[8:0]]<=write_data;
++            else tail_memory[nodes[4:0]]<=write_data;
++        end
++        if(reading) begin
++            if(!read_address[10]) begin
++                main_data<=main_memory[read_address[9:0]];read_bank<=0;
++            end else if(!read_address[9]) begin
++                middle_data<=middle_memory[read_address[8:0]];read_bank<=1;
++            end else begin
++                tail_data<=tail_memory[read_address[4:0]];read_bank<=2;
++            end
++        end
++    end
++    always_comb begin
++        case(read_bank)
++            0:read_data=main_data;
++            1:read_data=middle_data;
++            default:read_data=tail_data;
++        endcase
+     end
+     always_ff @(posedge clk) begin
+         if(rst) begin

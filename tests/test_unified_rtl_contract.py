@@ -14,7 +14,7 @@ class UnifiedRtlContractTests(unittest.TestCase):
             r'\binput\s+(?:wire|logic)\s+(?:\[[^]]+\]\s*)?'
             r'(.+?)(?=,\s*(?:input|output)|$)', ports, re.S)
         inputs = {name.strip() for group in declarations for name in group.split(',')}
-        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data', 'verify_valid', 'verify_data'})
+        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data', 'verify_valid', 'verify_data', 'signature_read_enable', 'signature_read_address'})
         self.assertRegex(ports, r'\[6:0\]\s+message_length')
         self.assertRegex(ports, r'\[63:0\]\s+message_data')
         for path in (ROOT / 'manifests/v42_sources.txt').read_text().split():

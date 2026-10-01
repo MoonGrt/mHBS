@@ -10,6 +10,10 @@ module tb_mhbs_external;
  parameter integer SWAP=0;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
+ logic signature_read_enable=0;logic [10:0] signature_read_address=0;
+ wire signature_read_valid,signature_valid,signature_error;
+ wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
+ wire [10:0] signature_nodes;wire [15:0] signature_length;
  wire verify_ready,verify_pass;
  wire verify_valid=0;wire [255:0] verify_data=0;
  wire busy,done,keygen_done,error,out_valid;
@@ -144,6 +148,22 @@ module tb_mhbs_external;
    check_route_source_coverage();
    $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
+   if(OPERATION==1)begin
+    if(!signature_valid || signature_error || signature_length!=metadata[0] ||
+       signature_nodes*signature_node_bytes!=metadata[0])$fatal(1,"signature storage metadata");
+    for(integer node=0;node<signature_nodes;node=node+1)begin
+     signature_read_enable=1;signature_read_address=11'(node);tick();
+     if(!signature_read_valid)$fatal(1,"signature read latency");
+     for(integer b=0;b<signature_node_bytes;b=b+1)
+      if(signature_read_data[b*8+:8]!==expected_bytes[node*int'(signature_node_bytes)+b])
+       $fatal(1,"stored signature mismatch node=%0d byte=%0d",node,b);
+    end
+    signature_read_address=signature_nodes;tick();
+    if(signature_read_valid)$fatal(1,"signature out-of-bounds read");
+    signature_read_enable=0;tick();
+    $display("SIGNATURE_STORE_PASS bytes=%0d nodes=%0d",signature_length,signature_nodes);
+   end else if(signature_valid || signature_error || signature_nodes || signature_length)
+    $fatal(1,"Keygen signature storage must be disabled");
    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end
    if(run+1<replays)begin rst=1;repeat(4)tick();rst=0;end
   end

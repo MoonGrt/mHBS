@@ -65,6 +65,7 @@ foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_25
  set start [clock seconds]
  set d [file join $out $name];file mkdir $d
  create_project -in_memory -part $part
+ read_verilog -sv rtl/memory/mhbs_signature_store.sv
  read_verilog [file join $out common_stub.v]
  read_verilog -sv [file join $out ${name}_shell.sv]
  synth_design -top mhbs_top -part $part -mode out_of_context -flatten_hierarchy none

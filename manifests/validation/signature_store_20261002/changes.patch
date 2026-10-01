@@ -1,0 +1,431 @@
+diff --git a/docs/Architecture.md b/docs/Architecture.md
+index a7faace3..009c1a5e 100644
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -6,6 +6,7 @@
+ 
+ ```text
+ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
++  ├─ mhbs_signature_store：Sign 完整签名缓存，完成后同步节点读回（可编译关闭）
+   └─ mhbs_hbs：宏操作调度、树归约、消息缓冲、结果输出
+       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
+       ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
+@@ -53,6 +54,13 @@ WOTS 按两个链一组输入，复用普通单次 Hash 请求执行 digit 到 1
+ 
+ 当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+ 
++Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保存后可随机或顺序读回；
++`SIGNATURE_STORE_ENABLE=0` 可关闭。缓存位于共同核提取区域之外，Keygen/Verify 不实例化。
++缓存单独综合实测为 43 LUT、35 FF、14 RAMB36E1 + 1 RAMB18E1；当前尚未重新测量带缓存
++整机的布线面积和频率，历史共同核资源与时序结论不等同于新增缓存后的完整顶层。
++接口见 [Job_Interface.md](Job_Interface.md)，验证与资源证据见
++[完整签名缓存报告](report/Signature_Storage.md)。
++
+ 共享列表存储按阶段复用：FORS 根压缩完成后才允许 WOTS 端点覆盖。FORS 叶节点直接进入树计算，不写入共享列表；根按地址奇偶进入对应写端口，保留双链同时写入能力。独立 mhbs_root_store 及其闲置测试已删除。
+ 
+ 六种 SHAKE 参数共用同一 K2U2 核。descriptor[1] 编码 0/1/2 为 128f/192f/256f，4/5/6 为 128s/192s/256s，3/7 非法，软件镜像检查拒绝。FORS 目标、叶游标和节点索引为 14 位；XMSS 叶地址保持 10 位（s 最大需要 9 位）。树栈/认证路径各 16 项、共享列表 68 项、摘要暂存 49 字节及 ROM 容量均不扩大。s 摘要使用 7 字节树索引，128s/192s 的叶索引按大端两字节解码；256s 使用一字节。
+diff --git a/docs/Job_Interface.md b/docs/Job_Interface.md
+index 93eef863..7d06a232 100644
+--- a/docs/Job_Interface.md
++++ b/docs/Job_Interface.md
+@@ -35,6 +35,33 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
+ 
+ 验证命令及验收边界见 [Verification.md](Verification.md)。
+ 
++## 完整签名缓存与读回
++
++`SIGNATURE_STORE_ENABLE=1`（默认）且 `OPERATION=1` 时，顶层自动保存全部签名输出。
++缓存位于共同核之外，不改变原输出流、计算周期或微码。Keygen、Verify 或显式关闭该参数时，
++缓存不实例化，下面所有输出恒为零。新增输入不用时接零。
++
++| 端口 | 语义 |
++|---|---|
++| `signature_valid` | `done=1` 且签名缓存无错误时为 1；保持至复位 |
++| `signature_length[15:0]` | 已保存的有效字节总数；签名完成后使用 |
++| `signature_nodes[10:0]` | 已保存节点数；签名完成后使用 |
++| `signature_node_bytes[5:0]` | 每节点有效低位字节数，16/24/32 |
++| `signature_read_enable` / `signature_read_address[10:0]` | 同步读请求，地址为节点索引，从 0 开始 |
++| `signature_read_valid` / `signature_read_data[255:0]` | 请求采样上升沿之后返回数据及有效标志；可每拍请求一个节点，无响应背压 |
++| `signature_error` | 缓存溢出、节点宽度非法/不一致或执行错误；保持至复位 |
++
++只有 `signature_valid=1` 且地址小于 `signature_nodes` 的请求产生读响应；其余请求的
++`signature_read_valid=0`。读数据仅在 valid 为 1 时有意义，未使用高位忽略。
++按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，即为完整签名。
++缓存可重复随机读取，读操作不影响 `done` 或原输出。缓存错误不改变原核心 `error`，调用方
++须检查 `signature_valid` 和 `signature_error` 后再使用缓存。
++
++存储为 1558 × 256 bit，同一存储覆盖全部六参数，最长签名为 256f 的 49,856 字节。
++128/192 位节点在 256 位槽中留空高位，以省去打包逻辑。推断同步 BRAM，不复位 RAM 内容；
++同步复位清除计数与有效状态，因此运行中复位会丢弃本次签名，旧 RAM 内容不可读回。
++本模块用于功能性保存，不提供物理存储擦除。历史共同核的 0 BRAM 面积不包含此顶层缓存。
++
+ ## 仿真统计与综合裁剪
+ 
+ `PROFILE_ENABLE` 在仿真默认开启，在定义 `SYNTHESIS` 时默认关闭；生产共同核综合也显式设置为 0。关闭后 `boot_cycles`、`keygen_cycles`、`sign_cycles`、`hash_count` 和 `permutation_count` 保留端口但恒为零，内部计数寄存器、基准寄存器及统计加减逻辑裁除。此开关不影响签名/公钥输出、握手、错误处理和完成周期。仿真 testbench 另从实际完成的 permutation 和 hash 事件观察统计，用于检查两种配置行为一致。
+diff --git a/experiments/v4.2/external_job_message/synth.tcl b/experiments/v4.2/external_job_message/synth.tcl
+index 45c15e85..db782299 100644
+--- a/experiments/v4.2/external_job_message/synth.tcl
++++ b/experiments/v4.2/external_job_message/synth.tcl
+@@ -65,6 +65,7 @@ foreach name {slh_128f_keygen slh_128f_sign slh_192f_keygen slh_192f_sign slh_25
+  set start [clock seconds]
+  set d [file join $out $name];file mkdir $d
+  create_project -in_memory -part $part
++ read_verilog -sv rtl/memory/mhbs_signature_store.sv
+  read_verilog [file join $out common_stub.v]
+  read_verilog -sv [file join $out ${name}_shell.sv]
+  synth_design -top mhbs_top -part $part -mode out_of_context -flatten_hierarchy none
+diff --git a/manifests/unified_sources.txt b/manifests/unified_sources.txt
+index a50021c3..6317402b 100644
+--- a/manifests/unified_sources.txt
++++ b/manifests/unified_sources.txt
+@@ -2,6 +2,7 @@ rtl/hash_lane/mhbs_keccak.sv
+ rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+ rtl/hash_lane/mhbs_recipe_lane.sv
+ rtl/memory/mhbs_value_store.sv
++rtl/memory/mhbs_signature_store.sv
+ rtl/sequencer/mhbs_program_sequencer.sv
+ rtl/top/mhbs_hbs.sv
+ rtl/top/mhbs_top.sv
+diff --git a/manifests/v42_sources.txt b/manifests/v42_sources.txt
+index a50021c3..6317402b 100644
+--- a/manifests/v42_sources.txt
++++ b/manifests/v42_sources.txt
+@@ -2,6 +2,7 @@ rtl/hash_lane/mhbs_keccak.sv
+ rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+ rtl/hash_lane/mhbs_recipe_lane.sv
+ rtl/memory/mhbs_value_store.sv
++rtl/memory/mhbs_signature_store.sv
+ rtl/sequencer/mhbs_program_sequencer.sv
+ rtl/top/mhbs_hbs.sv
+ rtl/top/mhbs_top.sv
+diff --git a/rtl/top/mhbs_top.sv b/rtl/top/mhbs_top.sv
+index 65e49b63..cbc32c60 100644
+--- a/rtl/top/mhbs_top.sv
++++ b/rtl/top/mhbs_top.sv
+@@ -3,6 +3,7 @@
+ module mhbs_top #(
+     parameter integer LANES=2,UNROLL=2,
+     parameter bit SWAP_PHYSICAL_LANES=0,
++    parameter bit SIGNATURE_STORE_ENABLE=1,
+     // Statistics are observable in simulation, absent from production hardware.
+ `ifdef SYNTHESIS
+     parameter bit PROFILE_ENABLE=0,
+@@ -28,7 +29,12 @@ module mhbs_top #(
+     output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
+     output wire [31:0] hash_count,permutation_count,
+     output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
+-    output wire [1:0] result_kind
++    output wire [1:0] result_kind,
++    input wire signature_read_enable,input wire [10:0] signature_read_address,
++    output wire signature_read_valid,output wire [255:0] signature_read_data,
++    output wire [5:0] signature_node_bytes,
++    output wire signature_valid,signature_error,
++    output wire [10:0] signature_nodes,output wire [15:0] signature_length
+ );
+     wire [3:0] program_address;
+     wire [3:0] template_address;
+@@ -115,5 +121,23 @@ module mhbs_top #(
+         end
+     end
+     // COMMON_EXECUTION_END
++    generate if(SIGNATURE_STORE_ENABLE && OPERATION==1) begin: stored_signature
++        mhbs_signature_store storage (
++            .clk,.rst,.finish(done),.abort(error),
++            .write_valid(out_valid),.write_data(out_data),.write_bytes(out_bytes),
++            .read_enable(signature_read_enable),.read_address(signature_read_address),
++            .read_valid(signature_read_valid),.read_data(signature_read_data),
++            .node_bytes(signature_node_bytes),.complete(signature_valid),
++            .error(signature_error),.nodes(signature_nodes),.length(signature_length)
++        );
++    end else begin: no_signature_store
++        assign signature_read_valid=0;
++        assign signature_read_data=0;
++        assign signature_node_bytes=0;
++        assign signature_valid=0;
++        assign signature_error=0;
++        assign signature_nodes=0;
++        assign signature_length=0;
++    end endgenerate
+ endmodule
+ `default_nettype wire
+diff --git a/scripts/verify_v42_external_units.py b/scripts/verify_v42_external_units.py
+index b9e0acd4..5b7fb015 100644
+--- a/scripts/verify_v42_external_units.py
++++ b/scripts/verify_v42_external_units.py
+@@ -4,7 +4,7 @@ import hashlib,json,shutil,subprocess,sys
+ from pathlib import Path
+ from v42_external_flow import ROOT,BASE,BUILD,identity,sha,write,run
+ out=BUILD/'units';out.mkdir(parents=True,exist_ok=True)
+-files=['tb/unit/mhbs_external_core_stub.sv','rtl/top/mhbs_top.sv','tb/unit/tb_mhbs_external_boot.sv']
++files=['rtl/memory/mhbs_signature_store.sv','tb/unit/mhbs_external_core_stub.sv','rtl/top/mhbs_top.sv','tb/unit/tb_mhbs_external_boot.sv']
+ run(['iverilog','-g2012','-s','tb_mhbs_external_boot','-o',str(out/'boot.vvp'),*files],out/'boot_compile.log')
+ run(['vvp',str(out/'boot.vvp')],out/'boot.log')
+ assert 'EXTERNAL_BOOT_UNIT_PASS' in (out/'boot.log').read_text()
+diff --git a/scripts/verify_v42_units.py b/scripts/verify_v42_units.py
+index 9405320e..8400894b 100644
+--- a/scripts/verify_v42_units.py
++++ b/scripts/verify_v42_units.py
+@@ -30,6 +30,9 @@ def one(name,top,files,params=(),runs=((),)):
+     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
+     print('SLH_UNIT_PASS',name,flush=True)
+ 
++one('signature_store','tb_mhbs_signature_store',
++    ['rtl/memory/mhbs_signature_store.sv','tb/unit/tb_mhbs_signature_store.sv'])
++
+ one('s_parameters','tb_mhbs_s_parameters',rtl+['tb/unit/tb_mhbs_s_parameters.sv'])
+ one('address_width','tb_mhbs_address_width',rtl+['tb/unit/tb_mhbs_address_width.sv'])
+ 
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+index e7e044ed..ce2e1b9c 100644
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -10,6 +10,10 @@ module tb_mhbs_external;
+  parameter integer SWAP=0;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
++ logic signature_read_enable=0;logic [10:0] signature_read_address=0;
++ wire signature_read_valid,signature_valid,signature_error;
++ wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
++ wire [10:0] signature_nodes;wire [15:0] signature_length;
+  wire verify_ready,verify_pass;
+  wire verify_valid=0;wire [255:0] verify_data=0;
+  wire busy,done,keygen_done,error,out_valid;
+@@ -144,6 +148,22 @@ module tb_mhbs_external;
+    check_route_source_coverage();
+    $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
+    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
++   if(OPERATION==1)begin
++    if(!signature_valid || signature_error || signature_length!=metadata[0] ||
++       signature_nodes*signature_node_bytes!=metadata[0])$fatal(1,"signature storage metadata");
++    for(integer node=0;node<signature_nodes;node=node+1)begin
++     signature_read_enable=1;signature_read_address=11'(node);tick();
++     if(!signature_read_valid)$fatal(1,"signature read latency");
++     for(integer b=0;b<signature_node_bytes;b=b+1)
++      if(signature_read_data[b*8+:8]!==expected_bytes[node*int'(signature_node_bytes)+b])
++       $fatal(1,"stored signature mismatch node=%0d byte=%0d",node,b);
++    end
++    signature_read_address=signature_nodes;tick();
++    if(signature_read_valid)$fatal(1,"signature out-of-bounds read");
++    signature_read_enable=0;tick();
++    $display("SIGNATURE_STORE_PASS bytes=%0d nodes=%0d",signature_length,signature_nodes);
++   end else if(signature_valid || signature_error || signature_nodes || signature_length)
++    $fatal(1,"Keygen signature storage must be disabled");
+    repeat(40)begin tick();if(!done || busy || out_valid || message_ready)$fatal(1,"completion halt");end
+    if(run+1<replays)begin rst=1;repeat(4)tick();rst=0;end
+   end
+diff --git a/tb/integration/tb_mhbs_verify.sv b/tb/integration/tb_mhbs_verify.sv
+index d3821836..b2ab3b93 100644
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -9,6 +9,10 @@ module tb_mhbs_verify;
+  parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
++ logic signature_read_enable=0;logic [10:0] signature_read_address=0;
++ wire signature_read_valid,signature_valid,signature_error;
++ wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
++ wire [10:0] signature_nodes;wire [15:0] signature_length;
+  wire busy,done,keygen_done,error,out_valid,verify_ready,verify_pass,message_ready;
+  wire [1:0] result_kind;
+  wire [15:0] error_code;wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+diff --git a/tests/test_unified_rtl_contract.py b/tests/test_unified_rtl_contract.py
+index a0a19e06..227d6578 100644
+--- a/tests/test_unified_rtl_contract.py
++++ b/tests/test_unified_rtl_contract.py
+@@ -14,7 +14,7 @@ class UnifiedRtlContractTests(unittest.TestCase):
+             r'\binput\s+(?:wire|logic)\s+(?:\[[^]]+\]\s*)?'
+             r'(.+?)(?=,\s*(?:input|output)|$)', ports, re.S)
+         inputs = {name.strip() for group in declarations for name in group.split(',')}
+-        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data', 'verify_valid', 'verify_data'})
++        self.assertEqual(inputs, {'clk', 'rst', 'message_valid', 'message_length', 'message_data', 'verify_valid', 'verify_data', 'signature_read_enable', 'signature_read_address'})
+         self.assertRegex(ports, r'\[6:0\]\s+message_length')
+         self.assertRegex(ports, r'\[63:0\]\s+message_data')
+         for path in (ROOT / 'manifests/v42_sources.txt').read_text().split():
+diff --git a/rtl/memory/mhbs_signature_store.sv b/rtl/memory/mhbs_signature_store.sv
+new file mode 100644
+index 00000000..0cb0a076
+--- /dev/null
++++ b/rtl/memory/mhbs_signature_store.sv
+@@ -0,0 +1,42 @@
++`timescale 1ns/1ps
++`default_nettype none
++// One output node per word: no packing or backpressure on the execution core.
++// 1558 nodes covers the largest supported signature (SHAKE-256f).
++module mhbs_signature_store (
++    input wire clk,rst,finish,abort,
++    input wire write_valid,input wire [255:0] write_data,input wire [5:0] write_bytes,
++    input wire read_enable,input wire [10:0] read_address,
++    output logic read_valid,output logic [255:0] read_data,
++    output logic [5:0] node_bytes,
++    output wire complete,output logic error,
++    output logic [10:0] nodes,output logic [15:0] length
++);
++    (* ram_style="block" *) logic [255:0] memory[0:1557];
++    wire size_ok=(write_bytes==16 || write_bytes==24 || write_bytes==32) &&
++                 (nodes==0 || write_bytes==node_bytes);
++    wire writing=write_valid && !rst && !finish && !abort && !error;
++    wire reading=read_enable && complete && read_address<nodes;
++    assign complete=finish && !rst && !abort && !error && nodes!=0;
++    // Do not reset the array or data register: infer synchronous block RAM.
++    always_ff @(posedge clk) begin
++        if(writing && nodes<1558 && size_ok) memory[nodes]<=write_data;
++        if(reading) read_data<=memory[read_address];
++    end
++    always_ff @(posedge clk) begin
++        if(rst) begin
++            nodes<=0;length<=0;node_bytes<=0;error<=0;read_valid<=0;
++        end else begin
++            read_valid<=reading;
++            if(abort) error<=1;
++            if(writing) begin
++                if(nodes>=1558 || !size_ok) error<=1;
++                else begin
++                    nodes<=nodes+1'b1;
++                    length<=length+{10'd0,write_bytes};
++                    node_bytes<=write_bytes;
++                end
++            end
++        end
++    end
++endmodule
++`default_nettype wire
+diff --git a/tb/unit/tb_mhbs_signature_store.sv b/tb/unit/tb_mhbs_signature_store.sv
+new file mode 100644
+index 00000000..688f1d77
+--- /dev/null
++++ b/tb/unit/tb_mhbs_signature_store.sv
+@@ -0,0 +1,62 @@
++`timescale 1ns/1ps
++module tb_mhbs_signature_store;
++    logic clk=0,rst=1,finish=0,abort=0,write_valid=0,read_enable=0;
++    logic [255:0] write_data=0;
++    logic [5:0] write_bytes=16;
++    logic [10:0] read_address=0;
++    wire read_valid,complete,error;
++    wire [255:0] read_data;
++    wire [5:0] node_bytes;
++    wire [10:0] nodes;
++    wire [15:0] length;
++    mhbs_signature_store dut(.*);
++    always #5 clk=~clk;
++    task tick;begin @(posedge clk);#1;end endtask
++    task reset_store;begin
++        rst=1;tick();rst=0;finish=0;abort=0;write_valid=0;read_enable=0;
++        if(complete || error || read_valid || nodes || length)$fatal(1,"reset metadata");
++    end endtask
++    function automatic [255:0] pattern(input integer index);
++        for(integer b=0;b<32;b=b+1)pattern[b*8+:8]=8'(index*13+b);
++    endfunction
++    initial begin
++        // Includes odd node counts and the largest six-profile signature.
++        for(integer bytes_per_node=16;bytes_per_node<=32;bytes_per_node+=8)begin
++            reset_store();write_bytes=6'(bytes_per_node);
++            for(integer n=0;n<1558;n=n+1)begin
++                write_valid=1;write_data=pattern(n);read_enable=1;
++                tick();if(read_valid || complete)$fatal(1,"read before completion");
++            end
++            write_valid=0;finish=1;tick();
++            if(!complete || error || nodes!=1558 || length!=1558*bytes_per_node || node_bytes!=bytes_per_node)
++                $fatal(1,"full store metadata");
++            for(integer n=1557;n>=0;n=n-1)begin
++                read_address=11'(n);tick();
++                if(!read_valid || read_data!==pattern(n))$fatal(1,"readback %0d",n);
++            end
++            read_address=1558;tick();if(read_valid)$fatal(1,"bounds");
++            read_address=0;write_valid=1;write_data='1;tick();
++            if(!read_valid || read_data!==pattern(0) || nodes!=1558)$fatal(1,"write after finish");
++            read_enable=0;tick();if(read_valid)$fatal(1,"read enable");
++            // A reset must invalidate even a pending read; RAM need not clear.
++            read_enable=1;reset_store();read_enable=1;finish=1;tick();
++            if(read_valid || complete)$fatal(1,"stale signature after reset");
++        end
++        reset_store();write_valid=1;write_bytes=32;
++        repeat(1558)tick();tick();
++        if(!error || nodes!=1558 || length!=49856)$fatal(1,"overflow must not wrap");
++        finish=1;tick();if(complete)$fatal(1,"overflow completion");
++        reset_store();write_valid=1;write_bytes=16;tick();write_bytes=24;tick();
++        if(!error || nodes!=1)$fatal(1,"mixed widths");
++        reset_store();write_valid=1;write_bytes=0;tick();
++        if(!error || nodes)$fatal(1,"invalid width");
++        reset_store();write_valid=1;write_bytes=16;tick();abort=1;tick();
++        finish=1;read_enable=1;tick();
++        if(!error || complete || read_valid || nodes!=1)$fatal(1,"abort");
++        reset_store();write_valid=1;write_data=pattern(99);tick();
++        reset_store();write_valid=1;write_bytes=24;write_data=pattern(7);tick();
++        write_valid=0;finish=1;read_enable=1;read_address=0;tick();
++        if(!read_valid || read_data!==pattern(7) || length!=24)$fatal(1,"restart");
++        $display("SIGNATURE_STORE_UNIT_PASS");$finish;
++    end
++endmodule
+diff --git a/docs/report/Signature_Storage.md b/docs/report/Signature_Storage.md
+new file mode 100644
+index 00000000..65c40c2e
+--- /dev/null
++++ b/docs/report/Signature_Storage.md
+@@ -0,0 +1,66 @@
++# 完整签名缓存：实现与验证
++
++## 改动范围
++
++在 `mhbs_top` 中增加独立签名缓存，原节点输出直接写入 RAM，无需打包或停顿执行核。
++共同核提取结果与改动前 HEAD 逐字节相同；Hash、微码及调度 RTL 未修改。
++`SIGNATURE_STORE_ENABLE` 默认开启，仅 Sign 实例化；可编译关闭以使用原流式模式。
++保留原全部输出，新增同步节点读回接口，协议见 [Job_Interface.md](../Job_Interface.md#完整签名缓存与读回)。
++
++缓存共 1558 个 256-bit 槽，逻辑容量 49,856 字节。节点有效长度为 16/24/32 字节，
++采用原输出顺序。128/192 位节点的槽内高位不使用，以避免增加字节打包逻辑。
++
++| 参数集 | 完整签名字节 | 节点数 | 实测 Sign 计算周期（不含 5 拍启动） |
++|---|---:|---:|---:|
++| 128f | 17,088 | 1,068 | 729,983 |
++| 192f | 35,664 | 1,486 | 1,249,491 |
++| 256f | 49,856 | 1,558 | 2,579,236 |
++| 128s | 7,856 | 491 | 15,317,506 |
++| 192s | 16,224 | 676 | 29,016,918 |
++| 256s | 29,792 | 931 | 27,069,757 |
++
++以上使用现有 1 字节消息参考向量、K2U2。签名完成后 `signature_valid=1`，
++按地址 0 至 `signature_nodes-1` 发出读请求；上升沿之后读取 `signature_read_valid/data`。
++拼接各节点的低 `signature_node_bytes` 字节即可恢复签名。每拍可读一个节点，支持重复读取。
++读取不会延长计算周期；顺序完整读回额外需要相应节点数的时钟拍。
++
++同步复位丢弃当前签名；只清元数据而不清 RAM，以保持 BRAM 推断。
++读口拒绝未完成、错误和越界请求。溢出或节点宽度错误置缓存错误，阻止使用不完整数据。
++
++## 新增存储模块综合
++
++Vivado 2025.2，`xc7a200tffg1156-3`，8 线程，独立 OOC 综合：
++
++| LUT | FF | LUTRAM | RAMB36E1 | RAMB18E1 | BRAM36 等效 | DSP |
++|---:|---:|---:|---:|---:|---:|---:|
++| 43 | 35 | 0 | 14 | 1 | 14.5 | 0 |
++
++这是缓存模块单独综合的资源，不是新增缓存后整机布局布线资源；本次未测新频率。
++原共同核的 0 BRAM 口径仍只描述共同核。新增缓存完整顶层的存储资源必须另计。
++
++## 已完成验证
++
++- 六参数 Sign：原输出以及缓存逐节点读回均与软件参考逐字节一致；输出总长度正确。
++- 六参数 Sign：计算周期、Hash/置换次数、输出哈希与既有周期分析基线一致。
++- 六参数正常 Verify：结果、周期和计算次数与基线一致。
++- 128f Keygen、共同核提取后的 Sign、统计关闭 Sign 均通过。
++- 128f Sign：运行中复位，以及完成后的复位重跑与缓存读回均通过。
++- 缓存单元：连续写、全容量、三种节点宽度、逆序读、读延迟、非法地址、溢出、
++  宽度不一致、故障退出、完成后禁止写入及复位后旧数据不可读均通过。
++- 顶层启动单元、14 项合同/流程检查和 Verilator lint 通过。
++
++没有重新执行完整故障/扩展消息回归或整机布局布线。本次验证聚焦新增存储及原计算行为不变。
++
++## 证据与复现
++
++原始日志、资源报告、源码快照、基线比较结果及证据哈希归档于
++[`manifests/validation/signature_store_20261002`](../../manifests/validation/signature_store_20261002)。
++（仓库根路径：`manifests/validation/signature_store_20261002`。）删除 `build` 后证据仍保留。
++
++```sh
++python3 scripts/v42_external_flow.py sim --tag signature_store_recheck --operation sign
++python3 scripts/verify_v42_verify.py signature_store_recheck --quick
++python3 scripts/verify_v42_external_units.py
++```
++
++完整生产源列表已包含新模块，共同核/外壳综合流程也已加入外壳所需的缓存 RTL。
