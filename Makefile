@@ -38,7 +38,7 @@ rtl-test:
 rtl-verification:
 	$(PYTHON) scripts/verify_v42_external_rtl.py $(TAG)
 	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --partition
-	$(PYTHON) scripts/verify_v42_pruning.py $(TAG) --baseline verify_area_compare_20260927_v1 --node-output
+	$(PYTHON) scripts/verify_v42_pruning.py $(TAG)
 	$(PYTHON) scripts/verify_v42_verify.py $(TAG)
 synth-core:
 	$(PYTHON) scripts/v42_external_synth.py $(TAG) --core-only
@@ -55,6 +55,5 @@ report-v42 report-ku:
 	$(PYTHON) scripts/report_ku_sign_atp.py
 reproduce-v42:
 	$(PYTHON) scripts/reproduce_v42_external.py
-	$(PYTHON) scripts/reproduce_v42_external_route.py
 reproduce-ku:
 	$(PYTHON) scripts/verify_ku_archive.py

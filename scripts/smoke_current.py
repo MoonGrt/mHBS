@@ -51,7 +51,8 @@ def main():
             for name, digest in inputs['source_sha256'].items():
                 assert hashlib.sha256(snapshot.extractfile(name).read()).hexdigest() == digest, name
         normal = json.loads((folder / 'simulation.json').read_text())
-        baseline = json.loads((BASE / 'candidates/program16_20260927_v1/simulation.json').read_text())
+        selected = json.loads((BASE / 'current_core.json').read_text())['candidate']
+        baseline = json.loads((BASE / 'candidates' / selected / 'simulation.json').read_text())
         assert normal['passed']
         assert set(normal['cases']) == {name + '_' + op for name in NAMES for op in ('keygen', 'sign')}
         for name, row in normal['cases'].items():

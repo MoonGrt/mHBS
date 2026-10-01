@@ -7,7 +7,9 @@ import json
 from v42_external_flow import BASE, NAMES, build_binary, capture, identity, run, sha, simulate_case, write
 
 
-def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
+def verify(tag, baseline=None):
+    if baseline is None:
+        baseline = json.loads((BASE / 'current_core.json').read_text())['candidate']
     folder = capture(tag)
     normal = json.loads((folder / 'simulation.json').read_text())
     old_file = BASE / 'candidates' / baseline / 'simulation.json'
@@ -20,16 +22,8 @@ def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
     for name, row in normal['cases'].items():
         if name not in old['cases']:continue
         reference=old['cases'][name]
-        n=len(bytes.fromhex(row['config']['secret_seed']))
-        vector=BASE/'vectors'/row['config']['profile']/('sign' if row['config']['operation'] else 'keygen')
-        byte_count=int((vector/'metadata.mem').read_text().split()[0],16)
-        # R's old output overlapped up to three sequencer cycles; one remains.
-        overlap=max(min(n//8,3)-1,0) if row['config']['operation'] else 0
-        saved=(byte_count//n)*(n//8-1)-overlap if node_output else 0
         for key in keys:
             expected=reference[key]
-            if key in ('total_cycles', 'sign_cycles' if row['config']['operation'] else 'keygen_cycles'):
-                expected-=saved
             assert row[key]==expected,(name,key,row[key],expected)
 
     evidence = {}
@@ -75,17 +69,16 @@ def verify(tag, baseline='current_complete_20260927_v2', node_output=False):
     evidence['faults.json'] = sha(folder/'faults.json')
     write(folder/'pruning_verification.json', dict(
         passed=True, rtl_sha256=identity(), baseline=baseline, baseline_sha256=sha(old_file),
-        cycle_equivalence_pass=not node_output, node_output_cycle_formula_pass=node_output,
+        cycle_equivalence_pass=True, node_output_cycle_formula_pass=False,
         statistics_equivalence_pass=True,
         baseline_cases=len(old['cases']), statistics_disabled_cases=4*len(NAMES), statistics_disabled_extended=2,
         fault_cases=2*len(NAMES), evidence_sha256=evidence))
-    print('PRUNING_VERIFICATION_PASS', tag, 'node-output cycle formula / statistics off / faults' if node_output else 'same cycles / statistics off / faults', flush=True)
+    print('PRUNING_VERIFICATION_PASS', tag, 'same cycles / statistics off / faults', flush=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('tag')
-    parser.add_argument('--baseline', default='current_complete_20260927_v2')
-    parser.add_argument('--node-output', action='store_true', help='expect one beat per node instead of 64-bit serialization')
+    parser.add_argument('--baseline', help='defaults to the accepted current_core.json candidate')
     args = parser.parse_args()
-    verify(args.tag, args.baseline, args.node_output)
+    verify(args.tag, args.baseline)

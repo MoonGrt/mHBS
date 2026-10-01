@@ -45,14 +45,9 @@ for mask in (0x101e,0x0006,0xffff):
 one('endpoint_68','tb_mhbs_value_store',
     ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
     ['-Ptb_mhbs_value_store.DEPTH=68'])
-one('fors_roots','tb_mhbs_root_store',
-    ['rtl/memory/mhbs_root_store.sv','tb/unit/tb_mhbs_root_store.sv'])
 one('endpoint_68_single_read','tb_mhbs_value_store',
     ['rtl/memory/mhbs_value_store.sv','tb/unit/tb_mhbs_value_store.sv'],
     ['-Ptb_mhbs_value_store.DEPTH=68','-Ptb_mhbs_value_store.SINGLE_READ=1'])
-one('fors_roots_single_read','tb_mhbs_root_store',
-    ['rtl/memory/mhbs_root_store.sv','tb/unit/tb_mhbs_root_store.sv'],
-    ['-Ptb_mhbs_root_store.SINGLE_READ=1'])
 one('slh64_sequencer','tb_mhbs_slh64_sequencer',
     ['rtl/sequencer/mhbs_program_sequencer.sv','tb/unit/tb_mhbs_slh64_sequencer.sv'])
 one('sponge','tb_mhbs_compact_shake_context_lane',

@@ -13,21 +13,19 @@ descriptor（配方、参数、路由）  ─┘                         ↑
 Job 参数、message_length、消息流 ──────────────────────────┘
 ```
 
-- 生产核支持 **SLH-DSA-128f、192f、256f**。每个参数点有一组三份镜像，同一执行核支持三者。当前生产核不支持 XMSS/LMS、索引 `q`、有状态树缓存或索引 guard；历史七点证据保留在各自版本目录。
+- 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。当前生产核不支持 XMSS/LMS、索引 `q`、有状态树缓存或索引 guard。
 - 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部仍可并行使用两个 Hash lane。
 - `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
 - Job 和消息不占 program 地址。五个 256 位 Job 参数从顶层进入，按 profile 只取低 `n` 字节。Sign 的 `PUBLIC_ROOT` 由调用方配置，例如使用独立 Keygen 输出。
 - 镜像的完整格式和引用检查在离线工具中完成。RTL **不扫描或全面校验镜像**；非法镜像不属于硬件运行契约。顶层仍检查消息长度，执行器仍处理运行故障。
 
-[`mhbs_top`](../rtl/top/mhbs_top.sv) 的输入为 `clk`、高有效**同步**复位 `rst`、`message_length[6:0]`、`message_data[63:0]` 和 `message_valid`；输出包括 `message_ready`、无背压结果流 `out_valid/out_data[63:0]/out_keep[7:0]/out_last`、`result_kind`、`busy/done/keygen_done/error/error_code`，以及 Boot、Keygen、Sign 周期和 Hash/置换计数。五个 Job 参数是 `SECRET_SEED`、`SECRET_PRF`、`PUBLIC_SEED`、`RANDOMIZER`、`PUBLIC_ROOT`；`OPERATION=0/1` 分别选择 Keygen/Sign。三个文件参数是 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_FILE`。默认参数是 128f 测试配置；其他参数点需匹配镜像和 Job。
-
-复位释放后，顶层读取 descriptor 0/1，提交一次 Job，从指定入口运行一次，最后保持完成或错误状态直至复位。Keygen 要求 `message_length=0` 且不接收消息；Sign 要求 `1…87` 字节，长度非法时以 `0x3002` 停机。消息仅在 `message_valid && message_ready` 时接收，`message_data[7:0]` 是当前拍首字节；最后一拍超出声明长度的字节忽略。没有 `message_last/keep` 输入。配置的 `message_length` 应保持稳定直到 Job 被接收。未执行的操作周期计数保持零；Sign 周期包含消息接收和输入等待，Boot 单独统计。`out_keep` 标出最后一个 64 位输出字中的有效低字节。
+完整端口协议见 [Job_Interface.md](Job_Interface.md)。`OPERATION=0/1/2` 选择 Keygen/Sign/Verify；消息为 64 位 valid/ready 输入，输出为 256 位节点拍及 `out_bytes`，Verify 使用 256 位节点 valid/ready 输入。每次同步复位后执行一次操作。
 
 ## 三份独立镜像
 
 | 文件 | 固定容量 | 内容 |
 |---|---:|---|
-| `program.mem` | 32 × 64 位 | SINGLE、RUN、LOOP、HALT 指令 |
+| `program.mem` | 16 × 64 位 | SINGLE、RUN、LOOP、HALT 指令 |
 | `template.mem` | 16 × 64 位 | 一条宏命令的操作、引用和标志 |
 | `descriptor.mem` | 32 × 64 位、双读 | 参数、Hash 配方、链/树和结果路由 |
 
@@ -35,7 +33,7 @@ Job 参数、message_length、消息流 ─────────────�
 
 ### Program：纯指令、双入口
 
-Program 的 **32 字全是指令区**，没有 Job、消息或操作控制字。每组镜像同时含 Keygen 和 Sign 程序，入口由 descriptor 0 指定；当前生成镜像的入口为 **0/3**，不是 RTL 硬编码。两段程序各以 HALT 结束，其余填零。离线工具拒绝非法入口或跳入填充区。
+Program 的 **16 字全是指令区**，没有 Job、消息或操作控制字。每组镜像同时含 Keygen 和 Sign 程序，入口由 descriptor 0 指定；当前生成镜像的入口为 **0/3**，不是 RTL 硬编码。两段程序各以 HALT 结束，其余填零。离线工具拒绝非法入口或跳入填充区。
 
 | 位 | SINGLE / RUN：`[63:62]` 为 0 / 1 |
 |---|---|
@@ -91,7 +89,7 @@ Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须�
 | 类型 | 物理字段；其余位按离线格式要求置零 |
 |---|---|
 | IMAGE，地址 0 | Sign 输出字节 `[17:0]`；Keygen 输出字节 `[35:18]`；Keygen 入口 `[40:36]`；Sign 入口 `[45:41]`；`[63:46]=0` |
-| PROFILE，地址 1 | 整个字仅取 `0/1/2`，分别表示 128f/192f/256f；节点 `n=16/24/32` 字节和树参数由此选择 |
+| PROFILE，地址 1 | 整个字取 `0/1/2/4/5/6`，分别表示 128f/192f/256f/128s/192s/256s；节点 `n=16/24/32` 字节和树参数由此选择 |
 | HASH | shape `[59:56]`；domain `[55:48]`；arity `[47:40]`；输出字节 `[37:32]`；最大 SHAKE rate 块数 `[29:24]`，**6 位** |
 | CHAIN | seed/step/reduce/leaf 配方地址位于 `[59:52]`/`[51:44]`/`[43:36]`/`[35:28]`；链数 `[27:20]`；最大步数 `[19:15]`；归约模式 `[13:12]` |
 | TREE | CHAIN 地址 `[59:52]`；parent HASH 地址 `[51:44]`；高度 `[43:40]`；target `[37:36]`；indexing `[33:32]`；缓存相关 `[31:29]` 必须为零 |
@@ -109,18 +107,22 @@ SLH CHAIN 只使用单叶模式 0 和端点列表归约模式 1，最多 **67** 
 | SLH-DSA-128f | 16 | 22 / 3 | 33 / 6 | 35 | 96 / 17,088 |
 | SLH-DSA-192f | 24 | 22 / 3 | 33 / 8 | 51 | 144 / 35,664 |
 | SLH-DSA-256f | 32 | 17 / 4 | 35 / 9 | 67 | 192 / 49,856 |
+| SLH-DSA-128s | 16 | 7 / 9 | 14 / 12 | 35 | 96 / 7,856 |
+| SLH-DSA-192s | 24 | 7 / 9 | 17 / 14 | 51 | 144 / 16,224 |
+| SLH-DSA-256s | 32 | 8 / 8 | 22 / 14 | 67 | 192 / 29,792 |
 
-三组镜像的 Keygen 都是末层 hypertree `TREE` → `EMIT` → `HALT`；Sign 使用消息随机化/摘要 `HASH`、FORS `TREE` 与根列表 `HASH`、层间 `TRANSFORM`、hypertree `TREE` 和 `LOOP`，最后 `HALT`。参数、循环次数和路由来自镜像，没有按参数点展开的 Keygen/Sign 控制状态机。
+六组镜像的 Keygen 都是末层 hypertree `TREE` → `EMIT` → `HALT`；Sign 使用消息随机化/摘要 `HASH`、FORS `TREE` 与根列表 `HASH`、层间 `TRANSFORM`、hypertree `TREE` 和 `LOOP`，最后 `HALT`。参数、循环次数和路由来自镜像，没有按参数点展开的 Keygen/Sign 控制状态机。
 
-## 离线转换与验证
+## 离线验证
 
-[`ExternalImage.decode()`](../model/slh64_external.py) 检查容量、保留位、入口/HALT、引用、SLH 限制和输出长度；[`ExternalMachine`](../model/slh64_external.py) 使用独立 Job 和消息执行。布局 2 把 Job/消息放在 program 内，可用 [`convert_v42_external.py`](../scripts/convert_v42_external.py) 离线转换为布局 3，并把输入写到镜像外的配置与测试文件。`model/slh64.py` 保留旧布局支持，**不表示当前 RTL 仍读取旧布局**。
+[`ExternalImage.decode()`](../model/slh64_external.py) 检查容量、保留位、入口/HALT、引用、SLH 限制和输出长度；[`ExternalMachine`](../model/slh64_external.py) 使用独立 Job 和消息执行。`model/slh64.py` 的逻辑展开仍由当前镜像生成与参考检查使用。
+
 
 ```sh
-make compile-microcode          # 六种参数点/操作组合的软件模型与向量门禁
+make compile-microcode          # 六参数共十二种参数点/操作组合的软件模型与向量门禁
 make rtl-unit-test             # Icarus 小型 RTL 单元测试
-make rtl-all-profiles TAG=ABI  # Verilator 六组独立 Keygen/Sign 仿真
+make rtl-all-profiles TAG=ABI  # Verilator 十二组独立 Keygen/Sign 仿真
 make reproduce-v42             # 核验 v4.2 已保存证据
 ```
 
-当前镜像位于 [`external_job_message/images`](../manifests/experiments/unified_hbs_v4.2/external_job_message/images)，接口与测量边界另见 [`External_Job_Message_Interface.md`](v4.2/External_Job_Message_Interface.md)。历史 ABI 3、XMSS/LMS、旧布局和旧 PPA 数据应使用对应封存源码及报告复现，不应按本文的生产 ABI 解读。
+当前镜像位于 [`external_job_message/images`](../manifests/experiments/unified_hbs_v4.2/external_job_message/images)，接口与测量边界另见 [`External_Job_Message_Interface.md`](Job_Interface.md)。历史 ABI 3、XMSS/LMS、旧布局和旧 PPA 数据应使用对应封存源码及报告复现，不应按本文的生产 ABI 解读。

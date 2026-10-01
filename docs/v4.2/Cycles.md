@@ -13,4 +13,4 @@
 
 Keygen/Sign 的核内计算周期为表中数值减 5；Verify 使用现有 testbench 的总周期计数。
 
-数据来自当前已验收版本 `parent_right_20260930_v1` 的 [Keygen/Sign 仿真](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/parent_right_20260930_v1/simulation.json)及 [Verify 仿真](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/parent_right_20260930_v1/verify/results.json)。已通过面积与完整回归验收，周期与 `value_narrow_20260930_v1` 及六参数扩展基线一致。
+数据来自当前已验收版本 `lut21k_20261002_v1_route_alias` 的 [Keygen/Sign 仿真](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/lut21k_20261002_v1_route_alias/simulation.json)及 [Verify 仿真](../../manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/lut21k_20261002_v1_route_alias/verify/results.json)。已通过面积与完整回归验收。
