@@ -23,5 +23,5 @@ def verify(manifest, base):
 
 if __name__ == '__main__':
     raw = verify(ARCHIVE / 'SHA256SUMS', ARCHIVE)
-    report = verify(ROOT / 'docs/v4.2/KU_Sign_ATP_151_112_67_48.sha256', ROOT)
+    report = verify(ROOT / 'docs/v4.2/KU_Sign_ATP_150_110_67_48.sha256', ROOT)
     print(f'KU_ARCHIVE_PASS: {raw} archived files; {report} report/input hashes')

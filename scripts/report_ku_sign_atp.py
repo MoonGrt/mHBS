@@ -14,10 +14,10 @@ from datetime import datetime
 from pathlib import Path
 
 MAIN = Path(__file__).resolve().parents[1]
-FREQUENCIES = {1: 151.0, 2: 112.0, 3: 67.0, 4: 48.0}
+FREQUENCIES = {1: 150.0, 2: 110.0, 3: 67.0, 4: 48.0}
 PREFIX = 'KU_Sign_ATP_' + '_'.join(f'{FREQUENCIES[u]:g}' for u in (1, 2, 3, 4))
 PROFILES = ('slh_128f', 'slh_192f', 'slh_256f')
-POINTS = [(k, u) for k in (1, 2, 4) for u in (1, 2, 3, 4)]
+POINTS = [(k, u) for k in (1, 2, 3, 4) for u in (1, 2, 3, 4)]
 
 
 def resources(path, read):
@@ -92,6 +92,9 @@ def main():
                         default=MAIN / 'manifests/experiments/ku_sign_latest',
                         help='Self-contained evidence archive (or original experiment worktree)')
     parser.add_argument('--output-dir', type=Path, default=MAIN / 'docs/v4.2')
+    parser.add_argument('--current-area', type=Path,
+                        default=MAIN / 'manifests/experiments/ku_sixteen_area_20261006_v1/results.json',
+                        help='Optional current-RTL common-core synthesis results')
     args = parser.parse_args()
     worktree, output = args.worktree.resolve(), args.output_dir.resolve()
     archived = (worktree / 'archive_manifest.json').exists()
@@ -128,7 +131,7 @@ def main():
     old_sources = None
     for k, u in POINTS:
         label = f'K{k}U{u}'
-        tag = f'ku_k{k}u{u}_v2' if u != 3 else ('signfixed_k2u3_50m_v1' if k == 2 else f'signscan_k{k}u3_v1')
+        tag = None if k == 3 else (f'ku_k{k}u{u}_v2' if u != 3 else ('signfixed_k2u3_50m_v1' if k == 2 else f'signscan_k{k}u3_v1'))
         point = dict(k=k, u=u, frequency_mhz=FREQUENCIES[u], tag=tag,
                      area=None, simulation={}, inputs=None, shells={})
         points[label] = point
@@ -194,6 +197,55 @@ def main():
     source_diff = '\n'.join(difflib.unified_diff(texts[0].splitlines(), texts[1].splitlines(),
                                               fromfile='nine_point', tofile='U3_support'))
 
+    full_top_dir = MAIN / 'manifests/experiments/ku_full_top_route_20261006_v1'
+    full_top = {}
+    full_top_status_path = full_top_dir / 'status.json'
+    full_top_status = read(full_top_status_path) if full_top_status_path.exists() else {}
+    if full_top_status:
+        remember(full_top_status_path)
+    for label in points:
+        folder = full_top_dir / label
+        result_path = folder / 'result.json'
+        synth_path = folder / 'synth_result.json'
+        if result_path.exists():
+            full_top[label] = read(result_path)
+            for name in ('synth_utilization.rpt', 'route_utilization.rpt',
+                         'synth_hierarchical.rpt', 'route_hierarchical.rpt',
+                         'timing_summary.rpt', 'check_timing.rpt', 'route_status.rpt'):
+                report_path = folder / name
+                if report_path.exists(): remember(report_path)
+        elif synth_path.exists():
+            full_top[label] = dict(area_synth=read(synth_path)['area'],
+                                   area_route=None, final_frequency_mhz=None,
+                                   timing_passed=False, status='synthesis_only')
+            if (folder / 'synth_utilization.rpt').exists(): remember(folder / 'synth_utilization.rpt')
+
+    current_area = None
+    if args.current_area.exists():
+        current_area = read(args.current_area.resolve())
+        assert current_area['schema'] == 'mhbs.ku16_area.v1'
+        assert set(current_area['points']) == set(points)
+        area_dir = args.current_area.resolve().parent
+        config = read(area_dir / 'config.json')
+        assert hashlib.sha256((area_dir / 'config.json').read_bytes()).hexdigest() == current_area['config_sha256']
+        for label, point in points.items():
+            item = current_area['points'][label]
+            assert (item['k'], item['u']) == (point['k'], point['u'])
+            assert item['source_sha256'] == config['source_sha256']
+            report_path = area_dir / label / 'core_utilization.rpt'
+            assert hashlib.sha256(report_path.read_bytes()).hexdigest() == item['evidence_sha256']['core_utilization.rpt']
+            assert resources(report_path, read) == item['area']
+            point['historical_area'] = point['area']
+            point['area'] = item['area']
+            point['area_source'] = evidence_name(report_path)
+            for name, expected_hash in item['evidence_sha256'].items():
+                evidence_path = area_dir / label / name
+                remember(evidence_path)
+                assert evidence[evidence_name(evidence_path)] == expected_hash
+        for path in (area_dir / 'snapshot').rglob('*'):
+            if path.is_file():
+                remember(path)
+
     rows = []
     for profile in PROFILES:
         shell = profile + '_sign'
@@ -216,9 +268,10 @@ def main():
                        shell_synth_equivalent_slice=shell_area,
                        estimated_shell_synth_atp=shell_area * latency if shell_area is not None and latency is not None else None,
                        atp_rank=None, atp_ratio_to_k2u2=None, speedup_to_k2u2=None,
-                       measurement_status='实测面积/周期；指定频率估算' if case else '缺少面积/周期' if area is None else '缺少该参数集周期',
+                       measurement_status=('当前源码实测面积/历史周期；指定频率估算' if current_area else '实测面积/周期；指定频率估算') if case else '缺少面积/周期' if area is None else '缺少该参数集周期',
                        output_sha256=case['output_sha256'] if case else None,
-                       source_tag=point['tag'], snapshot_sha256=point['inputs']['snapshot_sha256'] if point['inputs'] else None)
+                       source_tag=point['tag'], snapshot_sha256=point['inputs']['snapshot_sha256'] if point['inputs'] else None,
+                       area_source=point.get('area_source'))
             rows.append(row)
         group = [r for r in rows if r['profile_operation'] == profile.replace('slh_', '') + ' SG']
         valid = sorted((r for r in group if r['estimated_core_atp'] is not None), key=lambda r: r['estimated_core_atp'])
@@ -314,25 +367,35 @@ def main():
 
     frequency_title = ' / '.join(f'{FREQUENCIES[u]:g}' for u in (1, 2, 3, 4))
     frequency_description = '、'.join(f'U{u}={FREQUENCIES[u]:g} MHz' for u in (1, 2, 3, 4))
-    coverage_description = ('全部 36 行均具有实测共同核面积、计算周期、Hash 次数、置换次数和参考输出比对结果。'
-                            if len(complete) == len(rows) else
-                            f'{len(complete)} 行具有实测面积和计算周期，{len(rows) - len(complete)} 行缺数据并填 `-`。')
-    pareto_scope = '十二点' if len(full_points) == 12 else f'{len(full_points)} 个完整参数集设计'
-    pareto_missing_note = '' if len(full_points) == 12 else '缺少完整三组数据的设计不纳入全参数集 Pareto 判定。'
+    coverage_description = (f'全部 {len(rows)} 行均有共同核综合面积；其中 {len(complete)} 行沿用原 K/U 仿真的周期、'
+                            f'Hash 次数、置换次数和输出比对，K3 的 {len(rows)-len(complete)} 行没有功能或周期测量，ATP 填 `-`。'
+                            if current_area else
+                            f'{len(complete)} 行具有实测面积和计算周期，{len(rows)-len(complete)} 行缺数据并填 `-`。')
+    pareto_scope = '十六点' if len(full_points) == 16 else f'{len(full_points)} 个具有周期的设计'
+    pareto_missing_note = '' if len(full_points) == len(points) else 'K3 缺少完整三组周期数据，不纳入 Pareto 判定。'
     lines = [f'# K/U Sign 面积时间积报告：{frequency_title} MHz', '',
              f'统计时间：{generated}。本报告是指定频率下的估算结果及实测证据快照。', '',
              '## 1. 目的与范围', '',
-             '比较 K∈{1,2,4}、U∈{1,2,3,4} 的十二个设计，在 128f、192f、256f Sign 下的面积、签名时间和 ATP。'
-             '沿用实验的 K 取值，不包含 K3；本报告只分析 Sign。', '',
+             '比较 K∈{1,2,3,4}、U∈{1,2,3,4} 的十六个综合配置，在 128f、192f、256f Sign 下的面积。'
+             '有历史周期的配置继续计算签名时间和 ATP；K3 仅有面积。本报告只分析 Sign。', '',
              f'指定工作频率：{frequency_description}。'
              '同一个 U 对所有 K 使用相同频率，这是比较条件，不代表所有设计均已完成该频率签核。', '',
              f'共有 {len(rows)} 行设计/参数集组合。{coverage_description}'
-             'U3 的 192f/256f 补测复用相同源码、Program16 镜像及软件参考向量；计算周期来自实际仿真。', '',
+             '历史 U3 的 192f/256f 补测复用原实验源码、Program16 镜像及软件参考向量；计算周期来自当时仿真。', '',
              '## 2. 计算口径', '',
              '- 器件：`xc7a200tffg1156-3`；综合/布线：Vivado 2025.2；共同核综合采用 10 ns 约束。',
              '- 基线：Program16 镜像、ABI、软件参考向量；仅统计计算周期，不包含装载消息、输入输出传输及启动开销。',
              '- 主表面积采用共同核综合面积，保证所有已有设计使用同一面积口径。外壳综合面积及对应估算 ATP 另存 CSV；'
              '尚未综合的 U3 192f/256f 外壳资源仍为 `-`，不影响主表的共同核 ATP 计算。',
+             '- 共同核面积不包含 `mhbs_signature_store`。其独立综合为 11 RAMB36E1 + 1 RAMB18E1，'
+             '即 11.5 BRAM36 等效（见 [签名缓存报告](../report/Signature_Storage.md)）；完整顶层还需计入 ROM 和外壳逻辑。'
+             '下文指定 MHz 只是估算条件，不是本次十六点完整顶层的布线最终频率。',
+             *(['- 本次按 U1→U4 四批、每批 K1～K4 并行，重新综合十六个共同核。'
+                'K2 控制器取自当前 RTL；K1/K3/K4 控制器取自历史 K 参数化版本并连接当前数据通路，K3 增加三路端点存储。'
+                'K1/K3/K4 不是当前生产 RTL 的直接实例，且未重新做功能验证。',
+                '- 签名周期沿用原 K1/K2/K4 实验；K3 周期与 ATP 无有效数据。'
+                '完整顶层的 128f Sign 布线结果单列于下表；指定频率估算不构成所有配置的时序签核。'
+                'CSV 的外壳综合面积仍为历史数值。'] if current_area else []),
              '- 等效 Slice = LUT/4 + FF/8 + BRAM36×232.4 + DSP×102.4。LUTRAM 已包含在 LUT 中，不重复相加。'
              '等效 Slice 是资源换算指标，不是 Vivado 实际占用 Slice 数。',
              '- 签名时间（ms）= 计算周期 /（指定频率 MHz × 1000）。',
@@ -342,7 +405,7 @@ def main():
              '外部接口排除在核内频率签核范围之外。',
              '- 后台旧档的原始日志与状态保留；报告按上述判据重新检查已完成档位，CSV/JSON 同时保留原始状态。',
              '- 以下固定频率排序不能代替最终布线排序，K 的变化也可能改变可达到的频率。', '',
-             '## 3. 设计面积与数据覆盖', '',
+             '## 3. 共同核面积与数据覆盖', '',
              '| K/U | LUT | FF | LUTRAM | BRAM36 | DSP | 共同核等效 Slice | 指定 MHz | 周期 ns | 已验证 Sign 参数集 |',
              '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|']
     for label, point in points.items():
@@ -351,6 +414,36 @@ def main():
         lines.append('| ' + ' | '.join([label, *[fmt(area.get(key), 0) for key in ('lut', 'ff', 'lutram', 'bram36', 'dsp')],
                                        fmt(area.get('equivalent_slice')), fmt(point['frequency_mhz']),
                                        fmt(1000 / point['frequency_mhz'], 6), coverage]) + ' |')
+    lines += ['', '### 完整顶层：128f Sign（含签名缓存）', '',
+              '下表面积包含共同核、Program/Template/Descriptor ROM、外壳及 `mhbs_signature_store`。'
+              '原目标达标按目标周期下 Setup >0 ns 判断；布线最终 MHz 是同一已布线设计重新约束到约 0.05 ns Setup 余量的结果，并非在该周期重新布线。'
+              '最终 MHz 仅在新布线完整、Setup >0、Hold ≥0、DRC 无错误及核内约束检查通过时填写。'
+              '该频率只覆盖 128f Sign 核内路径，外部接口未签核；K3 的功能尚未验证。', '',
+              f'当前后台状态：{full_top_status.get("status", "-")}；已完成 '
+              f'{sum(v == "complete" for v in full_top_status.get("points", {}).values())}/16 点。', '',
+              '| K/U | 综合 LUT | FF | LUTRAM | BRAM36 等效 | DSP | 综合等效 Slice | 布线等效 Slice | 原目标 Setup ns | 原目标达标 | 布线最终 MHz | Setup ns | Hold ns | 128f 布线 ATP Slice·ms | 状态 |',
+              '|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|---:|---|']
+    for label in points:
+        item = full_top.get(label, {})
+        synth = item.get('area_synth') or {}
+        route = item.get('area_route') or {}
+        timing = item.get('timing') or {}
+        freq = item.get('final_frequency_mhz') if item.get('timing_passed') else None
+        target_wns = timing.get('initial_wns_ns')
+        target_pass = '是' if freq and target_wns is not None and target_wns > 0 else '否' if target_wns is not None else '-'
+        cycles = points[label]['simulation'].get('slh_128f_sign', {}).get('sign_cycles')
+        atp = route.get('equivalent_slice') * cycles / (freq * 1000) if freq and cycles else None
+        status = ('通过' if freq else '布线未通过' if item.get('area_route') else
+                  '仅综合' if synth else '待完成')
+        if full_top_status.get('points', {}).get(label) == 'stopped':
+            status = '已停止（仅综合）' if synth else '已停止'
+        elif full_top_status.get('status') == 'stopped' and status == '待完成':
+            status = '未启动（已停止）'
+        lines.append('| ' + ' | '.join([label, *[fmt(synth.get(key), 0) for key in ('lut','ff','lutram')],
+                                        fmt(synth.get('bram36'), 1), fmt(synth.get('dsp'), 0),
+                                        fmt(synth.get('equivalent_slice')), fmt(route.get('equivalent_slice')),
+                                        fmt(target_wns), target_pass, fmt(freq), fmt(timing.get('final_wns_ns')),
+                                        fmt(timing.get('final_whs_ns')), fmt(atp), status]) + ' |')
     lines += ['', '## 4. 全部数据总表', '',
               '第一列合并参数集与操作；按 128f SG、192f SG、256f SG 连续排列。所有时间与主表 ATP 使用指定频率计算，属于估算。'
               '排序仅覆盖本参数集已有数据的设计，未测设计保留 `-`。', '',
@@ -368,15 +461,16 @@ def main():
                                        fmt(result['best_atp_sign_ms']), fmt(result['best_atp']),
                                        fmt(result['improvement_vs_k2u2_percent'], 2) + '%', str(result['comparison_count'])]) + ' |')
     best128 = summary[0]
-    lines += ['', f'在指定频率和共同核综合面积的条件下，现有数据的三个参数集最低 ATP 均为 '
-              f'**{best128["best_atp_point"]}**，并且三个参数集的最短估算签名时间也均为该设计。'
-              '这是指定频率条件下的结论；其他 K 及参数集尚未完成对应频率签核，最终布线排序仍可能不同。', '',
+    lines += ['', '在指定频率和共同核综合面积条件下，仅对有历史周期的 K1/K2/K4 设计，三个参数集的最低估算 ATP 分别为：'
+              + '、'.join(f'{r["profile_operation"]} {r["best_atp_point"]}' for r in summary) + '。'
+              '这些是指定频率下的估算，其他 K 及参数集尚未完成对应频率签核。', '',
               '固定频率下，增加 U 会减少计算周期，同时降低指定频率并增加面积，因此 ATP 并不随 U 单调下降。'
               '增大 K 的并行收益需要与新增 Hash lane 面积一起比较。', '',
               f'以共同核面积及三组指定频率下的签名时间判断支配关系，{pareto_scope}中 Pareto 前沿为：'
               + '、'.join(pareto) + '。' + pareto_missing_note, '',
               '## 6. 指定频率的布线验证与实测 ATP', '',
-              '下表只展示 128f Sign 的对应指定频率证据。K1/K4 的这些目标频率尚未验证；192f/256f 也尚未完成对应目标频率扫描。'
+              '下表只展示历史 128f Sign 的对应指定频率证据。K1/K3/K4 的这些目标频率尚未验证；'
+              'K2 的历史通过记录也不能签核本次重新综合的 RTL。192f/256f 未完成对应目标频率扫描。'
               '失败档的布线面积可供观察，但不填写有效频率或合格实测 ATP。', '',
               '| 参数集/操作 | K/U | 指定 MHz | 布线后等效 Slice | Setup ns | Hold ns | 签核状态 | 有效 MHz | 合格实测 ATP Slice·ms |',
               '|---|---|---:|---:|---:|---:|---|---:|---:|']
@@ -387,8 +481,8 @@ def main():
                                        fmt(probe.get('post_route_equivalent_slice')), fmt(probe.get('setup_ns')),
                                        fmt(probe.get('hold_ns')), status_names.get(probe.get('status'), '未测试'),
                                        fmt(probe.get('qualified_frequency_mhz')), fmt(probe.get('qualified_route_atp'))]) + ' |')
-    lines += ['', 'K2U1 151 MHz、K2U2 112 MHz、K2U3 67 MHz、K2U4 48 MHz 均已按原目标周期通过。'
-              '各自的 Setup/Hold 及布线后面积列于上表。这四个频率不能直接作为其他 K 或其他参数集已通过签核的证据。', '',
+    lines += ['', '历史 K2U1 150 MHz、K2U2 110 MHz、K2U3 67 MHz、K2U4 48 MHz 已按原目标周期通过。'
+              '各自的 Setup/Hold 及布线后面积列于上表，不能作为本次新综合源码的频率签核。', '',
               '## 7. 全部新时序档位快照', '',
               '每档最多 2 小时、8 线程；中断与失败保留证据。下表状态来自本次生成报告时读取的持久化状态，运行中数据以后仍会变化。', '',
               '| 参数集/操作 | K/U | 目标 MHz | 周期 ns | Setup ns | Hold ns | 状态 | 累计分钟 | 运行目录 / 档位 |',
@@ -411,19 +505,25 @@ def main():
     lines += ['', '历史 20 ns 流程会在布线后重新设置最终时钟再分析，最终报告频率不是原始约束下的最高通过频率。'
               '历史 10 ns 流程的接口排除阶段也不同。它们与本次指定频率估算及严格目标周期扫描分表列示，不能直接混为同一测试条件。', '',
               '## 9. 功能验证与源码一致性', '',
-              f'- 已有的 {len(complete)} 组 Sign 仿真输出、Hash 次数、置换次数均与软件参考/Program16 基线一致。',
-              '- 九点使用同一源码快照。U3 版仅扩展 `mhbs_hbs.sv` 的合法 U 参数检查，Hash 数据通路未改变；'
-              '已逐字比较两个封存文件，Program16 镜像哈希和软件门禁哈希一致。JSON 保存源码差异及各点快照哈希。',
+              f'- 原实验已有的 {len(complete)} 组 Sign 仿真输出、Hash 次数、置换次数均与软件参考/Program16 基线一致。'
+              + ('本次当前 RTL 仅重综合，尚未重新验证这些周期与输出。' if current_area else ''),
+              '- 原 K1/K2/K4 实验使用同一源码快照。U3 版仅扩展 `mhbs_hbs.sv` 的合法 U 参数检查，Hash 数据通路未改变；'
+              '已逐字比较两个封存文件，Program16 镜像哈希和软件门禁哈希一致。JSON 保存历史源码差异及各点快照哈希。',
               '- 参数化 K2U2 的三组 Sign 计算周期与封存 Program16 一致：729983、1249491、2579236。',
-              f'- Program16 共同核等效 Slice 为 {baseline_area["equivalent_slice"]:.3f}；参数化 K2U2 为 '
-              f'{points["K2U2"]["area"]["equivalent_slice"]:.3f}，增加 '
-              f'{points["K2U2"]["area"]["equivalent_slice"] - baseline_area["equivalent_slice"]:.3f}（4.05%）。'
-              '该面积变化单独列出，不将生产基线面积混入九点排序。',
+              f'- 历史 Program16 共同核等效 Slice 为 {baseline_area["equivalent_slice"]:.3f}；本次 K2U2 为 '
+              f'{points["K2U2"]["area"]["equivalent_slice"]:.3f}，变化 '
+              f'{points["K2U2"]["area"]["equivalent_slice"] - baseline_area["equivalent_slice"]:.3f}'
+              f'（{(points["K2U2"]["area"]["equivalent_slice"] / baseline_area["equivalent_slice"] - 1)*100:.2f}%）。'
+              '该面积变化单独列出，不将历史基线面积混入 K/U 排序。',
               '- 当前可核对的 Keccak U1/U2/U3/U4 单元运行状态见 JSON；原九点端点存储、Verify、复位及统计关闭回归证据见九点封存记录。', '',
+              *(['- 当前共同核综合源码及各点原始资源报告见 '
+                 f'[新面积归档]({link(args.current_area.resolve().parent)})。历史面积也保存在 JSON 的 `historical_area` 中。', '']
+                if current_area else []),
               '## 10. 文件与复现', '',
-              f'- [全部数据 CSV]({PREFIX}.csv)：36 行，含共同核与外壳综合两种估算 ATP、排名和相对 K2U2 的比例。',
+              f'- [全部数据 CSV]({PREFIX}.csv)：{len(rows)} 行；K3 缺少周期与 ATP，外壳综合面积是历史数据。',
               f'- [全部档位 CSV]({PREFIX}_Timing.csv)：包含全部新时序尝试、失败原因和证据目录。',
               f'- [原始数据与证据 JSON]({PREFIX}.json)：实测资源/周期、源码快照、输出哈希、频率条件、历史对照和状态快照。',
+              f'- [完整顶层综合与布线归档]({link(full_top_dir)}): 128f Sign 各点的签名缓存、布线面积与最终核内频率证据。',
               f'- [证据 SHA-256 清单]({PREFIX}.sha256)：输入证据、生成脚本和输出文件哈希。',
               f'- [九点封存记录]({link(worktree / "manifests/experiments/ku_matrix_20260927_v1")}): 旧流程详细证据与扩展回归。',
               f'- [报告生成脚本]({link(Path(__file__).resolve())})。',
@@ -446,10 +546,13 @@ def main():
                    timing_acceptance=dict(setup_ns_greater_than=0, hold_ns_greater_or_equal=0,
                                           complete_route_required=True, rom_audit_required=True),
                    rows=rows, measured_rows=len(complete), missing_rows=len(rows) - len(complete),
+                   current_area_source=evidence_name(args.current_area.resolve()) if current_area else None,
                    summary=summary, pareto_points=pareto, pareto_considered_points=full_points,
                    points=points, baseline_area=baseline_area,
                    u3_source_diff=source_diff, timing_probes=probes, history=history,
-                   keccak_units=units_state['units'], source_evidence_sha256=evidence)
+                   keccak_units=units_state['units'], full_top_128f=full_top,
+                   full_top_status=full_top_status,
+                   source_evidence_sha256=evidence)
     output.mkdir(parents=True, exist_ok=True)
     md = output / (PREFIX + '.md')
     md.write_text('\n'.join(lines))

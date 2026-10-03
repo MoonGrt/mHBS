@@ -36,6 +36,6 @@ make reproduce-v42 reproduce-ku
 - `model/`、`tests/`、`tb/`：当前镜像生成、软件参考、协议和密码运算回归；旧命名的模型仍属于编译依赖。
 - `scripts/`、`experiments/v4.2/external_job_message/`：当前验证、综合、布线及 ROM 映射工具。
 - 当前源码快照、原始综合报告、DCP、完整回归日志和哈希由 `manifests/experiments/unified_hbs_v4.2/external_job_message/current_core.json` 指向。
-- [最新 K/U 报告](docs/v4.2/KU_Sign_ATP_151_112_67_48.md)和[原始 K/U 归档](manifests/experiments/ku_sign_latest/README.md)独立保留；`make report-ku`、`make reproduce-ku` 不依赖 build。
+- [最新 K/U 报告](docs/v4.2/KU_Sign_ATP_150_110_67_48.md)和[原始 K/U 归档](manifests/experiments/ku_sign_latest/README.md)独立保留；`make report-ku`、`make reproduce-ku` 不依赖 build。
 - 旧候选、重复报告和实验驱动已删除，可从 Git 恢复。清理清单：`manifests/cleanup_20261002.json`。
 - `source/`、`tmp/` 是本地研究资料和工作笔记，不属于生产源码或已提交备份。
