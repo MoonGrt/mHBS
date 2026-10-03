@@ -7,7 +7,7 @@
 module tb_mhbs_external;
  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
  parameter integer OPERATION=1,MESSAGE_BYTES=1;
- parameter integer SWAP=0;
+ parameter integer SWAP=0,LANES=2,UNROLL=2,PIPELINE=1;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
@@ -26,7 +26,7 @@ module tb_mhbs_external;
  reg [7:0] message_bytes[0:86];
  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.LANES(LANES),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
  `include "tb/integration/mhbs_parent_input_check.svh"
@@ -48,15 +48,20 @@ module tb_mhbs_external;
  wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
  genvar lane;
  generate for(lane=0;lane<2;lane=lane+1)begin: observers
+  if(lane<LANES)begin
   always @(posedge clk)begin
    if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
-   else if(`HBS_CORE.lanes[lane].lane.sponge.lane_state==2 &&
-           `HBS_CORE.lanes[lane].lane.sponge.round_index+2>=24)begin
-    observed_permutations[lane]=observed_permutations[lane]+1;
-    if(`HBS_CORE.lanes[lane].lane.sponge.running_last)
-     observed_hashes[lane]=observed_hashes[lane]+1;
+   else begin
+    if(`HBS_CORE.lanes[lane].lane.sponge.permutation_complete)begin
+     observed_permutations[lane]=observed_permutations[lane]+1;
+     if(`HBS_CORE.lanes[lane].lane.sponge.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
+    end
+    if(`HBS_CORE.lanes[lane].lane.batch_perm_done)begin
+     observed_permutations[lane]=observed_permutations[lane]+1;observed_hashes[lane]=observed_hashes[lane]+1;
+    end
    end
   end
+  end else initial begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
  end endgenerate
  always @(posedge clk)begin
   if(rst)observed_boot=0;

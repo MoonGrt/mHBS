@@ -4,11 +4,14 @@
 // Signer-specialized SHAKE lane: one sponge/permutation state and a compact
 // statically sized chain template.  The two top-level instances remain identical.
 module mhbs_compact_shake_context_lane #(
-    parameter integer UNROLL = 2, N = 16, DIGEST_BYTES = 34,
+    parameter integer UNROLL = 2, PIPELINE = 1, N = 16, DIGEST_BYTES = 34,
     parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
 ) (
     input  wire          clk,
     input  wire          rst,
+    input wire batch_mode,batch_valid,output wire batch_ready,
+    input wire [1599:0] batch_state,input wire [1:0] batch_tag,
+    output wire batch_done,output wire [1599:0] batch_digest,output wire [1:0] batch_result_tag,
     input wire [5:0] node_bytes,
     input wire [(N+32)*8-1:0] chain_prefix_data,
     input  wire          context_valid,
@@ -64,7 +67,9 @@ module mhbs_compact_shake_context_lane #(
     logic [N*8-1:0] captured_value;
     logic [4:0] round_index;
     wire [1599:0] round_state [0:UNROLL];
-    wire [1599:0] advanced_state = round_state[UNROLL];
+    wire [1599:0] advanced_state;
+    wire round_complete;
+    wire round_update;
     logic [1599:0] next_chain_state;
     wire [3:0] counter_next = chain_counter + 1'b1;
     wire [3:0] transition_counter =
@@ -177,17 +182,40 @@ module mhbs_compact_shake_context_lane #(
         end
     endfunction
 
-    assign round_state[0] = sponge_state;
-    generate for (round_step = 0; round_step < UNROLL;
-                  round_step = round_step + 1) begin : generated_rounds
-        localparam logic [4:0] ROUND_OFFSET = round_step;
-        (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
-            .state_in(round_state[round_step]),
-            .round_index(round_index + ROUND_OFFSET),
-            .state_out(round_state[round_step+1])
-        );
+    generate if(PIPELINE==1)begin: serial_rounds
+        assign round_state[0]=sponge_state;
+        for(genvar r=0;r<UNROLL;r=r+1)begin: generated_rounds
+            (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
+                .state_in(round_state[r]),.round_index(round_index+5'(r)),.state_out(round_state[r+1]));
+        end
+        assign advanced_state=round_state[UNROLL];
+        assign round_complete=round_index+UNROLL>=24;
+        assign round_update=lane_state==RUN;
+        assign batch_ready=0;assign batch_done=0;assign batch_digest=0;assign batch_result_tag=0;
+    end else begin: pipelined_rounds
+        logic sent;
+        wire ready,finished;
+        wire [1599:0] finished_state;
+        wire [1:0] finished_tag;
+        wire normal_valid=lane_state==RUN && !sent;
+        mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) engine(
+            .clk,.rst,.request_valid(batch_mode ? batch_valid : normal_valid),.request_ready(ready),
+            .request_state(batch_mode ? batch_state : sponge_state),.request_tag(batch_mode ? batch_tag : 2'd0),
+            .response_valid(finished),.response_state(finished_state),.response_tag(finished_tag));
+        assign batch_ready=batch_mode && ready;assign batch_done=batch_mode && finished;
+        assign batch_digest=finished_state;assign batch_result_tag=finished_tag;
+        assign advanced_state=finished_state;
+        assign round_complete=!batch_mode && finished;
+        assign round_update=lane_state==RUN && round_complete;
+        always_ff @(posedge clk)begin
+            if(rst)sent<=0;
+            else if(!batch_mode)begin
+                if(normal_valid && ready)sent<=1;
+                if(finished)sent<=0;
+            end
+        end
     end endgenerate
-
+    wire permutation_complete=lane_state==RUN && round_complete;
     always_comb begin
         next_chain_state='0;
         if(REUSE_FAST_FEEDBACK) next_chain_state={512'd0,fast_block_data};
@@ -241,7 +269,7 @@ module mhbs_compact_shake_context_lane #(
         || (lane_state == WAIT_BLOCK && first_block && append_index == 0);
     assign response_digest = sponge_state[DIGEST_BYTES*8-1:0];
     assign finish_valid = lane_state == RUN
-        && round_index + UNROLL >= 24
+        && round_complete
         && (!saved_chain_enable || chains_remaining <= 1)
         && running_last;
     assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
@@ -258,11 +286,11 @@ module mhbs_compact_shake_context_lane #(
         || (lane_state==WAIT_BLOCK && fast_block_valid && fast_block_ready);
     wire take_stream=lane_state==WAIT_BLOCK && !take_fast && block_valid;
     wire clear_stream=take_stream && first_block && append_index==0;
-    wire take_feedback=lane_state==RUN && round_index+UNROLL>=24
+    wire take_feedback=lane_state==RUN && round_complete
         && saved_chain_enable && chains_remaining>1;
     assign chain_feedback_valid=REUSE_FAST_FEEDBACK && take_feedback;
     assign chain_feedback_counter=transition_counter;
-    wire take_round=lane_state==RUN && !take_feedback;
+    wire take_round=round_update && !take_feedback;
     // One selected rate pair is absorbed per stream beat. Share that XOR
     // before distributing the result to the enabled state words.
     logic [127:0] previous_rate;
@@ -301,7 +329,7 @@ module mhbs_compact_shake_context_lane #(
                 : select_stream ? absorb_word : round_or_clear;
         end
         always_ff @(posedge clk)
-            if(!rst && (lane_state==RUN || take_fast || select_stream || clear_stream))
+            if(!rst && (round_update || take_fast || select_stream || clear_stream))
                 sponge_state[word_index*64 +:64]<=next_word;
     end endgenerate
 
@@ -393,7 +421,7 @@ module mhbs_compact_shake_context_lane #(
                     end
                 end
                 RUN: begin
-                    if (round_index + UNROLL >= 24) begin
+                    if (round_complete) begin
                         if (saved_capture_enable
                             && saved_capture_after == chain_iteration)
                             captured_value <= advanced_state[N*8-1:0];
@@ -416,7 +444,7 @@ module mhbs_compact_shake_context_lane #(
                                 lane_state <= WAIT_BLOCK;
                             end
                         end
-                    end else begin
+                    end else if(PIPELINE==1) begin
                         round_index <= round_index + UNROLL;
                     end
                 end

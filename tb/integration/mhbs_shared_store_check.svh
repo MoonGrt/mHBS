@@ -3,13 +3,12 @@
 reg [255:0] shared_expected[0:67];
 reg [67:0] shared_initialized=0;
 reg shared_roots_live=0;
+// Only logical lane zero implements the streamed list recipe.
+localparam integer SHARED_STREAM_LANE=SWAP ? LANES-1 : 0;
 wire shared_stream_read =
- (`HBS_CORE.lanes[0].lane.state==2 && `HBS_CORE.lanes[0].lane.shapes[12] &&
-  `HBS_CORE.lanes[0].lane.position>=`HBS_CORE.lanes[0].lane.prefix_bytes &&
-  `HBS_CORE.lanes[0].lane.position<`HBS_CORE.lanes[0].lane.input_length) ||
- (`HBS_CORE.lanes[1].lane.state==2 && `HBS_CORE.lanes[1].lane.shapes[12] &&
-  `HBS_CORE.lanes[1].lane.position>=`HBS_CORE.lanes[1].lane.prefix_bytes &&
-  `HBS_CORE.lanes[1].lane.position<`HBS_CORE.lanes[1].lane.input_length);
+ (`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.state==2 && `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.shapes[12] &&
+  `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.position>=`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.prefix_bytes &&
+  `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.position<`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.input_length);
 always @(posedge clk) begin
  if(`HBS_CORE.execution_rst) begin
   shared_initialized=0; shared_roots_live=0;

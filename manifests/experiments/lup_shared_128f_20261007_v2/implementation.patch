@@ -1,0 +1,1174 @@
+--- /dev/null
++++ b/manifests/unified_sources.txt
+@@ -0,0 +1,10 @@
++rtl/hash_lane/mhbs_keccak.sv
++rtl/hash_lane/mhbs_keccak_pipeline.sv
++rtl/hash_lane/mhbs_chain_pipeline_lane.sv
++rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++rtl/hash_lane/mhbs_recipe_lane.sv
++rtl/memory/mhbs_value_store.sv
++rtl/memory/mhbs_signature_store.sv
++rtl/sequencer/mhbs_program_sequencer.sv
++rtl/top/mhbs_hbs.sv
++rtl/top/mhbs_top.sv
+--- a/manifests/v42_sources.txt
++++ b/manifests/v42_sources.txt
+@@ -1,4 +1,6 @@
+ rtl/hash_lane/mhbs_keccak.sv
++rtl/hash_lane/mhbs_keccak_pipeline.sv
++rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+ rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+ rtl/hash_lane/mhbs_recipe_lane.sv
+ rtl/memory/mhbs_value_store.sv
+--- /dev/null
++++ b/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+@@ -0,0 +1,85 @@
++`timescale 1ns/1ps
++`default_nettype none
++// Per-context SLH chain metadata and completion slots. No Keccak duplication:
++// permutations use the same pipeline as the recipe/sponge path.
++module mhbs_chain_pipeline_lane #(
++ parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0
++)(
++ input wire clk,rst,input wire [5:0] node_bytes,
++ input wire request_valid,output wire request_ready,input wire [1:0] request_tag,
++ input wire [4:0] request_steps,request_capture_after,input wire request_capture,
++ input wire [255:0] secret_seed,public_seed,
++ input wire [4:0] request_layer,input wire [63:0] request_tree,
++ input wire [9:0] request_leaf,input wire [6:0] request_a,input wire [31:0] request_b,
++ input wire [7:0] seed_domain,step_domain,
++ output wire response_valid,input wire response_ready,output logic [1:0] response_tag,
++ output wire [255:0] response_digest,response_capture,
++ output wire perm_valid,input wire perm_ready,output wire [1599:0] perm_state,
++ output wire [1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
++ input wire [1:0] perm_result_tag,
++ output logic [31:0] hash_count,permutation_count
++);
++ function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
++ wire [255:0] seed_address={be32(request_b),be32({25'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
++ wire [255:0] step_address={be32(request_b),be32({25'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
++ logic [255:0] address[0:PIPELINE-1];
++ logic [4:0] steps[0:PIPELINE-1],iteration[0:PIPELINE-1],capture_after[0:PIPELINE-1];
++ logic [PIPELINE-1:0] busy,complete,capture_enable,preserve_counter;
++ logic [255:0] digest[0:PIPELINE-1],captured[0:PIPELINE-1];
++ wire [1:0] t=perm_result_tag;
++ wire again=perm_done && iteration[t]<steps[t];
++ wire capture_now=perm_done && capture_enable[t] && iteration[t]==capture_after[t];
++ logic [255:0] next_address;
++ always_comb begin
++  next_address=address[t];
++  if(!preserve_counter[t])next_address[224 +:32]=be32({28'd0,iteration[t][3:0]});
++ end
++ function automatic [1599:0] block_for(input [255:0] adr,input [255:0] val);
++  reg [1599:0] block_data;
++  begin
++   block_data=0;
++   case(node_bytes)
++    16:begin block_data[511:0]={val[127:0],adr,public_seed[127:0]};block_data[512 +:8]=8'h1f;end
++    24:begin block_data[639:0]={val[191:0],adr,public_seed[191:0]};block_data[640 +:8]=8'h1f;end
++    default:begin block_data[767:0]={val,adr,public_seed};block_data[768 +:8]=8'h1f;end
++   endcase
++   block_data[1087]=1;block_for=block_data;
++  end
++ endfunction
++ assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && !busy[request_tag];
++ wire accept=request_valid && request_ready;
++ assign perm_valid=again || accept;
++ assign perm_state=again ? block_for(next_address,perm_digest[255:0]) : block_for(seed_address,secret_seed);
++ assign perm_tag=again ? t : request_tag;
++ logic response_held;
++ logic [1:0] held_tag;
++ assign response_valid=|complete;
++ always_comb begin
++  response_tag=0;
++  for(integer j=PIPELINE-1;j>=0;j=j-1)if(complete[j])response_tag=2'(j);
++  if(response_held)response_tag=held_tag;
++ end
++ assign response_digest=digest[response_tag];
++ assign response_capture=captured[response_tag];
++ always_ff @(posedge clk)begin
++  if(rst)begin response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;hash_count<=0;permutation_count<=0;end
++  else begin
++   if(response_valid && !response_ready && !response_held)begin response_held<=1;held_tag<=response_tag;end
++   if(response_valid && response_ready)response_held<=0;
++   if(response_valid && response_ready)begin complete[response_tag]<=0;busy[response_tag]<=0;end
++   if(accept)begin
++    busy[request_tag]<=1;steps[request_tag]<=request_steps;iteration[request_tag]<=0;
++    capture_after[request_tag]<=request_capture_after;capture_enable[request_tag]<=request_capture;
++    preserve_counter[request_tag]<=step_domain==3;address[request_tag]<=step_address;
++    captured[request_tag]<=0;
++   end
++   if(perm_done)begin
++    if(PROFILE_ENABLE)begin hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;end
++    if(capture_now)captured[t]<=perm_digest[255:0];
++    if(again)iteration[t]<=iteration[t]+1'b1;
++    else begin complete[t]<=1;digest[t]<=perm_digest[255:0];end
++   end
++  end
++ end
++endmodule
++`default_nettype wire
+--- a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++++ b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+@@ -4,11 +4,14 @@
+ // Signer-specialized SHAKE lane: one sponge/permutation state and a compact
+ // statically sized chain template.  The two top-level instances remain identical.
+ module mhbs_compact_shake_context_lane #(
+-    parameter integer UNROLL = 2, N = 16, DIGEST_BYTES = 34,
++    parameter integer UNROLL = 2, PIPELINE = 1, N = 16, DIGEST_BYTES = 34,
+     parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
+ ) (
+     input  wire          clk,
+     input  wire          rst,
++    input wire batch_mode,batch_valid,output wire batch_ready,
++    input wire [1599:0] batch_state,input wire [1:0] batch_tag,
++    output wire batch_done,output wire [1599:0] batch_digest,output wire [1:0] batch_result_tag,
+     input wire [5:0] node_bytes,
+     input wire [(N+32)*8-1:0] chain_prefix_data,
+     input  wire          context_valid,
+@@ -64,7 +67,9 @@
+     logic [N*8-1:0] captured_value;
+     logic [4:0] round_index;
+     wire [1599:0] round_state [0:UNROLL];
+-    wire [1599:0] advanced_state = round_state[UNROLL];
++    wire [1599:0] advanced_state;
++    wire round_complete;
++    wire round_update;
+     logic [1599:0] next_chain_state;
+     wire [3:0] counter_next = chain_counter + 1'b1;
+     wire [3:0] transition_counter =
+@@ -177,17 +182,40 @@
+         end
+     endfunction
+ 
+-    assign round_state[0] = sponge_state;
+-    generate for (round_step = 0; round_step < UNROLL;
+-                  round_step = round_step + 1) begin : generated_rounds
+-        localparam logic [4:0] ROUND_OFFSET = round_step;
+-        (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
+-            .state_in(round_state[round_step]),
+-            .round_index(round_index + ROUND_OFFSET),
+-            .state_out(round_state[round_step+1])
+-        );
++    generate if(PIPELINE==1)begin: serial_rounds
++        assign round_state[0]=sponge_state;
++        for(genvar r=0;r<UNROLL;r=r+1)begin: generated_rounds
++            (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
++                .state_in(round_state[r]),.round_index(round_index+5'(r)),.state_out(round_state[r+1]));
++        end
++        assign advanced_state=round_state[UNROLL];
++        assign round_complete=round_index+UNROLL>=24;
++        assign round_update=lane_state==RUN;
++        assign batch_ready=0;assign batch_done=0;assign batch_digest=0;assign batch_result_tag=0;
++    end else begin: pipelined_rounds
++        logic sent;
++        wire ready,finished;
++        wire [1599:0] finished_state;
++        wire [1:0] finished_tag;
++        wire normal_valid=lane_state==RUN && !sent;
++        mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) engine(
++            .clk,.rst,.request_valid(batch_mode ? batch_valid : normal_valid),.request_ready(ready),
++            .request_state(batch_mode ? batch_state : sponge_state),.request_tag(batch_mode ? batch_tag : 2'd0),
++            .response_valid(finished),.response_state(finished_state),.response_tag(finished_tag));
++        assign batch_ready=batch_mode && ready;assign batch_done=batch_mode && finished;
++        assign batch_digest=finished_state;assign batch_result_tag=finished_tag;
++        assign advanced_state=finished_state;
++        assign round_complete=!batch_mode && finished;
++        assign round_update=lane_state==RUN && round_complete;
++        always_ff @(posedge clk)begin
++            if(rst)sent<=0;
++            else if(!batch_mode)begin
++                if(normal_valid && ready)sent<=1;
++                if(finished)sent<=0;
++            end
++        end
+     end endgenerate
+-
++    wire permutation_complete=lane_state==RUN && round_complete;
+     always_comb begin
+         next_chain_state='0;
+         if(REUSE_FAST_FEEDBACK) next_chain_state={512'd0,fast_block_data};
+@@ -241,7 +269,7 @@
+         || (lane_state == WAIT_BLOCK && first_block && append_index == 0);
+     assign response_digest = sponge_state[DIGEST_BYTES*8-1:0];
+     assign finish_valid = lane_state == RUN
+-        && round_index + UNROLL >= 24
++        && round_complete
+         && (!saved_chain_enable || chains_remaining <= 1)
+         && running_last;
+     assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+@@ -258,11 +286,11 @@
+         || (lane_state==WAIT_BLOCK && fast_block_valid && fast_block_ready);
+     wire take_stream=lane_state==WAIT_BLOCK && !take_fast && block_valid;
+     wire clear_stream=take_stream && first_block && append_index==0;
+-    wire take_feedback=lane_state==RUN && round_index+UNROLL>=24
++    wire take_feedback=lane_state==RUN && round_complete
+         && saved_chain_enable && chains_remaining>1;
+     assign chain_feedback_valid=REUSE_FAST_FEEDBACK && take_feedback;
+     assign chain_feedback_counter=transition_counter;
+-    wire take_round=lane_state==RUN && !take_feedback;
++    wire take_round=round_update && !take_feedback;
+     // One selected rate pair is absorbed per stream beat. Share that XOR
+     // before distributing the result to the enabled state words.
+     logic [127:0] previous_rate;
+@@ -301,7 +329,7 @@
+                 : select_stream ? absorb_word : round_or_clear;
+         end
+         always_ff @(posedge clk)
+-            if(!rst && (lane_state==RUN || take_fast || select_stream || clear_stream))
++            if(!rst && (round_update || take_fast || select_stream || clear_stream))
+                 sponge_state[word_index*64 +:64]<=next_word;
+     end endgenerate
+ 
+@@ -393,7 +421,7 @@
+                     end
+                 end
+                 RUN: begin
+-                    if (round_index + UNROLL >= 24) begin
++                    if (round_complete) begin
+                         if (saved_capture_enable
+                             && saved_capture_after == chain_iteration)
+                             captured_value <= advanced_state[N*8-1:0];
+@@ -416,7 +444,7 @@
+                                 lane_state <= WAIT_BLOCK;
+                             end
+                         end
+-                    end else begin
++                    end else if(PIPELINE==1) begin
+                         round_index <= round_index + UNROLL;
+                     end
+                 end
+--- /dev/null
++++ b/rtl/hash_lane/mhbs_keccak_pipeline.sv
+@@ -0,0 +1,53 @@
++`timescale 1ns/1ps
++`default_nettype none
++// One shared ring of P registered stages, U combinational rounds per stage.
++// Finished tokens leave without backpressure; the owner reserves result space.
++// Internal round feedback has priority over fresh tokens and chain feedback.
++module mhbs_keccak_pipeline #(
++ parameter integer UNROLL=1, PIPELINE=2, TAG_BITS=2
++)(
++ input wire clk,rst,input wire request_valid,output wire request_ready,
++ input wire [1599:0] request_state,input wire [TAG_BITS-1:0] request_tag,
++ output wire response_valid,output wire [1599:0] response_state,
++ output wire [TAG_BITS-1:0] response_tag
++);
++ localparam integer ROUNDS=UNROLL*PIPELINE;
++ initial if(UNROLL<1 || PIPELINE<1 || ROUNDS>24 || 24%ROUNDS!=0)
++  $fatal(1,"U*P must divide 24");
++ logic [PIPELINE-1:0] valid;
++ logic [1599:0] state_reg[0:PIPELINE-1];
++ logic [4:0] base[0:PIPELINE-1];
++ logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
++ wire recycle=valid[PIPELINE-1] && base[PIPELINE-1]+ROUNDS<24;
++ assign request_ready=!rst && !recycle;
++ assign response_valid=!rst && valid[PIPELINE-1] && !recycle;
++ assign response_state=state_reg[PIPELINE-1];
++ assign response_tag=tag[PIPELINE-1];
++ for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
++  wire [1599:0] rounds[0:UNROLL];
++  wire [4:0] start_round;
++  wire [TAG_BITS-1:0] source_tag;
++  wire source_valid;
++  if(s==0)begin
++   assign rounds[0]=recycle ? state_reg[PIPELINE-1] : request_state;
++   assign start_round=recycle ? base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
++   assign source_tag=recycle ? tag[PIPELINE-1] : request_tag;
++   assign source_valid=recycle || request_valid;
++  end else begin
++   assign rounds[0]=state_reg[s-1];assign start_round=base[s-1];
++   assign source_tag=tag[s-1];assign source_valid=valid[s-1];
++  end
++  for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
++   mhbs_keccak round_logic(.state_in(rounds[r]),
++    .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
++  end
++  always_ff @(posedge clk)begin
++   if(rst)valid[s]<=0;
++   else begin
++    valid[s]<=source_valid;
++    if(source_valid)begin state_reg[s]<=rounds[UNROLL];base[s]<=start_round;tag[s]<=source_tag;end
++   end
++  end
++ end
++endmodule
++`default_nettype wire
+--- a/rtl/hash_lane/mhbs_recipe_lane.sv
++++ b/rtl/hash_lane/mhbs_recipe_lane.sv
+@@ -5,12 +5,21 @@
+ module mhbs_recipe_lane #(
+     parameter integer N = 16,
+     parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
+-    parameter integer UNROLL = 2,
++    parameter integer UNROLL = 2, PIPELINE = 1,
+     parameter integer MAX_MESSAGE_BYTES = 87,
+     parameter [15:0] RECIPE_MASK = 16'hffff,
+     parameter bit PROFILE_ENABLE = 0
+ ) (
+     input wire clk, rst,
++    input wire batch_mode,batch_request_valid,output wire batch_request_ready,
++    input wire [1:0] batch_request_tag,
++    input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
++    input wire [9:0] batch_leaf,input wire [6:0] batch_a,input wire [31:0] batch_b,
++    input wire [7:0] batch_seed_domain,batch_step_domain,
++    output wire batch_response_valid,input wire batch_response_ready,
++    output wire [1:0] batch_response_tag,
++    output wire [255:0] batch_response_digest,batch_response_capture,
++    output wire [31:0] batch_hashes,batch_permutations,
+     input wire [5:0] node_bytes,
+     input wire request_valid, output wire request_ready,
+     input wire [63:0] request_recipe, request_step_recipe,
+@@ -420,8 +429,31 @@
+             default:live_chain_prefix[511:0]={address,public_seed};
+         endcase
+     end
+-    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
+-        .clk, .rst, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
++    wire batch_perm_valid,batch_perm_ready,batch_perm_done;
++    wire [1599:0] batch_perm_state,batch_perm_digest;
++    wire [1:0] batch_perm_tag,batch_perm_result_tag;
++    generate if(PIPELINE>1)begin: chain_pipeline
++        mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
++            .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
++            .request_tag(batch_request_tag),.request_steps(batch_steps),.request_capture_after(batch_capture_after),
++            .request_capture(batch_capture_enable),.secret_seed,.public_seed,
++            .request_layer,.request_tree,.request_leaf(batch_leaf),.request_a(batch_a),.request_b(batch_b),
++            .seed_domain(batch_seed_domain),.step_domain(batch_step_domain),
++            .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
++            .response_digest(batch_response_digest),.response_capture(batch_response_capture),
++            .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
++            .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
++            .hash_count(batch_hashes),.permutation_count(batch_permutations));
++    end else begin
++        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
++        assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
++        assign batch_response_digest=0;assign batch_response_capture=0;
++        assign batch_hashes=0;assign batch_permutations=0;
++    end endgenerate
++    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
++        .clk, .rst, .batch_mode,.batch_valid(batch_perm_valid),.batch_ready(batch_perm_ready),
++        .batch_state(batch_perm_state),.batch_tag(batch_perm_tag),.batch_done(batch_perm_done),
++        .batch_digest(batch_perm_digest),.batch_result_tag(batch_perm_result_tag),.node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
+         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
+         .fast_block_data(fast_block), .chain_enable(compact_chain),
+         .chain_prefix(compact_chain),
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -2,7 +2,7 @@
+ `default_nettype none
+ // One ABI 4 SLH macro executor for n=16/24/32.
+ module mhbs_hbs #(
+-    parameter integer UNROLL=2, LANES=2,
++    parameter integer UNROLL=2, LANES=2, PIPELINE=1,
+     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
+ ) (
+     input wire [63:0] image_header, profile_descriptor,
+@@ -61,7 +61,8 @@
+         HASH_ISSUE, HASH_WAIT, HASH_RESULT, ROUTE, TRANSFORM,
+         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
+         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
+-        VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE
++        VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
++        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD
+     } state_t;
+     state_t state, hash_return, output_return;
+     task automatic enter_state(input state_t next_state);
+@@ -113,6 +114,22 @@
+     logic [13:0] target, leaf_cursor, node_index;
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+     logic [1:0] chain_batch_mask;
++    localparam integer PIPE_BATCH=2*PIPELINE;
++    logic pipe_cache_valid,pipe_batch_used;
++    logic [2:0] pipe_issue_slot,pipe_pair;
++    logic [1:0] pipe_issue_accepted;
++    logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
++    logic [255:0] pipe_result[0:PIPE_BATCH-1],pipe_capture[0:PIPE_BATCH-1];
++    logic [7:0] pipe_seed_domain,pipe_step_domain;
++    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
++    wire [1:0] pipe_ready,pipe_valid,pipe_selected;
++    wire [1:0] pipe_tag[0:1];
++    wire [255:0] pipe_value[0:1],pipe_captured[0:1];
++    wire [31:0] pipe_hashes[0:1],pipe_permutations[0:1];
++    wire [255:0] selected_capture[0:1];
++    for(genvar pc=0;pc<2;pc=pc+1)begin
++        assign selected_capture[pc]=pipe_batch_used ? pipe_capture[2*pipe_pair+pc] : lane_capture[pc];
++    end
+     always_comb begin
+         chain_batch_mask=0;
+         for(int lane_index=0; lane_index<2; lane_index=lane_index+1)
+@@ -172,8 +189,8 @@
+                         : route_source==ROUTE_SAVED ? value[3] : emit_value)};
+     // The sponge retains capture through response and output stalls. No new
+     // request is issued before CHAIN_OUTPUT0/1 has consumed both captures.
+-    wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1];
+-    wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1];
++    wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1]+pipe_hashes[0]+pipe_hashes[1];
++    wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1]+pipe_permutations[0]+pipe_permutations[1];
+     assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+     assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
+ 
+@@ -195,10 +212,27 @@
+     genvar physical;
+     generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
+         localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
+-        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
++        wire [INDEX_BITS-1:0] batch_chain_index=chain_cursor+INDEX_BITS'(2*pipe_issue_slot+L);
++        wire [13:0] batch_leaf_index=leaf_cursor+14'(2*pipe_issue_slot+L);
++        assign pipe_selected[L]=state==PIPE_ISSUE && pipe_issue_slot<PIPELINE
++            && pipe_expected_mask[2*pipe_issue_slot+L] && !pipe_issue_accepted[L];
++        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+             .RECIPE_MASK(L==0 ? 16'h101e : 16'h0006),
+             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+-            .clk,.rst(execution_rst),.node_bytes,.request_valid(state==HASH_ISSUE && launch_pending[L]),
++            .clk,.rst(execution_rst),.node_bytes,
++            .batch_mode(pipe_mode),.batch_request_valid(pipe_selected[L]),.batch_request_ready(pipe_ready[L]),
++            .batch_request_tag(pipe_issue_slot[1:0]),
++            .batch_steps((macro_flags[3] && leaf_cursor==target) ? digit(batch_chain_index) : chain_descriptor[19:15]),
++            .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
++            .batch_capture_enable(macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
++            .batch_leaf(indexing==1 ? scalar_leaf : leaf_cursor[9:0]),
++            .batch_a(indexing==1 ? 7'd0 : batch_chain_index),
++            .batch_b(indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
++            .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
++            .batch_response_valid(pipe_valid[L]),.batch_response_ready(pipe_mode),.batch_response_tag(pipe_tag[L]),
++            .batch_response_digest(pipe_value[L]),.batch_response_capture(pipe_captured[L]),
++            .batch_hashes(pipe_hashes[L]),.batch_permutations(pipe_permutations[L]),
++            .request_valid(state==HASH_ISSUE && launch_pending[L]),
+             .request_ready(lane_ready[L]), .request_recipe(task_recipe), .request_step_recipe(task_step),
+             .request_chain(task_chain), .request_steps(task_steps[L]),
+             .request_capture_after(task_capture_after[L]),
+@@ -217,7 +251,8 @@
+         );
+     end
+     endgenerate
+-    initial if(LANES!=2 || UNROLL!=2) $error("Production core requires K2U2");
++    initial if(LANES!=2 || UNROLL<1 || PIPELINE<1 || PIPELINE>4 ||
++        UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported L/U/P configuration");
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+     logic [255:0] emit_value;
+@@ -392,6 +427,8 @@
+             hash_base<=0; permutation_base<=0; layer<=0;
+             task_recipe<=0; task_step<=0; message_received<=0;
+             fors_pair_pending<=0;
++            pipe_cache_valid<=0;pipe_batch_used<=0;pipe_pair<=0;pipe_issue_slot<=0;
++            pipe_issue_accepted<=0;pipe_done_mask<=0;pipe_expected_mask<=0;
+             for(i=0;i<2;i=i+1) begin
+                 task_steps[i]<=0; task_capture_after[i]<=0;
+                 task_leaf[i]<=0; task_a[i]<=0; task_b[i]<=0;
+@@ -399,6 +436,13 @@
+         end else begin
+             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
+             if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
++            if(PIPELINE>1 && pipe_mode)begin
++                for(integer pl=0;pl<2;pl=pl+1)if(pipe_valid[pl])begin
++                    pipe_done_mask[2*pipe_tag[pl]+pl]<=1;
++                    pipe_result[2*pipe_tag[pl]+pl]<=pipe_value[pl];
++                    pipe_capture[2*pipe_tag[pl]+pl]<=pipe_captured[pl];
++                end
++            end
+             case(state)
+                 IDLE: if(job_valid) begin
+                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
+@@ -432,7 +476,7 @@
+                     end else if(cmd_valid) begin
+                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
+                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
+-                        task_chain<=0; task_capture<=0;
++                        task_chain<=0; task_capture<=0;pipe_cache_valid<=0;pipe_batch_used<=0;
+                         for(i=0;i<2;i=i+1) task_steps[i]<=0;
+                         enter_state(LOAD_DESCRIPTOR);
+                     end
+@@ -461,6 +505,7 @@
+                 endcase
+                 end
+                 TREE_INIT: begin
++                    pipe_cache_valid<=0;pipe_batch_used<=0;
+                     saved_chain_descriptor<=descriptors[6];
+                     fors_pair_pending<=0;
+                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+@@ -483,7 +528,18 @@
+                             task_b[i]<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor+i);
+                         end
+                         read_verify_node(VERIFY_CHAIN_INPUT);
++                    end else if(PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
++                        if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
++                        else begin
++                            pipe_pair<=0;pipe_issue_slot<=0;pipe_issue_accepted<=0;pipe_done_mask<=0;
++                            for(integer q=0;q<PIPE_BATCH;q=q+1)
++                                pipe_expected_mask[q]<=indexing==1 ? (32'(leaf_cursor)+q < (32'd1<<tree_height))
++                                    : (32'(chain_cursor)+q < endpoint_count);
++                            pipe_seed_domain<=descriptors[4][55:48];pipe_step_domain<=descriptors[5][55:48];
++                            enter_state(PIPE_ISSUE);
++                        end
+                     end else begin
++                    pipe_batch_used<=0;
+                     task_chain<=1; task_step<=descriptors[5];
+                     for(i=0;i<2;i=i+1) begin
+                         task_capture[i]<=(indexing==1 ? leaf_cursor+i==target : leaf_cursor==target) && macro_flags[0];
+@@ -497,6 +553,23 @@
+                     start_hash(descriptors[4],chain_batch_mask,CHAIN_STORE);
+                     end
+                 end
++                PIPE_ISSUE: begin
++                    if(((pipe_issue_accepted | (pipe_ready & pipe_selected)) &
++                         pipe_expected_mask[2*pipe_issue_slot +:2])==pipe_expected_mask[2*pipe_issue_slot +:2])begin
++                        pipe_issue_accepted<=0;
++                        if(pipe_issue_slot+1>=PIPELINE)enter_state(PIPE_WAIT);
++                        else pipe_issue_slot<=pipe_issue_slot+1'b1;
++                    end else pipe_issue_accepted<=pipe_issue_accepted | (pipe_ready & pipe_selected);
++                end
++                PIPE_WAIT: if((pipe_done_mask & pipe_expected_mask)==pipe_expected_mask)enter_state(PIPE_LOAD);
++                PIPE_LOAD: begin
++                    pipe_batch_used<=1;
++                    pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(2*(pipe_pair+1)))!=0);
++                    active_mask<=pipe_expected_mask[2*pipe_pair +:2];
++                    result[0]<={{(V-W){1'b0}},pipe_result[2*pipe_pair]};
++                    result[1]<={{(V-W){1'b0}},pipe_result[2*pipe_pair+1]};
++                    enter_state(CHAIN_STORE);
++                end
+                 CHAIN_STORE: begin
+                     if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
+                     task_chain<=0;
+@@ -504,9 +577,9 @@
+                     else enter_state(CHAIN_NEXT);
+                 end
+                 CHAIN_OUTPUT0: start_output(indexing==1 && active_mask[1] && target[0]
+-                    ? lane_capture[1] : lane_capture[0],node_bytes,
++                    ? selected_capture[1] : selected_capture[0],node_bytes,
+                     active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+-                CHAIN_OUTPUT1: start_output(lane_capture[1],node_bytes,CHAIN_NEXT);
++                CHAIN_OUTPUT1: start_output(selected_capture[1],node_bytes,CHAIN_NEXT);
+                 CHAIN_NEXT: begin
+                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
+                     else if(standalone_chain && chain_descriptor[13:12]==0)
+--- a/rtl/top/mhbs_top.sv
++++ b/rtl/top/mhbs_top.sv
+@@ -1,7 +1,7 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+ module mhbs_top #(
+-    parameter integer LANES=2,UNROLL=2,
++    parameter integer LANES=2,UNROLL=2,PIPELINE=1,
+     parameter bit SWAP_PHYSICAL_LANES=0,
+     parameter bit SIGNATURE_STORE_ENABLE=1,
+     // Statistics are observable in simulation, absent from production hardware.
+@@ -72,7 +72,7 @@
+                                                : core_descriptor_addresses;
+     assign result_kind=OPERATION;
+     assign message_ready=(phase==RUN) && core_message_ready;
+-    mhbs_hbs #(.UNROLL(UNROLL),.LANES(LANES),.PROFILE_ENABLE(PROFILE_ENABLE),
++    mhbs_hbs #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.LANES(LANES),.PROFILE_ENABLE(PROFILE_ENABLE),
+         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES)) core (
+         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
+         .program_address,.program_data,.template_address,.template_data,
+--- /dev/null
++++ b/scripts/run_lup_sign_atp.py
+@@ -0,0 +1,127 @@
++#!/usr/bin/env python3
++"""Reproducible L2U1P1-P4 common-core area/time sweep; no place/route."""
++from pathlib import Path
++import argparse,csv,hashlib,json,re,shutil,subprocess,sys,tarfile,time
++from v42_external_flow import ROOT,BASE,simulate_case,sha,write,rtl
++from v42_common_partition import partition
++PART='xc7a200tffg1156-3'
++FREQ=150.0
++
++def area(path):
++ text=path.read_text();a={}
++ for label,key in [('Slice LUTs','lut'),('Slice Registers','ff'),('LUT as Memory','lutram'),('Block RAM Tile','bram36'),('DSPs','dsp')]:
++  m=re.search(r'\|\s*'+re.escape(label)+r'\*?\s*\|\s*([\d,.]+)',text);assert m,label;a[key]=float(m[1].replace(',',''))
++ a['equivalent_slice']=a['lut']/4+a['ff']/8+232.4*a['bram36']+102.4*a['dsp'];return a
++
++def prepare_baseline(out):
++ archive=out/'baseline.tar.gz'
++ if not archive.exists():
++  frozen=ROOT/'manifests/experiments/lup_shared_128f_20261007_v1/baseline.tar.gz'
++  shutil.copy2(frozen,archive)
++ ws=ROOT/'build/lup_shared_baseline';ws.mkdir(parents=True,exist_ok=True)
++ with tarfile.open(archive) as t:t.extractall(ws,filter='data')
++ hbs=ws/'rtl/top/mhbs_hbs.sv'
++ hbs.write_text(hbs.read_text().replace('LANES!=2 || UNROLL!=2','LANES!=2 || (UNROLL!=1 && UNROLL!=2)'))
++ tb=ws/'tb/integration/tb_mhbs_external.sv'
++ tb.write_text(tb.read_text().replace('parameter integer SWAP=0;','parameter integer SWAP=0,UNROLL=2;').replace('.OPERATION(OPERATION),.PROFILE_ENABLE','.OPERATION(OPERATION),.UNROLL(UNROLL),.PROFILE_ENABLE').replace('round_index+2>=24','round_index+UNROLL>=24'))
++ vector=BASE/'vectors/slh_128f/sign';cfg=json.loads((vector/'job.json').read_text())
++ params=[f"-G{k.upper()}=256'h{int.from_bytes(bytes.fromhex(cfg[k]),'little'):064x}" for k in ('secret_seed','secret_prf','public_seed','randomizer','public_root')]
++ for u in (1,2):
++  d=ROOT/f'build/lup_shared_baseline_result/U{u}';d.mkdir(parents=True,exist_ok=True)
++  # Source-bound compile cache, with a fresh run on every invocation.
++  manifest={'baseline':sha(archive),'testbench':sha(tb),'unroll':u}
++  binary=d/'obj/Vtb_mhbs_external'
++  if not binary.exists() or not (d/'inputs.json').exists() or json.loads((d/'inputs.json').read_text())!=manifest:
++   cmd=['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','--top-module','tb_mhbs_external',f'-GUNROLL={u}',*params,'--Mdir',str(d/'obj'),*(ws/'manifests/v42_sources.txt').read_text().splitlines(),'tb/integration/tb_mhbs_external.sv']
++   with (d/'compile.log').open('w') as f:subprocess.run(cmd,cwd=ws,stdout=f,stderr=subprocess.STDOUT,check=True)
++   write(d/'inputs.json',manifest)
++  with (d/'run.log').open('w') as f:subprocess.run([str(binary),f'+IMAGE={BASE/"images/slh_128f"}',f'+VECTOR={vector}',f'+DUMP={d/"actual.mem"}'],cwd=ws,stdout=f,stderr=subprocess.STDOUT,check=True)
++  print('FROZEN_BASELINE_PASS',f'L2U{u}P1',flush=True)
++
++def baseline(u):
++ d=ROOT/f'build/lup_shared_baseline_result/U{u}'
++ s=(d/'run.log').read_text();m=re.search(r'EXTERNAL_PASS boot=(\d+) keygen=(\d+) sign=(\d+) hashes=(\d+) permutations=(\d+).*total=(\d+)',s);assert m
++ return {'sign_cycles':int(m[3]),'hashes':int(m[4]),'permutations':int(m[5]),'total_cycles':int(m[6]),'output_sha256':sha(d/'actual.mem')}
++
++def check_same(result,ref,cycles=True):
++ for k in ('output_sha256','hashes','permutations')+(('sign_cycles','total_cycles') if cycles else ()):
++  assert result[k]==ref[k],(k,result[k],ref[k])
++
++def snapshot(out):
++ paths=set(rtl()+['manifests/v42_sources.txt','manifests/unified_sources.txt','Makefile','README.md','docs/Architecture.md','docs/Verification.md'])
++ for directory in ('scripts','tb','model','tests','experiments/v4.2'):
++  paths.update(str(p.relative_to(ROOT)) for p in (ROOT/directory).rglob('*') if p.is_file() and p.suffix in ('.sv','.svh','.py','.tcl','.mem','.json'))
++ for directory in ('images/slh_128f','vectors/slh_128f/sign'):
++  paths.update(str(p.relative_to(ROOT)) for p in (BASE/directory).rglob('*') if p.is_file())
++ identity={p:sha(ROOT/p) for p in sorted(paths)}
++ if (out/'inputs.json').exists():assert json.loads((out/'inputs.json').read_text())['source_sha256']==identity,'Source changed: use fresh experiment tag'
++ else:
++  with tarfile.open(out/'source_snapshot.tar.gz','w:gz') as t:
++   for p in identity:t.add(ROOT/p,arcname=p)
++  write(out/'inputs.json',dict(git_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),source_sha256=identity,snapshot_sha256=sha(out/'source_snapshot.tar.gz'),part=PART,clock_period_ns=6.666667,frequency_mhz_assumed=FREQ,profile_enable_synthesis=False,scope='common core',operation='128f sign',routed=False))
++ return identity
++
++def synth(out,p,ws):
++ d=out/f'L2U1P{p}';d.mkdir(exist_ok=True)
++ common,_=partition((ws/'rtl/top/mhbs_top.sv').read_text(),stub=True)
++ (d/'mhbs_common.sv').write_text(common)
++ lines=['set_param general.maxThreads 8',f'create_project -in_memory -part {PART}']
++ lines += [f'read_verilog -sv {{{ws/f}}}' for f in (ws/'manifests/v42_sources.txt').read_text().splitlines() if f!='rtl/top/mhbs_top.sv']
++ (d/'clock.xdc').write_text('create_clock -name clk -period 6.666667 [get_ports clk]\n')
++ lines += [f'read_verilog -sv {{{d/"mhbs_common.sv"}}}',f'read_xdc {{{d/"clock.xdc"}}}',f'synth_design -top mhbs_common -part {PART} -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=1 -generic PIPELINE={p} -generic PROFILE_ENABLE=0',f'report_utilization -file {{{d/"core_utilization.rpt"}}}',f'report_utilization -hierarchical -file {{{d/"core_hierarchical.rpt"}}}',f'report_timing_summary -file {{{d/"core_timing.rpt"}}}',
++ 'set bad {}', 'foreach c [get_cells -hier -filter {IS_PRIMITIVE == 1}] {', ' if {[string match FD* [get_property REF_NAME $c]] && [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $c]} {lappend bad $c}', '}', 'if {[llength $bad]} {error "Statistics registers remain: $bad"}',f'set f [open {{{d/"pruning_audit.json"}}} w]', 'puts $f {{"passed":true,"profile_enable":false,"statistics_registers":0}}','close $f',f'write_checkpoint -force {{{d/"post_synth.dcp"}}}',f'puts "LUP_COMMON_SYNTH_PASS L2U1P{p}"','exit']
++ (d/'synth.tcl').write_text('\n'.join(lines)+'\n');start=time.time()
++ with (d/'vivado.log').open('w') as f:subprocess.run(['vivado','-mode','batch','-nolog','-nojournal','-source',str(d/'synth.tcl')],cwd=ws,stdout=f,stderr=subprocess.STDOUT,check=True)
++ assert f'LUP_COMMON_SYNTH_PASS L2U1P{p}' in (d/'vivado.log').read_text()
++ a=area(d/'core_utilization.rpt');write(d/'synthesis.json',dict(passed=True,area=a,elapsed_seconds=time.time()-start,profile_enable=False,routed=False));print('LUP_SYNTH_PASS',f'L2U1P{p}',int(a['lut']),int(a['ff']),flush=True);return a
++
++def main():
++ ap=argparse.ArgumentParser();ap.add_argument('--tag',default='lup_shared_128f_20261007_v2');ap.add_argument('--sim-only',action='store_true');args=ap.parse_args()
++ assert re.fullmatch('[a-zA-Z0-9_-]+',args.tag)
++ out=ROOT/'manifests/experiments'/args.tag;out.mkdir(parents=True,exist_ok=True)
++ build=ROOT/'build'/args.tag;build.mkdir(parents=True,exist_ok=True)
++ identity=snapshot(out);prepare_baseline(out);ref=baseline(1);ref2=baseline(2);vector=BASE/'vectors/slh_128f/sign'
++ def sim(name,p,**kw):return simulate_case(build,name,vector,unroll=kw.pop('unroll',1),pipeline=p,**kw)[1]
++ sims={};checks={}
++ for p in (1,2,3,4):
++  s=sim(f'L2U1P{p}',p);check_same(s,ref,cycles=p==1);sims[p]=s
++  off=sim(f'L2U1P{p}_stats_off',p,profile_enable=False);check_same(off,s);checks[f'P{p}_stats_off']=off
++ default=sim('L2U2P1_default',1,unroll=2);check_same(default,ref2);checks['default_unchanged']=default
++ for p in (2,3,4):
++  replay=sim(f'P{p}_replay_stall',p,options=('+REPLAYS=2','+STALL=1','+INTERRUPT=1','+TAIL_NOISE=1'));assert (replay['hashes'],replay['permutations'])==(sims[p]['hashes'],sims[p]['permutations']);checks[f'P{p}_replay_stall']=replay
++ checks['P3_swapped']=sim('P3_swapped',3,swap=1);check_same(checks['P3_swapped'],sims[3])
++ checks['P4_partition']=sim('P4_partition',4,partitioned=True);check_same(checks['P4_partition'],sims[4])
++ # Error injection reuses the normal binary, retaining the existing halt checks.
++ from v42_external_flow import build_binary,run
++ cfg=json.loads((vector/'job.json').read_text())
++ binary=build_binary(build,cfg,unroll=1,pipeline=4)
++ for mode in (1,2):
++  log=build/'logs'/f'P4_fault_{mode}.log';run([str(binary),f'+IMAGE={BASE/"images/slh_128f"}',f'+VECTOR={vector}',f'+FAULT={mode}'],log);assert 'V42_FAULT_PASS' in log.read_text()
++  checks[f'P4_fault_{mode}']={'passed':True,'log_sha256':sha(log)}
++ write(out/'simulation.json',{'points':sims,'checks':checks,'baseline_u1':ref,'baseline_u2':ref2})
++ shutil.copytree(build/'logs',out/'simulation',dirs_exist_ok=True)
++ for folder in ('lup_shared_units','lup_shared_baseline_result'):
++  dest=out/folder;dest.mkdir(exist_ok=True)
++  for src in (ROOT/'build'/folder).rglob('*'):
++   if src.is_file() and src.suffix in ('.log','.json','.mem') and 'obj' not in src.parts:
++    target=dest/src.relative_to(ROOT/'build'/folder);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(src,target)
++ if args.sim_only:return
++ ws=build/'synth_source';ws.mkdir(exist_ok=True)
++ with tarfile.open(out/'source_snapshot.tar.gz') as t:t.extractall(ws,filter='data')
++ for path,h in identity.items():assert sha(ws/path)==h,path
++ rows=[]
++ for p in (1,2,3,4):
++  a=synth(out,p,ws);s=sims[p];ms=s['sign_cycles']/(FREQ*1000)
++  row=dict(point=f'L2U1P{p}',**a,compute_cycles=s['sign_cycles'],total_cycles=s['total_cycles'],hashes=s['hashes'],permutations=s['permutations'],assumed_mhz=FREQ,time_ms=ms,atp_slice_ms=a['equivalent_slice']*ms)
++  rows.append(row);write(out/f'L2U1P{p}'/'result.json',row)
++ for r in rows:r['speedup']=rows[0]['compute_cycles']/r['compute_cycles'];r['relative_atp']=r['atp_slice_ms']/rows[0]['atp_slice_ms']
++ write(out/'results.json',{'scope':'128f sign common core','frequency_basis':'assumed 150 MHz; no place/route','points':rows})
++ with (out/'results.csv').open('w') as f:w=csv.DictWriter(f,fieldnames=rows[0].keys());w.writeheader();w.writerows(rows)
++ text='# L2U1P1–P4：128f sign 共同核 ATP\n\n150 MHz 为统一假定频率，未经布局布线验证。面积包含流水寄存器、上下文及结果暂存，不包含顶层签名存储。LUT 已包含 LUTRAM。\n\n'
++ text+='| 配置 | LUT | FF | LUTRAM | BRAM36 | 等效 Slice | 计算周期 | 总周期 | 时间 ms | ATP Slice·ms | 相对 ATP |\n|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|\n'
++ for r in rows:text+=f"| {r['point']} | {r['lut']:.0f} | {r['ff']:.0f} | {r['lutram']:.0f} | {r['bram36']:g} | {r['equivalent_slice']:.3f} | {r['compute_cycles']} | {r['total_cycles']} | {r['time_ms']:.6f} | {r['atp_slice_ms']:.3f} | {r['relative_atp']:.4f} |\n"
++ text+='\n所有点的签名字节、Hash/置换次数一致：104937 / 105641。P1 与冻结旧 U1 的输出和周期一致，默认 L2U2P1 同样与旧实现一致。统计关闭、输入停顿、复位重放、lane 交换、共同核等价及故障退出检查通过。单元测试包含 U2P2、三种节点宽度、96 组独立 SHAKE 链向量和多上下文回压。\n\nATP = 等效 Slice × 计算周期 / 150000；新实验以 L 表示 lane，历史 K 与 L 同义，历史证据未改写。\n\n源码、配置和原始报告：`manifests/experiments/'+args.tag+'/`。各点的 `core_hierarchical.rpt` 是分层面积报告。本轮未测实际频率。\n'
++ (out/'report.md').write_text(text);(ROOT/'docs/v4.2/LUP_128f_Sign_ATP.md').write_text(text)
++ write(out/'evidence_sha256.json',{str(p.relative_to(out)):sha(p) for p in sorted(out.rglob('*')) if p.is_file() and p.name!='evidence_sha256.json' and p.suffix!='.dcp'})
++ print('LUP_SWEEP_PASS',str(out/'report.md'),flush=True)
++if __name__=='__main__':main()
+--- a/scripts/v42_common_partition.py
++++ b/scripts/v42_common_partition.py
+@@ -32,8 +32,8 @@
+     start=source.index(begin);stop=source.index(end)+len(end)
+     body=source[source.index('\n',start)+1:source.index(end)]
+     body=re.sub(r'\b('+'|'.join(JOBS)+r')\b',lambda m:JOBS[m[0]],body)
+-    common='`timescale 1ns/1ps\n`default_nettype none\nmodule mhbs_common #(parameter integer LANES=2,UNROLL=2,parameter bit SWAP_PHYSICAL_LANES=0,PROFILE_ENABLE=1)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
+-    params='' if stub else ' #(.LANES(LANES),.UNROLL(UNROLL),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),.PROFILE_ENABLE(PROFILE_ENABLE))'
++    common='`timescale 1ns/1ps\n`default_nettype none\nmodule mhbs_common #(parameter integer LANES=2,UNROLL=2,PIPELINE=1,parameter bit SWAP_PHYSICAL_LANES=0,PROFILE_ENABLE=1)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
++    params='' if stub else ' #(.LANES(LANES),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),.PROFILE_ENABLE(PROFILE_ENABLE))'
+     instance='    (* DONT_TOUCH="yes" *) mhbs_common'+params+' common (\n'
+     instance+=','.join('.'+v+'('+k+')' for k,v in JOBS.items())+',\n'
+     instance+=' .clk,.rst,.message_length,.message_data,.message_valid,.message_ready,\n'
+--- a/scripts/v42_external_flow.py
++++ b/scripts/v42_external_flow.py
+@@ -39,13 +39,13 @@
+  write(f/'inputs.json',dict(version='v4.2',layout_revision=3,tag=tag,rtl_sha256=identity(),source_sha256=source,snapshot_sha256=sha(f/'source_snapshot.tar.gz'),software_gate_sha256=sha(BASE/'software_gate.json'),baseline_commit='366b614',tool_versions={'verilator':tool_version('verilator','--version'),'iverilog':tool_version('iverilog','-V')}))
+  return f
+ 
+-def build_binary(folder,cfg,swap=0,partitioned=False,profile_enable=True):
+- key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,profile_enable,sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
++def build_binary(folder,cfg,swap=0,partitioned=False,profile_enable=True,unroll=2,pipeline=1):
++ key=hashlib.sha256(json.dumps((cfg,swap,identity(),partitioned,profile_enable,unroll,pipeline,sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
+  d=folder/'binaries'/key;binary=d/'obj/Vtb_mhbs_external'
+  if not binary.exists():
+   d.mkdir(parents=True,exist_ok=True)
+   parameters=[f"-G{k.upper()}=256'h{int.from_bytes(bytes.fromhex(cfg[k]),'little'):064x}" for k in PARAMS]
+-  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(profile_enable)}']
++  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(profile_enable)}',f'-GUNROLL={unroll}',f'-GPIPELINE={pipeline}']
+   sources=rtl();defines=[]
+   if partitioned:
+    from v42_common_partition import partition
+@@ -56,8 +56,8 @@
+   run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_mhbs_external.sv'],d/'compile.log')
+  return binary
+ 
+-def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False,profile_enable=True):
+- cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,swap,partitioned,profile_enable)
++def simulate_case(folder,name,vector,swap=0,options=(),partitioned=False,profile_enable=True,unroll=2,pipeline=1):
++ cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,swap,partitioned,profile_enable,unroll,pipeline)
+  log=folder/'logs'/(name+'.log');log.parent.mkdir(parents=True,exist_ok=True)
+  dump=log.with_suffix('.actual.mem')
+  cmd=[str(binary),'+IMAGE='+str(BASE/'images'/cfg['profile']),'+VECTOR='+str(vector),'+DUMP='+str(dump),*options]
+@@ -65,16 +65,16 @@
+  hits=re.findall(r'EXTERNAL_PASS boot=(\d+) keygen=(\d+) sign=(\d+) hashes=(\d+) permutations=(\d+) swap=(\d+) run=(\d+) wait=(\d+) total=(\d+)',log.read_text())
+  assert len(hits)==(2 if '+REPLAYS=2' in options else 1),str(log)
+  result=dict(zip(('boot_cycles','keygen_cycles','sign_cycles','hashes','permutations','swap','run','wait_cycles','total_cycles'),map(int,hits[-1])))
+- result.update(passed=True,profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
++ result.update(passed=True,lanes=2,unroll=unroll,pipeline=pipeline,profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
+  write(log.with_suffix('.json'),result);print('EXTERNAL_SIM_PASS',name,result['keygen_cycles'],result['sign_cycles'],flush=True)
+  return name,result
+ 
+ def main():
+- p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--swap',type=int,choices=[0,1],default=0);p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');a=p.parse_args()
++ p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--swap',type=int,choices=[0,1],default=0);p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');p.add_argument('--unroll',type=int,default=2);p.add_argument('--pipeline',type=int,choices=range(1,5),default=1);a=p.parse_args()
+  f=capture(a.tag)
+  if a.action=='sim':
+   def one(case):
+-   n,o=case;return simulate_case(f,n+'_'+o+('_swap' if a.swap else '')+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,a.swap,partitioned=a.partition,profile_enable=not a.no_profile)
++   n,o=case;return simulate_case(f,n+'_'+o+('_swap' if a.swap else '')+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,a.swap,partitioned=a.partition,profile_enable=not a.no_profile,unroll=a.unroll,pipeline=a.pipeline)
+   with concurrent.futures.ThreadPoolExecutor(3) as pool:r=dict(pool.map(one,[(n,o) for n in NAMES if a.profile in ('all',n) for o in ('keygen','sign') if a.operation in ('all',o)]))
+   filename='simulation_partition' if a.partition else 'simulation_s1' if a.swap else 'simulation'
+   if a.no_profile:filename+='_no_profile'
+--- /dev/null
++++ b/scripts/verify_lup_pipeline.py
+@@ -0,0 +1,56 @@
++#!/usr/bin/env python3
++"""Independent SHAKE chain vectors and interleaved U/P unit checks."""
++from pathlib import Path
++import hashlib,json,subprocess,sys,random
++ROOT=Path(__file__).resolve().parents[1]
++OUT=ROOT/'build/lup_shared_units';OUT.mkdir(parents=True,exist_ok=True)
++rng=random.Random(713)
++requests=[];digests=[];captures=[]
++for n in (16,24,32):
++ for i in range(32):
++  steps=(0,1,2,15)[i%4];cap=(0,steps//2,steps)[i%3];domain=3 if i%2 else 0
++  a=rng.randrange(67);b=rng.randrange(1<<20);leaf=rng.randrange(512);tree=rng.getrandbits(64);layer=rng.randrange(22)
++  req=n|(steps<<8)|(cap<<16)|(domain<<24)|(a<<32)|(b<<40)|(leaf<<72)|(tree<<88)|(layer<<152)
++  def address(dom,counter):return layer.to_bytes(4,'big')+bytes(4)+tree.to_bytes(8,'big')+dom.to_bytes(4,'big')+leaf.to_bytes(4,'big')+a.to_bytes(4,'big')+counter.to_bytes(4,'big')
++  pk=bytes(range(32,64))[:n];val=hashlib.shake_256(pk+address(6 if domain==3 else 5,b)+bytes(range(32))[:n]).digest(n)
++  captured=val if cap==0 else None
++  for j in range(steps):
++   val=hashlib.shake_256(pk+address(domain,b if domain==3 else j)+val).digest(n)
++   if j+1==cap:captured=val
++  requests.append(f'{req:064x}');digests.append(f'{int.from_bytes(val,"little"):064x}');captures.append(f'{int.from_bytes(captured,"little"):064x}')
++for name,values in [('chain_requests',requests),('chain_digest',digests),('chain_capture',captures)]:
++ (OUT/(name+'.mem')).write_text('\n'.join(values)+'\n')
++sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()
++records=[]
++for top in ('tb_mhbs_keccak_pipeline','tb_mhbs_chain_overlap'):
++ for u,p in ((1,1),(1,2),(1,3),(1,4),(2,2)):
++  name=f'{top}_U{u}P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
++  with log.open('w') as f:
++   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.UNROLL={u}',f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={OUT}']):
++    r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
++    if r.returncode:print(log.read_text()[-2000:]);raise SystemExit(r.returncode)
++  hits=[x for x in log.read_text().splitlines() if '_PASS ' in x];assert hits,name
++  print(*hits,flush=True);records.append({'test':name,'passed':True,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest()})
++padding=[]
++for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
++                  (32,3,73),(24,4,63),(32,4,41),(32,3,71),(32,4,40)]:
++    prf=bytes(range(32,32+n));seed=bytes(range(64,64+n))
++    randomizer=bytes(range(96,96+n));root=bytes(range(128,128+n))
++    payload=(prf+randomizer if shape==3 else randomizer+seed+root)+bytes(range(m))
++    digest=hashlib.shake_256(payload).digest(49)
++    padding.append((n<<442)|(shape<<438)|(m<<431)|((len(payload)//136+1)<<423)|
++                   int.from_bytes(digest,'little'))
++padding_file=OUT/'recipe_padding.mem'
++padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
++
++for top in ('tb_mhbs_compact_shake_context_lane','tb_mhbs_recipe_padding'):
++ for p in (2,3,4):
++  name=f'{top}_P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
++  with log.open('w') as f:
++   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={padding_file}']):
++    r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
++    if r.returncode:print(log.read_text()[-2000:]);raise SystemExit(r.returncode)
++  assert '_PASS' in log.read_text(),name
++  print('LUP_STREAM_PASS',top,p,flush=True)
++  records.append({'test':name,'passed':True,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest()})
++(OUT/'results.json').write_text(json.dumps(records,indent=2)+'\n')
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -7,7 +7,7 @@
+ module tb_mhbs_external;
+  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
+  parameter integer OPERATION=1,MESSAGE_BYTES=1;
+- parameter integer SWAP=0;
++ parameter integer SWAP=0,UNROLL=2,PIPELINE=1;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
+  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
+@@ -26,7 +26,7 @@
+  reg [7:0] message_bytes[0:86];
+  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
+  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
+- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
++ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
+  `include "tb/integration/mhbs_parent_input_check.svh"
+@@ -50,11 +50,14 @@
+  generate for(lane=0;lane<2;lane=lane+1)begin: observers
+   always @(posedge clk)begin
+    if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
+-   else if(`HBS_CORE.lanes[lane].lane.sponge.lane_state==2 &&
+-           `HBS_CORE.lanes[lane].lane.sponge.round_index+2>=24)begin
+-    observed_permutations[lane]=observed_permutations[lane]+1;
+-    if(`HBS_CORE.lanes[lane].lane.sponge.running_last)
+-     observed_hashes[lane]=observed_hashes[lane]+1;
++   else begin
++    if(`HBS_CORE.lanes[lane].lane.sponge.permutation_complete)begin
++     observed_permutations[lane]=observed_permutations[lane]+1;
++     if(`HBS_CORE.lanes[lane].lane.sponge.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
++    end
++    if(`HBS_CORE.lanes[lane].lane.batch_perm_done)begin
++     observed_permutations[lane]=observed_permutations[lane]+1;observed_hashes[lane]=observed_hashes[lane]+1;
++    end
+    end
+   end
+  end endgenerate
+--- /dev/null
++++ b/tb/reference/keccak_round_frozen.svh
+@@ -0,0 +1,106 @@
++// Frozen combinational reference from a76c7a44; no DUT pipeline control.
++    function automatic [63:0] rotl64;
++        input [63:0] value;
++        input integer amount;
++        begin
++            rotl64 = amount == 0 ? value
++                : (value << amount) | (value >> (64-amount));
++        end
++    endfunction
++
++    function automatic integer rho_offset;
++        input integer x;
++        input integer y;
++        begin
++            case (x + 5*y)
++                 0: rho_offset =  0;  1: rho_offset =  1;
++                 2: rho_offset = 62;  3: rho_offset = 28;
++                 4: rho_offset = 27;  5: rho_offset = 36;
++                 6: rho_offset = 44;  7: rho_offset =  6;
++                 8: rho_offset = 55;  9: rho_offset = 20;
++                10: rho_offset =  3; 11: rho_offset = 10;
++                12: rho_offset = 43; 13: rho_offset = 25;
++                14: rho_offset = 39; 15: rho_offset = 41;
++                16: rho_offset = 45; 17: rho_offset = 15;
++                18: rho_offset = 21; 19: rho_offset =  8;
++                20: rho_offset = 18; 21: rho_offset =  2;
++                22: rho_offset = 61; 23: rho_offset = 56;
++                24: rho_offset = 14;
++                default: rho_offset = 0;
++            endcase
++        end
++    endfunction
++
++    function automatic [63:0] round_constant;
++        input [4:0] index;
++        begin
++            case (index)
++                 0: round_constant = 64'h0000000000000001;
++                 1: round_constant = 64'h0000000000008082;
++                 2: round_constant = 64'h800000000000808a;
++                 3: round_constant = 64'h8000000080008000;
++                 4: round_constant = 64'h000000000000808b;
++                 5: round_constant = 64'h0000000080000001;
++                 6: round_constant = 64'h8000000080008081;
++                 7: round_constant = 64'h8000000000008009;
++                 8: round_constant = 64'h000000000000008a;
++                 9: round_constant = 64'h0000000000000088;
++                10: round_constant = 64'h0000000080008009;
++                11: round_constant = 64'h000000008000000a;
++                12: round_constant = 64'h000000008000808b;
++                13: round_constant = 64'h800000000000008b;
++                14: round_constant = 64'h8000000000008089;
++                15: round_constant = 64'h8000000000008003;
++                16: round_constant = 64'h8000000000008002;
++                17: round_constant = 64'h8000000000000080;
++                18: round_constant = 64'h000000000000800a;
++                19: round_constant = 64'h800000008000000a;
++                20: round_constant = 64'h8000000080008081;
++                21: round_constant = 64'h8000000000008080;
++                22: round_constant = 64'h0000000080000001;
++                23: round_constant = 64'h8000000080008008;
++                default: round_constant = 64'h0;
++            endcase
++        end
++    endfunction
++
++    function automatic [1599:0] keccak_round;
++        input [1599:0] input_state;
++        input [4:0] index;
++        reg [63:0] a [0:24];
++        reg [63:0] b [0:24];
++        reg [63:0] c [0:4];
++        reg [63:0] d [0:4];
++        reg [1599:0] result;
++        integer x;
++        integer y;
++        integer destination;
++        begin
++            for (y = 0; y < 5; y = y + 1)
++                for (x = 0; x < 5; x = x + 1)
++                    a[x+5*y] = input_state[64*(x+5*y) +: 64];
++            for (x = 0; x < 5; x = x + 1)
++                c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
++            for (x = 0; x < 5; x = x + 1)
++                d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
++            for (y = 0; y < 5; y = y + 1)
++                for (x = 0; x < 5; x = x + 1)
++                    a[x+5*y] = a[x+5*y] ^ d[x];
++            for (y = 0; y < 5; y = y + 1)
++                for (x = 0; x < 5; x = x + 1) begin
++                    destination = y + 5*((2*x+3*y)%5);
++                    b[destination] = rotl64(a[x+5*y], rho_offset(x,y));
++                end
++            for (y = 0; y < 5; y = y + 1)
++                for (x = 0; x < 5; x = x + 1)
++                    a[x+5*y] = b[x+5*y]
++                        ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y]);
++            a[0] = a[0] ^ round_constant(index);
++            result = '0;
++            for (y = 0; y < 5; y = y + 1)
++                for (x = 0; x < 5; x = x + 1)
++                    result[64*(x+5*y) +: 64] = a[x+5*y];
++            keccak_round = result;
++        end
++    endfunction
++
+--- a/tb/unit/mhbs_external_core_stub.sv
++++ b/tb/unit/mhbs_external_core_stub.sv
+@@ -2,7 +2,7 @@
+ `default_nettype none
+ // One ABI 4 SLH macro executor for n=16/24/32.
+ module mhbs_hbs #(
+-    parameter integer UNROLL=2, LANES=2,
++    parameter integer UNROLL=2, LANES=2, PIPELINE=1,
+     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
+ ) (
+     input wire [63:0] image_header, profile_descriptor,
+--- /dev/null
++++ b/tb/unit/tb_mhbs_chain_overlap.sv
+@@ -0,0 +1,93 @@
++`timescale 1ns/1ps
++module tb_mhbs_chain_overlap;
++ parameter integer UNROLL=1,PIPELINE=2;
++ logic clk=0,rst=1,request_valid=0,response_ready=0;
++ logic [1:0] request_tag=0;
++ wire request_ready,response_valid;
++ wire [1:0] response_tag;
++ wire [255:0] response_digest,response_capture;
++ logic [5:0] node_bytes;
++ logic [4:0] request_steps,request_capture_after,request_layer;
++ logic request_capture=1;
++ logic [9:0] request_leaf;
++ logic [6:0] request_a;
++ logic [31:0] request_b;
++ logic [63:0] request_tree;
++ logic [7:0] seed_domain,step_domain;
++ wire [255:0] secret_seed=256'h1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100;
++ wire [255:0] public_seed=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
++ wire pv,pr,pd;wire [1599:0] ps,po;wire [1:0] pt,ot;
++ wire [31:0] hash_count,permutation_count;
++ mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(
++  .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_tag,
++  .request_steps,.request_capture_after,.request_capture,.secret_seed,.public_seed,
++  .request_layer,.request_tree,.request_leaf,.request_a,.request_b,.seed_domain,.step_domain,
++  .response_valid,.response_ready,.response_tag,.response_digest,.response_capture,
++  .perm_valid(pv),.perm_ready(pr),.perm_state(ps),.perm_tag(pt),.perm_done(pd),.perm_digest(po),.perm_result_tag(ot),
++  .hash_count,.permutation_count);
++ mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) pipe(
++  .clk,.rst,.request_valid(pv),.request_ready(pr),.request_state(ps),.request_tag(pt),
++  .response_valid(pd),.response_state(po),.response_tag(ot));
++ reg [255:0] requests[0:95],digests[0:95],captures[0:95];
++ integer ids[0:3],received=0,expected_hashes=0,observed=0,cycles=0,max_live=0,live=0;
++ reg [3:0] pending=0;
++ reg held=0;reg [1:0] hold_tag;reg [255:0] hold_digest,hold_capture;
++ string dir;
++ always #5 clk=~clk;
++ always @(posedge clk)begin
++  if(rst)begin pending=0;held=0;expected_hashes=0;observed=0;live=0;end
++  else begin
++   cycles=cycles+1;
++   if(cycles>100000)$fatal(1,"overlap timeout");
++   if(pd)observed=observed+1;
++   if(held && (!response_valid || response_tag!==hold_tag || response_digest!==hold_digest || response_capture!==hold_capture))$fatal(1,"response changed under backpressure");
++   held=response_valid && !response_ready;
++   hold_tag=response_tag;hold_digest=response_digest;hold_capture=response_capture;
++   if(request_valid && request_ready)begin pending[request_tag]=1;live=live+1;expected_hashes=expected_hashes+request_steps+1;end
++   if(live>max_live)max_live=live;
++   if(response_valid && response_ready)begin
++    if(!pending[response_tag])$fatal(1,"stale/duplicate completion");
++    for(integer b=0;b<32;b=b+1)if(b<node_bytes)begin
++     if(response_digest[b*8 +:8]!==digests[ids[response_tag]][b*8 +:8])$fatal(1,"digest id=%0d",ids[response_tag]);
++     if(response_capture[b*8 +:8]!==captures[ids[response_tag]][b*8 +:8])$fatal(1,"capture id=%0d",ids[response_tag]);
++    end
++    pending[response_tag]=0;received=received+1;live=live-1;
++   end
++  end
++ end
++ task load(input integer id,input integer tag);
++  begin
++   ids[tag]=id;request_tag=2'(tag);
++   node_bytes=requests[id][5:0];request_steps=requests[id][12:8];request_capture_after=requests[id][20:16];
++   step_domain=requests[id][31:24];seed_domain=step_domain==3 ? 6 : 5;
++   request_a=requests[id][38:32];request_b=requests[id][71:40];request_leaf=requests[id][81:72];
++   request_tree=requests[id][151:88];request_layer=requests[id][156:152];request_valid=1;
++  end
++ endtask
++ initial begin
++  if(!$value$plusargs("VECTORS=%s",dir))$fatal(1,"vectors required");
++  $readmemh({dir,"/chain_requests.mem"},requests);$readmemh({dir,"/chain_digest.mem"},digests);$readmemh({dir,"/chain_capture.mem"},captures);
++  repeat(3)@(negedge clk);rst=0;
++  // Cancel an occupied pipeline, then immediately reuse every tag.
++  load(0,0);do @(posedge clk);while(!request_ready);
++  @(negedge clk);request_valid=0;repeat(3)@(negedge clk);rst=1;
++  repeat(2)@(negedge clk);rst=0;
++  for(integer width=0;width<3;width=width+1)begin
++   for(integer base=0;base<32;base=base+PIPELINE)begin
++    response_ready=0;
++    for(integer t=0;t<PIPELINE && base+t<32;t=t+1)begin
++     load(width*32+base+t,t);
++     do @(posedge clk);while(!request_ready);
++     @(negedge clk);request_valid=0;
++     if(t==0)repeat(27)@(negedge clk); // second request arrives after short first chain can finish
++    end
++    repeat(420)@(negedge clk);
++    while(pending!=0)begin response_ready=($random & 3)!=0;@(negedge clk);end
++    response_ready=0;
++    if(hash_count!=expected_hashes || permutation_count!=observed || observed!=expected_hashes)$fatal(1,"counters");
++   end
++  end
++  if(max_live<PIPELINE)$fatal(1,"no full overlap");
++  $display("CHAIN_OVERLAP_PASS U=%0d P=%0d cases=%0d max_live=%0d",UNROLL,PIPELINE,received,max_live);$finish;
++ end
++endmodule
+--- a/tb/unit/tb_mhbs_compact_shake_context_lane.sv
++++ b/tb/unit/tb_mhbs_compact_shake_context_lane.sv
+@@ -2,6 +2,7 @@
+ `default_nettype none
+ 
+ module tb_mhbs_compact_shake_context_lane;
++    parameter integer PIPELINE=1;
+     wire [5:0] node_bytes=16;
+     wire [383:0] chain_prefix_data=0;
+     logic clk = 1'b0;
+@@ -49,7 +50,7 @@
+ 
+     always #5 clk = ~clk;
+ 
+-    mhbs_compact_shake_context_lane #(.UNROLL(2)) dut (.*);
++    mhbs_compact_shake_context_lane #(.UNROLL(2),.PIPELINE(PIPELINE)) dut (.batch_mode(1'b0),.batch_valid(1'b0),.batch_state(1600'd0),.batch_tag(2'd0),.batch_ready(),.batch_done(),.batch_digest(),.batch_result_tag(),.*);
+ 
+     task automatic tick;
+         begin @(posedge clk); #1; end
+--- /dev/null
++++ b/tb/unit/tb_mhbs_keccak_pipeline.sv
+@@ -0,0 +1,46 @@
++`timescale 1ns/1ps
++module tb_mhbs_keccak_pipeline;
++ parameter integer UNROLL=1,PIPELINE=2;
++ logic clk=0,rst=1,request_valid=0;
++ wire request_ready,response_valid;
++ logic [1599:0] request_state;
++ logic [1:0] request_tag;
++ wire [1599:0] response_state;
++ wire [1:0] response_tag;
++ reg [1599:0] expected[0:3];reg [3:0] outstanding=0;
++ integer sent=0,received=0,cycles=0;
++ `include "tb/reference/keccak_round_frozen.svh"
++ mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
++ always #5 clk=~clk;
++ always @(posedge clk)if(!rst)begin
++  cycles=cycles+1;
++  if(response_valid)begin
++   if(!outstanding[response_tag] || response_state!==expected[response_tag])$fatal(1,"permutation mismatch tag=%0d",response_tag);
++   outstanding[response_tag]=0;received=received+1;
++  end
++  if(request_valid && request_ready)begin
++   if(outstanding[request_tag])$fatal(1,"duplicate tag");
++   expected[request_tag]=request_state;
++   for(integer r=0;r<24;r=r+1)expected[request_tag]=keccak_round(expected[request_tag],5'(r));
++   outstanding[request_tag]=1;sent=sent+1;
++  end
++  if(cycles>10000)$fatal(1,"timeout");
++ end
++ initial begin
++  repeat(3)@(negedge clk);rst=0;
++  for(integer run=0;run<2;run=run+1)begin
++   for(integer n=0;n<40;n=n+1)begin
++    @(negedge clk);request_valid=0;request_tag=2'(n%PIPELINE);
++    while(outstanding[request_tag])@(negedge clk);
++    for(integer w=0;w<50;w=w+1)request_state[w*32 +:32]=n==0 ? 0 : n==1 ? '1 : $random;
++    request_valid=1;do @(posedge clk);while(!request_ready);
++    @(negedge clk);request_valid=0;
++    if(n%7==0)repeat(2)@(negedge clk);
++   end
++   if(run==0)begin rst=1;outstanding=0;repeat(3)@(negedge clk);rst=0;end
++  end
++  while(outstanding!=0)@(negedge clk);
++  repeat(40)@(negedge clk);
++  $display("KECCAK_PIPELINE_PASS U=%0d P=%0d accepted=%0d checked=%0d reset_cancel=1",UNROLL,PIPELINE,sent,received);$finish;
++ end
++endmodule
+--- a/tb/unit/tb_mhbs_recipe_padding.sv
++++ b/tb/unit/tb_mhbs_recipe_padding.sv
+@@ -1,5 +1,6 @@
+ `timescale 1ns/1ps
+ module tb_mhbs_recipe_padding;
++    parameter integer PIPELINE=1;
+     logic clk=0,rst=1,request_valid=0,response_ready=0;
+     logic [5:0] node_bytes;
+     wire request_ready,response_valid,error;
+@@ -12,7 +13,7 @@
+     logic [447:0] vectors[0:9];
+     integer i,j,cycles=0,old_hashes,old_permutations;
+     string vector_file;
+-    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (
++    mhbs_recipe_lane #(.PIPELINE(PIPELINE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.batch_mode(1'b0),.batch_request_valid(1'b0),
+         .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
+         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
+         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),
+--- a/tb/unit/tb_mhbs_v42_recipe_lane.sv
++++ b/tb/unit/tb_mhbs_v42_recipe_lane.sv
+@@ -29,7 +29,11 @@
+     logic [1023:0] vectors[0:CASES-1];
+     integer i,j,cycles=0,length;
+     logic [M*8-1:0] expected;
+-    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.*);
++    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
++     .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
++     .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
++     .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
++     .batch_response_digest(),.batch_response_capture(),.batch_hashes(),.batch_permutations(),.*);
+     always #5 clk=~clk;
+     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
+     always_comb for(integer b=0;b<N;b=b+1) begin

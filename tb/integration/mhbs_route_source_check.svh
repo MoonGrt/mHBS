@@ -12,7 +12,7 @@ always @(posedge clk) begin
    route_check_live=0; route_checks=route_checks+1;
   end
   case(`HBS_CORE.state)
-   14: if(!(`HBS_CORE.indexing!=1 && `HBS_CORE.chain_cursor+2<`HBS_CORE.endpoint_count)
+   14: if(!(`HBS_CORE.indexing!=1 && `HBS_CORE.chain_cursor+LANES<`HBS_CORE.endpoint_count)
        && `HBS_CORE.standalone_chain && `HBS_CORE.chain_descriptor[13:12]==0) begin
     route_expected={136'd0,`HBS_CORE.node_value};route_check_live=1;
    end

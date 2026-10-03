@@ -1,12 +1,16 @@
 # mHBS v4.2
 
-K2U2 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
+默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
 
-当前采用版本：**21,043 LUT、7,932 FF、1,112 LUTRAM、6252.250 等效 Slice**，BRAM/DSP 为零。这是共同核综合数据；没有该版本的新布线频率。详见[当前面积报告](docs/v4.2/LUT21k.md)和[六参数周期](docs/v4.2/Cycles.md)。
+此前封存的 L2U2P1 版本：**21,043 LUT、7,932 FF、1,112 LUTRAM、6252.250 等效 Slice**，BRAM/DSP 为零。这是共同核综合数据；没有该版本的新布线频率。详见[当前面积报告](docs/v4.2/LUT21k.md)和[六参数周期](docs/v4.2/Cycles.md)。
+
+新增 L/U/P 实验：L 为 lane 数、U 为每级轮展开数、P 为流水级数。P>1 时，普通哈希和多上下文链共用同一套 P×U 轮逻辑。本轮仅验证 128f sign，参见 [LUP ATP 报告](docs/v4.2/LUP_128f_Sign_ATP.md)。历史 K 与 L 同义；冻结证据的路径与名称保持原样。
 
 ## 构建与验证
 
 ```bash
+make lup-unit-test
+make lup-atp LUP_TAG=lup_shared_128f_20261007_v2  # 四组共同核综合，无布线
 make contract-test lint
 make smoke TAG=my_smoke       # 模型、单元、12 组 KG/SG、6 组 Verify 和封存证据
 make verify TAG=my_full       # 再含扩展、共同核等价、统计关闭、故障及完整 Verify
@@ -32,7 +36,7 @@ make reproduce-v42 reproduce-ku
 
 ## 文件与证据
 
-- `rtl/`：源清单中的 7 个生产模块；FORS 根和 WOTS 端点共用 `mhbs_value_store`。
+- `rtl/`：源清单中的生产模块；FORS 根和 WOTS 端点共用 `mhbs_value_store`。
 - `model/`、`tests/`、`tb/`：当前镜像生成、软件参考、协议和密码运算回归；旧命名的模型仍属于编译依赖。
 - `scripts/`、`experiments/v4.2/external_job_message/`：当前验证、综合、布线及 ROM 映射工具。
 - 当前源码快照、原始综合报告、DCP、完整回归日志和哈希由 `manifests/experiments/unified_hbs_v4.2/external_job_message/current_core.json` 指向。

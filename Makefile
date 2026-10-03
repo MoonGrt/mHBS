@@ -57,3 +57,13 @@ reproduce-v42:
 	$(PYTHON) scripts/reproduce_v42_external.py
 reproduce-ku:
 	$(PYTHON) scripts/verify_ku_archive.py
+
+LUP_TAG ?= lup_shared_128f_20261007_v2
+.PHONY: lup-unit-test lup-atp report-lu reproduce-lu
+lup-unit-test:
+	$(PYTHON) scripts/verify_lup_pipeline.py
+lup-atp:
+	$(PYTHON) scripts/run_lup_sign_atp.py --tag $(LUP_TAG)
+# Read-only historical report entry points; original KU archive paths stay frozen.
+report-lu: report-ku
+reproduce-lu: reproduce-ku

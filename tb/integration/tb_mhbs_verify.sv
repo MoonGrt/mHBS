@@ -6,7 +6,7 @@
 `endif
 module tb_mhbs_verify;
  parameter [255:0] PUBLIC_SEED=0,PUBLIC_ROOT=0;
- parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0;
+ parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0,LANES=2;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
@@ -29,7 +29,7 @@ module tb_mhbs_verify;
  integer hashes[0:1],permutations[0:1],zero_steps=0,full_steps=0;
  reg [31:0] rng=32'h15c0ffee;
  string image_dir,vector_dir;
- mhbs_top #(.PUBLIC_SEED(PUBLIC_SEED),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(2),
+ mhbs_top #(.LANES(LANES),.PUBLIC_SEED(PUBLIC_SEED),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(2),
  .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),
  .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;

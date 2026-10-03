@@ -29,7 +29,11 @@ module tb_mhbs_v42_recipe_lane;
     logic [1023:0] vectors[0:CASES-1];
     integer i,j,cycles=0,length;
     logic [M*8-1:0] expected;
-    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.*);
+    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
+     .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+     .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
+     .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
+     .batch_response_digest(),.batch_response_capture(),.batch_hashes(),.batch_permutations(),.*);
     always #5 clk=~clk;
     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
     always_comb for(integer b=0;b<N;b=b+1) begin

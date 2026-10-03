@@ -5,12 +5,21 @@
 module mhbs_recipe_lane #(
     parameter integer N = 16,
     parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
-    parameter integer UNROLL = 2,
+    parameter integer UNROLL = 2, PIPELINE = 1,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter [15:0] RECIPE_MASK = 16'hffff,
     parameter bit PROFILE_ENABLE = 0
 ) (
     input wire clk, rst,
+    input wire batch_mode,batch_request_valid,output wire batch_request_ready,
+    input wire [1:0] batch_request_tag,
+    input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
+    input wire [9:0] batch_leaf,input wire [6:0] batch_a,input wire [31:0] batch_b,
+    input wire [7:0] batch_seed_domain,batch_step_domain,
+    output wire batch_response_valid,input wire batch_response_ready,
+    output wire [1:0] batch_response_tag,
+    output wire [255:0] batch_response_digest,batch_response_capture,
+    output wire [31:0] batch_hashes,batch_permutations,
     input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
     input wire [63:0] request_recipe, request_step_recipe,
@@ -420,8 +429,31 @@ module mhbs_recipe_lane #(
             default:live_chain_prefix[511:0]={address,public_seed};
         endcase
     end
-    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
-        .clk, .rst, .node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
+    wire batch_perm_valid,batch_perm_ready,batch_perm_done;
+    wire [1599:0] batch_perm_state,batch_perm_digest;
+    wire [1:0] batch_perm_tag,batch_perm_result_tag;
+    generate if(PIPELINE>1)begin: chain_pipeline
+        mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
+            .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
+            .request_tag(batch_request_tag),.request_steps(batch_steps),.request_capture_after(batch_capture_after),
+            .request_capture(batch_capture_enable),.secret_seed,.public_seed,
+            .request_layer,.request_tree,.request_leaf(batch_leaf),.request_a(batch_a),.request_b(batch_b),
+            .seed_domain(batch_seed_domain),.step_domain(batch_step_domain),
+            .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
+            .response_digest(batch_response_digest),.response_capture(batch_response_capture),
+            .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
+            .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
+            .hash_count(batch_hashes),.permutation_count(batch_permutations));
+    end else begin
+        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
+        assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
+        assign batch_response_digest=0;assign batch_response_capture=0;
+        assign batch_hashes=0;assign batch_permutations=0;
+    end endgenerate
+    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
+        .clk, .rst, .batch_mode,.batch_valid(batch_perm_valid),.batch_ready(batch_perm_ready),
+        .batch_state(batch_perm_state),.batch_tag(batch_perm_tag),.batch_done(batch_perm_done),
+        .batch_digest(batch_perm_digest),.batch_result_tag(batch_perm_result_tag),.node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
         .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
         .fast_block_data(fast_block), .chain_enable(compact_chain),
         .chain_prefix(compact_chain),
