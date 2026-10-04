@@ -70,9 +70,9 @@ module tb_mhbs_external;
   always @(posedge clk)begin
    if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
    else begin
-    if(`HBS_CORE.lanes[lane].lane.sponge.permutation_complete)begin
+    if(`HBS_CORE.lanes[lane].lane.permutation_complete)begin
      observed_permutations[lane]=observed_permutations[lane]+1;
-     if(`HBS_CORE.lanes[lane].lane.sponge.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
+     if(`HBS_CORE.lanes[lane].lane.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
     end
     if(`HBS_CORE.lanes[lane].lane.batch_perm_done)begin
      observed_permutations[lane]=observed_permutations[lane]+1;observed_hashes[lane]=observed_hashes[lane]+1;

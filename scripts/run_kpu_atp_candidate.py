@@ -6,7 +6,7 @@ from v42_external_flow import ROOT,BASE,simulate_case,build_binary,run,write,sha
 from run_lup_sign_atp import snapshot,synth,check_same
 
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--candidate',required=True);ap.add_argument('--best',type=float,default=40892.87622);ap.add_argument('--experiment',default='kpu_atp_unified_20261007');ap.add_argument('--mandatory',action='store_true');a=ap.parse_args()
+ ap=argparse.ArgumentParser();ap.add_argument('--candidate',required=True);ap.add_argument('--best',type=float,default=40892.87622);ap.add_argument('--experiment',default='kpu_atp_unified_20261007');ap.add_argument('--mandatory',action='store_true');ap.add_argument('--cycle-reference');a=ap.parse_args()
  assert all(x and all(c.isalnum() or c in '_-' for c in x) for x in (a.experiment,a.candidate))
  out=ROOT/'manifests/experiments'/a.experiment/a.candidate;build=ROOT/'build'/a.experiment/a.candidate
  out.mkdir(parents=True,exist_ok=True);build.mkdir(parents=True,exist_ok=True)
@@ -19,7 +19,10 @@ def main():
  for p in (1,2,3,4):
   r=sim(f'K1P{p}U1',p);check_same(r,ref,cycles=False);points[p]=r
 
- if a.mandatory:
+ if a.cycle_reference:
+  cycle_ref=json.loads((ROOT/a.cycle_reference).read_text())
+  for p in (1,2,3,4):check_same(points[p],cycle_ref[str(p)])
+ elif a.mandatory:
   for p,c in enumerate((2619719,1410128,985022,770546),1):assert points[p]['sign_cycles']==c,(p,points[p]['sign_cycles'],c)
  write(out/'simulation.json',points);shutil.copytree(build/'logs',out/'simulation',dirs_exist_ok=True)
  ws=build/'source';ws.mkdir(exist_ok=True)

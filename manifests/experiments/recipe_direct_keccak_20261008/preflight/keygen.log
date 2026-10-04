@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 82, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 78, in main
+    with concurrent.futures.ThreadPoolExecutor(3) as pool:r=dict(pool.map(one,[(n,o) for n in NAMES if a.profile in ('all',n) for o in ('keygen','sign') if a.operation in ('all',o)]))
+                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 77, in one
+    n,o=case;return simulate_case(f,n+'_'+o+('_swap' if a.swap else '')+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,a.swap,partitioned=a.partition,profile_enable=not a.no_profile,unroll=a.unroll,pipeline=a.pipeline,lanes=a.lanes)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 60, in simulate_case
+    cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,swap,partitioned,profile_enable,unroll,pipeline,lanes)
+                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 56, in build_binary
+    run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_mhbs_external.sv'],d/'compile.log')
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 16, in run
+    with log.open('w') as f:subprocess.run(cmd,cwd=cwd,stdout=f,stderr=subprocess.STDOUT,check=True)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['verilator', '--binary', '--timing', '-O3', '-j', '8', '-Wno-fatal', '-Wno-WIDTH', '-Wno-UNOPTFLAT', '--top-module', 'tb_mhbs_external', "-GSECRET_SEED=256'h00000000000000000000000000000000d1d06dcbb9181a55aabce64467d6b81d", "-GSECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7", "-GPUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5", "-GRANDOMIZER=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5", "-GPUBLIC_ROOT=256'h0000000000000000000000000000000000000000000000000000000000000000", '-GOPERATION=0', '-GMESSAGE_BYTES=0', '-GSWAP=0', '-GPROFILE_ENABLE=1', '-GUNROLL=2', '-GPIPELINE=1', '-GLANES=2', '--Mdir', '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/v4.2/external_job_message/recipe_direct_keccak_kg_20261008/binaries/6f0c9d7fae1564fd/obj', 'rtl/hash_lane/mhbs_keccak.sv', 'rtl/hash_lane/mhbs_chain_pipeline_lane.sv', 'rtl/hash_lane/mhbs_recipe_lane.sv', 'rtl/memory/mhbs_value_store.sv', 'rtl/memory/mhbs_signature_store.sv', 'rtl/sequencer/mhbs_program_sequencer.sv', 'rtl/top/mhbs_hbs.sv', 'rtl/top/mhbs_top.sv', 'tb/integration/tb_mhbs_external.sv']' returned non-zero exit status 1.

@@ -1,6 +1,36 @@
-# K1P1U1～K1P4U1：统一 Keccak 与第二轮 ATP 优化
+# KPU 统一 Keccak：ATP 优化与当前综合测量
 
 范围：128f sign，共同核，xc7a200tffg1156-3，6.666667 ns 综合约束，统计关闭。**150 MHz 为假定值，未经布局布线验证。**
+
+## 当前结果（2026-10-08）
+
+当前采用 **recipe lane 直接驱动 Keccak** 的实现，已删除 compact SHAKE 包装模块。下面合并该版本的 K1P1U1～K1P4U1 测量与最新 K1/K2 P1U1 测量；两次实验的八个生产 RTL 文件 SHA-256 完全一致，K1P1U1 重测面积和周期也完全一致。K3/K4 未扩展、未测量。
+
+| 配置 | LUT（含 LUTRAM） | FF | LUTRAM | BRAM36 | DSP | 等效 Slice | 计算周期 | 总周期 | Hash | 置换 | 时间 ms | ATP Slice·ms | 有效轮利用率 |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| K1P1U1 | 13,725 | 5,725 | 1,112 | 0 | 0 | 4,146.875 | 2,619,719 | 2,619,724 | 104,937 | 105,641 | 17.464793 | 72,424.315 | 96.78% |
+| K1P2U1 | 18,649 | 7,349 | 1,716 | 0 | 0 | 5,580.875 | 1,402,428 | 1,402,433 | 104,937 | 105,641 | 9.349520 | 52,178.502 | 90.39% |
+| K1P3U1 | 21,152 | 8,975 | 1,716 | 0 | 0 | 6,409.875 | 979,434 | 979,439 | 104,937 | 105,641 | 6.529560 | 41,853.663 | 86.29% |
+| K1P4U1 | 22,782 | 10,591 | 1,716 | 0 | 0 | 7,019.375 | 766,014 | 766,019 | 104,937 | 105,641 | 5.106760 | 35,846.263 | 82.75% |
+| K2P1U1 | 18,079 | 7,939 | 1,112 | 0 | 0 | 5,512.125 | 1,399,919 | 1,399,924 | 104,937 | 105,641 | 9.332793 | 51,443.523 | 90.55% |
+
+当前最低 ATP 为 **K1P4U1：35,846.263 Slice·ms**，较第二轮最终候选 `c3_batch_control` 的 35,966.911 下降 **0.335%**。K2P1U1 相对 K1P1U1 计算周期减少 **46.56%**，等效面积增加 **32.92%**。
+
+两组最新 K1/K2 签名均逐字节通过软件参考比较，Hash/置换次数一致，综合确认统计寄存器已裁剪。本次 K1/K2 测量未修改生产 RTL，也未重复整套回归；结构重构阶段的完整验证范围见 [recipe 直接驱动 Keccak 报告](Recipe_Direct_Keccak.md)。所有时间、ATP 均按假定 150 MHz 计算，不代表实际布线频率。
+
+当前分层面积报告：
+
+- [K1P1U1](../../manifests/experiments/k1k2_p1u1_current_20261008/K1P1U1/core_hierarchical.rpt)
+- [K1P2U1](../../manifests/experiments/recipe_direct_keccak_20261008/direct/K1P2U1/core_hierarchical.rpt)
+- [K1P3U1](../../manifests/experiments/recipe_direct_keccak_20261008/direct/K1P3U1/core_hierarchical.rpt)
+- [K1P4U1](../../manifests/experiments/recipe_direct_keccak_20261008/direct/K1P4U1/core_hierarchical.rpt)
+- [K2P1U1](../../manifests/experiments/k1k2_p1u1_current_20261008/K2P1U1/core_hierarchical.rpt)
+
+新增测量的源码快照、日志和原始数据分别保存在 [recipe 重构实验](../../manifests/experiments/recipe_direct_keccak_20261008/) 与 [K1/K2 实验](../../manifests/experiments/k1k2_p1u1_current_20261008/)。数据文件见 [recipe CSV](Recipe_Direct_Keccak.csv)、[recipe JSON](Recipe_Direct_Keccak.json)、[K1/K2 CSV](../../manifests/experiments/k1k2_p1u1_current_20261008/results.csv)、[K1/K2 JSON](../../manifests/experiments/k1k2_p1u1_current_20261008/results.json)；[K1/K2 独立报告](../../manifests/experiments/k1k2_p1u1_current_20261008/report.md)保留复现命令。
+
+## 第二轮优化历史（2026-10-07）
+
+以下为 recipe 直接驱动 Keccak 之前的实验，保留原始数值和验收结论。本文同名 CSV/JSON 仍对应本节历史实验，当前结果以以上链接的数据文件为准。
 
 原始基线为 `9e412986`，其 RTL 与上一轮最终测量快照一致。结构统一按用户要求必须保留；其余候选仅在四组最低 ATP 严格下降且回归通过时保留。
 
@@ -13,7 +43,7 @@
 | c3_batch_control | 压缩 WOTS 批次及输出控制 | 35966.911 | K1P4U1 | 保留 |
 | c4_round_decode | U1 遍次计数与固定级轮常量译码 | 36064.577 | K1P4U1 | 撤回 |
 
-最终保留 `c3_batch_control`；最低 ATP **35966.911**，相对原始基线变化 **-12.046%**，相对统一后基线变化 **-7.429%**。
+该轮最终保留 `c3_batch_control`；最低 ATP **35966.911**，相对原始基线变化 **-12.046%**，相对统一后基线变化 **-7.429%**。
 
 | 配置 | LUT | FF | LUTRAM | BRAM36 | DSP | 等效 Slice | 计算周期 | 总周期 | Hash | 置换 | 时间 ms | ATP Slice·ms | 有效轮利用率 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -31,15 +61,15 @@
 
 等效 Slice = LUT/4 + FF/8 + BRAM36×232.4 + DSP×102.4；LUT 已含 LUTRAM，不重复计数。时间(ms)=计算周期/150000；ATP=等效 Slice×时间。有效轮利用率=置换次数×24/(K×P×U×计算周期)，是有效轮吞吐比例，不是每个流水级的实测占用率。面积不含外部 ROM 和签名存储。
 
-统一结构只保留 compact lane 内一套 P×U 轮实例，`mhbs_keccak` 是唯一组合轮实现。删除独立 pipeline 模块和重复轮函数；P1 不增加启动/返回周期，P>1 保留反馈和共享末级状态。测试适配器仅存在于 testbench，不进入综合。
+该轮统一结构只保留 compact lane 内一套 P×U 轮实例，`mhbs_keccak` 是唯一组合轮实现。删除独立 pipeline 模块和重复轮函数；P1 不增加启动/返回周期，P>1 保留反馈和共享末级状态。测试适配器仅存在于 testbench，不进入综合。
 
 验证：四组签名逐字节对照软件参考，Hash/置换次数保持 104937/105641；结构统一的四组周期与原始基线一致。保留候选通过统计关闭、停顿/复位重放、共同核等价、异常退出和默认 K2P1U2/K2P4U1 检查。候选特定测试覆盖块构造、capture 禁用/未命中/复用、轮号等价、交错返回、多块填充。详细通过记录以各候选 validation.json、unit_evidence 及定向测试目录为准。
 
 最终选择源码另通过 17 项基础单元测试、14 项 Python 流程测试及 P4 签名复跑；RTL 哈希与所选综合快照逐文件一致，20 组综合网表均确认统计寄存器为零。
 
-第四项通过轮译码、随机置换、四组正常签名及基础单元检查，但最低 ATP 高于第三项，未进入完整 ATP 收益候选回归，已撤回。最终仍保留原轮号译码；不能将第四项 P3 的面积作为当前 P3 面积。
+第四项通过轮译码、随机置换、四组正常签名及基础单元检查，但最低 ATP 高于第三项，未进入完整 ATP 收益候选回归，已撤回。最终仍保留原轮号译码；不能将第四项 P3 的面积作为验收版本的 P3 面积。
 
 独立证据目录：`manifests/experiments/kpu_atp_unified_20261007/`。所有候选保留源码快照、补丁、配置、完整日志和分层报告；撤回的测量不代表当前 RTL。
-当前分层面积报告：`manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P<n>U1/core_hierarchical.rpt`。
+该轮验收版本分层面积报告：`manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P<n>U1/core_hierarchical.rpt`。
 
-本轮未布线、未提交、未推送；历史频率和旧四核结果未作为本轮实测对照。
+该轮未布线、未提交、未推送；历史频率和旧四核结果未作为该轮实测对照。

@@ -18,15 +18,15 @@ OBSERVER = r'''
  genvar prof_i;
  generate for(prof_i=0;prof_i<2;prof_i=prof_i+1)begin: prof_observe
   assign prof_run[prof_i]=!`HBS_CORE.execution_rst &&
-      `HBS_CORE.lanes[prof_i].lane.sponge.lane_state==2;
+      `HBS_CORE.lanes[prof_i].lane.hash_state==2;
   assign prof_prepare[prof_i]=!`HBS_CORE.execution_rst &&
       (`HBS_CORE.lanes[prof_i].lane.state==1 || `HBS_CORE.lanes[prof_i].lane.state==2);
   assign prof_transfer[prof_i]=!`HBS_CORE.execution_rst && (
       (`HBS_CORE.lanes[prof_i].lane.request_valid && `HBS_CORE.lanes[prof_i].lane.request_ready) ||
       (`HBS_CORE.lanes[prof_i].lane.response_valid && `HBS_CORE.lanes[prof_i].lane.response_ready) ||
-      (`HBS_CORE.lanes[prof_i].lane.sponge.context_valid && `HBS_CORE.lanes[prof_i].lane.sponge.context_ready) ||
-      (`HBS_CORE.lanes[prof_i].lane.sponge.fast_block_valid && `HBS_CORE.lanes[prof_i].lane.sponge.fast_block_ready) ||
-      (`HBS_CORE.lanes[prof_i].lane.sponge.block_valid && `HBS_CORE.lanes[prof_i].lane.sponge.block_ready));
+      (`HBS_CORE.lanes[prof_i].lane.state==1 && `HBS_CORE.lanes[prof_i].lane.hash_ready) ||
+      (`HBS_CORE.lanes[prof_i].lane.state==1 && `HBS_CORE.lanes[prof_i].lane.fixed_block && `HBS_CORE.lanes[prof_i].lane.fast_ready) ||
+      (`HBS_CORE.lanes[prof_i].lane.staged_valid && `HBS_CORE.lanes[prof_i].lane.block_ready));
  end endgenerate
  integer prof_total=0,prof_hash=0,prof_xfer=0,prof_other=0;
  integer prof_lane0=0,prof_lane1=0,prof_both=0,prof_prepare_all=0,prof_prepare_overlap=0;

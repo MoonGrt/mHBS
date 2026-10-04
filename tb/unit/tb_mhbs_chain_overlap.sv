@@ -19,16 +19,24 @@ module tb_mhbs_chain_overlap;
  logic [1:0] read_tag=0;wire [255:0] read_digest,read_capture;
  wire pv,pr,pd;wire [1599:0] ps,po;wire [1:0] pt,ot;
  wire [31:0] hash_count,permutation_count;
- mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(
-  .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_tag,
-  .request_steps,.request_capture_after,.request_capture,.secret_seed,.public_seed,
-  .request_layer,.request_tree,.request_leaf,.request_a,.request_b,.seed_domain,.step_domain,
-  .response_valid,.response_ready,.response_tag,.response_digest,.response_capture,
-  .perm_valid(pv),.perm_ready(pr),.perm_state(ps),.perm_tag(pt),.perm_done(pd),.perm_digest(po),.perm_result_tag(ot),
-  .read_tag,.read_digest,.read_capture,.hash_count,.permutation_count);
- mhbs_batch_test_driver #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) pipe(
-  .clk,.rst,.request_valid(pv),.request_ready(pr),.request_state(ps),.request_tag(pt),
-  .response_valid(pd),.response_state(po),.response_tag(ot));
+ mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(1),.PROFILE_ENABLE(1)) dut(
+  .clk,.rst,.node_bytes,.batch_mode(1'b1),
+  .batch_request_valid(request_valid),.batch_request_ready(request_ready),.batch_request_tag(request_tag),
+  .batch_steps(request_steps),.batch_capture_after(request_capture_after),.batch_capture_enable(request_capture),
+  .secret_seed,.public_seed,.request_layer,.request_tree,
+  .batch_leaf(request_leaf),.batch_a(request_a),.batch_b(request_b),
+  .batch_seed_domain(seed_domain),.batch_step_domain(step_domain),
+  .batch_response_valid(response_valid),.batch_response_ready(response_ready),.batch_response_tag(response_tag),
+  .batch_response_digest(response_digest),.batch_response_capture(response_capture),
+  .batch_read_tag(read_tag),.batch_read_digest(read_digest),.batch_read_capture(read_capture),
+  .batch_hashes(hash_count),.batch_permutations(permutation_count),
+  .request_valid(1'b0),.request_recipe(64'd0),.request_step_recipe(64'd0),.request_chain(1'b0),
+  .request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
+  .secret_prf(256'd0),.root(256'd0),.randomizer(256'd0),.identifier(128'd0),
+  .message_buffer(696'd0),.message_length(7'd0),.request_leaf(10'd0),.request_a(7'd0),.request_b(32'd0),
+  .request_left(256'd0),.request_right(256'd0),.list_data0(256'd0),.list_data1(256'd0),.response_ready(1'b0));
+ assign pd=dut.batch_perm_done;
+ `include "tb/unit/mhbs_recipe_round_check.svh"
  reg [255:0] requests[0:95],digests[0:95],captures[0:95];
  integer ids[0:3],received=0,expected_hashes=0,observed=0,cycles=0,max_live=0,live=0;
  reg [3:0] pending=0;

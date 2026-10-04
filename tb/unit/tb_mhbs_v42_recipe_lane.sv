@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 module tb_mhbs_v42_recipe_lane;
-    parameter integer PROFILE=0;
+    parameter integer PROFILE=0,PIPELINE=1,UNROLL=2;
+    parameter bit SHARED_STATE=1;
     parameter [15:0] MASK=16'h101e;
     parameter integer CASES=7;
     localparam integer N=PROFILE==0 ? 16 : PROFILE==1 ? 24 : 32;
@@ -29,11 +30,29 @@ module tb_mhbs_v42_recipe_lane;
     logic [1023:0] vectors[0:CASES-1];
     integer i,j,cycles=0,length;
     logic [M*8-1:0] expected;
-    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
+    mhbs_recipe_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
      .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
      .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
      .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
      .batch_response_digest(),.batch_response_capture(),.batch_read_tag(2'd0),.batch_read_digest(),.batch_read_capture(),.batch_hashes(),.batch_permutations(),.*);
+    wire ref_ready,ref_valid,ref_error;
+    wire [391:0] ref_value;wire [255:0] ref_capture;
+    wire [31:0] ref_hashes,ref_perms;
+    wire [7:0] ref_index0,ref_index1;
+    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) frozen(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
+     .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+     .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
+     .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
+     .batch_response_digest(),.batch_response_capture(),.batch_read_tag(2'd0),.batch_read_digest(),.batch_read_capture(),.batch_hashes(),.batch_permutations(),.request_ready(ref_ready),.response_valid(ref_valid),.response_value(ref_value),.response_capture(ref_capture),.error(ref_error),.hash_count(ref_hashes),.permutation_count(ref_perms),.list_index0(ref_index0),.list_index1(ref_index1),.*);
+    always @(negedge clk)if(!rst)begin
+      if({request_ready,response_valid,error,hash_count,permutation_count} !== {ref_ready,ref_valid,ref_error,ref_hashes,ref_perms})
+        $fatal(1,"pre-direct handshake/counter cycle mismatch");
+      if(response_valid && response_value!==ref_value)$fatal(1,"pre-direct digest mismatch");
+      if({list_index0,list_index1}!=={ref_index0,ref_index1})$fatal(1,"pre-direct list timing");
+      if(response_valid && request_capture && response_capture!==ref_capture)$fatal(1,"pre-direct capture mismatch");
+    end
+    `include "tb/unit/mhbs_recipe_round_check.svh"
+
     always #5 clk=~clk;
     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
     always_comb for(integer b=0;b<N;b=b+1) begin

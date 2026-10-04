@@ -20,9 +20,9 @@ for n in (16,24,32):
   requests.append(f'{req:064x}');digests.append(f'{int.from_bytes(val,"little"):064x}');captures.append(f'{int.from_bytes(captured,"little"):064x}')
 for name,values in [('chain_requests',requests),('chain_digest',digests),('chain_capture',captures)]:
  (OUT/(name+'.mem')).write_text('\n'.join(values)+'\n')
-sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()+['tb/unit/mhbs_batch_test_driver.sv']
+sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()+['tb/reference/mhbs_shake_pre_direct_ref.sv','tb/reference/mhbs_recipe_pre_direct_ref.sv']
 records=[]
-for top in ('tb_mhbs_keccak_pipeline','tb_mhbs_chain_overlap'):
+for top in ('tb_mhbs_chain_overlap',):
  for u,p in ((1,2),(1,3),(1,4),(2,2)):
   name=f'{top}_U{u}P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
   with log.open('w') as f:
@@ -43,11 +43,11 @@ for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
 padding_file=OUT/'recipe_padding.mem'
 padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
 
-for top in ('tb_mhbs_compact_shake_context_lane','tb_mhbs_recipe_padding'):
+for top in ('tb_mhbs_v42_recipe_lane','tb_mhbs_recipe_padding'):
  for p in (1,2,3,4):
   name=f'{top}_P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
   with log.open('w') as f:
-   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={padding_file}']):
+   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary)]+([f'+VECTORS={padding_file}'] if top=='tb_mhbs_recipe_padding' else [])):
     r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
     if r.returncode:print(log.read_text()[-2000:]);raise SystemExit(r.returncode)
   assert '_PASS' in log.read_text(),name

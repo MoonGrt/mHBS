@@ -1,0 +1,35 @@
+Traceback (most recent call last):
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/verify_v42_verify.py", line 94, in <module>
+    if __name__=='__main__':main()
+                            ^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/verify_v42_verify.py", line 91, in main
+    with concurrent.futures.ThreadPoolExecutor(3) as pool:results=dict(pool.map(profile,NAMES))
+                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 619, in result_iterator
+    yield _result_or_cancel(fs.pop())
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 317, in _result_or_cancel
+    return fut.result(timeout)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/usr/lib/python3.12/concurrent/futures/thread.py", line 58, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/verify_v42_verify.py", line 50, in profile
+    reference=case('normal');assert reference['zero'] and reference['full']
+              ^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/verify_v42_verify.py", line 40, in case
+    exe=binary(swap,stats,part,bad_root,root_bit,root_noise);log=vec/(label+'.log')
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/verify_v42_verify.py", line 36, in binary
+    run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_verify',*options,'--Mdir',str(exe.parent),*sources,'tb/integration/tb_mhbs_verify.sv'],d/'compile.log')
+  File "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/scripts/v42_external_flow.py", line 16, in run
+    with log.open('w') as f:subprocess.run(cmd,cwd=cwd,stdout=f,stderr=subprocess.STDOUT,check=True)
+                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['verilator', '--binary', '--timing', '-O3', '-j', '8', '-Wno-fatal', '-Wno-WIDTH', '-Wno-UNOPTFLAT', '--top-module', 'tb_mhbs_verify', "-GPUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5", "-GPUBLIC_ROOT=256'h000000000000000000000000000000003d774653892d5f3695b370c7cdab63ff", '-GMESSAGE_BYTES=1', '-GNODE_BYTES=16', '-GNODES=1068', '-GSWAP=0', '-GPROFILE_ENABLE=1', '--Mdir', '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/v4.2/external_job_message/recipe_direct_keccak_20261008/verify/slh_128f/s0_p1_c0_r0_b0_h0/obj', 'rtl/hash_lane/mhbs_keccak.sv', 'rtl/hash_lane/mhbs_chain_pipeline_lane.sv', 'rtl/hash_lane/mhbs_recipe_lane.sv', 'rtl/memory/mhbs_value_store.sv', 'rtl/memory/mhbs_signature_store.sv', 'rtl/sequencer/mhbs_program_sequencer.sv', 'rtl/top/mhbs_hbs.sv', 'rtl/top/mhbs_top.sv', 'tb/integration/tb_mhbs_verify.sv']' returned non-zero exit status 1.

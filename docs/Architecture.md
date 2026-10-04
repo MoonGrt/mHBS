@@ -10,9 +10,9 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
   └─ mhbs_hbs：宏操作调度、树归约、消息缓冲、结果输出
       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
       ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
-      └─ 两个 mhbs_recipe_lane：Hash 输入构造与局部链反馈
-          └─ mhbs_compact_shake_context_lane：统一 SHAKE 状态、吸收与流水控制
-              └─ P×U 个 mhbs_keccak：每级 U 轮，默认 P1U2
+      └─ mhbs_recipe_lane（LANES 个）：块构造、吸收、状态、链反馈与流水控制
+          ├─ mhbs_chain_pipeline_lane（P>1）：多上下文链任务与 capture 管理
+          └─ P×U 个 mhbs_keccak：每级 U 轮，默认 P1U2
 ```
 
 五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；双 lane 并行位于宏操作内部。逻辑 lane 0 支持完整 recipe 集，逻辑 lane 1 主要执行链计算；`SWAP_PHYSICAL_LANES` 可交换物理位置，逻辑能力不变。
@@ -73,6 +73,8 @@ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保�
 
 K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链模块保留单份结果/capture，并向控制器提供按 tag 读口；K1、U1、P>1 签名的 WOTS 完成后按链索引直接写端点，capture 按序输出。普通 sponge 在 K1、U1、P>1 时复用流水末级状态，仅在初始化、吸收和链反馈时通过内部写口修改它。连续补任务候选因 ATP 增加撤回，当前仍保留批次边界。
 
-统一 Keccak 实现：`mhbs_compact_shake_context_lane` 内直接展开 P 个级、每级 U 个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 `mhbs_keccak_pipeline`。P1 使用唯一状态寄存器及组合轮末完成判断，保持原周期；P>1 保留普通 sponge 与交错链共享流水和末级状态复用。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
+统一 Keccak 实现：`mhbs_recipe_lane` 内直接展开 P 个级、每级 U 个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 SHAKE 包装层或 `mhbs_keccak_pipeline`。固定块和链反馈共用 `fast_block`，已移除未启用的通用链模板与独立反馈构造。P1 使用唯一状态寄存器及组合轮末完成判断，保持原周期；P>1 保留普通 sponge 与交错链共享流水和末级状态复用。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
 
 第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；K1U1、P>1 sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。
+
+本轮 recipe 直接驱动 Keccak 的源码、周期等价和综合结果见 [Recipe_Direct_Keccak.md](v4.2/Recipe_Direct_Keccak.md)。冻结旧实现仅用于测试，未列入生产源码清单。

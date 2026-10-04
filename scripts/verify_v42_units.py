@@ -14,11 +14,15 @@ OUT=ROOT/'manifests/experiments/unified_hbs_v4.2/unit'/logic_id(identity)
 BUILD=ROOT/'build/v4.2/unit'/logic_id(identity)
 OUT.mkdir(parents=True,exist_ok=True);BUILD.mkdir(parents=True,exist_ok=True)
 rtl=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()
+refs=['tb/reference/mhbs_shake_pre_direct_ref.sv','tb/reference/mhbs_recipe_pre_direct_ref.sv']
+legacy=BUILD/'mhbs_recipe_lane_value_narrow_ref.sv'
+legacy.write_text((ROOT/'tb/reference/mhbs_recipe_lane_value_narrow_ref.sv').read_text().replace('mhbs_compact_shake_context_lane','mhbs_shake_pre_direct_ref'))
 records={}
 used_sources=set()
 
 def one(name,top,files,params=(),runs=((),)):
     assert logic()==identity
+    files=list(dict.fromkeys(files+refs))
     used_sources.update(files)
     binary=BUILD/(name+'.vvp')
     with (OUT/(name+'.log')).open('w') as log:
@@ -40,8 +44,8 @@ one('address_width','tb_mhbs_address_width',rtl+['tb/unit/tb_mhbs_address_width.
 # implementation for both production masks and the generic compatibility path.
 for mask in (0x101e,0x0006,0xffff):
     one('slh_fixed_block_'+format(mask,'04x'),'tb_mhbs_slh_fixed_block',
-        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
-         'rtl/hash_lane/mhbs_recipe_lane.sv','tb/reference/mhbs_recipe_lane_value_narrow_ref.sv',
+        ['rtl/hash_lane/mhbs_keccak.sv',
+         'rtl/hash_lane/mhbs_recipe_lane.sv',str(legacy.relative_to(ROOT)),
          'tb/unit/tb_mhbs_slh_fixed_block.sv'],
         [f'-Ptb_mhbs_slh_fixed_block.MASK={mask}'])
 
@@ -53,12 +57,9 @@ one('endpoint_68_single_read','tb_mhbs_value_store',
     ['-Ptb_mhbs_value_store.DEPTH=68','-Ptb_mhbs_value_store.SINGLE_READ=1'])
 one('slh64_sequencer','tb_mhbs_slh64_sequencer',
     ['rtl/sequencer/mhbs_program_sequencer.sv','tb/unit/tb_mhbs_slh64_sequencer.sv'])
-one('sponge','tb_mhbs_compact_shake_context_lane',
-    ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
-     'tb/unit/tb_mhbs_compact_shake_context_lane.sv'])
 for p in range(3):
     one('recipe_'+str(p),'tb_mhbs_v42_recipe_lane',
-        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+        ['rtl/hash_lane/mhbs_keccak.sv',
          'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'],
         [f'-Ptb_mhbs_v42_recipe_lane.PROFILE={p}'])
 # Independent SHAKE vectors alternate compact and ordinary feedback chains,
@@ -85,7 +86,7 @@ for profile,n in enumerate((16,24,32)):
     path=OUT/f'chain_capture_{profile}.mem'
     path.write_text(''.join(f'{v:0256x}\n' for v in vectors))
     one('chain_capture_'+str(profile),'tb_mhbs_v42_recipe_lane',
-        ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+        ['rtl/hash_lane/mhbs_keccak.sv',
          'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'],
         [f'-Ptb_mhbs_v42_recipe_lane.PROFILE={profile}',
          '-Ptb_mhbs_v42_recipe_lane.MASK=6',f'-Ptb_mhbs_v42_recipe_lane.CASES={len(vectors)}'],
@@ -104,7 +105,7 @@ for n,shape,m in [(16,4,87),(32,3,72),(24,4,65),(32,4,39),(24,4,64),
 padding_file=OUT/'recipe_padding.mem'
 padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
 one('recipe_padding','tb_mhbs_recipe_padding',
-    ['rtl/hash_lane/mhbs_keccak.sv','rtl/hash_lane/mhbs_compact_shake_context_lane.sv',
+    ['rtl/hash_lane/mhbs_keccak.sv',
      'rtl/hash_lane/mhbs_recipe_lane.sv','tb/unit/tb_mhbs_recipe_padding.sv'],
     runs=((f'+VECTORS={padding_file.relative_to(ROOT)}',),))
 assert logic()==identity

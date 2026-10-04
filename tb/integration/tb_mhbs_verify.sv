@@ -41,10 +41,10 @@ module tb_mhbs_verify;
  generate for(l=0;l<2;l=l+1)begin: observe
   always @(posedge clk)begin
    if(`HBS_CORE.execution_rst)begin hashes[l]=0;permutations[l]=0;end
-   else if(`HBS_CORE.lanes[l].lane.sponge.lane_state==2 &&
-           `HBS_CORE.lanes[l].lane.sponge.round_index+2>=24)begin
+   else if(`HBS_CORE.lanes[l].lane.hash_state==2 &&
+           `HBS_CORE.lanes[l].lane.round_index+2>=24)begin
     permutations[l]=permutations[l]+1;
-    if(`HBS_CORE.lanes[l].lane.sponge.running_last)hashes[l]=hashes[l]+1;
+    if(`HBS_CORE.lanes[l].lane.running_last)hashes[l]=hashes[l]+1;
    end
   end
  end endgenerate

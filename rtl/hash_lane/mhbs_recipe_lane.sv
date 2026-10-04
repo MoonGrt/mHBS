@@ -137,10 +137,10 @@ module mhbs_recipe_lane #(
     wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
     wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
     wire stream_last = rate_offset+13'd136 > input_length;
-    wire hash_ready, block_ready, fast_ready, digest_valid, finish_valid;
+    wire hash_ready, block_ready, fast_ready, finish_valid;
     wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
     wire [N*8-1:0] compact_capture;
-    wire compact_capture_valid, hash_error;
+    logic hash_error;
     wire completed = finish_valid;
     wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
     assign response_value=digest;
@@ -422,15 +422,6 @@ module mhbs_recipe_lane #(
         end
     end
 
-    logic [(N+32)*8-1:0] live_chain_prefix;
-    always @* begin
-        live_chain_prefix=0;
-        case(node_bytes)
-            16:live_chain_prefix[383:0]={address,public_seed[127:0]};
-            24:live_chain_prefix[447:0]={address,public_seed[191:0]};
-            default:live_chain_prefix[511:0]={address,public_seed};
-        endcase
-    end
     wire batch_perm_valid,batch_perm_ready,batch_perm_done;
     wire [1599:0] batch_perm_state,batch_perm_digest;
     wire [1:0] batch_perm_tag,batch_perm_result_tag;
@@ -454,24 +445,286 @@ module mhbs_recipe_lane #(
         assign batch_read_digest=0;assign batch_read_capture=0;
         assign batch_hashes=0;assign batch_permutations=0;
     end endgenerate
-    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1),.SHARED_STATE(SHARED_STATE)) sponge (
-        .clk, .rst, .batch_mode,.batch_valid(batch_perm_valid),.batch_ready(batch_perm_ready),
-        .batch_state(batch_perm_state),.batch_tag(batch_perm_tag),.batch_done(batch_perm_done),
-        .batch_digest(batch_perm_digest),.batch_result_tag(batch_perm_result_tag),.node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
-        .fast_block_valid(state == START && fixed_block), .fast_block_ready(fast_ready),
-        .fast_block_data(fast_block), .chain_enable(compact_chain),
-        .chain_prefix(compact_chain),
-        .chain_prefix_preserve_counter(request_step_recipe[55:48] == 3),
-        .chain_prefix_domain(request_step_recipe[50:48]),
-        .chain_count(request_steps+5'd1),
-        .capture_enable(compact_chain ? request_capture : capture_single),
-        .capture_after(compact_chain ? request_capture_after+5'd1 : 5'd1),
-        .block_valid(staged_valid), .block_ready, .block_data(staged_data),
-        .block_last(staged_last), .response_valid(digest_valid), .response_digest(digest),
-        .chain_feedback_valid,.chain_feedback_counter,
-        .finish_valid, .finish_digest, .capture_digest(compact_capture),
-        .capture_valid(compact_capture_valid), .error(hash_error)
-    );
+    // Direct Keccak datapath and absorb/chain control.
+    localparam logic [1:0] HASH_IDLE = 2'd0;
+    localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
+    localparam logic [1:0] HASH_RUN = 2'd2;
+
+    logic [1:0] hash_state;
+    logic saved_chain_enable;
+    logic saved_chain_prefix;
+    logic saved_chain_prefix_preserve_counter;
+    logic [4:0] saved_chain_count;
+    logic saved_capture_enable;
+    logic [4:0] saved_capture_after;
+    logic first_block;
+    logic running_last;
+    logic [3:0] append_index;
+
+    wire [24:0] state_write_enable;
+    wire [1599:0] state_write_data;
+    logic [1599:0] sponge_state;
+    logic [4:0] chains_remaining;
+    logic [3:0] chain_counter;
+    logic [4:0] chain_iteration;
+    logic [N*8-1:0] captured_value;
+    logic [4:0] round_index;
+    wire [1599:0] advanced_state;
+    wire round_complete;
+    wire round_update;
+    wire [3:0] counter_next = chain_counter + 1'b1;
+    wire [3:0] transition_counter =
+        saved_chain_prefix && chain_iteration == 1
+            ? chain_counter : counter_next;
+
+    // One P-stage datapath for both serial and interleaved execution. P1
+    // writes its sole state through the sponge word enables, without launch
+    // or return bubbles. P>1 carries valid/round/tag through the same stages.
+    localparam integer ROUNDS=UNROLL*PIPELINE;
+    logic [1599:0] state_reg [0:PIPELINE-1];
+    logic [PIPELINE-1:0] stage_valid;
+    logic [4:0] stage_base [0:PIPELINE-1];
+    logic [1:0] stage_tag [0:PIPELINE-1];
+    logic sent;
+    wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
+        && stage_base[PIPELINE-1]+ROUNDS<24;
+    wire ready=!rst && !recycle;
+    wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
+    wire normal_valid=hash_state==HASH_RUN && !sent;
+    wire issue_valid=batch_mode ? batch_perm_valid : normal_valid;
+    wire [1599:0] issue_state=batch_mode ? batch_perm_state : sponge_state;
+    wire [1:0] issue_tag=batch_mode ? batch_perm_tag : 2'd0;
+    wire [1599:0] finished_state=state_reg[PIPELINE-1];
+    wire [1599:0] stage_result[0:PIPELINE-1];
+    for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
+        wire [1599:0] rounds[0:UNROLL];
+        wire [4:0] start_round;
+        wire [1:0] source_tag;
+        wire source_valid;
+        if(s==0)begin: input_stage
+            assign rounds[0]=PIPELINE==1 ? sponge_state
+                : recycle ? state_reg[PIPELINE-1] : issue_state;
+            assign start_round=PIPELINE==1 ? round_index
+                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
+            assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
+            assign source_valid=PIPELINE>1 && (recycle || issue_valid);
+        end else begin: following_stage
+            assign rounds[0]=state_reg[s-1];
+            assign start_round=stage_base[s-1];
+            assign source_tag=stage_tag[s-1];
+            assign source_valid=stage_valid[s-1];
+        end
+        for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
+            mhbs_keccak round_logic(.state_in(rounds[r]),
+                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
+        end
+        assign stage_result[s]=rounds[UNROLL];
+        for(genvar w=0;w<25;w=w+1)begin: words
+            always_ff @(posedge clk)if(!rst)begin
+                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
+                    state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
+                else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
+            end
+        end
+        always_ff @(posedge clk)begin
+            if(rst)stage_valid[s]<=0;
+            else begin
+                stage_valid[s]<=source_valid;
+                if(source_valid)begin stage_base[s]<=start_round;stage_tag[s]<=source_tag;end
+            end
+        end
+    end
+    assign batch_perm_ready=PIPELINE>1 && batch_mode && ready;
+    assign batch_perm_done=PIPELINE>1 && batch_mode && finished;
+    assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
+    assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : 2'd0;
+    if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
+    assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
+    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
+    assign round_update=hash_state==HASH_RUN && (PIPELINE==1 || round_complete);
+    always_ff @(posedge clk)begin
+        if(rst)sent<=0;
+        else if(!batch_mode)begin
+            if(normal_valid && ready)sent<=1;
+            if(finished)sent<=0;
+        end
+    end
+    // synthesis translate_off
+    always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
+        if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
+    // synthesis translate_on
+    wire permutation_complete=hash_state==HASH_RUN && round_complete;
+
+    assign hash_ready = hash_state == HASH_IDLE;
+    assign block_ready = hash_state == HASH_WAIT_BLOCK;
+    assign fast_ready = (hash_state == HASH_IDLE && (state == START))
+        || (hash_state == HASH_WAIT_BLOCK && first_block && append_index == 0);
+    assign digest = sponge_state[DIGEST_BYTES*8-1:0];
+    assign finish_valid = hash_state == HASH_RUN
+        && round_complete
+        && (!saved_chain_enable || chains_remaining <= 1)
+        && running_last;
+    assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+    assign compact_capture = captured_value;
+
+    initial begin
+        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 4 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+            $error("recipe lane requires positive U/P and U*P dividing 24");
+    end
+
+    // Mutually exclusive word updates expose one data mux instead of a
+    // priority network for whole-state loads mixed with partial absorption.
+    wire take_fast=(hash_state==HASH_IDLE && (state == START) && (state == START && fixed_block))
+        || (hash_state==HASH_WAIT_BLOCK && (state == START && fixed_block) && fast_ready);
+    wire take_stream=hash_state==HASH_WAIT_BLOCK && !take_fast && staged_valid;
+    wire clear_stream=take_stream && first_block && append_index==0;
+    wire take_feedback=hash_state==HASH_RUN && round_complete
+        && saved_chain_enable && chains_remaining>1;
+    assign chain_feedback_valid=take_feedback;
+    assign chain_feedback_counter=transition_counter;
+    // One selected rate pair is absorbed per stream beat. Share that XOR
+    // before distributing the result to the enabled state words.
+    logic [127:0] previous_rate;
+    always @* begin
+        case(append_index)
+            0:previous_rate=sponge_state[0 +:128];
+            1:previous_rate=sponge_state[128 +:128];
+            2:previous_rate=sponge_state[256 +:128];
+            3:previous_rate=sponge_state[384 +:128];
+            4:previous_rate=sponge_state[512 +:128];
+            5:previous_rate=sponge_state[640 +:128];
+            6:previous_rate=sponge_state[768 +:128];
+            7:previous_rate=sponge_state[896 +:128];
+            default:previous_rate={64'd0,sponge_state[1024 +:64]};
+        endcase
+    end
+    wire [127:0] absorbed_block=staged_data ^ (previous_rate & {128{!clear_stream}});
+    genvar word_index;
+    generate for(word_index=0;word_index<25;word_index=word_index+1) begin: state_words
+        wire select_stream=word_index<17 && take_stream && append_index==word_index/2;
+        wire [63:0] fast_word;
+        if(word_index<17) assign fast_word=fast_block[word_index*64 +:64];
+        else assign fast_word=64'd0;
+        // The register enable suppresses idle cycles. The default data can
+        // therefore be the permutation result without a 1,600-bit HASH_RUN mask.
+        wire [63:0] round_or_clear=(clear_stream || (SHARED_STATE && PIPELINE>1)) ? 64'd0
+            : advanced_state[word_index*64 +:64];
+        wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
+        wire [63:0] next_word;
+            assign next_word=(take_fast || take_feedback) ? fast_word
+                : select_stream ? absorb_word : round_or_clear;
+        assign state_write_data[word_index*64 +:64]=next_word;
+        // A completed permutation already resides in the shared register.
+        // Only absorption, initialization or a new chain block needs a write.
+        assign state_write_enable[word_index]=!rst &&
+            (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
+        if(!SHARED_STATE && PIPELINE>1)begin: private_state
+            always_ff @(posedge clk)
+                if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
+        end
+    end endgenerate
+
+    always_ff @(posedge clk) begin
+        if (rst) begin
+            hash_state <= HASH_IDLE;
+            saved_chain_enable <= 1'b0;
+            saved_chain_prefix <= 1'b0;
+            saved_chain_prefix_preserve_counter <= 1'b0;
+            saved_chain_count <= '0;
+            saved_capture_enable <= 1'b0;
+            saved_capture_after <= '0;
+            first_block <= 1'b1;
+            running_last <= 1'b0;
+            append_index <= 0;
+            chains_remaining <= '0;
+            chain_counter <= '0;
+            chain_iteration <= '0;
+            round_index <= '0;
+            hash_error <= 1'b0;
+        end else begin
+            hash_error <= 1'b0;
+            case (hash_state)
+                HASH_IDLE: if ((state == START)) begin
+                    saved_chain_enable <= compact_chain;
+                    saved_chain_prefix <= compact_chain;
+                    saved_chain_prefix_preserve_counter
+                        <= (request_step_recipe[55:48] == 3);
+                    saved_chain_count <= (request_steps+5'd1);
+                    saved_capture_enable <= (compact_chain ? request_capture : capture_single);
+                    saved_capture_after <= (compact_chain ? request_capture_after+5'd1 : 5'd1);
+                    first_block <= 1'b1;
+                    append_index <= 0;
+                    if ((state == START && fixed_block)) begin
+                        running_last <= 1'b1;
+                        chains_remaining <= compact_chain
+                            ? (request_steps+5'd1) : 5'd1;
+                        chain_counter <= 0;
+                        chain_iteration <= 1;
+                        round_index <= 0;
+                        hash_state <= HASH_RUN;
+                    end else
+                        hash_state <= HASH_WAIT_BLOCK;
+                end
+                HASH_WAIT_BLOCK: if ((state == START && fixed_block) && fast_ready) begin
+                    // Generic pre-padded one-rate-block path.  The recipe
+                    // executor builds fixed-format blocks while this lane is
+                    // idle, avoiding nine serial append cycles per context.
+                    running_last <= 1'b1;
+                    chains_remaining <= saved_chain_enable
+                        ? saved_chain_count : 5'd1;
+                    chain_counter <= 0;
+                    chain_iteration <= 1;
+                    round_index <= 0;
+                    hash_state <= HASH_RUN;
+                end else if (staged_valid) begin
+                    if (append_index == 8) begin
+                        running_last <= staged_last;
+                        append_index <= 0;
+                        if (saved_chain_enable && !staged_last) begin
+                            hash_error <= 1'b1;
+                            hash_state <= HASH_IDLE;
+                        end else begin
+                            chains_remaining <= saved_chain_enable
+                                ? saved_chain_count : 5'd1;
+                            chain_counter <= 0;
+                            chain_iteration <= 1;
+                            round_index <= 0;
+                            hash_state <= HASH_RUN;
+                        end
+                    end else begin
+                        append_index <= append_index + 1'b1;
+                    end
+                end
+                HASH_RUN: begin
+                    if (round_complete) begin
+                        if (saved_capture_enable
+                            && saved_capture_after == chain_iteration)
+                            captured_value <= advanced_state[N*8-1:0];
+                        if (saved_chain_enable && chains_remaining > 1) begin
+                            chains_remaining <= chains_remaining - 1'b1;
+                            if (!saved_chain_prefix_preserve_counter
+                                && !(saved_chain_prefix
+                                     && chain_iteration == 1))
+                                chain_counter <= chain_counter + 1'b1;
+                            chain_iteration <= chain_iteration + 1'b1;
+                            round_index <= 0;
+                        end else begin
+                            if (running_last) begin
+                                hash_state <= HASH_IDLE;
+                            end else begin
+                                first_block <= 1'b0;
+                                hash_state <= HASH_WAIT_BLOCK;
+                            end
+                        end
+                    end else if(PIPELINE==1) begin
+                        round_index <= round_index + UNROLL;
+                    end
+                end
+                default: hash_state <= HASH_IDLE;
+            endcase
+        end
+    end
+
 
     always_ff @(posedge clk) begin
         if (rst) begin
