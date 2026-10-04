@@ -1,6 +1,7 @@
 `timescale 1ns/1ps
 module tb_mhbs_recipe_padding;
     parameter integer PIPELINE=1;
+    parameter bit SHARED_STATE=1;
     logic clk=0,rst=1,request_valid=0,response_ready=0;
     logic [5:0] node_bytes;
     wire request_ready,response_valid,error;
@@ -13,7 +14,7 @@ module tb_mhbs_recipe_padding;
     logic [447:0] vectors[0:9];
     integer i,j,cycles=0,old_hashes,old_permutations;
     string vector_file;
-    mhbs_recipe_lane #(.PIPELINE(PIPELINE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.batch_mode(1'b0),.batch_request_valid(1'b0),
+    mhbs_recipe_lane #(.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.batch_mode(1'b0),.batch_request_valid(1'b0),
         .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),

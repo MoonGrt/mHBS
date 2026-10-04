@@ -1,0 +1,27 @@
+set_param general.maxThreads 8
+create_project -in_memory -part xc7a200tffg1156-3
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/hash_lane/mhbs_keccak.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/hash_lane/mhbs_chain_pipeline_lane.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/hash_lane/mhbs_compact_shake_context_lane.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/hash_lane/mhbs_recipe_lane.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/memory/mhbs_value_store.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/memory/mhbs_signature_store.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/sequencer/mhbs_program_sequencer.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/build/kpu_atp_unified_20261007/c3_batch_control/source/rtl/top/mhbs_hbs.sv}
+read_verilog -sv {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/mhbs_common.sv}
+read_xdc {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/clock.xdc}
+synth_design -top mhbs_common -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=1 -generic UNROLL=1 -generic PIPELINE=1 -generic PROFILE_ENABLE=0
+report_utilization -file {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/core_utilization.rpt}
+report_utilization -hierarchical -file {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/core_hierarchical.rpt}
+report_timing_summary -file {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/core_timing.rpt}
+set bad {}
+foreach c [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
+ if {[string match FD* [get_property REF_NAME $c]] && [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $c]} {lappend bad $c}
+}
+if {[llength $bad]} {error "Statistics registers remain: $bad"}
+set f [open {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/pruning_audit.json} w]
+puts $f {{"passed":true,"profile_enable":false,"statistics_registers":0}}
+close $f
+write_checkpoint -force {/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/manifests/experiments/kpu_atp_unified_20261007/c3_batch_control/K1P1U1/post_synth.dcp}
+puts "LUP_COMMON_SYNTH_PASS K1P1U1"
+exit

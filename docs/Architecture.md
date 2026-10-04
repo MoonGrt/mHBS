@@ -11,8 +11,8 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
       ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
       └─ 两个 mhbs_recipe_lane：Hash 输入构造与局部链反馈
-          └─ mhbs_compact_shake_context_lane：SHAKE 状态与吸收控制
-              └─ mhbs_keccak：默认每拍展开两轮（U2）
+          └─ mhbs_compact_shake_context_lane：统一 SHAKE 状态、吸收与流水控制
+              └─ P×U 个 mhbs_keccak：每级 U 轮，默认 P1U2
 ```
 
 五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；双 lane 并行位于宏操作内部。逻辑 lane 0 支持完整 recipe 集，逻辑 lane 1 主要执行链计算；`SWAP_PHYSICAL_LANES` 可交换物理位置，逻辑能力不变。
@@ -41,7 +41,7 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
 
 ## L2U2P1 数据通路裁剪
 
-当前生产核要求 `LANES=2, UNROLL=2`，任务数组、掩码及输出控制按双通道构建；保留物理 lane 交换验证。配方形状和长度解码受各 lane 的 `RECIPE_MASK` 静态约束，链专用 lane 不构建流式输入路径。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。旧 masked 配方仅在模块参数允许它时保留跨中间哈希的值寄存器，不进入生产网表。
+默认生产配置为 `LANES=2, UNROLL=2, PIPELINE=1`，任务数组、掩码及输出控制按双通道构建；保留物理 lane 交换验证。配方形状和长度解码受各 lane 的 `RECIPE_MASK` 静态约束，链专用 lane 不构建流式输入路径。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。旧 masked 配方仅在模块参数允许它时保留跨中间哈希的值寄存器，不进入生产网表。
 
 统计开关沿 top/common/core/lane 传递，生产综合关闭，仿真保留。综合阶段检查实际网表，禁止统计寄存器和被替代的重复值/capture 寄存器残留。
 
@@ -65,8 +65,14 @@ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保�
 
 六种 SHAKE 参数共用同一 L2U2P1 核。descriptor[1] 编码 0/1/2 为 128f/192f/256f，4/5/6 为 128s/192s/256s，3/7 非法，软件镜像检查拒绝。FORS 目标、叶游标和节点索引为 14 位；XMSS 叶地址保持 10 位（s 最大需要 9 位）。树栈/认证路径各 16 项、共享列表 68 项、摘要暂存 49 字节及 ROM 容量均不扩大。s 摘要使用 7 字节树索引，128s/192s 的叶索引按大端两字节解码；256s 使用一字节。
 
-## L/U/P 流水实验
+## K/P/U 流水实验
 
-参数 `LANES/UNROLL/PIPELINE` 分别为 L/U/P，默认 L2U2P1。每 lane 的 P 个流水级各包含 U 轮，共用普通 sponge 与交错链任务；每个上下文的链反馈遵守数据依赖。WOTS 和 FORS 每批最多 L×P 个任务，按原顺序每次两节点回存或送入树栈。仅新增内部 batch 接口，外部接口不变。
+参数 `LANES/PIPELINE/UNROLL` 分别对应 K/P/U，新配置统一写作 KxPxUx，默认 K2P1U2；历史 L 与 K 含义相同。每 lane 的 P 个流水级各包含 U 轮，普通 sponge 与交错链共用 Keccak；每个上下文的链反馈遵守数据依赖。WOTS 和 FORS 每批最多 K×P 个任务，FORS 按序送入树栈。外部接口不变。
 
-`make lup-unit-test` 验证轮级等价与链交错；`make lup-atp LUP_TAG=<新标签>` 执行 128f sign 的 L2U1P1～P4 仿真、共同核综合和 ATP 报告。频率统一假定 150 MHz，不布线。P>1 的其他参数集/操作未作本轮端到端验收。历史 K 标签只用于冻结证据，当前命名统一使用 L。
+`make lup-unit-test` 验证轮级等价与链交错；`make lup-atp LUP_TAG=<新标签>` 执行 128f sign 的 L2U1P1～P4 仿真、共同核综合和 ATP 报告。频率统一假定 150 MHz，不布线。P>1 的其他参数集/操作未作本轮端到端验收。历史 L/U/P 标签及实验路径保持不变，新报告统一使用 KxPxUx。
+
+K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链模块保留单份结果/capture，并向控制器提供按 tag 读口；K1、U1、P>1 签名的 WOTS 完成后按链索引直接写端点，capture 按序输出。普通 sponge 在 K1、U1、P>1 时复用流水末级状态，仅在初始化、吸收和链反馈时通过内部写口修改它。连续补任务候选因 ATP 增加撤回，当前仍保留批次边界。
+
+统一 Keccak 实现：`mhbs_compact_shake_context_lane` 内直接展开 P 个级、每级 U 个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 `mhbs_keccak_pipeline`。P1 使用唯一状态寄存器及组合轮末完成判断，保持原周期；P>1 保留普通 sponge 与交错链共享流水和末级状态复用。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
+
+第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；K1U1、P>1 sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。

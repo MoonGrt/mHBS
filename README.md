@@ -43,3 +43,5 @@ make reproduce-v42 reproduce-ku
 - [最新 K/U 报告](docs/v4.2/KU_Sign_ATP_150_110_67_48.md)和[原始 K/U 归档](manifests/experiments/ku_sign_latest/README.md)独立保留；`make report-ku`、`make reproduce-ku` 不依赖 build。
 - 旧候选、重复报告和实验驱动已删除，可从 Git 恢复。清理清单：`manifests/cleanup_20261002.json`。
 - `source/`、`tmp/` 是本地研究资料和工作笔记，不属于生产源码或已提交备份。
+
+当前 K1P1U1～K1P4U1 的统一 Keccak 实现及最新共同核综合结果见 [第二轮 ATP 报告](docs/v4.2/KPU_ATP_Unified_Optimization.md)。150 MHz 为假定频率，未布线。

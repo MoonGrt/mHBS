@@ -33,7 +33,7 @@ module tb_mhbs_v42_recipe_lane;
      .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
      .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
      .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
-     .batch_response_digest(),.batch_response_capture(),.batch_hashes(),.batch_permutations(),.*);
+     .batch_response_digest(),.batch_response_capture(),.batch_read_tag(2'd0),.batch_read_digest(),.batch_read_capture(),.batch_hashes(),.batch_permutations(),.*);
     always #5 clk=~clk;
     always @(posedge clk) begin cycles<=cycles+1; if(cycles>10000) $fatal(1,"recipe timeout"); end
     always_comb for(integer b=0;b<N;b=b+1) begin

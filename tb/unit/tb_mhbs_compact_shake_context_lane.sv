@@ -2,7 +2,8 @@
 `default_nettype none
 
 module tb_mhbs_compact_shake_context_lane;
-    parameter integer PIPELINE=1;
+    parameter integer PIPELINE=1, UNROLL=2;
+    parameter bit SHARED_STATE=1;
     wire [5:0] node_bytes=16;
     wire [383:0] chain_prefix_data=0;
     logic clk = 1'b0;
@@ -50,7 +51,7 @@ module tb_mhbs_compact_shake_context_lane;
 
     always #5 clk = ~clk;
 
-    mhbs_compact_shake_context_lane #(.UNROLL(2),.PIPELINE(PIPELINE)) dut (.batch_mode(1'b0),.batch_valid(1'b0),.batch_state(1600'd0),.batch_tag(2'd0),.batch_ready(),.batch_done(),.batch_digest(),.batch_result_tag(),.*);
+    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE)) dut (.batch_mode(1'b0),.batch_valid(1'b0),.batch_state(1600'd0),.batch_tag(2'd0),.batch_ready(),.batch_done(),.batch_digest(),.batch_result_tag(),.*);
 
     task automatic tick;
         begin @(posedge clk); #1; end

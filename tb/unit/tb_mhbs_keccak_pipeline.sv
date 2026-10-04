@@ -8,18 +8,21 @@ module tb_mhbs_keccak_pipeline;
  wire [1599:0] response_state;
  wire [1:0] response_tag;
  reg [1599:0] expected[0:3];reg [3:0] outstanding=0;
+ integer due[0:3];
  integer sent=0,received=0,cycles=0;
  `include "tb/reference/keccak_round_frozen.svh"
- mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
+ mhbs_batch_test_driver #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
  always #5 clk=~clk;
  always @(posedge clk)if(!rst)begin
   cycles=cycles+1;
   if(response_valid)begin
+   if(cycles!=due[response_tag])$fatal(1,"permutation latency changed");
    if(!outstanding[response_tag] || response_state!==expected[response_tag])$fatal(1,"permutation mismatch tag=%0d",response_tag);
    outstanding[response_tag]=0;received=received+1;
   end
   if(request_valid && request_ready)begin
    if(outstanding[request_tag])$fatal(1,"duplicate tag");
+   due[request_tag]=cycles+24/UNROLL;
    expected[request_tag]=request_state;
    for(integer r=0;r<24;r=r+1)expected[request_tag]=keccak_round(expected[request_tag],5'(r));
    outstanding[request_tag]=1;sent=sent+1;

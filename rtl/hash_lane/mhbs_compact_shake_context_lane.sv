@@ -5,7 +5,7 @@
 // statically sized chain template.  The two top-level instances remain identical.
 module mhbs_compact_shake_context_lane #(
     parameter integer UNROLL = 2, PIPELINE = 1, N = 16, DIGEST_BYTES = 34,
-    parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0
+    parameter bit STREAM_CHAIN_ENABLE = 1, REUSE_FAST_FEEDBACK = 0, SHARED_STATE=0
 ) (
     input  wire          clk,
     input  wire          rst,
@@ -56,6 +56,8 @@ module mhbs_compact_shake_context_lane #(
     logic running_last;
     logic [3:0] append_index;
 
+    wire [24:0] state_write_enable;
+    wire [1599:0] state_write_data;
     logic [1599:0] sponge_state;
     logic [(N+32)*8-1:0] chain_template;
     // Recipe request fields stay stable through the response handshake.
@@ -66,7 +68,6 @@ module mhbs_compact_shake_context_lane #(
     logic [4:0] chain_iteration;
     logic [N*8-1:0] captured_value;
     logic [4:0] round_index;
-    wire [1599:0] round_state [0:UNROLL];
     wire [1599:0] advanced_state;
     wire round_complete;
     wire round_update;
@@ -77,144 +78,82 @@ module mhbs_compact_shake_context_lane #(
             ? chain_counter : counter_next;
     genvar round_step;
 
-    function automatic [63:0] rotl64;
-        input [63:0] value;
-        input integer amount;
-        begin
-            rotl64 = amount == 0 ? value
-                : (value << amount) | (value >> (64-amount));
+    // One P-stage datapath for both serial and interleaved execution. P1
+    // writes its sole state through the sponge word enables, without launch
+    // or return bubbles. P>1 carries valid/round/tag through the same stages.
+    localparam integer ROUNDS=UNROLL*PIPELINE;
+    logic [1599:0] state_reg [0:PIPELINE-1];
+    logic [PIPELINE-1:0] stage_valid;
+    logic [4:0] stage_base [0:PIPELINE-1];
+    logic [1:0] stage_tag [0:PIPELINE-1];
+    logic sent;
+    wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
+        && stage_base[PIPELINE-1]+ROUNDS<24;
+    wire ready=!rst && !recycle;
+    wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
+    wire normal_valid=lane_state==RUN && !sent;
+    wire issue_valid=batch_mode ? batch_valid : normal_valid;
+    wire [1599:0] issue_state=batch_mode ? batch_state : sponge_state;
+    wire [1:0] issue_tag=batch_mode ? batch_tag : 2'd0;
+    wire [1599:0] finished_state=state_reg[PIPELINE-1];
+    wire [1599:0] stage_result[0:PIPELINE-1];
+    for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
+        wire [1599:0] rounds[0:UNROLL];
+        wire [4:0] start_round;
+        wire [1:0] source_tag;
+        wire source_valid;
+        if(s==0)begin: input_stage
+            assign rounds[0]=PIPELINE==1 ? sponge_state
+                : recycle ? state_reg[PIPELINE-1] : issue_state;
+            assign start_round=PIPELINE==1 ? round_index
+                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
+            assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
+            assign source_valid=PIPELINE>1 && (recycle || issue_valid);
+        end else begin: following_stage
+            assign rounds[0]=state_reg[s-1];
+            assign start_round=stage_base[s-1];
+            assign source_tag=stage_tag[s-1];
+            assign source_valid=stage_valid[s-1];
         end
-    endfunction
-
-    function automatic integer rho_offset;
-        input integer x;
-        input integer y;
-        begin
-            case (x + 5*y)
-                 0: rho_offset =  0;  1: rho_offset =  1;
-                 2: rho_offset = 62;  3: rho_offset = 28;
-                 4: rho_offset = 27;  5: rho_offset = 36;
-                 6: rho_offset = 44;  7: rho_offset =  6;
-                 8: rho_offset = 55;  9: rho_offset = 20;
-                10: rho_offset =  3; 11: rho_offset = 10;
-                12: rho_offset = 43; 13: rho_offset = 25;
-                14: rho_offset = 39; 15: rho_offset = 41;
-                16: rho_offset = 45; 17: rho_offset = 15;
-                18: rho_offset = 21; 19: rho_offset =  8;
-                20: rho_offset = 18; 21: rho_offset =  2;
-                22: rho_offset = 61; 23: rho_offset = 56;
-                24: rho_offset = 14;
-                default: rho_offset = 0;
-            endcase
+        for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
+            mhbs_keccak round_logic(.state_in(rounds[r]),
+                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
         end
-    endfunction
-
-    function automatic [63:0] round_constant;
-        input [4:0] index;
-        begin
-            case (index)
-                 0: round_constant = 64'h0000000000000001;
-                 1: round_constant = 64'h0000000000008082;
-                 2: round_constant = 64'h800000000000808a;
-                 3: round_constant = 64'h8000000080008000;
-                 4: round_constant = 64'h000000000000808b;
-                 5: round_constant = 64'h0000000080000001;
-                 6: round_constant = 64'h8000000080008081;
-                 7: round_constant = 64'h8000000000008009;
-                 8: round_constant = 64'h000000000000008a;
-                 9: round_constant = 64'h0000000000000088;
-                10: round_constant = 64'h0000000080008009;
-                11: round_constant = 64'h000000008000000a;
-                12: round_constant = 64'h000000008000808b;
-                13: round_constant = 64'h800000000000008b;
-                14: round_constant = 64'h8000000000008089;
-                15: round_constant = 64'h8000000000008003;
-                16: round_constant = 64'h8000000000008002;
-                17: round_constant = 64'h8000000000000080;
-                18: round_constant = 64'h000000000000800a;
-                19: round_constant = 64'h800000008000000a;
-                20: round_constant = 64'h8000000080008081;
-                21: round_constant = 64'h8000000000008080;
-                22: round_constant = 64'h0000000080000001;
-                23: round_constant = 64'h8000000080008008;
-                default: round_constant = 64'h0;
-            endcase
-        end
-    endfunction
-
-    function automatic [1599:0] keccak_round;
-        input [1599:0] input_state;
-        input [4:0] index;
-        reg [63:0] a [0:24];
-        reg [63:0] b [0:24];
-        reg [63:0] c [0:4];
-        reg [63:0] d [0:4];
-        reg [1599:0] result;
-        integer x;
-        integer y;
-        integer destination;
-        begin
-            for (y = 0; y < 5; y = y + 1)
-                for (x = 0; x < 5; x = x + 1)
-                    a[x+5*y] = input_state[64*(x+5*y) +: 64];
-            for (x = 0; x < 5; x = x + 1)
-                c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
-            for (x = 0; x < 5; x = x + 1)
-                d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
-            for (y = 0; y < 5; y = y + 1)
-                for (x = 0; x < 5; x = x + 1)
-                    a[x+5*y] = a[x+5*y] ^ d[x];
-            for (y = 0; y < 5; y = y + 1)
-                for (x = 0; x < 5; x = x + 1) begin
-                    destination = y + 5*((2*x+3*y)%5);
-                    b[destination] = rotl64(a[x+5*y], rho_offset(x,y));
-                end
-            for (y = 0; y < 5; y = y + 1)
-                for (x = 0; x < 5; x = x + 1)
-                    a[x+5*y] = b[x+5*y]
-                        ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y]);
-            a[0] = a[0] ^ round_constant(index);
-            result = '0;
-            for (y = 0; y < 5; y = y + 1)
-                for (x = 0; x < 5; x = x + 1)
-                    result[64*(x+5*y) +: 64] = a[x+5*y];
-            keccak_round = result;
-        end
-    endfunction
-
-    generate if(PIPELINE==1)begin: serial_rounds
-        assign round_state[0]=sponge_state;
-        for(genvar r=0;r<UNROLL;r=r+1)begin: generated_rounds
-            (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
-                .state_in(round_state[r]),.round_index(round_index+5'(r)),.state_out(round_state[r+1]));
-        end
-        assign advanced_state=round_state[UNROLL];
-        assign round_complete=round_index+UNROLL>=24;
-        assign round_update=lane_state==RUN;
-        assign batch_ready=0;assign batch_done=0;assign batch_digest=0;assign batch_result_tag=0;
-    end else begin: pipelined_rounds
-        logic sent;
-        wire ready,finished;
-        wire [1599:0] finished_state;
-        wire [1:0] finished_tag;
-        wire normal_valid=lane_state==RUN && !sent;
-        mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) engine(
-            .clk,.rst,.request_valid(batch_mode ? batch_valid : normal_valid),.request_ready(ready),
-            .request_state(batch_mode ? batch_state : sponge_state),.request_tag(batch_mode ? batch_tag : 2'd0),
-            .response_valid(finished),.response_state(finished_state),.response_tag(finished_tag));
-        assign batch_ready=batch_mode && ready;assign batch_done=batch_mode && finished;
-        assign batch_digest=finished_state;assign batch_result_tag=finished_tag;
-        assign advanced_state=finished_state;
-        assign round_complete=!batch_mode && finished;
-        assign round_update=lane_state==RUN && round_complete;
-        always_ff @(posedge clk)begin
-            if(rst)sent<=0;
-            else if(!batch_mode)begin
-                if(normal_valid && ready)sent<=1;
-                if(finished)sent<=0;
+        assign stage_result[s]=rounds[UNROLL];
+        for(genvar w=0;w<25;w=w+1)begin: words
+            always_ff @(posedge clk)if(!rst)begin
+                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
+                    state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
+                else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
             end
         end
-    end endgenerate
+        always_ff @(posedge clk)begin
+            if(rst)stage_valid[s]<=0;
+            else begin
+                stage_valid[s]<=source_valid;
+                if(source_valid)begin stage_base[s]<=start_round;stage_tag[s]<=source_tag;end
+            end
+        end
+    end
+    assign batch_ready=PIPELINE>1 && batch_mode && ready;
+    assign batch_done=PIPELINE>1 && batch_mode && finished;
+    assign batch_digest=PIPELINE>1 ? finished_state : 1600'd0;
+    assign batch_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : 2'd0;
+    if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
+    assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
+    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
+    assign round_update=lane_state==RUN && (PIPELINE==1 || round_complete);
+    always_ff @(posedge clk)begin
+        if(rst)sent<=0;
+        else if(!batch_mode)begin
+            if(normal_valid && ready)sent<=1;
+            if(finished)sent<=0;
+        end
+    end
+    // synthesis translate_off
+    always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
+        if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
+    // synthesis translate_on
     wire permutation_complete=lane_state==RUN && round_complete;
     always_comb begin
         next_chain_state='0;
@@ -276,7 +215,7 @@ module mhbs_compact_shake_context_lane #(
     assign capture_digest = captured_value;
 
     initial begin
-        if (UNROLL < 1 || UNROLL > 24 || (24 % UNROLL) != 0)
+        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 4 || ROUNDS > 24 || (24 % ROUNDS) != 0)
             $error("compact SHAKE lane UNROLL must divide 24");
     end
 
@@ -316,7 +255,7 @@ module mhbs_compact_shake_context_lane #(
         else assign fast_word=64'd0;
         // The register enable suppresses idle cycles. The default data can
         // therefore be the permutation result without a 1,600-bit RUN mask.
-        wire [63:0] round_or_clear=clear_stream ? 64'd0
+        wire [63:0] round_or_clear=(clear_stream || (SHARED_STATE && PIPELINE>1)) ? 64'd0
             : advanced_state[word_index*64 +:64];
         wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
         wire [63:0] next_word;
@@ -328,9 +267,15 @@ module mhbs_compact_shake_context_lane #(
                 : take_feedback ? next_chain_state[word_index*64 +:64]
                 : select_stream ? absorb_word : round_or_clear;
         end
-        always_ff @(posedge clk)
-            if(!rst && (round_update || take_fast || select_stream || clear_stream))
-                sponge_state[word_index*64 +:64]<=next_word;
+        assign state_write_data[word_index*64 +:64]=next_word;
+        // A completed permutation already resides in the shared register.
+        // Only absorption, initialization or a new chain block needs a write.
+        assign state_write_enable[word_index]=!rst &&
+            (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
+        if(!SHARED_STATE && PIPELINE>1)begin: private_state
+            always_ff @(posedge clk)
+                if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
+        end
     end endgenerate
 
     always_ff @(posedge clk) begin

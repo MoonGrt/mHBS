@@ -54,8 +54,18 @@ make route-common TAG=my_full
 
 [KU 最新报告](v4.2/KU_Sign_ATP_150_110_67_48.md)列出历史 L2 共同核与实验性 L1/L3/L4 综合面积；历史周期和频率不构成新源码的功能或时序验收。历史转换入口和旧实验驱动已删除，旧版本可从 Git 恢复。
 
-## L/U/P 流水实验
+## K/P/U 流水实验
 
-参数 `LANES/UNROLL/PIPELINE` 分别为 L/U/P，默认 L2U2P1。每 lane 的 P 个流水级各包含 U 轮，共用普通 sponge 与交错链任务；每个上下文的链反馈遵守数据依赖。WOTS 和 FORS 每批最多 L×P 个任务，按原顺序每次两节点回存或送入树栈。仅新增内部 batch 接口，外部接口不变。
+参数 `LANES/PIPELINE/UNROLL` 分别为 K/P/U，默认 K2P1U2。每 lane 的 P 个流水级各包含 U 轮，共用普通 sponge 与交错链任务；每个上下文的链反馈遵守数据依赖。WOTS 和 FORS 每批最多 K×P 个任务；K1U1、P>1 sign 的 WOTS 完成直接写回，capture 与 FORS 节点仍按原索引消费。仅新增内部 batch 接口，外部接口不变。
 
 `make lup-unit-test` 验证轮级等价与链交错；`make lup-atp LUP_TAG=<新标签>` 执行 128f sign 的 L2U1P1～P4 仿真、共同核综合和 ATP 报告。频率统一假定 150 MHz，不布线。P>1 的其他参数集/操作未作本轮端到端验收。历史 K 标签只用于冻结证据，当前命名统一使用 L。
+
+## K1P1U1～K1P4U1 ATP 优化验证
+
+本轮结果见 [ATP 优化报告](v4.2/KPU_ATP_Optimization.md)，证据保存在 `manifests/experiments/kpu_atp_opt_20261007/`。最终候选为 `c4b_shared_sponge_write`；仅验收 128f sign 的四组性能，不将节点宽度单元测试视为其他参数集/操作的端到端验收。
+
+四组逐字节软件参考、统计关闭、停顿与复位重放、共同核等价、两项异常退出及 16 项相关单元组通过；Hash/置换次数保持 104937/105641。默认 K2P1U2 与 K2P4U1 周期回归通过，14 项 Python 流程契约测试与 17 项原有基础单元回归通过。链单元增加按 tag 读取已完成摘要/capture 的保留与复用检查；共享状态覆盖普通多块吸收、链反馈及三种节点宽度填充边界。连续调度候选另通过五组显式槽位释放测试，但因 ATP 增加撤回，相关接口不进入最终源码。综合关闭统计，并审计私有 sponge 状态寄存器移除。
+
+统一底层后的 `scripts/verify_lup_pipeline.py` 从 compact lane 的 batch 端口验证 P2～P4 和 U2P2 的随机置换、固定返回延迟和交错链；P1 使用普通 sponge/recipe 入口。链向量包含 capture 禁用、未命中、首/中/末位置及 tag 复用。`scripts/verify_kpu_chain_format.py --out <独立目录>` 对照冻结的旧链适配器，检查三种节点宽度、反馈块、同拍完成/新请求、capture 读回和控制周期。测试接线适配器不进入生产源码清单。
+
+第二轮结果见 [统一 Keccak 与 ATP 优化](v4.2/KPU_ATP_Unified_Optimization.md)。`scripts/verify_kpu_round_decode.py --out <独立目录>` 以冻结轮函数检查零值、全一、随机状态及所有有效/无效轮号；会记录是否启用了固定级译码。该译码候选未保留，最终版本走原译码。集成签名检查新增尾批和连续输出覆盖计数。

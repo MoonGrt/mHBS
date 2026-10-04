@@ -1,0 +1,178 @@
+diff --git a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+--- a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++++ b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+@@ -82,13 +82,15 @@
+     // writes its sole state through the sponge word enables, without launch
+     // or return bubbles. P>1 carries valid/round/tag through the same stages.
+     localparam integer ROUNDS=UNROLL*PIPELINE;
++    localparam bit FIXED_U1=UNROLL==1 && PIPELINE>1;
++    localparam integer BASE_BITS=FIXED_U1 ? $clog2(24/PIPELINE) : 5;
+     logic [1599:0] state_reg [0:PIPELINE-1];
+     logic [PIPELINE-1:0] stage_valid;
+-    logic [4:0] stage_base [0:PIPELINE-1];
++    logic [BASE_BITS-1:0] stage_base [0:PIPELINE-1];
+     logic [1:0] stage_tag [0:PIPELINE-1];
+     logic sent;
+     wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
+-        && stage_base[PIPELINE-1]+ROUNDS<24;
++        && (FIXED_U1 ? stage_base[PIPELINE-1]<24/PIPELINE-1 : stage_base[PIPELINE-1]+ROUNDS<24);
+     wire ready=!rst && !recycle;
+     wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
+     wire normal_valid=lane_state==RUN && !sent;
+@@ -99,14 +101,14 @@
+     wire [1599:0] stage_result[0:PIPELINE-1];
+     for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
+         wire [1599:0] rounds[0:UNROLL];
+-        wire [4:0] start_round;
++        wire [BASE_BITS-1:0] start_round;
+         wire [1:0] source_tag;
+         wire source_valid;
+         if(s==0)begin: input_stage
+             assign rounds[0]=PIPELINE==1 ? sponge_state
+                 : recycle ? state_reg[PIPELINE-1] : issue_state;
+-            assign start_round=PIPELINE==1 ? round_index
+-                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
++            assign start_round=PIPELINE==1 ? BASE_BITS'(round_index)
++                : recycle ? stage_base[PIPELINE-1]+BASE_BITS'(FIXED_U1 ? 1 : ROUNDS) : {BASE_BITS{1'b0}};
+             assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
+             assign source_valid=PIPELINE>1 && (recycle || issue_valid);
+         end else begin: following_stage
+@@ -116,8 +118,10 @@
+             assign source_valid=stage_valid[s-1];
+         end
+         for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
+-            mhbs_keccak round_logic(.state_in(rounds[r]),
+-                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
++            mhbs_keccak #(.ROUND_STRIDE(FIXED_U1 ? PIPELINE : 1),
++                .ROUND_OFFSET(FIXED_U1 ? s : 0)) round_logic(.state_in(rounds[r]),
++                .round_index(FIXED_U1 ? 5'(start_round) : 5'(start_round)+5'(s*UNROLL+r)),
++                .state_out(rounds[r+1]));
+         end
+         assign stage_result[s]=rounds[UNROLL];
+         for(genvar w=0;w<25;w=w+1)begin: words
+diff --git a/rtl/hash_lane/mhbs_keccak.sv b/rtl/hash_lane/mhbs_keccak.sv
+--- a/rtl/hash_lane/mhbs_keccak.sv
++++ b/rtl/hash_lane/mhbs_keccak.sv
+@@ -3,7 +3,9 @@
+ 
+ // Structurally explicit Keccak-f[1600] round used to compare Vivado mapping
+ // against the function-inlined implementation.
+-module mhbs_keccak (
++module mhbs_keccak #(
++    parameter integer ROUND_STRIDE=1, ROUND_OFFSET=0
++) (
+     input  wire [1599:0] state_in,
+     input  wire [4:0]    round_index,
+     output wire [1599:0] state_out
+@@ -13,7 +15,7 @@
+     wire [63:0] d [0:4];
+     wire [63:0] theta [0:24];
+     wire [63:0] b [0:24];
+-    wire [63:0] rc;
++    logic [63:0] rc;
+     genvar x, y;
+ 
+     function automatic [63:0] rotl64;
+@@ -76,7 +78,17 @@
+         end
+     endfunction
+ 
+-    assign rc = round_constant(round_index);
++    // The default port is the absolute round index. A fixed pipeline stage
++    // instead receives the pass index and decodes only its own constants.
++    // All products below are elaboration constants, not runtime arithmetic.
++    initial if(ROUND_STRIDE<1 || 24%ROUND_STRIDE!=0 || ROUND_OFFSET<0 || ROUND_OFFSET>=ROUND_STRIDE)
++        $fatal(1,"invalid fixed round mapping");
++    always_comb begin
++        rc=0;
++        if(ROUND_STRIDE==1 && ROUND_OFFSET==0)rc=round_constant(round_index);
++        else for(integer pass=0;pass<24/ROUND_STRIDE;pass=pass+1)
++            if(round_index==5'(pass))rc=round_constant(5'(pass*ROUND_STRIDE+ROUND_OFFSET));
++    end
+     generate
+         for (y=0; y<5; y=y+1) begin : map_y
+             for (x=0; x<5; x=x+1) begin : map_x
+diff --git a/scripts/verify_kpu_round_decode.py b/scripts/verify_kpu_round_decode.py
+--- /dev/null
++++ b/scripts/verify_kpu_round_decode.py
+@@ -0,0 +1,19 @@
++#!/usr/bin/env python3
++"""Check every valid/invalid round decoding input against the frozen round."""
++import argparse,subprocess,json,hashlib
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def main():
++ ap=argparse.ArgumentParser();ap.add_argument('--out',required=True);a=ap.parse_args();out=ROOT/a.out;out.mkdir(parents=True,exist_ok=True)
++ source=ROOT/'rtl/hash_lane/mhbs_keccak.sv';specialized='ROUND_STRIDE' in source.read_text();records=[]
++ for p in (1,2,3,4):
++  binary=out/f'P{p}.vvp';log=out/f'P{p}.log'
++  with log.open('w') as f:
++   for cmd in (['iverilog','-g2012','-s','tb_mhbs_round_decode',f'-Ptb_mhbs_round_decode.STRIDE={p}',f'-Ptb_mhbs_round_decode.SPECIALIZED={int(specialized)}','-o',str(binary),str(source),'tb/unit/tb_mhbs_round_decode.sv'],['vvp',str(binary)]):
++    r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
++    if r.returncode:raise RuntimeError(log.read_text()[-2000:])
++  hits=[x for x in log.read_text().splitlines() if 'ROUND_DECODE_PASS' in x];assert hits;print(*hits,flush=True)
++  records.append(dict(stride=p,specialized=specialized,passed=True,log_sha256=sha(log)))
++ (out/'results.json').write_text(json.dumps(dict(source_sha256=sha(source),tests=records),indent=2)+'\n')
++if __name__=='__main__':main()
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -38,9 +38,9 @@
+  reg [7:0] expected_bytes[0:65535];
+  integer cursor=0,cycles=0,replays=1,interrupt_run=0,dump_file=0;
+  integer residency[0:63];
+- integer tail_batches=0,consecutive_outputs=0;logic previous_output=0;
++ integer tail_batches=0,consecutive_outputs=0;logic previous_output=0,coverage_reported=0;
+  always @(posedge clk)begin
+-  if(rst)begin tail_batches=0;consecutive_outputs=0;previous_output=0;end
++  if(rst)begin tail_batches=0;consecutive_outputs=0;previous_output=0;coverage_reported=0;end
+   else begin
+    if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
+    previous_output=out_valid;
+@@ -48,7 +48,8 @@
+       && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected[0] && `HBS_CORE.pipe_ready[0]
+       && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
+        tail_batches=tail_batches+1;
+-   if(done && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
++   if(done && !coverage_reported && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
++    coverage_reported=1;
+     if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
+     $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
+    end
+diff --git a/tb/unit/tb_mhbs_round_decode.sv b/tb/unit/tb_mhbs_round_decode.sv
+--- /dev/null
++++ b/tb/unit/tb_mhbs_round_decode.sv
+@@ -0,0 +1,32 @@
++`timescale 1ns/1ps
++module tb_mhbs_round_decode;
++ parameter integer STRIDE=1,SPECIALIZED=0;
++ logic [1599:0] state_in;
++ logic [4:0] pass_index;
++ wire [1599:0] result[0:STRIDE-1];
++ `include "tb/reference/keccak_round_frozen.svh"
++ for(genvar stage=0;stage<STRIDE;stage=stage+1)begin: stages
++  if(SPECIALIZED)begin: fixed_map
++   mhbs_keccak #(.ROUND_STRIDE(STRIDE),.ROUND_OFFSET(stage)) dut(
++    .state_in,.round_index(pass_index),.state_out(result[stage]));
++  end else begin: absolute_map
++   mhbs_keccak dut(.state_in,
++    .round_index(pass_index<24/STRIDE ? 5'(pass_index*STRIDE+stage) : 5'd31),.state_out(result[stage]));
++  end
++ end
++ integer checks=0;
++ initial begin
++  for(integer pattern=0;pattern<34;pattern=pattern+1)begin
++   for(integer w=0;w<50;w=w+1)state_in[32*w +:32]=pattern==0 ? 0 : pattern==1 ? '1 : $random;
++   for(integer pass=0;pass<32;pass=pass+1)begin
++    pass_index=5'(pass);#1;
++    for(integer stage=0;stage<STRIDE;stage=stage+1)begin
++     if(result[stage]!==keccak_round(state_in,pass<24/STRIDE ? 5'(pass*STRIDE+stage) : 5'd31))
++      $fatal(1,"round mismatch stride=%0d pass=%0d stage=%0d",STRIDE,pass,stage);
++     checks=checks+1;
++    end
++   end
++  end
++  $display("ROUND_DECODE_PASS stride=%0d specialized=%0d checks=%0d",STRIDE,SPECIALIZED,checks);$finish;
++ end
++endmodule

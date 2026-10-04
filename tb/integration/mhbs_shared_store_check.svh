@@ -26,6 +26,12 @@ always @(posedge clk) begin
    shared_expected[`HBS_CORE.group_index]=`HBS_CORE.route_value[255:0];
    shared_initialized[`HBS_CORE.group_index]=1;
   end
+  if(`HBS_CORE.state==7 && `HBS_CORE.pipe_direct && `HBS_CORE.chain_cursor==0)shared_initialized=0;
+  if(`HBS_CORE.pipe_direct && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_valid[0])begin
+   if(shared_roots_live)$fatal(1,"direct WOTS before FORS compression");
+   shared_expected[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag[0]]=`HBS_CORE.pipe_value[0];
+   shared_initialized[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag[0]]=1;
+  end
   if(`HBS_CORE.state==8) begin
    if(`HBS_CORE.indexing==1) begin
     if(`HBS_CORE.endpoint_write0 || `HBS_CORE.endpoint_write1)

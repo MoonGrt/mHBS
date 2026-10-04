@@ -61,19 +61,20 @@ def snapshot(out):
   write(out/'inputs.json',dict(git_head=subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),source_sha256=identity,snapshot_sha256=sha(out/'source_snapshot.tar.gz'),part=PART,clock_period_ns=6.666667,frequency_mhz_assumed=FREQ,profile_enable_synthesis=False,scope='common core',operation='128f sign',routed=False))
  return identity
 
-def synth(out,p,ws,lanes=2):
- d=out/f'L{lanes}U1P{p}';d.mkdir(exist_ok=True)
+def synth(out,p,ws,lanes=2,point=None):
+ point=point or f'L{lanes}U1P{p}'
+ d=out/point;d.mkdir(exist_ok=True)
  common,_=partition((ws/'rtl/top/mhbs_top.sv').read_text(),stub=True)
  (d/'mhbs_common.sv').write_text(common)
  lines=['set_param general.maxThreads 8',f'create_project -in_memory -part {PART}']
  lines += [f'read_verilog -sv {{{ws/f}}}' for f in (ws/'manifests/v42_sources.txt').read_text().splitlines() if f!='rtl/top/mhbs_top.sv']
  (d/'clock.xdc').write_text('create_clock -name clk -period 6.666667 [get_ports clk]\n')
  lines += [f'read_verilog -sv {{{d/"mhbs_common.sv"}}}',f'read_xdc {{{d/"clock.xdc"}}}',f'synth_design -top mhbs_common -part {PART} -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES={lanes} -generic UNROLL=1 -generic PIPELINE={p} -generic PROFILE_ENABLE=0',f'report_utilization -file {{{d/"core_utilization.rpt"}}}',f'report_utilization -hierarchical -file {{{d/"core_hierarchical.rpt"}}}',f'report_timing_summary -file {{{d/"core_timing.rpt"}}}',
- 'set bad {}', 'foreach c [get_cells -hier -filter {IS_PRIMITIVE == 1}] {', ' if {[string match FD* [get_property REF_NAME $c]] && [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $c]} {lappend bad $c}', '}', 'if {[llength $bad]} {error "Statistics registers remain: $bad"}',f'set f [open {{{d/"pruning_audit.json"}}} w]', 'puts $f {{"passed":true,"profile_enable":false,"statistics_registers":0}}','close $f',f'write_checkpoint -force {{{d/"post_synth.dcp"}}}',f'puts "LUP_COMMON_SYNTH_PASS L{lanes}U1P{p}"','exit']
+ 'set bad {}', 'foreach c [get_cells -hier -filter {IS_PRIMITIVE == 1}] {', ' if {[string match FD* [get_property REF_NAME $c]] && [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $c]} {lappend bad $c}', '}', 'if {[llength $bad]} {error "Statistics registers remain: $bad"}',f'set f [open {{{d/"pruning_audit.json"}}} w]', 'puts $f {{"passed":true,"profile_enable":false,"statistics_registers":0}}','close $f',f'write_checkpoint -force {{{d/"post_synth.dcp"}}}',f'puts "LUP_COMMON_SYNTH_PASS {point}"','exit']
  (d/'synth.tcl').write_text('\n'.join(lines)+'\n');start=time.time()
  with (d/'vivado.log').open('w') as f:subprocess.run(['vivado','-mode','batch','-nolog','-nojournal','-source',str(d/'synth.tcl')],cwd=ws,stdout=f,stderr=subprocess.STDOUT,check=True)
- assert f'LUP_COMMON_SYNTH_PASS L{lanes}U1P{p}' in (d/'vivado.log').read_text()
- a=area(d/'core_utilization.rpt');write(d/'synthesis.json',dict(passed=True,area=a,elapsed_seconds=time.time()-start,profile_enable=False,routed=False));print('LUP_SYNTH_PASS',f'L{lanes}U1P{p}',int(a['lut']),int(a['ff']),flush=True);return a
+ assert f'LUP_COMMON_SYNTH_PASS {point}' in (d/'vivado.log').read_text()
+ a=area(d/'core_utilization.rpt');write(d/'synthesis.json',dict(passed=True,area=a,elapsed_seconds=time.time()-start,profile_enable=False,routed=False));print('LUP_SYNTH_PASS',point,int(a['lut']),int(a['ff']),flush=True);return a
 
 def main():
  ap=argparse.ArgumentParser();ap.add_argument('--tag',default='lup_shared_128f_20261007_v2');ap.add_argument('--sim-only',action='store_true');args=ap.parse_args()

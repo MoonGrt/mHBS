@@ -38,6 +38,24 @@ module tb_mhbs_external;
  reg [7:0] expected_bytes[0:65535];
  integer cursor=0,cycles=0,replays=1,interrupt_run=0,dump_file=0;
  integer residency[0:63];
+ integer tail_batches=0,consecutive_outputs=0;logic previous_output=0,coverage_reported=0;
+ always @(posedge clk)begin
+  if(rst)begin tail_batches=0;consecutive_outputs=0;previous_output=0;coverage_reported=0;end
+  else begin
+   if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
+   previous_output=out_valid;
+   if(LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
+      && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected[0] && `HBS_CORE.pipe_ready[0]
+      && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
+       tail_batches=tail_batches+1;
+   if(done && !coverage_reported && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
+    coverage_reported=1;
+    if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
+    $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
+   end
+  end
+ end
+
  // Testbench-only observers keep production-disabled statistics independently
  // checkable. Count completed permutations/hashes, not the RTL issue counters.
  integer observed_boot=0,observed_cycles=0;

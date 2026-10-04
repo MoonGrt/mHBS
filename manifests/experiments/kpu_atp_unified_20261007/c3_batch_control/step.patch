@@ -1,0 +1,111 @@
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -62,6 +62,7 @@
+         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
+         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
+         VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
++        // Keep retired enum positions stable for historical cycle observers.
+         PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE
+     } state_t;
+     state_t state, hash_return, output_return;
+@@ -373,6 +374,21 @@
+     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
+         begin emit_value<=v; emit_length<=length; output_return<=ret; enter_state(OUTPUT_CHUNK); end
+     endtask
++    // All slots have completed before this transition. Their capture data
++    // stays intact until the final output beat, then the whole batch is free.
++    task automatic advance_direct_batch;
++        begin
++            if(chain_cursor+PIPELINE<endpoint_count)begin
++                chain_cursor<=chain_cursor+PIPELINE;
++                pipe_pair<=0;pipe_issue_slot<=0;pipe_issue_accepted<=0;pipe_done_mask<=0;
++                for(integer q=0;q<PIPE_BATCH;q=q+1)
++                    pipe_expected_mask[q]<=32'(chain_cursor)+PIPELINE+q<endpoint_count;
++                enter_state(PIPE_ISSUE);
++            end else begin
++                chain_cursor<=endpoint_count-1'b1;enter_state(CHAIN_NEXT);
++            end
++        end
++    endtask
+     task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
+         begin
+             task_recipe<=selected_recipe; active_mask<=mask;
+@@ -587,29 +603,19 @@
+                     if(((pipe_issue_accepted | (pipe_ready & pipe_selected)) &
+                          pipe_issue_mask)==pipe_issue_mask)begin
+                         pipe_issue_accepted<=0;
+-                        if(pipe_issue_slot+1>=PIPELINE)enter_state(PIPE_WAIT);
++                        if(pipe_issue_slot+1>=PIPELINE ||
++                           (pipe_direct && (pipe_expected_mask>>(pipe_issue_slot+1))==0))enter_state(PIPE_WAIT);
+                         else pipe_issue_slot<=pipe_issue_slot+1'b1;
+                     end else pipe_issue_accepted<=pipe_issue_accepted | (pipe_ready & pipe_selected);
+                 end
+                 PIPE_WAIT: if((pipe_done_mask & pipe_expected_mask)==pipe_expected_mask)begin
+                     if(pipe_direct)begin
+                         pipe_cache_valid<=0;pipe_batch_used<=1;pipe_pair<=0;
+-                        if(macro_flags[0] && leaf_cursor==target)enter_state(PIPE_CAPTURE);
+-                        else enter_state(PIPE_ADVANCE);
++                        if(macro_flags[0] && leaf_cursor==target)begin
++                            start_output(pipe_read_capture[0],node_bytes,PIPE_CAPTURE_NEXT);
++                            pipe_pair<=1;
++                        end else advance_direct_batch();
+                     end else enter_state(PIPE_LOAD);
+-                end
+-                PIPE_CAPTURE: start_output(pipe_read_capture[0],node_bytes,PIPE_CAPTURE_NEXT);
+-                PIPE_CAPTURE_NEXT: begin
+-                    if(pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(pipe_pair+1))!=0))begin
+-                        pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_CAPTURE);
+-                    end else enter_state(PIPE_ADVANCE);
+-                end
+-                PIPE_ADVANCE: begin
+-                    if(chain_cursor+PIPELINE<endpoint_count)begin
+-                        chain_cursor<=chain_cursor+PIPELINE;enter_state(CHAIN_SETUP);
+-                    end else begin
+-                        chain_cursor<=endpoint_count-1'b1;enter_state(CHAIN_NEXT);
+-                    end
+                 end
+                 PIPE_LOAD: begin
+                     pipe_batch_used<=1;
+@@ -758,7 +764,13 @@
+                     end
+                     enter_state(VERIFY_CHAIN_RUN);
+                 end
+-                OUTPUT_CHUNK: enter_state(output_return);
++                OUTPUT_CHUNK: begin
++                    if(pipe_direct && output_return==PIPE_CAPTURE_NEXT)begin
++                        if(pipe_pair<PIPELINE && (pipe_expected_mask>>pipe_pair)!=0)begin
++                            emit_value<=pipe_read_capture[0];pipe_pair<=pipe_pair+1'b1;
++                        end else advance_direct_batch();
++                    end else enter_state(output_return);
++                end
+                 DRAIN: enter_state(FINISH);
+                 FINISH: begin
+                     done<=1; enter_state(IDLE);
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -38,6 +38,23 @@
+  reg [7:0] expected_bytes[0:65535];
+  integer cursor=0,cycles=0,replays=1,interrupt_run=0,dump_file=0;
+  integer residency[0:63];
++ integer tail_batches=0,consecutive_outputs=0;logic previous_output=0;
++ always @(posedge clk)begin
++  if(rst)begin tail_batches=0;consecutive_outputs=0;previous_output=0;end
++  else begin
++   if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
++   previous_output=out_valid;
++   if(LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
++      && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected[0] && `HBS_CORE.pipe_ready[0]
++      && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
++       tail_batches=tail_batches+1;
++   if(done && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
++    if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
++    $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
++   end
++  end
++ end
++
+  // Testbench-only observers keep production-disabled statistics independently
+  // checkable. Count completed permutations/hashes, not the RTL issue counters.
+  integer observed_boot=0,observed_cycles=0;

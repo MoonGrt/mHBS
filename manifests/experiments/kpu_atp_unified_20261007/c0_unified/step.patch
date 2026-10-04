@@ -1,0 +1,604 @@
+diff --git a/manifests/unified_sources.txt b/manifests/unified_sources.txt
+--- a/manifests/unified_sources.txt
++++ b/manifests/unified_sources.txt
+@@ -1,5 +1,4 @@
+ rtl/hash_lane/mhbs_keccak.sv
+-rtl/hash_lane/mhbs_keccak_pipeline.sv
+ rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+ rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+ rtl/hash_lane/mhbs_recipe_lane.sv
+diff --git a/manifests/v42_sources.txt b/manifests/v42_sources.txt
+--- a/manifests/v42_sources.txt
++++ b/manifests/v42_sources.txt
+@@ -1,5 +1,4 @@
+ rtl/hash_lane/mhbs_keccak.sv
+-rtl/hash_lane/mhbs_keccak_pipeline.sv
+ rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+ rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+ rtl/hash_lane/mhbs_recipe_lane.sv
+diff --git a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+--- a/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
++++ b/rtl/hash_lane/mhbs_compact_shake_context_lane.sv
+@@ -68,7 +68,6 @@
+     logic [4:0] chain_iteration;
+     logic [N*8-1:0] captured_value;
+     logic [4:0] round_index;
+-    wire [1599:0] round_state [0:UNROLL];
+     wire [1599:0] advanced_state;
+     wire round_complete;
+     wire round_update;
+@@ -79,146 +78,82 @@
+             ? chain_counter : counter_next;
+     genvar round_step;
+ 
+-    function automatic [63:0] rotl64;
+-        input [63:0] value;
+-        input integer amount;
+-        begin
+-            rotl64 = amount == 0 ? value
+-                : (value << amount) | (value >> (64-amount));
+-        end
+-    endfunction
+-
+-    function automatic integer rho_offset;
+-        input integer x;
+-        input integer y;
+-        begin
+-            case (x + 5*y)
+-                 0: rho_offset =  0;  1: rho_offset =  1;
+-                 2: rho_offset = 62;  3: rho_offset = 28;
+-                 4: rho_offset = 27;  5: rho_offset = 36;
+-                 6: rho_offset = 44;  7: rho_offset =  6;
+-                 8: rho_offset = 55;  9: rho_offset = 20;
+-                10: rho_offset =  3; 11: rho_offset = 10;
+-                12: rho_offset = 43; 13: rho_offset = 25;
+-                14: rho_offset = 39; 15: rho_offset = 41;
+-                16: rho_offset = 45; 17: rho_offset = 15;
+-                18: rho_offset = 21; 19: rho_offset =  8;
+-                20: rho_offset = 18; 21: rho_offset =  2;
+-                22: rho_offset = 61; 23: rho_offset = 56;
+-                24: rho_offset = 14;
+-                default: rho_offset = 0;
+-            endcase
+-        end
+-    endfunction
+-
+-    function automatic [63:0] round_constant;
+-        input [4:0] index;
+-        begin
+-            case (index)
+-                 0: round_constant = 64'h0000000000000001;
+-                 1: round_constant = 64'h0000000000008082;
+-                 2: round_constant = 64'h800000000000808a;
+-                 3: round_constant = 64'h8000000080008000;
+-                 4: round_constant = 64'h000000000000808b;
+-                 5: round_constant = 64'h0000000080000001;
+-                 6: round_constant = 64'h8000000080008081;
+-                 7: round_constant = 64'h8000000000008009;
+-                 8: round_constant = 64'h000000000000008a;
+-                 9: round_constant = 64'h0000000000000088;
+-                10: round_constant = 64'h0000000080008009;
+-                11: round_constant = 64'h000000008000000a;
+-                12: round_constant = 64'h000000008000808b;
+-                13: round_constant = 64'h800000000000008b;
+-                14: round_constant = 64'h8000000000008089;
+-                15: round_constant = 64'h8000000000008003;
+-                16: round_constant = 64'h8000000000008002;
+-                17: round_constant = 64'h8000000000000080;
+-                18: round_constant = 64'h000000000000800a;
+-                19: round_constant = 64'h800000008000000a;
+-                20: round_constant = 64'h8000000080008081;
+-                21: round_constant = 64'h8000000000008080;
+-                22: round_constant = 64'h0000000080000001;
+-                23: round_constant = 64'h8000000080008008;
+-                default: round_constant = 64'h0;
+-            endcase
+-        end
+-    endfunction
+-
+-    function automatic [1599:0] keccak_round;
+-        input [1599:0] input_state;
+-        input [4:0] index;
+-        reg [63:0] a [0:24];
+-        reg [63:0] b [0:24];
+-        reg [63:0] c [0:4];
+-        reg [63:0] d [0:4];
+-        reg [1599:0] result;
+-        integer x;
+-        integer y;
+-        integer destination;
+-        begin
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = input_state[64*(x+5*y) +: 64];
+-            for (x = 0; x < 5; x = x + 1)
+-                c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
+-            for (x = 0; x < 5; x = x + 1)
+-                d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = a[x+5*y] ^ d[x];
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1) begin
+-                    destination = y + 5*((2*x+3*y)%5);
+-                    b[destination] = rotl64(a[x+5*y], rho_offset(x,y));
+-                end
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    a[x+5*y] = b[x+5*y]
+-                        ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y]);
+-            a[0] = a[0] ^ round_constant(index);
+-            result = '0;
+-            for (y = 0; y < 5; y = y + 1)
+-                for (x = 0; x < 5; x = x + 1)
+-                    result[64*(x+5*y) +: 64] = a[x+5*y];
+-            keccak_round = result;
+-        end
+-    endfunction
+-
+-    generate if(PIPELINE==1)begin: serial_rounds
+-        assign round_state[0]=sponge_state;
+-        for(genvar r=0;r<UNROLL;r=r+1)begin: generated_rounds
+-            (* keep_hierarchy="yes" *) mhbs_keccak round_logic (
+-                .state_in(round_state[r]),.round_index(round_index+5'(r)),.state_out(round_state[r+1]));
+-        end
+-        assign advanced_state=round_state[UNROLL];
+-        assign round_complete=round_index+UNROLL>=24;
+-        assign round_update=lane_state==RUN;
+-        assign batch_ready=0;assign batch_done=0;assign batch_digest=0;assign batch_result_tag=0;
+-    end else begin: pipelined_rounds
+-        logic sent;
+-        wire ready,finished;
+-        wire [1599:0] finished_state;
+-        wire [1:0] finished_tag;
+-        wire normal_valid=lane_state==RUN && !sent;
+-        mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.STATE_ACCESS(SHARED_STATE)) engine(
+-            .state_write_enable,.state_write_data,
+-            .clk,.rst,.request_valid(batch_mode ? batch_valid : normal_valid),.request_ready(ready),
+-            .request_state(batch_mode ? batch_state : sponge_state),.request_tag(batch_mode ? batch_tag : 2'd0),
+-            .response_valid(finished),.response_state(finished_state),.response_tag(finished_tag));
+-        assign batch_ready=batch_mode && ready;assign batch_done=batch_mode && finished;
+-        assign batch_digest=finished_state;assign batch_result_tag=finished_tag;
+-        if(SHARED_STATE)assign sponge_state=finished_state;
+-        assign advanced_state=finished_state;
+-        assign round_complete=!batch_mode && finished;
+-        assign round_update=lane_state==RUN && round_complete;
++    // One P-stage datapath for both serial and interleaved execution. P1
++    // writes its sole state through the sponge word enables, without launch
++    // or return bubbles. P>1 carries valid/round/tag through the same stages.
++    localparam integer ROUNDS=UNROLL*PIPELINE;
++    logic [1599:0] state_reg [0:PIPELINE-1];
++    logic [PIPELINE-1:0] stage_valid;
++    logic [4:0] stage_base [0:PIPELINE-1];
++    logic [1:0] stage_tag [0:PIPELINE-1];
++    logic sent;
++    wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
++        && stage_base[PIPELINE-1]+ROUNDS<24;
++    wire ready=!rst && !recycle;
++    wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
++    wire normal_valid=lane_state==RUN && !sent;
++    wire issue_valid=batch_mode ? batch_valid : normal_valid;
++    wire [1599:0] issue_state=batch_mode ? batch_state : sponge_state;
++    wire [1:0] issue_tag=batch_mode ? batch_tag : 2'd0;
++    wire [1599:0] finished_state=state_reg[PIPELINE-1];
++    wire [1599:0] stage_result[0:PIPELINE-1];
++    for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
++        wire [1599:0] rounds[0:UNROLL];
++        wire [4:0] start_round;
++        wire [1:0] source_tag;
++        wire source_valid;
++        if(s==0)begin: input_stage
++            assign rounds[0]=PIPELINE==1 ? sponge_state
++                : recycle ? state_reg[PIPELINE-1] : issue_state;
++            assign start_round=PIPELINE==1 ? round_index
++                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
++            assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
++            assign source_valid=PIPELINE>1 && (recycle || issue_valid);
++        end else begin: following_stage
++            assign rounds[0]=state_reg[s-1];
++            assign start_round=stage_base[s-1];
++            assign source_tag=stage_tag[s-1];
++            assign source_valid=stage_valid[s-1];
++        end
++        for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
++            mhbs_keccak round_logic(.state_in(rounds[r]),
++                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
++        end
++        assign stage_result[s]=rounds[UNROLL];
++        for(genvar w=0;w<25;w=w+1)begin: words
++            always_ff @(posedge clk)if(!rst)begin
++                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
++                    state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
++                else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
++            end
++        end
+         always_ff @(posedge clk)begin
+-            if(rst)sent<=0;
+-            else if(!batch_mode)begin
+-                if(normal_valid && ready)sent<=1;
+-                if(finished)sent<=0;
++            if(rst)stage_valid[s]<=0;
++            else begin
++                stage_valid[s]<=source_valid;
++                if(source_valid)begin stage_base[s]<=start_round;stage_tag[s]<=source_tag;end
+             end
+         end
+-    end endgenerate
++    end
++    assign batch_ready=PIPELINE>1 && batch_mode && ready;
++    assign batch_done=PIPELINE>1 && batch_mode && finished;
++    assign batch_digest=PIPELINE>1 ? finished_state : 1600'd0;
++    assign batch_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : 2'd0;
++    if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
++    assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
++    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
++    assign round_update=lane_state==RUN && (PIPELINE==1 || round_complete);
++    always_ff @(posedge clk)begin
++        if(rst)sent<=0;
++        else if(!batch_mode)begin
++            if(normal_valid && ready)sent<=1;
++            if(finished)sent<=0;
++        end
++    end
++    // synthesis translate_off
++    always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
++        if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
++    // synthesis translate_on
+     wire permutation_complete=lane_state==RUN && round_complete;
+     always_comb begin
+         next_chain_state='0;
+@@ -280,7 +215,7 @@
+     assign capture_digest = captured_value;
+ 
+     initial begin
+-        if (UNROLL < 1 || UNROLL > 24 || (24 % UNROLL) != 0)
++        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 4 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+             $error("compact SHAKE lane UNROLL must divide 24");
+     end
+ 
+@@ -337,7 +272,7 @@
+         // Only absorption, initialization or a new chain block needs a write.
+         assign state_write_enable[word_index]=!rst &&
+             (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
+-        if(!SHARED_STATE || PIPELINE==1)begin: private_state
++        if(!SHARED_STATE && PIPELINE>1)begin: private_state
+             always_ff @(posedge clk)
+                 if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
+         end
+diff --git a/rtl/hash_lane/mhbs_keccak_pipeline.sv b/rtl/hash_lane/mhbs_keccak_pipeline.sv
+--- a/rtl/hash_lane/mhbs_keccak_pipeline.sv
++++ /dev/null
+@@ -1,61 +0,0 @@
+-`timescale 1ns/1ps
+-`default_nettype none
+-// One shared ring of P registered stages, U combinational rounds per stage.
+-// Finished tokens leave without backpressure; the owner reserves result space.
+-// Internal round feedback has priority over fresh tokens and chain feedback.
+-module mhbs_keccak_pipeline #(
+- parameter integer UNROLL=1, PIPELINE=2, TAG_BITS=2, parameter bit STATE_ACCESS=0
+-)(
+- input wire [24:0] state_write_enable,input wire [1599:0] state_write_data,
+- input wire clk,rst,input wire request_valid,output wire request_ready,
+- input wire [1599:0] request_state,input wire [TAG_BITS-1:0] request_tag,
+- output wire response_valid,output wire [1599:0] response_state,
+- output wire [TAG_BITS-1:0] response_tag
+-);
+- localparam integer ROUNDS=UNROLL*PIPELINE;
+- initial if(UNROLL<1 || PIPELINE<1 || ROUNDS>24 || 24%ROUNDS!=0)
+-  $fatal(1,"U*P must divide 24");
+- logic [PIPELINE-1:0] valid;
+- logic [1599:0] state_reg[0:PIPELINE-1];
+- logic [4:0] base[0:PIPELINE-1];
+- logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+- wire recycle=valid[PIPELINE-1] && base[PIPELINE-1]+ROUNDS<24;
+- assign request_ready=!rst && !recycle;
+- assign response_valid=!rst && valid[PIPELINE-1] && !recycle;
+- assign response_state=state_reg[PIPELINE-1];
+- assign response_tag=tag[PIPELINE-1];
+- for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
+-  wire [1599:0] rounds[0:UNROLL];
+-  wire [4:0] start_round;
+-  wire [TAG_BITS-1:0] source_tag;
+-  wire source_valid;
+-  if(s==0)begin
+-   assign rounds[0]=recycle ? state_reg[PIPELINE-1] : request_state;
+-   assign start_round=recycle ? base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
+-   assign source_tag=recycle ? tag[PIPELINE-1] : request_tag;
+-   assign source_valid=recycle || request_valid;
+-  end else begin
+-   assign rounds[0]=state_reg[s-1];assign start_round=base[s-1];
+-   assign source_tag=tag[s-1];assign source_valid=valid[s-1];
+-  end
+-  for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
+-   mhbs_keccak round_logic(.state_in(rounds[r]),
+-    .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
+-  end
+-  for(genvar w=0;w<25;w=w+1)begin: state_words
+-   always_ff @(posedge clk)if(!rst)begin
+-    if(STATE_ACCESS && s==PIPELINE-1 && state_write_enable[w])
+-     state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
+-    else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
+-   end
+-  end
+-  always_ff @(posedge clk)begin
+-   if(rst)valid[s]<=0;
+-   else begin
+-    valid[s]<=source_valid;
+-    if(source_valid)begin base[s]<=start_round;tag[s]<=source_tag;end
+-   end
+-  end
+- end
+-endmodule
+-`default_nettype wire
+diff --git a/scripts/run_kpu_atp_candidate.py b/scripts/run_kpu_atp_candidate.py
+--- a/scripts/run_kpu_atp_candidate.py
++++ b/scripts/run_kpu_atp_candidate.py
+@@ -6,8 +6,9 @@
+ from run_lup_sign_atp import snapshot,synth,check_same
+ 
+ def main():
+- ap=argparse.ArgumentParser();ap.add_argument('--candidate',required=True);ap.add_argument('--best',type=float,default=42458.15269333333);a=ap.parse_args()
+- out=ROOT/'manifests/experiments/kpu_atp_opt_20261007'/a.candidate;build=ROOT/'build/kpu_atp_opt'/a.candidate
++ ap=argparse.ArgumentParser();ap.add_argument('--candidate',required=True);ap.add_argument('--best',type=float,default=40892.87622);ap.add_argument('--experiment',default='kpu_atp_unified_20261007');ap.add_argument('--mandatory',action='store_true');a=ap.parse_args()
++ assert all(x and all(c.isalnum() or c in '_-' for c in x) for x in (a.experiment,a.candidate))
++ out=ROOT/'manifests/experiments'/a.experiment/a.candidate;build=ROOT/'build'/a.experiment/a.candidate
+  out.mkdir(parents=True,exist_ok=True);build.mkdir(parents=True,exist_ok=True)
+  identity=snapshot(out)
+  (out/'implementation.patch').write_bytes(subprocess.check_output(['git','diff','HEAD'],cwd=ROOT))
+@@ -17,6 +18,9 @@
+  points={}
+  for p in (1,2,3,4):
+   r=sim(f'K1P{p}U1',p);check_same(r,ref,cycles=False);points[p]=r
++ 
++ if a.mandatory:
++  for p,c in enumerate((2619719,1410128,985022,770546),1):assert points[p]['sign_cycles']==c,(p,points[p]['sign_cycles'],c)
+  write(out/'simulation.json',points);shutil.copytree(build/'logs',out/'simulation',dirs_exist_ok=True)
+  ws=build/'source';ws.mkdir(exist_ok=True)
+  with tarfile.open(out/'source_snapshot.tar.gz') as t:t.extractall(ws,filter='data')
+@@ -31,7 +35,7 @@
+  write(out/'results.json',rows)
+  with (out/'results.csv').open('w') as f:w=csv.DictWriter(f,fieldnames=rows[0]);w.writeheader();w.writerows(rows)
+  best=min(rows,key=lambda r:r['atp_slice_ms']);gain=best['atp_slice_ms']<a.best;checks={}
+- if gain:
++ if gain or a.mandatory:
+   for p in (1,2,3,4):
+    checks[f'P{p}_off']=sim(f'K1P{p}U1_stats_off',p,profile_enable=False);check_same(checks[f'P{p}_off'],points[p])
+    checks[f'P{p}_replay']=sim(f'K1P{p}U1_replay',p,options=('+REPLAYS=2','+STALL=1','+INTERRUPT=1','+TAIL_NOISE=1'))
+@@ -41,11 +45,11 @@
+   checks['K2P4U1']=sim('K2P4U1_regression',4,lanes=2);assert checks['K2P4U1']['sign_cycles']==486328;check_same(checks['K2P4U1'],ref,cycles=False)
+   binary=build_binary(build,json.loads((vector/'job.json').read_text()),unroll=1,pipeline=4,lanes=1)
+   for mode in (1,2):
+-   log=build/'logs'/f'fault_{mode}.log';run([str(binary),f'+IMAGE={BASE/"images/slh_128f"}',f'+VECTOR={vector}',f'+FAULT={mode}'],log);assert 'V42_FAULT_PASS' in log.read_text()
++   log=build/'logs'/f'fault_{mode}.log';run([str(binary),f'+IMAGE={BASE/"images/slh_128f"}',f'+VECTOR={vector}',f'+FAULT={mode}'],log);assert 'V42_FAULT_PASS' in log.read_text();checks[f'fault_{mode}']={'passed':True,'log_sha256':sha(log)}
+   run(['python3','scripts/verify_lup_pipeline.py'],out/'unit.log')
+   shutil.copytree(ROOT/'build/lup_shared_units',out/'unit_evidence',ignore=shutil.ignore_patterns('*.vvp'),dirs_exist_ok=True)
+  write(out/'validation.json',checks);shutil.copytree(build/'logs',out/'simulation',dirs_exist_ok=True)
+- write(out/'decision.json',dict(accepted=gain,best=best,previous_best=a.best,validated=gain))
++ write(out/'decision.json',dict(accepted=gain or a.mandatory,mandatory=a.mandatory,best=best,previous_best=a.best,validated=gain or a.mandatory))
+  write(out/'evidence_sha256.json',{str(p.relative_to(out)):sha(p) for p in out.rglob('*') if p.is_file() and p.name!='evidence_sha256.json' and p.suffix!='.dcp'})
+- print('CANDIDATE_COMPLETE',a.candidate,'ACCEPT' if gain else 'REJECT',best['point'],best['atp_slice_ms'],flush=True)
++ print('CANDIDATE_COMPLETE',a.candidate,'ACCEPT' if gain or a.mandatory else 'REJECT',best['point'],best['atp_slice_ms'],flush=True)
+ if __name__=='__main__':main()
+diff --git a/scripts/verify_kpu_chain_format.py b/scripts/verify_kpu_chain_format.py
+--- /dev/null
++++ b/scripts/verify_kpu_chain_format.py
+@@ -0,0 +1,20 @@
++#!/usr/bin/env python3
++"""Cycle equivalence against the frozen pre-round-two chain formatter."""
++import argparse,subprocess,tarfile,json,hashlib
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++def main():
++ ap=argparse.ArgumentParser();ap.add_argument('--out',required=True);a=ap.parse_args();out=ROOT/a.out;out.mkdir(parents=True,exist_ok=True)
++ archive=ROOT/'manifests/experiments/kpu_atp_unified_20261007/baseline/source_snapshot.tar.gz'
++ with tarfile.open(archive) as t:source=t.extractfile('rtl/hash_lane/mhbs_chain_pipeline_lane.sv').read().decode()
++ ref=out/'chain_ref.sv';ref.write_text(source.replace('module mhbs_chain_pipeline_lane #','module mhbs_chain_pipeline_lane_ref #'))
++ records=[]
++ for p in (1,2,3,4):
++  binary=out/f'P{p}.vvp';log=out/f'P{p}.log'
++  with log.open('w') as f:
++   for cmd in (['iverilog','-g2012','-s','tb_mhbs_chain_format_equiv',f'-Ptb_mhbs_chain_format_equiv.PIPELINE={p}','-o',str(binary),'rtl/hash_lane/mhbs_chain_pipeline_lane.sv',str(ref),'tb/unit/tb_mhbs_chain_format_equiv.sv'],['vvp',str(binary)]):
++    r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
++    if r.returncode:raise RuntimeError(log.read_text()[-2000:])
++  records.append({'p':p,'passed':True,'log_sha256':hashlib.sha256(log.read_bytes()).hexdigest()});print(log.read_text().splitlines()[-1],flush=True)
++ (out/'results.json').write_text(json.dumps(records,indent=2)+'\n')
++if __name__=='__main__':main()
+diff --git a/scripts/verify_lup_pipeline.py b/scripts/verify_lup_pipeline.py
+--- a/scripts/verify_lup_pipeline.py
++++ b/scripts/verify_lup_pipeline.py
+@@ -8,22 +8,22 @@
+ requests=[];digests=[];captures=[]
+ for n in (16,24,32):
+  for i in range(32):
+-  steps=(0,1,2,15)[i%4];cap=(0,steps//2,steps)[i%3];domain=3 if i%2 else 0
++  steps=(0,1,2,15)[i%4];cap=steps+1 if i%8==7 else (0,steps//2,steps)[i%3];enabled=i%8!=6;domain=3 if i%2 else 0
+   a=rng.randrange(67);b=rng.randrange(1<<20);leaf=rng.randrange(512);tree=rng.getrandbits(64);layer=rng.randrange(22)
+-  req=n|(steps<<8)|(cap<<16)|(domain<<24)|(a<<32)|(b<<40)|(leaf<<72)|(tree<<88)|(layer<<152)
++  req=n|(steps<<8)|(cap<<16)|(domain<<24)|(a<<32)|(b<<40)|(leaf<<72)|(tree<<88)|(layer<<152)|((not enabled)<<160)
+   def address(dom,counter):return layer.to_bytes(4,'big')+bytes(4)+tree.to_bytes(8,'big')+dom.to_bytes(4,'big')+leaf.to_bytes(4,'big')+a.to_bytes(4,'big')+counter.to_bytes(4,'big')
+   pk=bytes(range(32,64))[:n];val=hashlib.shake_256(pk+address(6 if domain==3 else 5,b)+bytes(range(32))[:n]).digest(n)
+-  captured=val if cap==0 else None
++  captured=val if enabled and cap==0 else bytes(n)
+   for j in range(steps):
+    val=hashlib.shake_256(pk+address(domain,b if domain==3 else j)+val).digest(n)
+-   if j+1==cap:captured=val
++   if enabled and j+1==cap:captured=val
+   requests.append(f'{req:064x}');digests.append(f'{int.from_bytes(val,"little"):064x}');captures.append(f'{int.from_bytes(captured,"little"):064x}')
+ for name,values in [('chain_requests',requests),('chain_digest',digests),('chain_capture',captures)]:
+  (OUT/(name+'.mem')).write_text('\n'.join(values)+'\n')
+-sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()
++sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()+['tb/unit/mhbs_batch_test_driver.sv']
+ records=[]
+ for top in ('tb_mhbs_keccak_pipeline','tb_mhbs_chain_overlap'):
+- for u,p in ((1,1),(1,2),(1,3),(1,4),(2,2)):
++ for u,p in ((1,2),(1,3),(1,4),(2,2)):
+   name=f'{top}_U{u}P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
+   with log.open('w') as f:
+    for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.UNROLL={u}',f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={OUT}']):
+@@ -44,7 +44,7 @@
+ padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
+ 
+ for top in ('tb_mhbs_compact_shake_context_lane','tb_mhbs_recipe_padding'):
+- for p in (2,3,4):
++ for p in (1,2,3,4):
+   name=f'{top}_P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
+   with log.open('w') as f:
+    for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={padding_file}']):
+diff --git a/tb/unit/mhbs_batch_test_driver.sv b/tb/unit/mhbs_batch_test_driver.sv
+--- /dev/null
++++ b/tb/unit/mhbs_batch_test_driver.sv
+@@ -0,0 +1,17 @@
++`timescale 1ns/1ps
++module mhbs_batch_test_driver #(parameter UNROLL=1,PIPELINE=2)(
++ input wire clk,rst,request_valid,output wire request_ready,
++ input wire [1599:0] request_state,input wire [1:0] request_tag,
++ output wire response_valid,output wire [1599:0] response_state,output wire [1:0] response_tag);
++ mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(1)) dut(
++  .clk,.rst,.batch_mode(1'b1),.batch_valid(request_valid),.batch_ready(request_ready),
++  .batch_state(request_state),.batch_tag(request_tag),.batch_done(response_valid),
++  .batch_digest(response_state),.batch_result_tag(response_tag),
++  .node_bytes(6'd16),.chain_prefix_data(384'd0),.context_valid(1'b0),.context_ready(),
++  .fast_block_valid(1'b0),.fast_block_ready(),.fast_block_data(1088'd0),
++  .chain_enable(1'b0),.chain_prefix(1'b0),.chain_prefix_preserve_counter(1'b0),
++  .chain_prefix_domain(3'd0),.chain_count(5'd0),.capture_enable(1'b0),.capture_after(5'd0),
++  .block_valid(1'b0),.block_ready(),.block_data(128'd0),.block_last(1'b0),
++  .response_valid(),.response_digest(),.chain_feedback_valid(),.chain_feedback_counter(),
++  .finish_valid(),.finish_digest(),.capture_digest(),.capture_valid(),.error());
++endmodule
+diff --git a/tb/unit/tb_mhbs_chain_format_equiv.sv b/tb/unit/tb_mhbs_chain_format_equiv.sv
+--- /dev/null
++++ b/tb/unit/tb_mhbs_chain_format_equiv.sv
+@@ -0,0 +1,65 @@
++`timescale 1ns/1ps
++// Frozen adapter oracle: legal interleaved completions, deterministic stalls,
++// all node widths, disabled/missed captures, tag reuse and simultaneous events.
++module tb_mhbs_chain_format_equiv;
++ parameter integer PIPELINE=4;
++ logic clk=0,rst=1;
++ always #5 clk=~clk;
++ logic [5:0] node_bytes=16;
++ logic request_valid=0,response_ready=0,perm_ready=1,perm_done=0;
++ logic [1:0] request_tag=0,read_tag=0,perm_result_tag=0;
++ logic [4:0] request_steps=0,request_capture_after=0,request_layer=0;
++ logic request_capture=0;
++ logic [255:0] secret_seed=256'hdeadbeef,public_seed=256'hfeed1234;
++ logic [63:0] request_tree=0;
++ logic [9:0] request_leaf=0;
++ logic [6:0] request_a=0;
++ logic [31:0] request_b=0;
++ logic [7:0] seed_domain=5,step_domain=0;
++ logic [1599:0] perm_digest=0;
++ wire request_ready,response_valid,perm_valid;
++ wire [1:0] response_tag,perm_tag;
++ wire [255:0] read_digest,read_capture,response_digest,response_capture;
++ wire [1599:0] perm_state;
++ wire [31:0] hash_count,permutation_count;
++ wire rr,rv,pv;wire [1:0] rt,pt;
++ wire [255:0] rd,rc,vd,vc;wire [1599:0] ps;wire [31:0] hc,pc;
++ mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(.*);
++ mhbs_chain_pipeline_lane_ref #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) ref_dut(
++ .clk,.rst,.node_bytes,.request_valid,.request_tag,.request_steps,.request_capture_after,.request_capture,
++ .secret_seed,.public_seed,.request_layer,.request_tree,.request_leaf,.request_a,.request_b,.seed_domain,.step_domain,
++ .read_tag,.response_ready,.perm_ready,.perm_done,.perm_digest,.perm_result_tag,
++ .request_ready(rr),.read_digest(rd),.read_capture(rc),.response_valid(rv),.response_tag(rt),
++ .response_digest(vd),.response_capture(vc),.perm_valid(pv),.perm_state(ps),.perm_tag(pt),.hash_count(hc),.permutation_count(pc));
++ logic [PIPELINE-1:0] pending=0,known=0;
++ integer cycle=0,accepted=0,simultaneous=0;
++ always @(posedge clk)if(!rst)begin
++  if({request_ready,response_valid,perm_valid,hash_count,permutation_count}!=={rr,rv,pv,hc,pc})$fatal(1,"control mismatch");
++  if(perm_valid && {perm_state,perm_tag}!=={ps,pt})$fatal(1,"block/tag mismatch");
++  if(response_valid && {response_tag,response_digest,response_capture}!=={rt,vd,vc})$fatal(1,"response mismatch");
++  if(known[read_tag] && read_capture!==rc)$fatal(1,"capture readback mismatch");
++  if(request_valid && request_ready)begin known[request_tag]=1;accepted=accepted+1;if(perm_done)simultaneous=simultaneous+1;end
++  if(perm_valid && perm_ready)pending[perm_tag]=1;
++ end
++ initial begin
++  for(integer width=0;width<3;width=width+1)begin
++   @(negedge clk);rst=1;request_valid=0;perm_done=0;pending=0;known=0;
++   repeat(2)@(negedge clk);rst=0;node_bytes=6'(16+8*width);
++   for(integer i=0;i<600;i=i+1)begin
++    @(negedge clk);
++    request_valid=i<500 && i%5!=0;request_tag=2'(i%PIPELINE);read_tag=2'((i/3)%PIPELINE);
++    request_steps=5'(i%6);request_capture_after=5'((i/7)%8);request_capture=i%3!=0;
++    request_b=32'hffffffff-i;request_a=7'(i);request_leaf=10'(i*3);request_tree=64'hfedcba9876543210+i;request_layer=5'(i);
++    step_domain=i%2 ? 3 : 0;seed_domain=i%2 ? 6 : 5;response_ready=i%7!=0;
++    perm_done=0;
++    for(integer t=PIPELINE-1;t>=0;t=t-1)if(pending[t])begin perm_done=1;perm_result_tag=2'(t);end
++    if(perm_done)pending[perm_result_tag]=0;
++    perm_ready=perm_done || i%4!=0;
++    for(integer w=0;w<50;w=w+1)perm_digest[w*32 +:32]=$random;
++   end
++  end
++  @(negedge clk);request_valid=0;
++  if(accepted<30 || (PIPELINE>1 && simultaneous==0))$fatal(1,"coverage missing");
++  $display("CHAIN_FORMAT_EQUIV_PASS P=%0d accepted=%0d simultaneous=%0d",PIPELINE,accepted,simultaneous);$finish;
++ end
++endmodule
+diff --git a/tb/unit/tb_mhbs_chain_overlap.sv b/tb/unit/tb_mhbs_chain_overlap.sv
+--- a/tb/unit/tb_mhbs_chain_overlap.sv
++++ b/tb/unit/tb_mhbs_chain_overlap.sv
+@@ -26,7 +26,7 @@
+   .response_valid,.response_ready,.response_tag,.response_digest,.response_capture,
+   .perm_valid(pv),.perm_ready(pr),.perm_state(ps),.perm_tag(pt),.perm_done(pd),.perm_digest(po),.perm_result_tag(ot),
+   .read_tag,.read_digest,.read_capture,.hash_count,.permutation_count);
+- mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) pipe(
++ mhbs_batch_test_driver #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) pipe(
+   .clk,.rst,.request_valid(pv),.request_ready(pr),.request_state(ps),.request_tag(pt),
+   .response_valid(pd),.response_state(po),.response_tag(ot));
+  reg [255:0] requests[0:95],digests[0:95],captures[0:95];
+@@ -60,7 +60,7 @@
+   begin
+    ids[tag]=id;request_tag=2'(tag);
+    node_bytes=requests[id][5:0];request_steps=requests[id][12:8];request_capture_after=requests[id][20:16];
+-   step_domain=requests[id][31:24];seed_domain=step_domain==3 ? 6 : 5;
++   request_capture=!requests[id][160];step_domain=requests[id][31:24];seed_domain=step_domain==3 ? 6 : 5;
+    request_a=requests[id][38:32];request_b=requests[id][71:40];request_leaf=requests[id][81:72];
+    request_tree=requests[id][151:88];request_layer=requests[id][156:152];request_valid=1;
+   end
+diff --git a/tb/unit/tb_mhbs_compact_shake_context_lane.sv b/tb/unit/tb_mhbs_compact_shake_context_lane.sv
+--- a/tb/unit/tb_mhbs_compact_shake_context_lane.sv
++++ b/tb/unit/tb_mhbs_compact_shake_context_lane.sv
+@@ -2,7 +2,7 @@
+ `default_nettype none
+ 
+ module tb_mhbs_compact_shake_context_lane;
+-    parameter integer PIPELINE=1;
++    parameter integer PIPELINE=1, UNROLL=2;
+     parameter bit SHARED_STATE=1;
+     wire [5:0] node_bytes=16;
+     wire [383:0] chain_prefix_data=0;
+@@ -51,7 +51,7 @@
+ 
+     always #5 clk = ~clk;
+ 
+-    mhbs_compact_shake_context_lane #(.UNROLL(2),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE)) dut (.batch_mode(1'b0),.batch_valid(1'b0),.batch_state(1600'd0),.batch_tag(2'd0),.batch_ready(),.batch_done(),.batch_digest(),.batch_result_tag(),.*);
++    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE)) dut (.batch_mode(1'b0),.batch_valid(1'b0),.batch_state(1600'd0),.batch_tag(2'd0),.batch_ready(),.batch_done(),.batch_digest(),.batch_result_tag(),.*);
+ 
+     task automatic tick;
+         begin @(posedge clk); #1; end
+diff --git a/tb/unit/tb_mhbs_keccak_pipeline.sv b/tb/unit/tb_mhbs_keccak_pipeline.sv
+--- a/tb/unit/tb_mhbs_keccak_pipeline.sv
++++ b/tb/unit/tb_mhbs_keccak_pipeline.sv
+@@ -8,18 +8,21 @@
+  wire [1599:0] response_state;
+  wire [1:0] response_tag;
+  reg [1599:0] expected[0:3];reg [3:0] outstanding=0;
++ integer due[0:3];
+  integer sent=0,received=0,cycles=0;
+  `include "tb/reference/keccak_round_frozen.svh"
+- mhbs_keccak_pipeline #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.state_write_enable(25'd0),.state_write_data(1600'd0),.*);
++ mhbs_batch_test_driver #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
+  always #5 clk=~clk;
+  always @(posedge clk)if(!rst)begin
+   cycles=cycles+1;
+   if(response_valid)begin
++   if(cycles!=due[response_tag])$fatal(1,"permutation latency changed");
+    if(!outstanding[response_tag] || response_state!==expected[response_tag])$fatal(1,"permutation mismatch tag=%0d",response_tag);
+    outstanding[response_tag]=0;received=received+1;
+   end
+   if(request_valid && request_ready)begin
+    if(outstanding[request_tag])$fatal(1,"duplicate tag");
++   due[request_tag]=cycles+24/UNROLL;
+    expected[request_tag]=request_state;
+    for(integer r=0;r<24;r=r+1)expected[request_tag]=keccak_round(expected[request_tag],5'(r));
+    outstanding[request_tag]=1;sent=sent+1;

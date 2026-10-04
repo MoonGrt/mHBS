@@ -8,7 +8,7 @@ module mhbs_recipe_lane #(
     parameter integer UNROLL = 2, PIPELINE = 1,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter [15:0] RECIPE_MASK = 16'hffff,
-    parameter bit PROFILE_ENABLE = 0
+    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0
 ) (
     input wire clk, rst,
     input wire batch_mode,batch_request_valid,output wire batch_request_ready,
@@ -19,6 +19,8 @@ module mhbs_recipe_lane #(
     output wire batch_response_valid,input wire batch_response_ready,
     output wire [1:0] batch_response_tag,
     output wire [255:0] batch_response_digest,batch_response_capture,
+    input wire [1:0] batch_read_tag,
+    output wire [255:0] batch_read_digest,batch_read_capture,
     output wire [31:0] batch_hashes,batch_permutations,
     input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
@@ -441,6 +443,7 @@ module mhbs_recipe_lane #(
             .seed_domain(batch_seed_domain),.step_domain(batch_step_domain),
             .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
             .response_digest(batch_response_digest),.response_capture(batch_response_capture),
+            .read_tag(batch_read_tag),.read_digest(batch_read_digest),.read_capture(batch_read_capture),
             .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
             .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
             .hash_count(batch_hashes),.permutation_count(batch_permutations));
@@ -448,9 +451,10 @@ module mhbs_recipe_lane #(
         assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
         assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
         assign batch_response_digest=0;assign batch_response_capture=0;
+        assign batch_read_digest=0;assign batch_read_capture=0;
         assign batch_hashes=0;assign batch_permutations=0;
     end endgenerate
-    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1)) sponge (
+    mhbs_compact_shake_context_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.N(N),.DIGEST_BYTES(DIGEST_BYTES),.STREAM_CHAIN_ENABLE(0),.REUSE_FAST_FEEDBACK(1),.SHARED_STATE(SHARED_STATE)) sponge (
         .clk, .rst, .batch_mode,.batch_valid(batch_perm_valid),.batch_ready(batch_perm_ready),
         .batch_state(batch_perm_state),.batch_tag(batch_perm_tag),.batch_done(batch_perm_done),
         .batch_digest(batch_perm_digest),.batch_result_tag(batch_perm_result_tag),.node_bytes, .chain_prefix_data(live_chain_prefix), .context_valid(state == START), .context_ready(hash_ready),
