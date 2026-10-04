@@ -389,9 +389,10 @@ class Job:
 class Machine:
     def __init__(self, image: Image, job: Job,
                  observe: Callable[[int, bytes, bytes], None] | None = None,
-                 *, index_policy: str = "guarded"):
+                 *, index_policy: str = "guarded", recompute_auth: bool = False):
         if index_policy not in ("guarded", "fixed_q_no_guard"):
             raise ValueError("index policy")
+        self.recompute_auth = recompute_auth
         self.index_policy = index_policy
         validate(image)
         if any(len(v) != image.n for v in (job.secret, job.prf, job.public, job.random)):
@@ -536,9 +537,9 @@ class Machine:
         if sign and not 1 <= len(message) <= 87:
             raise ValueError("message length")
         if sign and self.image.stateful:
-            if not self.cache_valid: raise ValueError("keygen required")
+            if not self.recompute_auth and not self.cache_valid: raise ValueError("keygen required")
             if self.q >= 1024: raise ValueError("index exhausted")
-            if not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
+            if not self.recompute_auth and not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
                 raise ValueError("authentication cache belongs to another index")
             if self.index_policy == "guarded" and not commit:
                 raise ValueError("state commit required before execution/output")

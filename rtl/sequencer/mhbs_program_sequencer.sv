@@ -11,7 +11,7 @@ module mhbs_program_sequencer (
  state_t state;
  logic [3:0] pc;
  logic [63:0] token;
- logic [15:0] template_word;
+ logic [16:0] template_word;
  logic [10:0] coordinate,stride;
  logic [5:0] remaining;
  logic [1:0] sp;
@@ -25,7 +25,7 @@ module mhbs_program_sequencer (
  assign ready=state==IDLE;
  assign command_valid=state==ISSUE;
  assign command={1'b0,template_word[2:0],3'd0,template_word[7:3],3'd0,template_word[12:8],
-                 template_word[15],1'b0,template_word[14:13],coordinate,13'd0};
+                 template_word[15],template_word[16],template_word[14:13],coordinate,13'd0};
  integer i;
  always_ff @(posedge clk) begin
   if(rst) begin
@@ -50,7 +50,7 @@ module mhbs_program_sequencer (
       end
       state<=FETCH;
      end else begin
-      template_word<=template_data[15:0];coordinate<=token[57:47]+loop_bias[0]+loop_bias[1];
+      template_word<=template_data[16:0];coordinate<=token[57:47]+loop_bias[0]+loop_bias[1];
       stride<=token[40:30];remaining<=token[46:41];state<=ISSUE;
      end
     end

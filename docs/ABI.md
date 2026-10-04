@@ -1,4 +1,4 @@
-# mHBS 当前 ABI：SLH 专用 `slh64_v4.2`（布局修订 3）
+# mHBS 当前 ABI：`slh64_v4.2`（布局修订 3）
 
 本文描述**当前生产 RTL**。工程版本为 v4.2，五类宏操作延续 **ABI 4 逻辑语义**，三份物理镜像采用 `slh64_v4.2` 的**布局修订 3**。物理镜像没有运行时 ABI 版本字；格式标识和修订号由构建元数据及离线工具管理。历史布局不能直接交给当前 RTL 使用。本文位号从最低位 0 开始，`[高:低]` 包含两端。
 
@@ -13,7 +13,7 @@ descriptor（配方、参数、路由）  ─┘                         ↑
 Job 参数、message_length、消息流 ──────────────────────────┘
 ```
 
-- 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。当前生产核不支持 XMSS/LMS、索引 `q`、有状态树缓存或索引 guard。
+- 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。新增实验 SHAKE256 XMSS/LMS omega2/4，支持外部索引 q；不实现树缓存或索引 guard。
 - 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部仍可并行使用两个 Hash lane。
 - `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
 - Job 和消息不占 program 地址。五个 256 位 Job 参数从顶层进入，按 profile 只取低 `n` 字节。Sign 的 `PUBLIC_ROOT` 由调用方配置，例如使用独立 Keygen 输出。
@@ -56,7 +56,7 @@ LOOP 最多嵌套两层。`HALT` 为 `[63:62]=3` 且其余位为零，在当前�
 
 ### Template：单宏命令
 
-Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须为零。容量为 16 项。
+Template 物理字宽为 64 位，但**仅 `[16:0]` 承载编码**，高位须为零。容量为 16 项。
 
 | 位 | 含义 |
 |---|---|
@@ -66,9 +66,10 @@ Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须�
 | `[13]` | `CAPTURE`：输出目标链值或 FORS 秘密值 |
 | `[14]` | `AUTH`：输出认证路径 |
 | `[15]` | `EXTERNAL_ROOT`：最终层使用外部公钥根的语义 |
-| `[63:16]` | 保留，离线要求为零 |
+| `[16]` | SIGN_ONLY；SLH 必须为零，XMSS/LMS Sign 链使用 |
+| `[63:17]` | 保留，离线要求为零 |
 
-序列器将 template 与 program 坐标展开为 ABI 4 的 48 位宏命令：`op[47:44]`、`descriptor[43:36]`、`route[35:28]`、`flags[27:24]`、`coordinate[23:0]`。物理引用补成 8 位，坐标低 13 位为零。`flags[27:24]` 从高到低为 `EXTERNAL_ROOT`、禁用的 `SIGN_ONLY`、`AUTH`、`CAPTURE`；当前 SLH 格式禁止 `SIGN_ONLY`。发射和完成是单宏握手，没有第二宏槽或多事件 scoreboard。
+序列器将 template 与 program 坐标展开为 ABI 4 的 48 位宏命令：`op[47:44]`、`descriptor[43:36]`、`route[35:28]`、`flags[27:24]`、`coordinate[23:0]`。物理引用补成 8 位，坐标低 13 位为零。`flags[27:24]` 从高到低为 `EXTERNAL_ROOT`、`SIGN_ONLY`、`AUTH`、`CAPTURE`；当前 SLH 格式禁止 `SIGN_ONLY`。发射和完成是单宏握手，没有第二宏槽或多事件 scoreboard。
 
 ### Descriptor：固定物理地址
 
@@ -98,7 +99,7 @@ Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须�
 | EMIT | 首个 SEGMENT 地址 `[59:52]`；连续 SEGMENT 数 `[51:48]` |
 | SEGMENT | 来源 `[59:56]`；长度 `[55:48]`；32 位常量 `[31:0]` |
 
-引用字段虽沿用 8 位位置，当前物理地址仅低 5 位有效。HASH shape 仅支持 1 `ADDRESS_SEED`、2 `ADDRESS_VALUE`、3 `MESSAGE_PRF`、4 `MESSAGE_DIGEST`、12 `ADDRESS_LIST`。SHAKE256 rate 为 136 字节；`blocks` 是输入容量上界，不是重复 Hash 次数。新 Hash 清零 1600 位状态，多块输入延续同一状态；短输入可直接装入填充后的吸收块，链步可走局部反馈路径。
+引用字段虽沿用 8 位位置，当前物理地址仅低 5 位有效。SLH 镜像的 HASH shape 使用 1 `ADDRESS_SEED`、2 `ADDRESS_VALUE`、3 `MESSAGE_PRF`、4 `MESSAGE_DIGEST`、12 `ADDRESS_LIST`。SHAKE256 rate 为 136 字节；`blocks` 是输入容量上界，不是重复 Hash 次数。新 Hash 清零 1600 位状态，多块输入延续同一状态；短输入可直接装入填充后的吸收块，链步可走局部反馈路径。
 
 SLH CHAIN 只使用单叶模式 0 和端点列表归约模式 1，最多 **67** 条链，每链最多 15 步。TREE 用于 FORS 和 hypertree，`target/indexing` 当前只使用 0/1，禁用有状态树缓存。ROUTE 保存中间值、解析消息摘要或按 FORS group 保存根。TRANSFORM 操作 1 产生 base-16 链数字及校验和，操作 2 更新 hypertree 层叶号。当前 SEGMENT 来源使用 0 `SECRET`、1 `PRF`、2 `PUBLIC`、3 `ROOT`、4 `RANDOM`、7 `CONSTANT`；旧有状态算法专用来源不属于生产镜像。
 
@@ -126,3 +127,11 @@ make reproduce-v42             # 核验 v4.2 已保存证据
 ```
 
 当前镜像位于 [`external_job_message/images`](../manifests/experiments/unified_hbs_v4.2/external_job_message/images)，接口与测量边界另见 [`External_Job_Message_Interface.md`](Job_Interface.md)。历史 ABI 3、XMSS/LMS、旧布局和旧 PPA 数据应使用对应封存源码及报告复现，不应按本文的生产 ABI 解读。
+
+## 实验 XMSS/LMS 扩展
+
+编码由 `model/stateful.py` 生成并按规范化镜像严格回读检查。profile 8/9 为 xmss_omega2/4，10/11 为 lms_omega2/4；均 n=32、h=10。新镜像采用可达描述符压缩，地址不沿用上面的 SLH 固定映射；各引用已重定位，segment 连续性保留。原 SLH 编码和镜像不变。
+
+新增生产使用的 shape 为 5 INDEX_PRF、6 ROOT_MESSAGE、7 MASKED_SEED、8 MASKED_VALUE、9 PREFIX_SEED、10 PREFIX_VALUE、11 PREFIX_MESSAGE、13 PREFIX_LIST、14 PREFIX_LEAF、15 PREFIX_PARENT。XMSS mode=2 使用 L-tree，LMS mode=1 压缩端点后计算叶；TREE indexing=2 使用 LMS 堆式地址。omega2 的 TRANSFORM 产生 128+5 个二位数字，omega4 产生 64+3 个四位数字。
+
+TREE 历史缓存位 31/30/29 在新镜像清零，Sign 重建认证树。SEGMENT 5 为 identifier，6 为四字节大端 q；XMSS 的来源 4 是计算所得 R，LMS 来源 4 是外部 RANDOMIZER。混合长度输出和节点 Verify 的边界由 [Job_Interface.md](Job_Interface.md) 定义。四个 profile 使用仓库实验格式，不是 RFC 注册编码。

@@ -6,7 +6,7 @@ module tb_mhbs_external_boot;
  logic [6:0] kg_message_length=7'd0;
  wire message_ready,kg_ready,done,kg_done,error,busy;
  wire [31:0] boot_cycles,keygen_cycles,sign_cycles;
- `define JOB .SECRET_SEED(256'h1122),.SECRET_PRF(256'h3344),.PUBLIC_SEED(256'h5566),.RANDOMIZER(256'h7788),.PUBLIC_ROOT(256'h99aa)
+ `define JOB .KEY_INDEX(32'd1023),.IDENTIFIER(128'h0102030405060708090a0b0c0d0e0f10),.SECRET_SEED(256'h1122),.SECRET_PRF(256'h3344),.PUBLIC_SEED(256'h5566),.RANDOMIZER(256'h7788),.PUBLIC_ROOT(256'h99aa)
  mhbs_top #(`JOB,.OPERATION(1)) dut(.clk,.rst,.message_length,.message_data,.message_valid,.message_ready,.done,.error,.busy,.boot_cycles,.keygen_cycles,.sign_cycles);
  mhbs_top #(`JOB,.OPERATION(0)) kg(.clk,.rst,.message_length(kg_message_length),.message_data,.message_valid,.message_ready(kg_ready),.done(kg_done));
  always #5 clk=~clk;

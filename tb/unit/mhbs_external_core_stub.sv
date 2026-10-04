@@ -16,6 +16,7 @@ module mhbs_hbs #(
     input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
     input wire [6:0] job_message_length,
     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
+    input wire [31:0] job_index,input wire [127:0] job_identifier,
     input wire message_valid, output wire message_ready,
     input wire [63:0] message_data,
     input wire verify_valid, output wire verify_ready,
@@ -41,6 +42,7 @@ module mhbs_hbs #(
       done<=0;
       if(job_valid && job_ready)begin
        if(job_secret_seed!=256'h1122 || job_secret_prf!=256'h3344 || job_public_seed!=256'h5566 || job_randomizer!=256'h7788 || job_public_root!=256'h99aa)$fatal(1,"Job parameters changed");
+       if(job_index!=1023 || job_identifier!=128'h0102030405060708090a0b0c0d0e0f10)$fatal(1,"stateful Job parameters");
        if(job_entry!=(job_operation ? 3 : 0))$fatal(1,"entry selection");
        active<=1;accepted_length<=job_message_length;received<=0;starts<=starts+1;cycles<=0;
       end

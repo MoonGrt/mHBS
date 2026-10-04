@@ -15,6 +15,8 @@ module mhbs_top #(
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
     parameter [255:0] RANDOMIZER=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
     parameter [255:0] PUBLIC_ROOT=256'h000000000000000000000000000000003d774653892d5f3695b370c7cdab63ff,
+    parameter [31:0] KEY_INDEX=0,
+    parameter [127:0] IDENTIFIER=0,
     parameter [1:0] OPERATION=2'd1,
     parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/program.mem",
     parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/template.mem",
@@ -32,6 +34,7 @@ module mhbs_top #(
     output wire [1:0] result_kind,
     input wire signature_read_enable,input wire [10:0] signature_read_address,
     output wire signature_read_valid,output wire [255:0] signature_read_data,
+    output wire [5:0] signature_read_bytes,
     output wire [5:0] signature_node_bytes,
     output wire signature_valid,signature_error,
     output wire [10:0] signature_nodes,output wire [15:0] signature_length
@@ -78,6 +81,7 @@ module mhbs_top #(
         .program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
         .job_valid(phase==REQUEST && message_length_valid),.job_ready(core_job_ready),
+        .job_index(KEY_INDEX),.job_identifier(IDENTIFIER),
         .job_operation(OPERATION),.job_message_length(message_length),
         .job_secret_seed(SECRET_SEED),.job_secret_prf(SECRET_PRF),
         .job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),
@@ -126,12 +130,12 @@ module mhbs_top #(
             .clk,.rst,.finish(done),.abort(error),
             .write_valid(out_valid),.write_data(out_data),.write_bytes(out_bytes),
             .read_enable(signature_read_enable),.read_address(signature_read_address),
-            .read_valid(signature_read_valid),.read_data(signature_read_data),
+            .read_valid(signature_read_valid),.read_data(signature_read_data),.read_bytes(signature_read_bytes),
             .node_bytes(signature_node_bytes),.complete(signature_valid),
             .error(signature_error),.nodes(signature_nodes),.length(signature_length)
         );
     end else begin: no_signature_store
-        assign signature_read_valid=0;
+        assign signature_read_valid=0;assign signature_read_bytes=0;
         assign signature_read_data=0;
         assign signature_node_bytes=0;
         assign signature_valid=0;

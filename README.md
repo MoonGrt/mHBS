@@ -1,6 +1,6 @@
 # mHBS v4.2
 
-默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
+默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
 
 此前封存的 L2U2P1 版本：**21,043 LUT、7,932 FF、1,112 LUTRAM、6252.250 等效 Slice**，BRAM/DSP 为零。这是共同核综合数据；没有该版本的新布线频率。详见[当前面积报告](docs/v4.2/LUT21k.md)和[六参数周期](docs/v4.2/Cycles.md)。
 
@@ -26,11 +26,11 @@ make reproduce-v42 reproduce-ku
 
 ## 接口与镜像
 
-- 五个 Job 参数：SECRET_SEED、SECRET_PRF、PUBLIC_SEED、RANDOMIZER、PUBLIC_ROOT；`OPERATION=0/1/2` 选择 Keygen/Sign/Verify。
+- Stateful Job 另有 KEY_INDEX 与 IDENTIFIER，索引由外部持久化管理。五个节点 Job 参数：SECRET_SEED、SECRET_PRF、PUBLIC_SEED、RANDOMIZER、PUBLIC_ROOT；`OPERATION=0/1/2` 选择 Keygen/Sign/Verify。
 - 消息：64 位 valid/ready 输入；Sign/Verify 长度 1–87 字节，Keygen 长度为零。
 - 输出：256 位节点拍，`out_bytes` 指明有效低位字节，无输出背压。
 - Verify：256 位外部节点 valid/ready 输入，完成后读取 `verify_pass`。
-- 镜像保持文件加载：program 16×64、template 16×64、descriptor 32×64；有效条目分别为 14、11、30，含填充容量为 512 B。
+- 镜像保持文件加载：program 16×64、template 16×64、descriptor 32×64；SLH 有效条目分别为 14、11、30；新 XMSS/LMS 为 10、8、26/29，含填充容量为 512 B。
 
 [架构](docs/Architecture.md) · [端口协议](docs/Job_Interface.md) · [物理 ABI](docs/ABI.md) · [宏语义](docs/Unified_HBS_ABI.md)
 

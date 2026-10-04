@@ -30,7 +30,7 @@ make verify TAG=my_full
 
 ## 检查范围
 
-扩展覆盖 Keygen 根传入 Sign、lane 交换、消息停顿、复位/重放、1/7/8/9/87 字节消息和尾拍噪声。Verify 覆盖有效签名、节点/消息/根篡改、输入等待、复位、lane 交换、统计关闭和故障。
+扩展覆盖 Keygen 根传入 Sign、lane 交换、消息停顿、复位/重放、1/7/8/9/81/82/83/87 字节消息和尾拍噪声。Verify 覆盖有效签名、节点/消息/根篡改、输入等待、复位、lane 交换、统计关闭和故障。
 
 集成 scoreboard 检查共享列表初始化、FORS/WOTS 切换和读取值、父节点输入稳定性及左右顺序，以及 ROUTE 消费值与原暂存值逐拍一致。存储源代码中的固定银行断言检查写地址奇偶。
 
@@ -69,3 +69,21 @@ make route-common TAG=my_full
 统一底层后的 `scripts/verify_lup_pipeline.py` 从 compact lane 的 batch 端口验证 P2～P4 和 U2P2 的随机置换、固定返回延迟和交错链；P1 使用普通 sponge/recipe 入口。链向量包含 capture 禁用、未命中、首/中/末位置及 tag 复用。`scripts/verify_kpu_chain_format.py --out <独立目录>` 对照冻结的旧链适配器，检查三种节点宽度、反馈块、同拍完成/新请求、capture 读回和控制周期。测试接线适配器不进入生产源码清单。
 
 第二轮结果见 [统一 Keccak 与 ATP 优化](v4.2/KPU_ATP_Unified_Optimization.md)。`scripts/verify_kpu_round_decode.py --out <独立目录>` 以冻结轮函数检查零值、全一、随机状态及所有有效/无效轮号；会记录是否启用了固定级译码。该译码候选未保留，最终版本走原译码。集成签名检查新增尾批和连续输出覆盖计数。
+
+## XMSS/LMS 扩展验证
+
+原 SLH 流程继续覆盖六种参数集。新算法使用 `scripts/stateful_vectors.py` 生成四参数镜像和向量：冻结 `67a1cd75` 模型给出根和签名字节，新冷启动模型比较输出并统计完整树重算；`model/reference/stateful_shake.py` 独立使用 hashlib 验证，不执行微码。
+
+```bash
+python3 scripts/stateful_vectors.py
+python3 scripts/run_stateful.py --k 1
+python3 scripts/run_stateful.py --k 2
+python3 scripts/verify_stateful_edges.py
+python3 scripts/verify_stateful_lms_padding.py
+python3 scripts/verify_stateful_masked_chain.py
+python3 -m unittest tests.test_stateful
+```
+
+运行时 Job/ROM 集成 bench 执行真实共同核，逐字节检查 Keygen/Sign、Verify 结果、Hash/置换统计及混合长度缓存读回。边界覆盖 q=0/1/1023、超界索引、7/8/9/81/82/83/87 字节消息、签名/消息/根篡改、输入等待、截断后复位、运行中复位重放、lane 错误、统计关闭、lane 交换、P4 普通请求和默认 U2 配置。
+
+实测数据及独立综合快照保存在 `manifests/experiments/stateful_20261008/`；报告见 [Stateful_XMSS_LMS.md](v4.2/Stateful_XMSS_LMS.md)。本轮只做综合，不布线，150 MHz 是估算假设。

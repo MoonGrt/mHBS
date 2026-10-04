@@ -1,0 +1,2306 @@
+diff --git a/README.md b/README.md
+index 3098af1d..b1272938 100644
+--- a/README.md
++++ b/README.md
+@@ -1,6 +1,6 @@
+ # mHBS v4.2
+ 
+-默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
++默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
+ 
+ 此前封存的 L2U2P1 版本：**21,043 LUT、7,932 FF、1,112 LUTRAM、6252.250 等效 Slice**，BRAM/DSP 为零。这是共同核综合数据；没有该版本的新布线频率。详见[当前面积报告](docs/v4.2/LUT21k.md)和[六参数周期](docs/v4.2/Cycles.md)。
+ 
+@@ -26,11 +26,11 @@ make reproduce-v42 reproduce-ku
+ 
+ ## 接口与镜像
+ 
+-- 五个 Job 参数：SECRET_SEED、SECRET_PRF、PUBLIC_SEED、RANDOMIZER、PUBLIC_ROOT；`OPERATION=0/1/2` 选择 Keygen/Sign/Verify。
++- Stateful Job 另有 KEY_INDEX 与 IDENTIFIER，索引由外部持久化管理。五个节点 Job 参数：SECRET_SEED、SECRET_PRF、PUBLIC_SEED、RANDOMIZER、PUBLIC_ROOT；`OPERATION=0/1/2` 选择 Keygen/Sign/Verify。
+ - 消息：64 位 valid/ready 输入；Sign/Verify 长度 1–87 字节，Keygen 长度为零。
+ - 输出：256 位节点拍，`out_bytes` 指明有效低位字节，无输出背压。
+ - Verify：256 位外部节点 valid/ready 输入，完成后读取 `verify_pass`。
+-- 镜像保持文件加载：program 16×64、template 16×64、descriptor 32×64；有效条目分别为 14、11、30，含填充容量为 512 B。
++- 镜像保持文件加载：program 16×64、template 16×64、descriptor 32×64；SLH 有效条目分别为 14、11、30；新 XMSS/LMS 为 10、8、26/29，含填充容量为 512 B。
+ 
+ [架构](docs/Architecture.md) · [端口协议](docs/Job_Interface.md) · [物理 ABI](docs/ABI.md) · [宏语义](docs/Unified_HBS_ABI.md)
+ 
+diff --git a/docs/ABI.md b/docs/ABI.md
+index 8a84ac58..90b35c5f 100644
+--- a/docs/ABI.md
++++ b/docs/ABI.md
+@@ -1,4 +1,4 @@
+-# mHBS 当前 ABI：SLH 专用 `slh64_v4.2`（布局修订 3）
++# mHBS 当前 ABI：`slh64_v4.2`（布局修订 3）
+ 
+ 本文描述**当前生产 RTL**。工程版本为 v4.2，五类宏操作延续 **ABI 4 逻辑语义**，三份物理镜像采用 `slh64_v4.2` 的**布局修订 3**。物理镜像没有运行时 ABI 版本字；格式标识和修订号由构建元数据及离线工具管理。历史布局不能直接交给当前 RTL 使用。本文位号从最低位 0 开始，`[高:低]` 包含两端。
+ 
+@@ -13,7 +13,7 @@ descriptor（配方、参数、路由）  ─┘                         ↑
+ Job 参数、message_length、消息流 ──────────────────────────┘
+ ```
+ 
+-- 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。当前生产核不支持 XMSS/LMS、索引 `q`、有状态树缓存或索引 guard。
++- 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。新增实验 SHAKE256 XMSS/LMS omega2/4，支持外部索引 q；不实现树缓存或索引 guard。
+ - 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部仍可并行使用两个 Hash lane。
+ - `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
+ - Job 和消息不占 program 地址。五个 256 位 Job 参数从顶层进入，按 profile 只取低 `n` 字节。Sign 的 `PUBLIC_ROOT` 由调用方配置，例如使用独立 Keygen 输出。
+@@ -56,7 +56,7 @@ LOOP 最多嵌套两层。`HALT` 为 `[63:62]=3` 且其余位为零，在当前
+ 
+ ### Template：单宏命令
+ 
+-Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须为零。容量为 16 项。
++Template 物理字宽为 64 位，但**仅 `[16:0]` 承载编码**，高位须为零。容量为 16 项。
+ 
+ | 位 | 含义 |
+ |---|---|
+@@ -66,9 +66,10 @@ Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须
+ | `[13]` | `CAPTURE`：输出目标链值或 FORS 秘密值 |
+ | `[14]` | `AUTH`：输出认证路径 |
+ | `[15]` | `EXTERNAL_ROOT`：最终层使用外部公钥根的语义 |
+-| `[63:16]` | 保留，离线要求为零 |
++| `[16]` | SIGN_ONLY；SLH 必须为零，XMSS/LMS Sign 链使用 |
++| `[63:17]` | 保留，离线要求为零 |
+ 
+-序列器将 template 与 program 坐标展开为 ABI 4 的 48 位宏命令：`op[47:44]`、`descriptor[43:36]`、`route[35:28]`、`flags[27:24]`、`coordinate[23:0]`。物理引用补成 8 位，坐标低 13 位为零。`flags[27:24]` 从高到低为 `EXTERNAL_ROOT`、禁用的 `SIGN_ONLY`、`AUTH`、`CAPTURE`；当前 SLH 格式禁止 `SIGN_ONLY`。发射和完成是单宏握手，没有第二宏槽或多事件 scoreboard。
++序列器将 template 与 program 坐标展开为 ABI 4 的 48 位宏命令：`op[47:44]`、`descriptor[43:36]`、`route[35:28]`、`flags[27:24]`、`coordinate[23:0]`。物理引用补成 8 位，坐标低 13 位为零。`flags[27:24]` 从高到低为 `EXTERNAL_ROOT`、`SIGN_ONLY`、`AUTH`、`CAPTURE`；当前 SLH 格式禁止 `SIGN_ONLY`。发射和完成是单宏握手，没有第二宏槽或多事件 scoreboard。
+ 
+ ### Descriptor：固定物理地址
+ 
+@@ -98,7 +99,7 @@ Template 物理字宽为 64 位，但**仅 `[15:0]` 承载编码**，高位须
+ | EMIT | 首个 SEGMENT 地址 `[59:52]`；连续 SEGMENT 数 `[51:48]` |
+ | SEGMENT | 来源 `[59:56]`；长度 `[55:48]`；32 位常量 `[31:0]` |
+ 
+-引用字段虽沿用 8 位位置，当前物理地址仅低 5 位有效。HASH shape 仅支持 1 `ADDRESS_SEED`、2 `ADDRESS_VALUE`、3 `MESSAGE_PRF`、4 `MESSAGE_DIGEST`、12 `ADDRESS_LIST`。SHAKE256 rate 为 136 字节；`blocks` 是输入容量上界，不是重复 Hash 次数。新 Hash 清零 1600 位状态，多块输入延续同一状态；短输入可直接装入填充后的吸收块，链步可走局部反馈路径。
++引用字段虽沿用 8 位位置，当前物理地址仅低 5 位有效。SLH 镜像的 HASH shape 使用 1 `ADDRESS_SEED`、2 `ADDRESS_VALUE`、3 `MESSAGE_PRF`、4 `MESSAGE_DIGEST`、12 `ADDRESS_LIST`。SHAKE256 rate 为 136 字节；`blocks` 是输入容量上界，不是重复 Hash 次数。新 Hash 清零 1600 位状态，多块输入延续同一状态；短输入可直接装入填充后的吸收块，链步可走局部反馈路径。
+ 
+ SLH CHAIN 只使用单叶模式 0 和端点列表归约模式 1，最多 **67** 条链，每链最多 15 步。TREE 用于 FORS 和 hypertree，`target/indexing` 当前只使用 0/1，禁用有状态树缓存。ROUTE 保存中间值、解析消息摘要或按 FORS group 保存根。TRANSFORM 操作 1 产生 base-16 链数字及校验和，操作 2 更新 hypertree 层叶号。当前 SEGMENT 来源使用 0 `SECRET`、1 `PRF`、2 `PUBLIC`、3 `ROOT`、4 `RANDOM`、7 `CONSTANT`；旧有状态算法专用来源不属于生产镜像。
+ 
+@@ -126,3 +127,11 @@ make reproduce-v42             # 核验 v4.2 已保存证据
+ ```
+ 
+ 当前镜像位于 [`external_job_message/images`](../manifests/experiments/unified_hbs_v4.2/external_job_message/images)，接口与测量边界另见 [`External_Job_Message_Interface.md`](Job_Interface.md)。历史 ABI 3、XMSS/LMS、旧布局和旧 PPA 数据应使用对应封存源码及报告复现，不应按本文的生产 ABI 解读。
++
++## 实验 XMSS/LMS 扩展
++
++编码由 `model/stateful.py` 生成并按规范化镜像严格回读检查。profile 8/9 为 xmss_omega2/4，10/11 为 lms_omega2/4；均 n=32、h=10。新镜像采用可达描述符压缩，地址不沿用上面的 SLH 固定映射；各引用已重定位，segment 连续性保留。原 SLH 编码和镜像不变。
++
++新增生产使用的 shape 为 5 INDEX_PRF、6 ROOT_MESSAGE、7 MASKED_SEED、8 MASKED_VALUE、9 PREFIX_SEED、10 PREFIX_VALUE、11 PREFIX_MESSAGE、13 PREFIX_LIST、14 PREFIX_LEAF、15 PREFIX_PARENT。XMSS mode=2 使用 L-tree，LMS mode=1 压缩端点后计算叶；TREE indexing=2 使用 LMS 堆式地址。omega2 的 TRANSFORM 产生 128+5 个二位数字，omega4 产生 64+3 个四位数字。
++
++TREE 历史缓存位 31/30/29 在新镜像清零，Sign 重建认证树。SEGMENT 5 为 identifier，6 为四字节大端 q；XMSS 的来源 4 是计算所得 R，LMS 来源 4 是外部 RANDOMIZER。混合长度输出和节点 Verify 的边界由 [Job_Interface.md](Job_Interface.md) 定义。四个 profile 使用仓库实验格式，不是 RFC 注册编码。
+diff --git a/docs/Architecture.md b/docs/Architecture.md
+index 8ad22e3c..d10c4f9d 100644
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -1,6 +1,6 @@
+ # mHBS 当前生产架构
+ 
+-生产源码以 `manifests/v42_sources.txt` 为准；`manifests/unified_sources.txt` 是内容相同的兼容清单。当前支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s 的 Keygen/Sign，以及外部节点输入的 Verify，唯一顶层为 `mhbs_top`。验证入口见 [Verification.md](Verification.md)，端口协议见 [Job_Interface.md](Job_Interface.md)。
++生产源码以 `manifests/v42_sources.txt` 为准；`manifests/unified_sources.txt` 是内容相同的兼容清单。当前支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s 的 Keygen/Sign/Verify，并新增 `xmss_omega2/4`、`lms_omega2/4`（n=32、h=10、实验 SHAKE256 编码）。唯一顶层为 `mhbs_top`。验证入口见 [Verification.md](Verification.md)，端口协议见 [Job_Interface.md](Job_Interface.md)。
+ 
+ ## 执行路径
+ 
+@@ -9,7 +9,7 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+   ├─ mhbs_signature_store：Sign 完整签名缓存，完成后同步节点读回（可编译关闭）
+   └─ mhbs_hbs：宏操作调度、树归约、消息缓冲、结果输出
+       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
+-      ├─ mhbs_value_store：68 项共享存储，分时保存 FORS 根与 WOTS 链端点
++      ├─ mhbs_value_store：136 项共享存储，分时保存 FORS 根与 WOTS 链端点
+       └─ mhbs_recipe_lane（LANES 个）：块构造、吸收、状态、链反馈与流水控制
+           ├─ mhbs_chain_pipeline_lane（P>1）：多上下文链任务与 capture 管理
+           └─ P×U 个 mhbs_keccak：每级 U 轮，默认 P1U2
+@@ -17,7 +17,7 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+ 
+ 五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；双 lane 并行位于宏操作内部。逻辑 lane 0 支持完整 recipe 集，逻辑 lane 1 主要执行链计算；`SWAP_PHYSICAL_LANES` 可交换物理位置，逻辑能力不变。
+ 
+-核使用 256 位节点存储，由 descriptor 中的 profile 编码选择有效的 16/24/32 字节。FORS 根与 WOTS 链端点共享深度为 68 的存储；树栈和认证路径各为 16 个节点。消息缓冲上限为 87 字节。
++核使用 256 位节点存储，由 descriptor 中的 profile 编码选择有效的 16/24/32 字节。FORS 根与 WOTS 链端点共享深度为 136 的存储；树栈和认证路径各为 16 个节点。消息缓冲上限为 87 字节。
+ 
+ ## 镜像与启动
+ 
+@@ -35,13 +35,13 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+ 
+ ## 共同核综合
+ 
+-`scripts/v42_common_partition.py` 从顶层标记区域提取启动控制和执行核，生成构建用的 `mhbs_common`。Job、消息和 ROM 数据成为该区域输入，内部连接保持不变。共同区域综合一次，十二个 Keygen/Sign 参数外壳分别链接同一网表；验收检查内部结构指纹、ROM 初始化映射以及提取前后的完整 RTL 输出和周期一致性。
++`scripts/v42_common_partition.py` 从顶层标记区域提取启动控制和执行核，生成构建用的 `mhbs_common`。Job、消息和 ROM 数据成为该区域输入，内部连接保持不变。既有 SLH 流程中，共同区域综合一次，十二个 Keygen/Sign 参数外壳分别链接同一网表；验收检查内部结构指纹、ROM 初始化映射以及提取前后的完整 RTL 输出和周期一致性。
+ 
+-支持共同核 post-synth 流程，以及十二个 Keygen/Sign 参数外壳分别进行的布局布线。`route-common` 完成布线和验收，`freeze-common` 封存已验收的结果。频率口径为 OOC 核内寄存器间路径，核内同步控制参与检查，外部输入/输出路径排除。0 ns 外部输入假设下的端口 hold 违例单独保留，接口尚未时序签核。资源或频率结论绑定实际测量的源码快照，最新结果见 [最新 K/U 实验报告](v4.2/KU_Sign_ATP_150_110_67_48.md)。
++既有 SLH 流程支持共同核 post-synth，以及十二个 Keygen/Sign 参数外壳分别进行的布局布线；本次新算法只测共同核综合。`route-common` 完成布线和验收，`freeze-common` 封存已验收的结果。频率口径为 OOC 核内寄存器间路径，核内同步控制参与检查，外部输入/输出路径排除。0 ns 外部输入假设下的端口 hold 违例单独保留，接口尚未时序签核。资源或频率结论绑定实际测量的源码快照，最新结果见 [最新 K/U 实验报告](v4.2/KU_Sign_ATP_150_110_67_48.md)。
+ 
+ ## L2U2P1 数据通路裁剪
+ 
+-默认生产配置为 `LANES=2, UNROLL=2, PIPELINE=1`，任务数组、掩码及输出控制按双通道构建；保留物理 lane 交换验证。配方形状和长度解码受各 lane 的 `RECIPE_MASK` 静态约束，链专用 lane 不构建流式输入路径。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。旧 masked 配方仅在模块参数允许它时保留跨中间哈希的值寄存器，不进入生产网表。
++默认生产配置为 `LANES=2, UNROLL=2, PIPELINE=1`，任务数组、掩码及输出控制按双通道构建；保留物理 lane 交换验证。配方形状和长度解码受各 lane 的 `RECIPE_MASK` 静态约束，链专用 lane 不构建流式输入路径。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。XMSS 启用 masked 配方及跨中间哈希的值寄存器；LMS 启用 prefix 配方。两者复用既有 Keccak 数据通路。
+ 
+ 统计开关沿 top/common/core/lane 传递，生产综合关闭，仿真保留。综合阶段检查实际网表，禁止统计寄存器和被替代的重复值/capture 寄存器残留。
+ 
+@@ -52,11 +52,11 @@ Verify 使用同一 sign 镜像：PRF_msg 宏读取外部 R；TREE 宏读取 FOR
+ 
+ WOTS 按两个链一组输入，复用普通单次 Hash 请求执行 digit 到 14 的后缀链；digit=15 直接存端点。这样保持现有 compact chain 语义和 Hash lane 源码不变，Verify 每步有控制调度开销。所有节点长度与地址来自受信任镜像；签名字节流拆分位于外部。
+ 
+-当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
++当前输出采用 256 位节点拍：`out_valid` 有效时接收 `out_data` 的低 `out_bytes` 个字节（4/16/24/32），`done` 标记整项结束；无输出反压、out_keep 或 out_last。测试端仍逐字节检查完整 SK/PK/签名和精确总长度。原 64 位输出波形及周期属于历史版本。
+ 
+ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保存后可随机或顺序读回；
+ `SIGNATURE_STORE_ENABLE=0` 可关闭。缓存位于共同核提取区域之外，Keygen/Verify 不实例化。
+-缓存单独综合实测为 484 LUT（含 172 LUTRAM）、293 FF、11 RAMB36E1 + 1 RAMB18E1；当前尚未重新测量带缓存
++历史版本缓存单独综合实测为 484 LUT（含 172 LUTRAM）、293 FF、11 RAMB36E1 + 1 RAMB18E1；当前尚未重新测量带缓存
+ 整机的布线面积和频率，历史共同核资源与时序结论不等同于新增缓存后的完整顶层。
+ 接口见 [Job_Interface.md](Job_Interface.md)，验证与资源证据见
+ [完整签名缓存报告](report/Signature_Storage.md)。
+@@ -78,3 +78,15 @@ K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链
+ 第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；K1U1、P>1 sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。
+ 
+ 本轮 recipe 直接驱动 Keccak 的源码、周期等价和综合结果见 [Recipe_Direct_Keccak.md](v4.2/Recipe_Direct_Keccak.md)。冻结旧实现仅用于测试，未列入生产源码清单。
++
++## XMSS/LMS 实验扩展
++
++四个 profile 编码为 8/9/10/11，omega 是每个数字的位数：2/4 分别使用 133/67 条链、最大 3/15 步。编码与仓库冻结模型一致，不宣称 RFC 参数互操作。
++
++XMSS 复用共享端点存储做原地 L-tree 归约，每层奇数尾节点直接保留；LMS 对端点列表做 prefix hash，随后计算叶哈希，树采用堆式地址。两者复用原树栈和认证路径。Sign 每次重新计算完整树，不依赖历史 Keygen 或树缓存。
++
++新算法只走普通链/普通请求路径；即使 P>1 也不使用 SLH 多上下文批处理。链可按 K1/K2 并行，存储提供相邻两个节点读取，地址为 8 位。SLH 的六种参数和批处理调度保持原路径。
++
++新镜像只装入可达描述符（XMSS 26、LMS 29），program/template/descriptor 容量仍为 16/16/32。template 位 16 承载 SIGN_ONLY，旧镜像该位为零。共同核 Job 新增 q 与 identifier；统计关闭后仍通过同一综合裁剪检查。
++
++本次功能、面积及周期证据见 [XMSS/LMS 扩展报告](v4.2/Stateful_XMSS_LMS.md)。历史频率不代表扩展后设计的频率。
+diff --git a/docs/Job_Interface.md b/docs/Job_Interface.md
+index fd39e12c..94a2f608 100644
+--- a/docs/Job_Interface.md
++++ b/docs/Job_Interface.md
+@@ -1,6 +1,6 @@
+ # mHBS 当前 Job 与流接口
+ 
+-唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，每次复位执行一次 Keygen、Sign 或 Verify。
++唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，以及实验 `xmss_omega2/4`、`lms_omega2/4`；每次复位执行一次 Keygen、Sign 或 Verify。
+ 
+ ## 配置
+ 
+@@ -17,7 +17,7 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
+ | `message_data[63:0]` | 低字节先传，尾拍多余字节忽略 |
+ | `message_valid` / `message_ready` | 上升沿两者同时为 1 时接收一拍；等待 ready 时保持 valid 和 data |
+ | `out_valid` / `out_data[255:0]` | 每个有效拍直接输出一个完整节点，无 out_ready；接收方必须及时接收 |
+-| `out_bytes[5:0]` | 有效低位字节数（16/24/32），按低字节到高字节拼接；未用高位忽略 |
++| `out_bytes[5:0]` | 有效低位字节数（4/16/24/32），按低字节到高字节拼接；未用高位忽略 |
+ | `result_kind[1:0]` | 0 为 Keygen 的 SK\|\|PK；1 为签名；2 为 Verify |
+ | `busy` | 复位时置 1，完成或错误时清零 |
+ | `done` | 整项结果输出结束后保持为 1，直到复位；不再提供 out_last/out_keep |
+@@ -46,14 +46,15 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
+ | `signature_valid` | `done=1` 且签名缓存无错误时为 1；保持至复位 |
+ | `signature_length[15:0]` | 已保存的有效字节总数；签名完成后使用 |
+ | `signature_nodes[10:0]` | 已保存节点数；签名完成后使用 |
+-| `signature_node_bytes[5:0]` | 每节点有效低位字节数，16/24/32 |
++| `signature_node_bytes[5:0]` | 常规节点宽度，16/24/32；混合字段读回使用 signature_read_bytes |
+ | `signature_read_enable` / `signature_read_address[10:0]` | 同步读请求，地址为节点索引，从 0 开始 |
+ | `signature_read_valid` / `signature_read_data[255:0]` | 请求采样上升沿之后返回数据及有效标志；可每拍请求一个节点，无响应背压 |
++| `signature_read_bytes[5:0]` | 与 read_valid/data 同拍返回本项有效字节数，4/16/24/32 |
+ | `signature_error` | 缓存溢出、节点宽度非法/不一致或执行错误；保持至复位 |
+ 
+ 只有 `signature_valid=1` 且地址小于 `signature_nodes` 的请求产生读响应；其余请求的
+ `signature_read_valid=0`。读数据仅在 valid 为 1 时有意义，未使用高位忽略。
+-按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，即为完整签名。
++按地址递增，将每节点的低 `signature_read_bytes` 字节按低字节在先拼接，即为完整签名。
+ 缓存可重复随机读取，读操作不影响 `done` 或原输出。缓存错误不改变原核心 `error`，调用方
+ 须检查 `signature_valid` 和 `signature_error` 后再使用缓存。
+ 
+@@ -76,3 +77,20 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
+ Verify 不输出 out 数据流。done=1、error=0 时读取 verify_pass：1 为根匹配，0 为签名不匹配；不匹配不是协议或执行故障。done/verify_pass 保持到复位。节点供应不足时等待输入，不把停顿判成无效签名；完成后的额外节点不被接受。完整签名字节流的长度及分帧检查由外部负责。
+ 
+ Verify 的 keygen_cycles、sign_cycles 保持零；仿真可观察共同核 cycles，hash/permutation 统计沿用 PROFILE_ENABLE。生产统计仍关闭。消息范围和每次复位一项操作的约束不变。
++
++## XMSS/LMS 的 q 与标识符
++
++`KEY_INDEX[31:0]`、`IDENTIFIER[127:0]` 是新增顶层参数，默认零；共同核分别通过 `job_index`、`job_identifier` 接收。q 为数值 0–1023，超界在执行前报 `0x3008`；标识符按低字节在先表示 16 字节 LMS I。XMSS 忽略 identifier。Keygen 的根与 q 无关，输出的私钥索引字段使用所给 q。
++
++签名前调用方必须持久化占用 q，禁止同一私钥重复使用；复位仅重启硬件，不恢复可用索引。Verify 不消耗索引。核不实现索引分配或持久化。
++
++所有新参数使用 32 字节节点、h=10 和实验 SHAKE256 配方。Sign 格式：
++
++- XMSS：`q[4] || R[32] || WOTS 签名[133/67 × 32] || auth[10 × 32]`，共 4612/2500 字节。
++- LMS：`q[4] || OTS_type[4] || R[32] || LMOTS 签名[133/67 × 32] || tree_type[4] || auth[10 × 32]`，共 4620/2508 字节。
++
++四字节字段按大端字节串输出，线上仍从 out_data 低字节开始读取。LMS 私有类型为 omega2 `0x80000002`、omega4 `0x80000003`、树 `0x80000006`；不是标准 RFC 类型号。
++
++Verify 的外部适配器先用 `model.reference.stateful_shake.parse_signature` 校验精确长度、q 和 LMS 类型，再把 q 放入 KEY_INDEX、I 放入 IDENTIFIER。节点接口只输入 R、133/67 个链节点和 10 个认证节点；q、类型字段不作为节点发送。消息继续使用原接口，根通过 PUBLIC_ROOT 输入。核恢复实际根并比较，不接收预计算叶或中间根。不足节点会等待，额外节点不被接收。
++
++Sign 输出的 4 字节字段各占一个缓存槽，容量仍为 1558 项。以每项 signature_read_bytes 拼接可还原完整签名；SLH 每项长度仍等于 signature_node_bytes。Sign 包含完整认证树重算，不可按旧模型缓存命中的 Sign 周期估算。
+diff --git a/docs/Verification.md b/docs/Verification.md
+index f48e2d8d..5f068e81 100644
+--- a/docs/Verification.md
++++ b/docs/Verification.md
+@@ -30,7 +30,7 @@ make verify TAG=my_full
+ 
+ ## 检查范围
+ 
+-扩展覆盖 Keygen 根传入 Sign、lane 交换、消息停顿、复位/重放、1/7/8/9/87 字节消息和尾拍噪声。Verify 覆盖有效签名、节点/消息/根篡改、输入等待、复位、lane 交换、统计关闭和故障。
++扩展覆盖 Keygen 根传入 Sign、lane 交换、消息停顿、复位/重放、1/7/8/9/81/82/83/87 字节消息和尾拍噪声。Verify 覆盖有效签名、节点/消息/根篡改、输入等待、复位、lane 交换、统计关闭和故障。
+ 
+ 集成 scoreboard 检查共享列表初始化、FORS/WOTS 切换和读取值、父节点输入稳定性及左右顺序，以及 ROUTE 消费值与原暂存值逐拍一致。存储源代码中的固定银行断言检查写地址奇偶。
+ 
+@@ -69,3 +69,21 @@ make route-common TAG=my_full
+ 统一底层后的 `scripts/verify_lup_pipeline.py` 从 compact lane 的 batch 端口验证 P2～P4 和 U2P2 的随机置换、固定返回延迟和交错链；P1 使用普通 sponge/recipe 入口。链向量包含 capture 禁用、未命中、首/中/末位置及 tag 复用。`scripts/verify_kpu_chain_format.py --out <独立目录>` 对照冻结的旧链适配器，检查三种节点宽度、反馈块、同拍完成/新请求、capture 读回和控制周期。测试接线适配器不进入生产源码清单。
+ 
+ 第二轮结果见 [统一 Keccak 与 ATP 优化](v4.2/KPU_ATP_Unified_Optimization.md)。`scripts/verify_kpu_round_decode.py --out <独立目录>` 以冻结轮函数检查零值、全一、随机状态及所有有效/无效轮号；会记录是否启用了固定级译码。该译码候选未保留，最终版本走原译码。集成签名检查新增尾批和连续输出覆盖计数。
++
++## XMSS/LMS 扩展验证
++
++原 SLH 流程继续覆盖六种参数集。新算法使用 `scripts/stateful_vectors.py` 生成四参数镜像和向量：冻结 `67a1cd75` 模型给出根和签名字节，新冷启动模型比较输出并统计完整树重算；`model/reference/stateful_shake.py` 独立使用 hashlib 验证，不执行微码。
++
++```bash
++python3 scripts/stateful_vectors.py
++python3 scripts/run_stateful.py --k 1
++python3 scripts/run_stateful.py --k 2
++python3 scripts/verify_stateful_edges.py
++python3 scripts/verify_stateful_lms_padding.py
++python3 scripts/verify_stateful_masked_chain.py
++python3 -m unittest tests.test_stateful
++```
++
++运行时 Job/ROM 集成 bench 执行真实共同核，逐字节检查 Keygen/Sign、Verify 结果、Hash/置换统计及混合长度缓存读回。边界覆盖 q=0/1/1023、超界索引、7/8/9/81/82/83/87 字节消息、签名/消息/根篡改、输入等待、截断后复位、运行中复位重放、lane 错误、统计关闭、lane 交换、P4 普通请求和默认 U2 配置。
++
++实测数据及独立综合快照保存在 `manifests/experiments/stateful_20261008/`；报告见 [Stateful_XMSS_LMS.md](v4.2/Stateful_XMSS_LMS.md)。本轮只做综合，不布线，150 MHz 是估算假设。
+diff --git a/model/slh64_external.py b/model/slh64_external.py
+index 4842525a..53f86f38 100644
+--- a/model/slh64_external.py
++++ b/model/slh64_external.py
+@@ -21,6 +21,9 @@ class ExternalImage:
+         if h>>46:raise ValueError('header reserved')
+         kg=(h>>36)&31;sg=(h>>41)&31
+         if kg>=16 or sg>=16:raise ValueError('entry exceeds program capacity')
++        if self.descriptors[1] in (8,9,10,11):
++            from model.stateful import decode
++            return decode(self)
+         desc=list(self.descriptors);desc[0]&=(1<<36)-1
+         # Reuse the independently checked ABI-4 expansion and reference checks.
+         # The legacy decoder receives synthetic zero inputs, never caller data.
+@@ -50,6 +53,8 @@ def convert_legacy(image):
+ 
+ 
+ def compile_external(name):
++    from model.stateful import PROFILE_CODES,encode
++    if name in PROFILE_CODES.values():return encode(name)
+     n=compile_image(name).n
+     zero=bytes(n)
+     return convert_legacy(pack(name,Job(zero,zero,zero,zero),b'\0',zero,False))[0]
+@@ -58,10 +63,11 @@ def compile_external(name):
+ class ExternalMachine:
+     def __init__(self,image,job,root,message,sign,observe=None):
+         logical=image.decode()
+-        if job.q or any(job.identifier):raise ValueError('SLH-only job')
++        if not logical.stateful and (job.q or any(job.identifier)):raise ValueError('SLH-only job')
++        if logical.stateful and not 0<=job.q<1024:raise ValueError('index exhausted')
+         if len(root)!=logical.n:raise ValueError('root size')
+         if not (1<=len(message)<=87 if sign else len(message)==0):raise ValueError('message length')
+-        self.machine=Machine(logical,job,observe)
++        self.machine=Machine(logical,job,observe, index_policy='fixed_q_no_guard' if logical.stateful else 'guarded', recompute_auth=logical.stateful)
+         self.message=message;self.sign=bool(sign);self.halted=False
+         if sign:self.machine.values[3]=root
+ 
+diff --git a/model/unified_hbs.py b/model/unified_hbs.py
+index 8916eb73..f58ee2f4 100644
+--- a/model/unified_hbs.py
++++ b/model/unified_hbs.py
+@@ -389,9 +389,10 @@ class Job:
+ class Machine:
+     def __init__(self, image: Image, job: Job,
+                  observe: Callable[[int, bytes, bytes], None] | None = None,
+-                 *, index_policy: str = "guarded"):
++                 *, index_policy: str = "guarded", recompute_auth: bool = False):
+         if index_policy not in ("guarded", "fixed_q_no_guard"):
+             raise ValueError("index policy")
++        self.recompute_auth = recompute_auth
+         self.index_policy = index_policy
+         validate(image)
+         if any(len(v) != image.n for v in (job.secret, job.prf, job.public, job.random)):
+@@ -536,9 +537,9 @@ class Machine:
+         if sign and not 1 <= len(message) <= 87:
+             raise ValueError("message length")
+         if sign and self.image.stateful:
+-            if not self.cache_valid: raise ValueError("keygen required")
++            if not self.recompute_auth and not self.cache_valid: raise ValueError("keygen required")
+             if self.q >= 1024: raise ValueError("index exhausted")
+-            if not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
++            if not self.recompute_auth and not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
+                 raise ValueError("authentication cache belongs to another index")
+             if self.index_policy == "guarded" and not commit:
+                 raise ValueError("state commit required before execution/output")
+diff --git a/rtl/memory/mhbs_signature_store.sv b/rtl/memory/mhbs_signature_store.sv
+index 4bcc14a9..803d2a12 100644
+--- a/rtl/memory/mhbs_signature_store.sv
++++ b/rtl/memory/mhbs_signature_store.sv
+@@ -7,7 +7,7 @@ module mhbs_signature_store (
+     input wire write_valid,input wire [255:0] write_data,input wire [5:0] write_bytes,
+     input wire read_enable,input wire [10:0] read_address,
+     output logic read_valid,output logic [255:0] read_data,
+-    output logic [5:0] node_bytes,
++    output logic [5:0] node_bytes,output logic [5:0] read_bytes,
+     output wire complete,output logic error,
+     output logic [10:0] nodes,output logic [15:0] length
+ );
+@@ -17,19 +17,22 @@ module mhbs_signature_store (
+     (* ram_style="distributed" *) logic [255:0] tail_memory[0:21];
+     logic [255:0] main_data,middle_data,tail_data;
+     logic [1:0] read_bank;
+-    wire size_ok=(write_bytes==16 || write_bytes==24 || write_bytes==32) &&
+-                 (nodes==0 || write_bytes==node_bytes);
++    (* ram_style="distributed" *) logic [5:0] byte_counts[0:1557];
++    wire size_ok=(write_bytes==4 || write_bytes==16 || write_bytes==24 || write_bytes==32) &&
++                 (write_bytes==4 || node_bytes==0 || write_bytes==node_bytes);
+     wire writing=write_valid && !rst && !finish && !abort && !error;
+     wire reading=read_enable && complete && read_address<nodes;
+     assign complete=finish && !rst && !abort && !error && nodes!=0;
+     // Do not reset the array or data register: infer synchronous block RAM.
+     always_ff @(posedge clk) begin
+         if(writing && nodes<1558 && size_ok) begin
++            byte_counts[nodes]<=write_bytes;
+             if(!nodes[10]) main_memory[nodes[9:0]]<=write_data;
+             else if(!nodes[9]) middle_memory[nodes[8:0]]<=write_data;
+             else tail_memory[nodes[4:0]]<=write_data;
+         end
+         if(reading) begin
++            read_bytes<=byte_counts[read_address];
+             if(!read_address[10]) begin
+                 main_data<=main_memory[read_address[9:0]];read_bank<=0;
+             end else if(!read_address[9]) begin
+@@ -57,7 +60,7 @@ module mhbs_signature_store (
+                 else begin
+                     nodes<=nodes+1'b1;
+                     length<=length+{10'd0,write_bytes};
+-                    node_bytes<=write_bytes;
++                    if(write_bytes!=4)node_bytes<=write_bytes;
+                 end
+             end
+         end
+diff --git a/rtl/sequencer/mhbs_program_sequencer.sv b/rtl/sequencer/mhbs_program_sequencer.sv
+index 058fa767..296a9bb1 100644
+--- a/rtl/sequencer/mhbs_program_sequencer.sv
++++ b/rtl/sequencer/mhbs_program_sequencer.sv
+@@ -11,7 +11,7 @@ module mhbs_program_sequencer (
+  state_t state;
+  logic [3:0] pc;
+  logic [63:0] token;
+- logic [15:0] template_word;
++ logic [16:0] template_word;
+  logic [10:0] coordinate,stride;
+  logic [5:0] remaining;
+  logic [1:0] sp;
+@@ -25,7 +25,7 @@ module mhbs_program_sequencer (
+  assign ready=state==IDLE;
+  assign command_valid=state==ISSUE;
+  assign command={1'b0,template_word[2:0],3'd0,template_word[7:3],3'd0,template_word[12:8],
+-                 template_word[15],1'b0,template_word[14:13],coordinate,13'd0};
++                 template_word[15],template_word[16],template_word[14:13],coordinate,13'd0};
+  integer i;
+  always_ff @(posedge clk) begin
+   if(rst) begin
+@@ -50,7 +50,7 @@ module mhbs_program_sequencer (
+       end
+       state<=FETCH;
+      end else begin
+-      template_word<=template_data[15:0];coordinate<=token[57:47]+loop_bias[0]+loop_bias[1];
++      template_word<=template_data[16:0];coordinate<=token[57:47]+loop_bias[0]+loop_bias[1];
+       stride<=token[40:30];remaining<=token[46:41];state<=ISSUE;
+      end
+     end
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+index 911ff4bd..334a83a6 100644
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -15,6 +15,7 @@ module mhbs_hbs #(
+     input wire clk, rst,
+     input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
+     input wire [6:0] job_message_length,
++    input wire [31:0] job_index, input wire [127:0] job_identifier,
+     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
+     input wire message_valid, output wire message_ready,
+     input wire [63:0] message_data,
+@@ -27,20 +28,24 @@ module mhbs_hbs #(
+     output wire [31:0] hash_count, permutation_count,
+     output logic [31:0] cycles
+ );
+-    localparam integer N=32, W=256, V=392, INDEX_BITS=7, MAX_MESSAGE_BYTES=87;
++    localparam integer N=32, W=256, V=392, INDEX_BITS=8, MAX_MESSAGE_BYTES=87;
+     localparam integer DIGEST_BYTES=49;
+     // Six supported profiles need at most ceil(35*9/8)=40 FORS bytes.
+     // Tree/leaf indices still consume the full V-bit transient Hmsg result.
+     localparam integer FORS_DIGEST_BITS=320;
++    wire stateful=profile_descriptor[3];
++    wire xmss=stateful && !profile_descriptor[1];
++    wire omega2=stateful && !profile_descriptor[0];
++    wire [3:0] chain_max=omega2 ? 4'd3 : 4'd15;
+     wire [1:0] profile_code=profile_descriptor[1:0];
+-    wire small_signature=profile_descriptor[2];
+-    wire [5:0] node_bytes=profile_code==0 ? 6'd16
++    wire small_signature=!stateful && profile_descriptor[2];
++    wire [5:0] node_bytes=stateful ? 6'd32 : profile_code==0 ? 6'd16
+         : profile_code==1 ? 6'd24 : 6'd32;
+     wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
+         : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
+     wire [3:0] HP=small_signature ? (profile_code[1] ? 4'd8 : 4'd9)
+         : profile_code[1] ? 4'd4 : 4'd3;
+-    wire [7:0] LEN1={1'b0,node_bytes,1'b0};
++    wire [7:0] LEN1=omega2 ? 8'd128 : {1'b0,node_bytes,1'b0};
+     wire [63:0] descriptors [0:7];
+     // Two reads are sufficient: request recipe plus chain-step recipe.
+     // Macro and tree/chain descriptors are already latched in setup states.
+@@ -63,7 +68,8 @@ module mhbs_hbs #(
+         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
+         VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
+         // Keep retired enum positions stable for historical cycle observers.
+-        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE
++        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
++        LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM
+     } state_t;
+     state_t state, hash_return, output_return;
+     task automatic enter_state(input state_t next_state);
+@@ -89,7 +95,10 @@ module mhbs_hbs #(
+     logic [63:0] scalar_tree;
+     logic [9:0] scalar_leaf;
+     logic [11:0] checksum;
+-    logic [6:0] transform_index;
++    logic [7:0] transform_index;
++    logic [7:0] lt_count,lt_cursor;
++    logic [3:0] lt_level;
++    wire sign_only=stateful && !verifying && standalone_chain && macro_flags[2];
+     logic [4:0] layer;
+     logic [5:0] group_index;
+     logic [3:0] macro_op, macro_flags;
+@@ -122,7 +131,7 @@ module mhbs_hbs #(
+     logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
+     wire [255:0] pipe_read_result[0:1],pipe_read_capture[0:1];
+     logic [7:0] pipe_seed_domain,pipe_step_domain;
+-    wire pipe_direct=LANES==1 && UNROLL==1 && PIPELINE>1 && operation==1 && indexing!=1;
++    wire pipe_direct=!stateful && LANES==1 && UNROLL==1 && PIPELINE>1 && operation==1 && indexing!=1;
+     wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
+     wire [1:0] pipe_ready,pipe_valid,pipe_selected;
+     wire [1:0] pipe_issue_mask=pipe_expected_mask[LANES*pipe_issue_slot +:LANES];
+@@ -152,7 +161,8 @@ module mhbs_hbs #(
+             EMIT: hash_recipe_id=emit_base+emit_cursor;
+             CHAIN_SETUP: hash_recipe_id=chain_descriptor[59:52];
+             VERIFY_CHAIN_RUN: hash_recipe_id=chain_descriptor[48:44];
+-            REDUCE_SETUP: hash_recipe_id=chain_descriptor[43:36];
++            REDUCE_SETUP,LT_SETUP: hash_recipe_id=chain_descriptor[43:36];
++            SF_LEAF: hash_recipe_id=chain_descriptor[35:28];
+             PARENT_SETUP: hash_recipe_id=parent_id;
+             default: begin end
+         endcase
+@@ -168,14 +178,14 @@ module mhbs_hbs #(
+     // Parent operands stay unchanged through HASH_ISSUE/HASH_WAIT and are
+     // updated only in PARENT_DONE. Other recipes do not consume the right
+     // input, so no duplicate parent-right register is needed.
+-    wire [255:0] parent_right = verifying && !node_index[0] ? emit_value : node_value;
++    wire [255:0] parent_right = verifying && hash_return==PARENT_DONE && !node_index[0] ? emit_value : node_value;
+     // Results stay stable for each outstanding request. Only verification
+     // leaf/chain hashes take their input from these existing result registers.
+     wire verify_chain_source = verifying &&
+         (hash_return==VERIFY_CHAIN_ADVANCE || (hash_return==LEAF_SETUP && indexing==1));
+     logic [1:0] active_mask, launch_pending, response_pending;
+-    wire [1:0] verify_step_mask = {chain_batch_mask[1] && task_b[1][3:0]!=15,
+-                                 chain_batch_mask[0] && task_b[0][3:0]!=15};
++    wire [1:0] verify_step_mask = {chain_batch_mask[1] && task_b[1][3:0]!=chain_max,
++                                 chain_batch_mask[0] && task_b[0][3:0]!=chain_max};
+     wire [1:0] lane_ready, lane_valid, lane_error;
+     wire [V-1:0] lane_value [0:1];
+     wire [255:0] lane_capture [0:1];
+@@ -205,7 +215,7 @@ module mhbs_hbs #(
+     // Reuse the same parity banks; root writes use the matching physical
+     // write port so the even/odd address invariants remain static.
+     wire root_write=state==ROUTE && macro_route!=0 && route_descriptor[53];
+-    mhbs_value_store #(.WIDTH(W),.DEPTH(68),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(1),.FIXED_BANK_WRITES(1),.SPLIT_TAIL(0)) endpoints (
++    mhbs_value_store #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS),.SINGLE_READ(0),.FIXED_BANK_WRITES(1),.SPLIT_TAIL(0)) endpoints (
+         .clk, .write0(endpoint_write0), .write1(endpoint_write1),
+         .address0(endpoint_address0), .address1(endpoint_address1),
+         .data0(endpoint_data0), .data1(endpoint_data1),
+@@ -220,7 +230,7 @@ module mhbs_hbs #(
+         assign pipe_selected[L]=state==PIPE_ISSUE && pipe_issue_slot<PIPELINE
+             && pipe_expected_mask[LANES*pipe_issue_slot+L] && !pipe_issue_accepted[L];
+         mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+-            .SHARED_STATE(LANES==1 && UNROLL==1),.RECIPE_MASK(L==0 ? 16'h101e : 16'h0006),
++            .SHARED_STATE(LANES==1 && UNROLL==1),.RECIPE_MASK(L==0 ? 16'hfffe : 16'h0786),
+             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+             .clk,.rst(execution_rst),.node_bytes,
+             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected[L]),.batch_request_ready(pipe_ready[L]),
+@@ -242,8 +252,8 @@ module mhbs_hbs #(
+             .request_capture_after(task_capture_after[L]),
+             .request_capture(task_capture[L]),
+             .secret_seed,.secret_prf,.public_seed,.root(value[3][W-1:0]),
+-            .randomizer(task_recipe[59:56]==4 ? value[0][W-1:0] : randomizer),
+-            .identifier(128'd0),.message_buffer,.message_length,
++            .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
++            .identifier(job_identifier),.message_buffer,.message_length,
+             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf[L]),
+             .request_a(task_a[L]),.request_b(task_b[L]),.request_left(verify_chain_source ? result[L][W-1:0] : (L==0 ? task_left0 : 256'd0)),.request_right(L==0 ? parent_right : 256'd0),
+             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
+@@ -293,8 +303,16 @@ module mhbs_hbs #(
+         begin
+             checksum_index=index-LEN1;
+             digit=0;
+-            if(index<LEN1) begin
++            if(index<LEN1 && omega2) begin
++                digit={3'd0,value[2][{index[6:2],3'b0}+{1'b0,(index[1:0]^2'd3),1'b0} +:2]};
++            end else if(index<LEN1) begin
+                 digit={1'b0,value[2][{(index[5:0]^6'd1),2'b0} +:4]};
++            end else if(omega2) begin
++                case(checksum_index)
++                    0:digit={3'd0,checksum[9:8]};1:digit={3'd0,checksum[7:6]};
++                    2:digit={3'd0,checksum[5:4]};3:digit={3'd0,checksum[3:2]};
++                    4:digit={3'd0,checksum[1:0]};default:digit=0;
++                endcase
+             end else begin
+                 case(checksum_index)
+                     0:digit={1'b0,checksum[11:8]}; 1:digit={1'b0,checksum[7:4]};
+@@ -426,6 +444,12 @@ module mhbs_hbs #(
+             end else begin
+                 endpoint_write0=active_mask[0]; endpoint_write1=active_mask[1];
+             end
++        end else if(state==LT_STORE || state==LT_COPY) begin
++            endpoint_address0={1'b0,lt_cursor[7:2],1'b0};
++            endpoint_address1={1'b0,lt_cursor[7:2],1'b1};
++            endpoint_data0=state==LT_COPY ? endpoint_value0 : result[0][W-1:0];
++            endpoint_data1=endpoint_data0;
++            endpoint_write0=!lt_cursor[1];endpoint_write1=lt_cursor[1];
+         end else if(root_write) begin
+             endpoint_address0={1'b0,group_index[5:1],1'b0};
+             endpoint_address1={1'b0,group_index[5:1],1'b1};
+@@ -433,6 +457,9 @@ module mhbs_hbs #(
+             endpoint_write0=!group_index[0]; endpoint_write1=group_index[0];
+         end
+ 
++        if(state==LT_SETUP || state==LT_COPY)begin
++            endpoint_read0=lt_cursor;endpoint_read1=lt_cursor+1'b1;
++        end else if(state==LT_FINISH)begin endpoint_read0=0;endpoint_read1=1;end
+     end
+ 
+     // Validity is owned by the tree controller; data arrays have no reset.
+@@ -452,7 +479,9 @@ module mhbs_hbs #(
+             1: emit_source=secret_prf;
+             2: emit_source=public_seed;
+             3: emit_source=value[3][W-1:0];
+-            4: emit_source=randomizer;
++            4: emit_source=xmss ? value[0] : randomizer;
++            5: emit_source={128'd0,job_identifier};
++            6: emit_source={224'd0,be32(job_index)};
+             7: emit_source=be32(emit_descriptor[31:0]);
+             default: emit_source=0;
+         endcase
+@@ -471,7 +500,7 @@ module mhbs_hbs #(
+             task_chain<=0; task_capture<=0;
+             hash_base<=0; permutation_base<=0; layer<=0;
+             task_recipe<=0; task_step<=0; message_received<=0;
+-            fors_pair_pending<=0;
++            fors_pair_pending<=0;lt_count<=0;lt_cursor<=0;lt_level<=0;
+             pipe_cache_valid<=0;pipe_batch_used<=0;pipe_pair<=0;pipe_issue_slot<=0;
+             pipe_issue_accepted<=0;pipe_done_mask<=0;pipe_expected_mask<=0;
+             for(i=0;i<2;i=i+1) begin
+@@ -494,10 +523,11 @@ module mhbs_hbs #(
+                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
+                     verify_pass<=0;
+                     message_length<=job_message_length; message_received<=0;
+-                    scalar_tree<=0; scalar_leaf<=0; layer<=0; group_index<=0;
++                    scalar_tree<=0; scalar_leaf<=stateful ? job_index[9:0] : 0; layer<=0; group_index<=0;
+                     if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
+                     value[3]<=job_public_root;
+-                    if(job_operation) begin
++                    if(stateful && job_index>=1024)fail(16'h3008);
++                    else if(job_operation) begin
+                         enter_state(MESSAGE);
+                     end else begin
+                         enter_state(LAUNCH);
+@@ -535,18 +565,20 @@ module mhbs_hbs #(
+                            task_a[0]<=0; task_b[0]<=0;
+                            // The sign program starts with PRF_msg. Verification
+                            // supplies that R as the first external node.
+-                           if(verifying && saved_descriptor[59:56]==3)
++                           if(verifying && stateful && (saved_descriptor[59:56]==5 || saved_descriptor[59:56]==11))
++                               read_verify_node(SF_RANDOM);
++                           else if(verifying && saved_descriptor[59:56]==3)
+                                read_verify_node(VERIFY_RANDOM);
+                            else start_hash(saved_descriptor,2'b01,HASH_RESULT);
+                        end
+                     2: begin
+                            chain_id<=macro_desc; standalone_chain<=1; indexing<=0;
+-                           leaf_cursor<=0; target<=0; chain_cursor<=0;
++                           leaf_cursor<=stateful ? job_index[9:0] : 0; target<=stateful ? job_index[9:0] : 0; chain_cursor<=0;
+                            endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor; enter_state(CHAIN_SETUP);
+                        end
+                     3: enter_state(TREE_INIT);
+                     4: begin checksum<=0; transform_index<=0; enter_state(TRANSFORM); end
+-                    5: begin emit_base<=descriptor[59:52]; emit_count<=descriptor[51:48]; emit_cursor<=0; enter_state(EMIT); end
++                    5: if(verifying && stateful)complete_macro(); else begin emit_base<=descriptor[59:52]; emit_count<=descriptor[51:48]; emit_cursor<=0; enter_state(EMIT); end
+                     default: fail(16'h3006);
+                 endcase
+                 end
+@@ -556,12 +588,14 @@ module mhbs_hbs #(
+                     fors_pair_pending<=0;
+                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+                     indexing<=descriptor[33:32]; standalone_chain<=0;
+-                    target<=descriptor[37:36]==1 ? fors_target(group_index)
++                    target<=stateful ? {4'd0,job_index[9:0]} : descriptor[37:36]==1 ? fors_target(group_index)
+                         : scalar_leaf;
+                     leaf_cursor<=verifying ? scalar_leaf : 0;
+                     chain_cursor<=0; node_level<=0; auth_level<=0;
+                     endpoint_count<=descriptors[6][27:20];
+-                    enter_state(CHAIN_SETUP);
++                    if(stateful && verifying)begin
++                        node_value<=value[2];node_index<=job_index[9:0];enter_state(PUSH_NODE);
++                    end else enter_state(CHAIN_SETUP);
+                 end
+                 CHAIN_SETUP: begin
+                     if(verifying) begin
+@@ -574,7 +608,7 @@ module mhbs_hbs #(
+                             task_b[i]<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor+i);
+                         end
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+-                    end else if(PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
++                    end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
+                         if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
+                         else begin
+                             pipe_pair<=0;pipe_issue_slot<=0;pipe_issue_accepted<=0;pipe_done_mask<=0;
+@@ -592,7 +626,7 @@ module mhbs_hbs #(
+                         task_leaf[i]<=indexing==1 ? scalar_leaf : leaf_cursor;
+                         task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
+                         task_b[i]<=indexing==1 ? (group_index<<FORS_A)+leaf_cursor+i : 0;
+-                        task_steps[i]<=(macro_flags[3] && leaf_cursor==target)
++                        task_steps[i]<=(sign_only || (macro_flags[3] && leaf_cursor==target))
+                             ? digit(chain_cursor+i) : chain_descriptor[19:15];
+                         task_capture_after[i]<=indexing==1 ? 0 : digit(chain_cursor+i);
+                     end
+@@ -628,16 +662,19 @@ module mhbs_hbs #(
+                 CHAIN_STORE: begin
+                     if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
+                     task_chain<=0;
+-                    if(!verifying && macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target))) enter_state(CHAIN_OUTPUT0);
++                    if(sign_only || (!verifying && macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target)))) enter_state(CHAIN_OUTPUT0);
+                     else enter_state(CHAIN_NEXT);
+                 end
+-                CHAIN_OUTPUT0: start_output(indexing==1 && active_mask[1] && target[0]
++                CHAIN_OUTPUT0: start_output(sign_only ? result[0][W-1:0] : indexing==1 && active_mask[1] && target[0]
+                     ? selected_capture[1] : selected_capture[0],node_bytes,
+                     active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+-                CHAIN_OUTPUT1: start_output(selected_capture[1],node_bytes,CHAIN_NEXT);
++                CHAIN_OUTPUT1: start_output(sign_only ? result[1][W-1:0] : selected_capture[1],node_bytes,CHAIN_NEXT);
+                 CHAIN_NEXT: begin
+                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
+-                    else if(standalone_chain && chain_descriptor[13:12]==0)
++                    else if(sign_only)complete_macro();
++                    else if(stateful && chain_descriptor[13:12]==2)begin
++                        lt_count<=endpoint_count;lt_cursor<=0;lt_level<=0;enter_state(LT_SETUP);
++                    end else if(standalone_chain && chain_descriptor[13:12]==0)
+                         route_result(ROUTE_NODE);
+                     else if(!verifying && macro_flags[3] && leaf_cursor==target) begin
+                         node_value<=0; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
+@@ -651,7 +688,42 @@ module mhbs_hbs #(
+                 REDUCE_SETUP: begin
+                     task_chain<=0; task_capture<=0; task_steps[0]<=0;
+                     task_leaf[0]<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
+-                    start_hash(descriptors[4],2'b01,LEAF_SETUP);
++                    start_hash(descriptors[4],2'b01,stateful ? SF_REDUCED : LEAF_SETUP);
++                end
++                LT_SETUP: begin
++                    if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
++                    else begin
++                        task_chain<=0;task_capture<=0;task_steps[0]<=0;
++                        task_leaf[0]<=leaf_cursor;task_a[0]<=lt_level;task_b[0]<=lt_cursor>>1;
++                        task_left0<=endpoint_value0;node_value<=endpoint_value1;
++                        start_hash(descriptors[4],2'b01,LT_STORE);
++                    end
++                end
++                LT_STORE,LT_COPY:enter_state(LT_NEXT);
++                LT_NEXT:begin
++                    if(lt_cursor+2<lt_count)begin lt_cursor<=lt_cursor+2;enter_state(LT_SETUP);end
++                    else if(lt_count<=2)enter_state(LT_FINISH);
++                    else begin lt_count<=(lt_count+1)>>1;lt_cursor<=0;lt_level<=lt_level+1'b1;enter_state(LT_SETUP);end
++                end
++                LT_FINISH:begin
++                    node_value<=endpoint_value0;
++                    if(verifying && standalone_chain)begin value[2]<=endpoint_value0;complete_macro();end
++                    else begin node_index<=leaf_cursor;node_level<=0;enter_state(PUSH_NODE);end
++                end
++                SF_REDUCED:enter_state(SF_LEAF);
++                SF_LEAF:begin
++                    task_chain<=0;task_capture<=0;task_steps[0]<=0;
++                    task_leaf[0]<=leaf_cursor;task_a[0]<=0;task_b[0]<=32'd1024+leaf_cursor;
++                    task_left0<=result[0][W-1:0];start_hash(descriptors[0],2'b01,SF_LEAF_DONE);
++                end
++                SF_LEAF_DONE:begin
++                    node_value<=result[0][W-1:0];
++                    if(verifying && standalone_chain)begin value[2]<=result[0][W-1:0];complete_macro();end
++                    else begin node_index<=leaf_cursor;node_level<=0;enter_state(PUSH_NODE);end
++                end
++                SF_RANDOM:begin
++                    value[0]<=emit_value;
++                    if(xmss)complete_macro();else start_hash(saved_descriptor,2'b01,HASH_RESULT);
+                 end
+                 LEAF_SETUP: if(standalone_chain)route_result(ROUTE_HASH);
+                     else begin node_value<=result[0][W-1:0]; node_level<=0;
+@@ -692,7 +764,10 @@ module mhbs_hbs #(
+                         start_output(auth_path[auth_level],node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
+                     end else enter_state(TREE_FINISH);
+                 end
+-                TREE_FINISH: route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
++                TREE_FINISH: begin
++                    if(stateful && verifying)value[2]<=node_value;
++                    route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
++                end
+                 HASH_ISSUE: begin
+                     launch_pending<=launch_pending & ~lane_ready;
+                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
+@@ -728,7 +803,7 @@ module mhbs_hbs #(
+                         scalar_leaf<=scalar_tree & ((1<<descriptor[43:40])-1);
+                         scalar_tree<=scalar_tree>>descriptor[43:40]; complete_macro();
+                     end else if(descriptor[59:56]==1) begin
+-                        checksum<=checksum+15-digit(transform_index);
++                        checksum<=checksum+chain_max-digit(transform_index);
+                         if(transform_index+1==LEN1) complete_macro();
+                         else transform_index<=transform_index+1'b1;
+                     end else fail(16'h3006);
+diff --git a/rtl/top/mhbs_top.sv b/rtl/top/mhbs_top.sv
+index 74a071ec..964b3347 100644
+--- a/rtl/top/mhbs_top.sv
++++ b/rtl/top/mhbs_top.sv
+@@ -15,6 +15,8 @@ module mhbs_top #(
+     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
+     parameter [255:0] RANDOMIZER=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
+     parameter [255:0] PUBLIC_ROOT=256'h000000000000000000000000000000003d774653892d5f3695b370c7cdab63ff,
++    parameter [31:0] KEY_INDEX=0,
++    parameter [127:0] IDENTIFIER=0,
+     parameter [1:0] OPERATION=2'd1,
+     parameter PROGRAM_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/program.mem",
+     parameter TEMPLATE_INIT_FILE="manifests/experiments/unified_hbs_v4.2/external_job_message/images/slh_128f/template.mem",
+@@ -32,6 +34,7 @@ module mhbs_top #(
+     output wire [1:0] result_kind,
+     input wire signature_read_enable,input wire [10:0] signature_read_address,
+     output wire signature_read_valid,output wire [255:0] signature_read_data,
++    output wire [5:0] signature_read_bytes,
+     output wire [5:0] signature_node_bytes,
+     output wire signature_valid,signature_error,
+     output wire [10:0] signature_nodes,output wire [15:0] signature_length
+@@ -78,6 +81,7 @@ module mhbs_top #(
+         .program_address,.program_data,.template_address,.template_data,
+         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
+         .job_valid(phase==REQUEST && message_length_valid),.job_ready(core_job_ready),
++        .job_index(KEY_INDEX),.job_identifier(IDENTIFIER),
+         .job_operation(OPERATION),.job_message_length(message_length),
+         .job_secret_seed(SECRET_SEED),.job_secret_prf(SECRET_PRF),
+         .job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),
+@@ -126,12 +130,12 @@ module mhbs_top #(
+             .clk,.rst,.finish(done),.abort(error),
+             .write_valid(out_valid),.write_data(out_data),.write_bytes(out_bytes),
+             .read_enable(signature_read_enable),.read_address(signature_read_address),
+-            .read_valid(signature_read_valid),.read_data(signature_read_data),
++            .read_valid(signature_read_valid),.read_data(signature_read_data),.read_bytes(signature_read_bytes),
+             .node_bytes(signature_node_bytes),.complete(signature_valid),
+             .error(signature_error),.nodes(signature_nodes),.length(signature_length)
+         );
+     end else begin: no_signature_store
+-        assign signature_read_valid=0;
++        assign signature_read_valid=0;assign signature_read_bytes=0;
+         assign signature_read_data=0;
+         assign signature_node_bytes=0;
+         assign signature_valid=0;
+diff --git a/scripts/v42_common_partition.py b/scripts/v42_common_partition.py
+index 60e72a7a..266d7c95 100644
+--- a/scripts/v42_common_partition.py
++++ b/scripts/v42_common_partition.py
+@@ -8,13 +8,14 @@ import re
+ 
+ JOBS = {'SECRET_SEED':'job_secret_seed', 'SECRET_PRF':'job_secret_prf',
+         'PUBLIC_SEED':'job_public_seed', 'RANDOMIZER':'job_randomizer',
+-        'PUBLIC_ROOT':'job_public_root', 'OPERATION':'job_operation'}
++        'PUBLIC_ROOT':'job_public_root', 'KEY_INDEX':'job_index', 'IDENTIFIER':'job_identifier', 'OPERATION':'job_operation'}
+ PORTS = '''
+  input wire clk,rst,
+  output wire [3:0] program_address,output wire [3:0] template_address,
+  input wire [63:0] program_data,template_data,
+  output wire [9:0] descriptor_addresses,input wire [127:0] descriptor_data,
+  input wire [255:0] job_secret_seed,job_secret_prf,job_public_seed,job_randomizer,job_public_root,
++ input wire [31:0] job_index,input wire [127:0] job_identifier,
+  input wire [1:0] job_operation,input wire [6:0] message_length,
+  input wire verify_valid,output wire verify_ready,
+  input wire [255:0] verify_data,output wire verify_pass,
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+index 8dab0e4e..84ee7959 100644
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -12,6 +12,7 @@ module tb_mhbs_external;
+  logic clk=0,rst=1;
+  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
+  wire signature_read_valid,signature_valid,signature_error;
++ wire [5:0] signature_read_bytes;
+  wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
+  wire [10:0] signature_nodes;wire [15:0] signature_length;
+  wire verify_ready,verify_pass;
+diff --git a/tb/integration/tb_mhbs_verify.sv b/tb/integration/tb_mhbs_verify.sv
+index 1e16874e..b2d0021f 100644
+--- a/tb/integration/tb_mhbs_verify.sv
++++ b/tb/integration/tb_mhbs_verify.sv
+@@ -11,6 +11,7 @@ module tb_mhbs_verify;
+  logic clk=0,rst=1;
+  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
+  wire signature_read_valid,signature_valid,signature_error;
++ wire [5:0] signature_read_bytes;
+  wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
+  wire [10:0] signature_nodes;wire [15:0] signature_length;
+  wire busy,done,keygen_done,error,out_valid,verify_ready,verify_pass,message_ready;
+diff --git a/tb/unit/mhbs_external_core_stub.sv b/tb/unit/mhbs_external_core_stub.sv
+index a489b39e..058d599b 100644
+--- a/tb/unit/mhbs_external_core_stub.sv
++++ b/tb/unit/mhbs_external_core_stub.sv
+@@ -16,6 +16,7 @@ module mhbs_hbs #(
+     input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
+     input wire [6:0] job_message_length,
+     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
++    input wire [31:0] job_index,input wire [127:0] job_identifier,
+     input wire message_valid, output wire message_ready,
+     input wire [63:0] message_data,
+     input wire verify_valid, output wire verify_ready,
+@@ -41,6 +42,7 @@ module mhbs_hbs #(
+       done<=0;
+       if(job_valid && job_ready)begin
+        if(job_secret_seed!=256'h1122 || job_secret_prf!=256'h3344 || job_public_seed!=256'h5566 || job_randomizer!=256'h7788 || job_public_root!=256'h99aa)$fatal(1,"Job parameters changed");
++       if(job_index!=1023 || job_identifier!=128'h0102030405060708090a0b0c0d0e0f10)$fatal(1,"stateful Job parameters");
+        if(job_entry!=(job_operation ? 3 : 0))$fatal(1,"entry selection");
+        active<=1;accepted_length<=job_message_length;received<=0;starts<=starts+1;cycles<=0;
+       end
+diff --git a/tb/unit/tb_mhbs_external_boot.sv b/tb/unit/tb_mhbs_external_boot.sv
+index 2e964bcd..6d5b4c64 100644
+--- a/tb/unit/tb_mhbs_external_boot.sv
++++ b/tb/unit/tb_mhbs_external_boot.sv
+@@ -6,7 +6,7 @@ module tb_mhbs_external_boot;
+  logic [6:0] kg_message_length=7'd0;
+  wire message_ready,kg_ready,done,kg_done,error,busy;
+  wire [31:0] boot_cycles,keygen_cycles,sign_cycles;
+- `define JOB .SECRET_SEED(256'h1122),.SECRET_PRF(256'h3344),.PUBLIC_SEED(256'h5566),.RANDOMIZER(256'h7788),.PUBLIC_ROOT(256'h99aa)
++ `define JOB .KEY_INDEX(32'd1023),.IDENTIFIER(128'h0102030405060708090a0b0c0d0e0f10),.SECRET_SEED(256'h1122),.SECRET_PRF(256'h3344),.PUBLIC_SEED(256'h5566),.RANDOMIZER(256'h7788),.PUBLIC_ROOT(256'h99aa)
+  mhbs_top #(`JOB,.OPERATION(1)) dut(.clk,.rst,.message_length,.message_data,.message_valid,.message_ready,.done,.error,.busy,.boot_cycles,.keygen_cycles,.sign_cycles);
+  mhbs_top #(`JOB,.OPERATION(0)) kg(.clk,.rst,.message_length(kg_message_length),.message_data,.message_valid,.message_ready(kg_ready),.done(kg_done));
+  always #5 clk=~clk;
+diff --git a/tb/unit/tb_mhbs_signature_store.sv b/tb/unit/tb_mhbs_signature_store.sv
+index 561559d8..9d9dc4ea 100644
+--- a/tb/unit/tb_mhbs_signature_store.sv
++++ b/tb/unit/tb_mhbs_signature_store.sv
+@@ -6,7 +6,7 @@ module tb_mhbs_signature_store;
+     logic [10:0] read_address=0;
+     wire read_valid,complete,error;
+     wire [255:0] read_data;
+-    wire [5:0] node_bytes;
++    wire [5:0] node_bytes,read_bytes;
+     wire [10:0] nodes;
+     wire [15:0] length;
+     mhbs_signature_store dut(.*);
+@@ -33,7 +33,7 @@ module tb_mhbs_signature_store;
+                 $fatal(1,"full store metadata");
+             for(integer n=1557;n>=0;n=n-1)begin
+                 read_address=11'(n);tick();
+-                if(!read_valid || read_data!==pattern(n))$fatal(1,"readback %0d",n);
++                if(!read_valid || read_data!==pattern(n) || read_bytes!=bytes_per_node)$fatal(1,"readback %0d",n);
+             end
+             // Jump between all three banks on consecutive requests.
+             for(integer n=0;n<1558;n=n+1)begin
+@@ -63,6 +63,16 @@ module tb_mhbs_signature_store;
+         reset_store();write_valid=1;write_bytes=24;write_data=pattern(7);tick();
+         write_valid=0;finish=1;read_enable=1;read_address=0;tick();
+         if(!read_valid || read_data!==pattern(7) || length!=24)$fatal(1,"restart");
++        reset_store();
++        for(integer n=0;n<148;n++)begin
++            write_valid=1;write_data=pattern(n);write_bytes=n==0||n==1||n==137 ? 4 : 32;tick();
++        end
++        write_valid=0;finish=1;tick();
++        if(error||!complete||nodes!=148||length!=4652)$fatal(1,"mixed metadata");
++        for(integer n=147;n>=0;n--)begin
++            read_enable=1;read_address=n;tick();
++            if(!read_valid||read_data!==pattern(n)||read_bytes!=(n==0||n==1||n==137 ? 4 : 32))$fatal(1,"mixed bytes");
++        end
+         $display("SIGNATURE_STORE_UNIT_PASS");$finish;
+     end
+ endmodule
+diff --git a/docs/v4.2/Stateful_XMSS_LMS.csv b/docs/v4.2/Stateful_XMSS_LMS.csv
+new file mode 100644
+index 00000000..1720383e
+--- /dev/null
++++ b/docs/v4.2/Stateful_XMSS_LMS.csv
+@@ -0,0 +1,25 @@
++profile,point,operation,compute_cycles,total_cycles,hashes,permutations,log,lut,ff,lutram,bram36,dsp,equivalent_slice,assumed_mhz,time_ms,atp_slice_ms
++lms_omega2,K1P1U1,0,15679504,15679509,547839,579583,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_0_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,104.53002666666667,599492.7691866667
++lms_omega2,K1P1U1,1,15689069,15689074,548177,579921,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_1_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,104.59379333333334,599858.4789908334
++lms_omega2,K1P1U1,2,8304,8309,208,239,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_2_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,0.05536,317.49652
++lms_omega4,K1P1U1,0,28510224,28510229,1100799,1116159,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_0_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,190.06816,1090064.65612
++lms_omega4,K1P1U1,1,28525638,28525643,1101392,1116752,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_1_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,190.17092,1090653.997565
++lms_omega4,K1P1U1,2,15469,15474,493,508,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_2_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,0.10312666666666667,591.4443241666667
++xmss_omega2,K1P1U1,0,49049538,49049543,1906684,1906684,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_0_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,326.99692,1875368.2108149999
++xmss_omega2,K1P1U1,1,49069779,49069784,1907449,1907449,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_1_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,327.13186,1876142.1085825001
++xmss_omega2,K1P1U1,2,30893,30898,1136,1136,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_2_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,0.20595333333333332,1181.1681108333332
++xmss_omega4,K1P1U1,0,86463426,86463431,3430396,3430396,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_0_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,576.42284,3305857.040255
++xmss_omega4,K1P1U1,1,86499491,86499496,3431815,3431815,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_1_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,576.6632733333333,3307235.9554758333
++xmss_omega4,K1P1U1,2,52414,52419,1970,1970,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_2_K1P1U1_stats1_swap0.log,19531.0,6819.0,1456.0,0.0,0.0,5735.125,150,0.34942666666666666,2004.0056116666667
++lms_omega2,K2P1U1,0,8583184,8583189,547839,579583,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_0_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,57.22122666666667,446332.72065333335
++lms_omega2,K2P1U1,1,8589144,8589149,548177,579921,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_1_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,57.26096,446642.64561999997
++lms_omega2,K2P1U1,2,6300,6305,208,239,manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_2_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,0.042,327.60525
++lms_omega4,K2P1U1,0,14824464,14824469,1100799,1116159,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_0_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,98.82976,770884.4817199999
++lms_omega4,K2P1U1,1,14835138,14835143,1101392,1116752,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_1_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,98.90092,771439.538615
++lms_omega4,K2P1U1,2,11712,11717,493,508,manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_2_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,0.07808,609.03376
++xmss_omega2,K2P1U1,0,31815618,31815623,1906684,1906684,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_0_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,212.10412,1654438.6490149999
++xmss_omega2,K2P1U1,1,31829454,31829459,1907449,1907449,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_1_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,212.19636,1655158.132545
++xmss_omega2,K2P1U1,2,26837,26842,1136,1136,manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_2_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,0.17891333333333334,1395.5463641666668
++xmss_omega4,K2P1U1,0,47433666,47433671,3430396,3430396,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_0_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,316.22444,2466590.1600550003
++xmss_omega4,K2P1U1,1,47457941,47457946,3431815,3431815,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_1_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,316.38627333333335,2467852.480284167
++xmss_omega4,K2P1U1,2,37035,37040,1970,1970,manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_2_K2P1U1_stats1_swap0.log,26164.0,10073.0,1456.0,0.0,0.0,7800.125,150,0.2469,1925.8508625000002
+diff --git a/docs/v4.2/Stateful_XMSS_LMS.json b/docs/v4.2/Stateful_XMSS_LMS.json
+new file mode 100644
+index 00000000..62aac0c0
+--- /dev/null
++++ b/docs/v4.2/Stateful_XMSS_LMS.json
+@@ -0,0 +1,537 @@
++{
++  "configuration": {
++    "n": 32,
++    "h": 10,
++    "hash": "experimental SHAKE256",
++    "q": 0,
++    "message_hex": "42",
++    "clock_period_ns": 6.666667,
++    "assumed_mhz": 150,
++    "routed": false,
++    "sign_recomputes_full_tree": true,
++    "scope": "common core; excludes ROM and signature cache"
++  },
++  "baseline_commit": "67a1cd75",
++  "previous_area": {
++    "K1P1U1": {
++      "point": "K1P1U1",
++      "lut": 13725.0,
++      "ff": 5725.0,
++      "lutram": 1112.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 4146.875,
++      "compute_cycles": 2619719,
++      "total_cycles": 2619724,
++      "hashes": 104937,
++      "permutations": 105641,
++      "time_ms": 17.464793333333333,
++      "atp_slice_ms": 72424.31485416666,
++      "keccak_utilization": 0.9678076160076711
++    },
++    "K2P1U1": {
++      "point": "K2P1U1",
++      "lut": 18079.0,
++      "ff": 7939.0,
++      "lutram": 1112.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5512.125,
++      "compute_cycles": 1399919,
++      "total_cycles": 1399924,
++      "hashes": 104937,
++      "permutations": 105641,
++      "time_ms": 9.332793333333333,
++      "atp_slice_ms": 51443.5234525,
++      "keccak_utilization": 0.9055466780578019
++    }
++  },
++  "area_delta": {
++    "K1P1U1": {
++      "lut": 5806.0,
++      "ff": 1094.0,
++      "lutram": 344.0,
++      "bram36": 0.0,
++      "equivalent_slice": 1588.25
++    },
++    "K2P1U1": {
++      "lut": 8085.0,
++      "ff": 2134.0,
++      "lutram": 344.0,
++      "bram36": 0.0,
++      "equivalent_slice": 2288.0
++    }
++  },
++  "validation": {
++    "passed": true,
++    "normal_cases": 24,
++    "masked_chain_unit_cases": 15,
++    "stateful_edge_cases": 101,
++    "slh_normal_cases": 12,
++    "slh_verify_cases": 130,
++    "slh_variant_cases": 34,
++    "slh_output_cycles_unchanged": true,
++    "rtl_matches_synthesis_snapshot": true,
++    "independent_verifier": "model/reference/stateful_shake.py",
++    "frozen_oracle_commit": "67a1cd75",
++    "frequency_basis": "assumed 150 MHz; no place/route"
++  },
++  "points": [
++    {
++      "profile": "lms_omega2",
++      "point": "K1P1U1",
++      "operation": 0,
++      "compute_cycles": 15679504,
++      "total_cycles": 15679509,
++      "hashes": 547839,
++      "permutations": 579583,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_0_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 104.53002666666667,
++      "atp_slice_ms": 599492.7691866667
++    },
++    {
++      "profile": "lms_omega2",
++      "point": "K1P1U1",
++      "operation": 1,
++      "compute_cycles": 15689069,
++      "total_cycles": 15689074,
++      "hashes": 548177,
++      "permutations": 579921,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_1_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 104.59379333333334,
++      "atp_slice_ms": 599858.4789908334
++    },
++    {
++      "profile": "lms_omega2",
++      "point": "K1P1U1",
++      "operation": 2,
++      "compute_cycles": 8304,
++      "total_cycles": 8309,
++      "hashes": 208,
++      "permutations": 239,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_2_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.05536,
++      "atp_slice_ms": 317.49652
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K1P1U1",
++      "operation": 0,
++      "compute_cycles": 28510224,
++      "total_cycles": 28510229,
++      "hashes": 1100799,
++      "permutations": 1116159,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_0_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 190.06816,
++      "atp_slice_ms": 1090064.65612
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K1P1U1",
++      "operation": 1,
++      "compute_cycles": 28525638,
++      "total_cycles": 28525643,
++      "hashes": 1101392,
++      "permutations": 1116752,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_1_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 190.17092,
++      "atp_slice_ms": 1090653.997565
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K1P1U1",
++      "operation": 2,
++      "compute_cycles": 15469,
++      "total_cycles": 15474,
++      "hashes": 493,
++      "permutations": 508,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_2_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.10312666666666667,
++      "atp_slice_ms": 591.4443241666667
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K1P1U1",
++      "operation": 0,
++      "compute_cycles": 49049538,
++      "total_cycles": 49049543,
++      "hashes": 1906684,
++      "permutations": 1906684,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_0_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 326.99692,
++      "atp_slice_ms": 1875368.2108149999
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K1P1U1",
++      "operation": 1,
++      "compute_cycles": 49069779,
++      "total_cycles": 49069784,
++      "hashes": 1907449,
++      "permutations": 1907449,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_1_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 327.13186,
++      "atp_slice_ms": 1876142.1085825001
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K1P1U1",
++      "operation": 2,
++      "compute_cycles": 30893,
++      "total_cycles": 30898,
++      "hashes": 1136,
++      "permutations": 1136,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_2_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.20595333333333332,
++      "atp_slice_ms": 1181.1681108333332
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K1P1U1",
++      "operation": 0,
++      "compute_cycles": 86463426,
++      "total_cycles": 86463431,
++      "hashes": 3430396,
++      "permutations": 3430396,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_0_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 576.42284,
++      "atp_slice_ms": 3305857.040255
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K1P1U1",
++      "operation": 1,
++      "compute_cycles": 86499491,
++      "total_cycles": 86499496,
++      "hashes": 3431815,
++      "permutations": 3431815,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_1_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 576.6632733333333,
++      "atp_slice_ms": 3307235.9554758333
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K1P1U1",
++      "operation": 2,
++      "compute_cycles": 52414,
++      "total_cycles": 52419,
++      "hashes": 1970,
++      "permutations": 1970,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_2_K1P1U1_stats1_swap0.log",
++      "lut": 19531.0,
++      "ff": 6819.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 5735.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.34942666666666666,
++      "atp_slice_ms": 2004.0056116666667
++    },
++    {
++      "profile": "lms_omega2",
++      "point": "K2P1U1",
++      "operation": 0,
++      "compute_cycles": 8583184,
++      "total_cycles": 8583189,
++      "hashes": 547839,
++      "permutations": 579583,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_0_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 57.22122666666667,
++      "atp_slice_ms": 446332.72065333335
++    },
++    {
++      "profile": "lms_omega2",
++      "point": "K2P1U1",
++      "operation": 1,
++      "compute_cycles": 8589144,
++      "total_cycles": 8589149,
++      "hashes": 548177,
++      "permutations": 579921,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_1_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 57.26096,
++      "atp_slice_ms": 446642.64561999997
++    },
++    {
++      "profile": "lms_omega2",
++      "point": "K2P1U1",
++      "operation": 2,
++      "compute_cycles": 6300,
++      "total_cycles": 6305,
++      "hashes": 208,
++      "permutations": 239,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega2_q0_m1_2_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.042,
++      "atp_slice_ms": 327.60525
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K2P1U1",
++      "operation": 0,
++      "compute_cycles": 14824464,
++      "total_cycles": 14824469,
++      "hashes": 1100799,
++      "permutations": 1116159,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_0_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 98.82976,
++      "atp_slice_ms": 770884.4817199999
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K2P1U1",
++      "operation": 1,
++      "compute_cycles": 14835138,
++      "total_cycles": 14835143,
++      "hashes": 1101392,
++      "permutations": 1116752,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_1_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 98.90092,
++      "atp_slice_ms": 771439.538615
++    },
++    {
++      "profile": "lms_omega4",
++      "point": "K2P1U1",
++      "operation": 2,
++      "compute_cycles": 11712,
++      "total_cycles": 11717,
++      "hashes": 493,
++      "permutations": 508,
++      "log": "manifests/experiments/stateful_20261008/logs/lms_omega4_q0_m1_2_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.07808,
++      "atp_slice_ms": 609.03376
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K2P1U1",
++      "operation": 0,
++      "compute_cycles": 31815618,
++      "total_cycles": 31815623,
++      "hashes": 1906684,
++      "permutations": 1906684,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_0_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 212.10412,
++      "atp_slice_ms": 1654438.6490149999
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K2P1U1",
++      "operation": 1,
++      "compute_cycles": 31829454,
++      "total_cycles": 31829459,
++      "hashes": 1907449,
++      "permutations": 1907449,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_1_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 212.19636,
++      "atp_slice_ms": 1655158.132545
++    },
++    {
++      "profile": "xmss_omega2",
++      "point": "K2P1U1",
++      "operation": 2,
++      "compute_cycles": 26837,
++      "total_cycles": 26842,
++      "hashes": 1136,
++      "permutations": 1136,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega2_q0_m1_2_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.17891333333333334,
++      "atp_slice_ms": 1395.5463641666668
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K2P1U1",
++      "operation": 0,
++      "compute_cycles": 47433666,
++      "total_cycles": 47433671,
++      "hashes": 3430396,
++      "permutations": 3430396,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_0_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 316.22444,
++      "atp_slice_ms": 2466590.1600550003
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K2P1U1",
++      "operation": 1,
++      "compute_cycles": 47457941,
++      "total_cycles": 47457946,
++      "hashes": 3431815,
++      "permutations": 3431815,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_1_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 316.38627333333335,
++      "atp_slice_ms": 2467852.480284167
++    },
++    {
++      "profile": "xmss_omega4",
++      "point": "K2P1U1",
++      "operation": 2,
++      "compute_cycles": 37035,
++      "total_cycles": 37040,
++      "hashes": 1970,
++      "permutations": 1970,
++      "log": "manifests/experiments/stateful_20261008/logs/xmss_omega4_q0_m1_2_K2P1U1_stats1_swap0.log",
++      "lut": 26164.0,
++      "ff": 10073.0,
++      "lutram": 1456.0,
++      "bram36": 0.0,
++      "dsp": 0.0,
++      "equivalent_slice": 7800.125,
++      "assumed_mhz": 150,
++      "time_ms": 0.2469,
++      "atp_slice_ms": 1925.8508625000002
++    }
++  ]
++}
+diff --git a/docs/v4.2/Stateful_XMSS_LMS.md b/docs/v4.2/Stateful_XMSS_LMS.md
+new file mode 100644
+index 00000000..3f615e17
+--- /dev/null
++++ b/docs/v4.2/Stateful_XMSS_LMS.md
+@@ -0,0 +1,62 @@
++# XMSS/LMS 实验 SHAKE256 扩展
++
++已实现四个参数集的 Keygen、Sign、Verify。n=32、h=10；omega2/4 表示每个数字 2/4 位，分别为 133/67 条链、最大 3/15 步。沿用冻结 `67a1cd75` 模型配方和私有编码，不宣称 RFC 参数互操作。
++
++Sign 每次完整重算认证树，无整树缓存；q 由外部在签名前持久化占用，复位不允许重复使用。Verify 通过 R、链节点和认证节点恢复根。端点存储为 136×256 bit，XMSS 原地 L-tree、LMS 列表/叶压缩复用原树栈；新算法使用普通请求，SLH 流水批处理不变。
++
++## 共同核面积
++
++器件 xc7a200tffg1156-3，综合约束 6.666667 ns，统计关闭。仅综合，**150 MHz 为假定值，未经布局布线验证**。面积不含镜像 ROM 和顶层签名缓存；LUT 已含 LUTRAM，不重复计数。
++
++| 配置 | LUT | FF | LUTRAM | BRAM | 等效 Slice | ΔLUT | Δ等效 Slice |
++|---|---:|---:|---:|---:|---:|---:|---:|
++| K1P1U1 | 19,531 | 6,819 | 1,456 | 0 | 5,735.125 | +5,806 | +1,588.250 |
++| K2P1U1 | 26,164 | 10,073 | 1,456 | 0 | 7,800.125 | +8,085 | +2,288.000 |
++
++面积增量相对同约束的原 SLH 共同核：K1P1U1 为 13,725 LUT / 5,725 FF / 4146.875 Slice；K2P1U1 为 18,079 LUT / 7,939 FF / 5512.125 Slice。新增的是配方、调度和存储支持，没有新增 Keccak 引擎。
++
++`等效 Slice=LUT/4+FF/8+232.4×BRAM36+102.4×DSP`；`时间(ms)=计算周期/150000`；`ATP=等效 Slice×时间(ms)`。
++
++## 24 组正常执行
++
++q=0，消息为 1 字节 `42`；完整密钥/标识符输入见归档向量。总周期从复位释放计至完成，计算周期不含启动/结束的 5 拍；无外部停顿。Verify 周期依赖消息及链数字。Hash 是实际 SHAKE 调用数，XMSS masked hash 包含子哈希。Sign 包含完整树计算，不能与历史缓存命中周期直接比较。
++
++| 配置 | 参数集 | 操作 | 计算周期 | 总周期 | Hash | 置换 | 时间 ms（估算） | ATP Slice·ms（估算） |
++|---|---|---|---:|---:|---:|---:|---:|---:|
++| K1P1U1 | lms_omega2 | Keygen | 15,679,504 | 15,679,509 | 547,839 | 579,583 | 104.530 | 599492.769 |
++| K1P1U1 | lms_omega2 | Sign | 15,689,069 | 15,689,074 | 548,177 | 579,921 | 104.594 | 599858.479 |
++| K1P1U1 | lms_omega2 | Verify | 8,304 | 8,309 | 208 | 239 | 0.055 | 317.497 |
++| K1P1U1 | lms_omega4 | Keygen | 28,510,224 | 28,510,229 | 1,100,799 | 1,116,159 | 190.068 | 1090064.656 |
++| K1P1U1 | lms_omega4 | Sign | 28,525,638 | 28,525,643 | 1,101,392 | 1,116,752 | 190.171 | 1090653.998 |
++| K1P1U1 | lms_omega4 | Verify | 15,469 | 15,474 | 493 | 508 | 0.103 | 591.444 |
++| K1P1U1 | xmss_omega2 | Keygen | 49,049,538 | 49,049,543 | 1,906,684 | 1,906,684 | 326.997 | 1875368.211 |
++| K1P1U1 | xmss_omega2 | Sign | 49,069,779 | 49,069,784 | 1,907,449 | 1,907,449 | 327.132 | 1876142.109 |
++| K1P1U1 | xmss_omega2 | Verify | 30,893 | 30,898 | 1,136 | 1,136 | 0.206 | 1181.168 |
++| K1P1U1 | xmss_omega4 | Keygen | 86,463,426 | 86,463,431 | 3,430,396 | 3,430,396 | 576.423 | 3305857.040 |
++| K1P1U1 | xmss_omega4 | Sign | 86,499,491 | 86,499,496 | 3,431,815 | 3,431,815 | 576.663 | 3307235.955 |
++| K1P1U1 | xmss_omega4 | Verify | 52,414 | 52,419 | 1,970 | 1,970 | 0.349 | 2004.006 |
++| K2P1U1 | lms_omega2 | Keygen | 8,583,184 | 8,583,189 | 547,839 | 579,583 | 57.221 | 446332.721 |
++| K2P1U1 | lms_omega2 | Sign | 8,589,144 | 8,589,149 | 548,177 | 579,921 | 57.261 | 446642.646 |
++| K2P1U1 | lms_omega2 | Verify | 6,300 | 6,305 | 208 | 239 | 0.042 | 327.605 |
++| K2P1U1 | lms_omega4 | Keygen | 14,824,464 | 14,824,469 | 1,100,799 | 1,116,159 | 98.830 | 770884.482 |
++| K2P1U1 | lms_omega4 | Sign | 14,835,138 | 14,835,143 | 1,101,392 | 1,116,752 | 98.901 | 771439.539 |
++| K2P1U1 | lms_omega4 | Verify | 11,712 | 11,717 | 493 | 508 | 0.078 | 609.034 |
++| K2P1U1 | xmss_omega2 | Keygen | 31,815,618 | 31,815,623 | 1,906,684 | 1,906,684 | 212.104 | 1654438.649 |
++| K2P1U1 | xmss_omega2 | Sign | 31,829,454 | 31,829,459 | 1,907,449 | 1,907,449 | 212.196 | 1655158.133 |
++| K2P1U1 | xmss_omega2 | Verify | 26,837 | 26,842 | 1,136 | 1,136 | 0.179 | 1395.546 |
++| K2P1U1 | xmss_omega4 | Keygen | 47,433,666 | 47,433,671 | 3,430,396 | 3,430,396 | 316.224 | 2466590.160 |
++| K2P1U1 | xmss_omega4 | Sign | 47,457,941 | 47,457,946 | 3,431,815 | 3,431,815 | 316.386 | 2467852.480 |
++| K2P1U1 | xmss_omega4 | Verify | 37,035 | 37,040 | 1,970 | 1,970 | 0.247 | 1925.851 |
++
++## 验证与证据
++
++- 新算法：24 组正常执行通过；Keygen/Sign 逐字节对照冻结模型，Verify 对照独立 hashlib 验证器。101 项扩展覆盖 q=1/1023、越界、篡改消息/R/链/认证路径/根、消息边界、停顿、截断及复位、异常退出、统计关闭、lane 交换、P4 普通请求和默认 U2。
++- 133 项链与 L-tree 奇数保留由完整树输出对照覆盖；共享存储测试覆盖 127/128 边界和奇数节点晋升；混合 4/32 字节缓存逐项读回通过。四参数正常向量均包含零步和最大步链；另有 15 项 masked chain 检查覆盖普通 P4 反馈、共享/独立状态及默认 U2，按冻结轮函数逐拍对照。
++- SLH：六参数 Keygen/Sign 12 组、Verify 130 项全部通过，原输出、周期和 Hash/置换次数不变；追加 34 项统计关闭、共同核提取及 K/P 配置检查。
++- 两组综合均通过统计寄存器裁剪检查；本轮无布线，无新频率结论，无提交或推送。
++
++[全部实验资料](../../manifests/experiments/stateful_20261008/) · [K1 分层面积](../../manifests/experiments/stateful_20261008/implementation/K1P1U1/core_hierarchical.rpt) · [K2 分层面积](../../manifests/experiments/stateful_20261008/implementation/K2P1U1/core_hierarchical.rpt)
++
++综合快照和配置位于 `implementation/`，完整最终源码补丁为 `final_changes.patch`；最终测试源码与 SLH/单元证据位于 `validation/`，正常及边界向量在 `vectors/`，日志在 `logs/`。`evidence_sha256.json` 绑定所有归档文本和源码快照。
++
++重跑入口：`scripts/stateful_vectors.py`、`scripts/run_stateful.py --k 1/2`、`scripts/verify_stateful_edges.py`、`scripts/verify_stateful_lms_padding.py`、`scripts/verify_stateful_masked_chain.py`、`scripts/verify_stateful_slh.py`、`scripts/verify_stateful_k2_middle.py`、`scripts/synth_stateful.py`、`scripts/report_stateful.py`。修改源码应使用新的实验目录；综合与最终测试快照分别保留，不改写历史基线。
+diff --git a/model/reference/stateful_shake.py b/model/reference/stateful_shake.py
+new file mode 100644
+index 00000000..d39ea2d0
+--- /dev/null
++++ b/model/reference/stateful_shake.py
+@@ -0,0 +1,76 @@
++"""Independent direct verifier for the repository's experimental SHAKE256 variants.
++
++No microcode, recipe descriptors or Machine calls. These are NOT registered RFC
++parameter encodings. The caller owns durable, non-repeating signing indices.
++"""
++from hashlib import shake_256
++
++def be(x,n=4):return x.to_bytes(n,'big')
++def H(x):return shake_256(x).digest(32)
++def digits(digest,bits):
++    ds=[(b>>s)&((1<<bits)-1) for b in digest for s in range(8-bits,-1,-bits)]
++    c=sum(((1<<bits)-1)-d for d in ds);count=(len(ds)*((1<<bits)-1)).bit_length()//bits+1
++    return ds+[(c>>s)&((1<<bits)-1) for s in range((count-1)*bits,-1,-bits)]
++def xor(a,b):return bytes(x^y for x,y in zip(a,b))
++def masked(public,domain,leaf,level,index,left,right=None):
++    addr=bytes(12)+be(domain)+be(leaf)+be(level)+be(index)
++    key=H(be(3,32)+public+addr+be(0));m0=H(be(3,32)+public+addr+be(1))
++    if right is None:return H(bytes(32)+key+xor(left,m0))
++    m1=H(be(3,32)+public+addr+be(2))
++    return H(be(1,32)+key+xor(left,m0)+xor(right,m1))
++
++def parse_signature(name,sig):
++    if name not in ('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'):raise ValueError('profile')
++    bits=2 if name.endswith('2') else 4;count=133 if bits==2 else 67;xmss=name.startswith('xmss')
++    if len(sig)!=(4 if xmss else 12)+32*(1+count+10):raise ValueError('signature length')
++    q=int.from_bytes(sig[:4],'big')
++    if q>=1024:raise ValueError('signature index')
++    offset=4
++    if not xmss:
++        if sig[4:8]!=be(0x80000002 if bits==2 else 0x80000003):raise ValueError('OTS type')
++        offset=8
++    random=sig[offset:offset+32];offset+=32
++    chains=[sig[offset+32*i:offset+32*(i+1)] for i in range(count)];offset+=32*count
++    if not xmss:
++        if sig[offset:offset+4]!=be(0x80000006):raise ValueError('tree type')
++        offset+=4
++    auth=[sig[offset+32*i:offset+32*(i+1)] for i in range(10)]
++    return q,random,chains,auth
++
++def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),observe=None):
++    if len(public_seed)!=32 or len(public_root)!=32 or len(identifier)!=16 or not 1<=len(message)<=87:return False
++    try:q,r,chains,auth=parse_signature(name,signature)
++    except ValueError:return False
++    bits=2 if name.endswith('2') else 4;maximum=(1<<bits)-1
++    xmss=name.startswith('xmss')
++    # Optional observer counts primitive SHAKE invocations independently of RTL.
++    hashes=0;perms=0
++    def h(data):
++        nonlocal hashes,perms
++        hashes+=1;perms+=len(data)//136+1
++        return H(data)
++    def mask(domain,leaf,level,index,left,right=None):
++        addr=bytes(12)+be(domain)+be(leaf)+be(level)+be(index)
++        key=h(be(3,32)+public_seed+addr+be(0));m0=h(be(3,32)+public_seed+addr+be(1))
++        if right is None:return h(bytes(32)+key+xor(left,m0))
++        m1=h(be(3,32)+public_seed+addr+be(2))
++        return h(be(1,32)+key+xor(left,m0)+xor(right,m1))
++    digest=h(be(2,32)+r+public_root+be(q,32)+message if xmss else identifier+be(q)+b'\x81\x81'+r+message)
++    endpoints=[]
++    for i,(value,start) in enumerate(zip(chains,digits(digest,bits))):
++        for j in range(start,maximum):value=mask(0,q,i,j,value) if xmss else h(identifier+be(q)+be(i,2)+be(j,1)+value)
++        endpoints.append(value)
++    if xmss:
++        level=0
++        while len(endpoints)>1:
++            endpoints=[mask(1,q,level,i//2,endpoints[i],endpoints[i+1]) for i in range(0,len(endpoints)-1,2)]+(endpoints[-1:] if len(endpoints)&1 else [])
++            level+=1
++        value=endpoints[0]
++    else:
++        value=h(identifier+be(q)+b'\x80\x80'+b''.join(endpoints))
++        value=h(identifier+be(1024+q)+b'\x82\x82'+value)
++    for level,sibling in enumerate(auth):
++        left,right=(sibling,value) if (q>>level)&1 else (value,sibling)
++        value=mask(2,0,level,q>>(level+1),left,right) if xmss else h(identifier+be((1024+q)>>(level+1))+b'\x83\x83'+left+right)
++    if observe is not None:observe.update(hashes=hashes,permutations=perms)
++    return value==public_root
+diff --git a/model/stateful.py b/model/stateful.py
+new file mode 100644
+index 00000000..6e0a1774
+--- /dev/null
++++ b/model/stateful.py
+@@ -0,0 +1,65 @@
++"""Layout-3 experimental SHAKE256 XMSS/LMS; external index, cold authentication.
++
++The legacy model remains the cached-execution oracle. New images preserve its
++byte recipes and encodings but recompute the authentication tree during Sign.
++"""
++from dataclasses import replace
++from model.unified_hbs import compile_image, field, Kind, Macro, Image, validate
++
++PROFILE_CODES={8:'xmss_omega2',9:'xmss_omega4',10:'lms_omega2',11:'lms_omega4'}
++REFS={Kind.CHAIN:(52,44,36,28),Kind.TREE:(52,44),Kind.EMIT:(52,)}
++
++def cold_image(name):
++    image=compile_image(name)
++    if not image.stateful:raise ValueError('stateful profile required')
++    d=list(image.descriptors)
++    for i,w in enumerate(d):
++        if w>>60==Kind.TREE:d[i]=w & ~(7<<29)
++    image=replace(image,descriptors=tuple(d));validate(image);return image
++
++def descriptor_map(image):
++    used={0,1}
++    def visit(i):
++        if i==0 or i in used:return
++        used.add(i);w=image.descriptors[i];kind=w>>60
++        for shift in REFS.get(kind,()):visit(field(w,shift,8))
++        if kind==Kind.EMIT:
++            for j in range(field(w,52,8),field(w,52,8)+field(w,48,4)):visit(j)
++    for sign in (False,True):
++        for w in image.words(sign)[:-1]:visit(field(w,88,8));visit(field(w,80,8))
++    order=sorted(used)
++    if len(order)>32:raise ValueError('descriptor capacity')
++    return order
++
++def encode(name):
++    from model.slh64_external import ExternalImage
++    image=cold_image(name);order=descriptor_map(image);mapping={v:i for i,v in enumerate(order)}
++    d=[0]*32;t=[0]*16;p=[0]*16
++    for j,i in enumerate(order):
++        w=image.descriptors[i]&((1<<60)-1)
++        for shift in REFS.get(image.descriptors[i]>>60,()):
++            r=field(w,shift,8)
++            if r:w=(w&~(255<<shift))|(mapping[r]<<shift)
++        d[j]=w
++    d[0]=(d[0]&((1<<36)-1))|(image.entry(True)<<41)
++    d[1]=next(c for c,n in PROFILE_CODES.items() if n==name)
++    for j,w in enumerate(image.templates):
++        flags=field(w,76,4)
++        t[j]=field(w,96,4)|(mapping[field(w,88,8)]<<3)|(mapping[field(w,80,8)]<<8)|((flags&3)<<13)|((flags&8)<<12)|((flags&4)<<14)
++    if len(image.tokens)>16 or len(image.templates)>16:raise ValueError('code capacity')
++    for j,w in enumerate(image.tokens):
++        kind=w>>126
++        if kind>=2:
++            if kind!=3:raise ValueError('unexpected stateful loop')
++            p[j]=3<<62
++        else:p[j]=(kind<<62)|(field(w,120,6)<<58)|((field(w,96,24)>>13)<<47)|(field(w,66,6)<<41)|((field(w,42,24)>>13)<<30)
++    return ExternalImage(tuple(p),tuple(t),tuple(d))
++
++def decode(external):
++    # New families have canonical offline-generated images. Require every word
++    # to match: no unknown recipe, padding, address or flag reaches hardware.
++    try:name=PROFILE_CODES[external.descriptors[1]]
++    except KeyError:raise ValueError('stateful profile code') from None
++    expected=encode(name)
++    if external!=expected:raise ValueError('noncanonical stateful image')
++    return cold_image(name)
+diff --git a/scripts/report_stateful.py b/scripts/report_stateful.py
+new file mode 100644
+index 00000000..da1a0673
+--- /dev/null
++++ b/scripts/report_stateful.py
+@@ -0,0 +1,107 @@
++#!/usr/bin/env python3
++"""Assemble measured stateful results and source-bound verification evidence."""
++from pathlib import Path
++import json,csv,hashlib,shutil,subprocess,tarfile
++from run_stateful import OUT,ROOT
++from run_lup_sign_atp import snapshot
++
++def read(p):return json.loads(p.read_text())
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def main():
++ area=read(OUT/'implementation/area.json');rows=[]
++ old={r['point']:r for r in read(ROOT/'manifests/experiments/k1k2_p1u1_current_20261008/results.json')}
++ for k in (1,2):
++  r=read(OUT/f'K{k}P1U1_simulation.json');assert len(r)==12
++  for s in r:
++   a=area[s['point']];ms=s['compute_cycles']/150000
++   rows.append(dict(**s,**a,assumed_mhz=150,time_ms=ms,atp_slice_ms=a['equivalent_slice']*ms))
++ masked=read(OUT/'masked_chain/results.json');assert len(masked)==3 and all(x['passed'] for x in masked)
++ edges=read(OUT/'edge_results.json');assert len(edges)==101,len(edges)
++ normal={(r['profile'],r['operation']):r for r in rows if r['point']=='K2P1U1'}
++ for name in ('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'):
++  for label in ('stats_off','swap'):
++   r=edges[name+'_'+label];assert r['compute_cycles']==normal[name,2]['compute_cycles']
++ for label in ('stats_off','swap'):
++  assert edges['lms_omega2_sign_'+label]['compute_cycles']==normal['lms_omega2',1]['compute_cycles']
++ variants=read(OUT/'slh_variants.json');assert len(variants)==34
++ oldver=read(ROOT/'manifests/experiments/unified_hbs_v4.2/external_job_message/candidates/lut21k_20261002_v1_route_alias/verify/results.json')
++ curver=read(ROOT/'build/v4.2/external_job_message/stateful_verify_regression_20261008/verify/results.json');assert curver['passed']
++ assert sum(map(len,curver['profiles'].values()))==130
++ for name,v in curver['profiles'].items():
++  for key in ('cycles','hashes','permutations','nodes'):assert v['normal'][key]==oldver['profiles'][name]['normal'][key]
++ inputs=read(OUT/'implementation/inputs.json')
++ for f in (ROOT/'manifests/v42_sources.txt').read_text().split():assert sha(ROOT/f)==inputs['source_sha256'][f]
++ evidence=OUT/'validation';evidence.mkdir(exist_ok=True)
++ # Final tests/docs snapshot is separate from the exact synthesis snapshot.
++ snapshot(evidence)
++ shutil.copytree(ROOT/'build/stateful_20261008/slh_variants/logs',OUT/'slh_variants_logs',dirs_exist_ok=True)
++ for src,label in [(ROOT/'build/v4.2/external_job_message/stateful_slh_regression_20261008','slh_normal'),(ROOT/'build/v4.2/external_job_message/stateful_verify_regression_20261008','slh_verify'),(ROOT/'manifests/experiments/stateful_20261008/unit_evidence','units'),(ROOT/'build/stateful_20261008/frozen_kp/results','frozen_k2_middle')]:
++  dest=evidence/label
++  for p in src.rglob('*'):
++   if p.is_file() and 'obj' not in p.parts and 'binaries' not in p.parts and p.suffix in ('.log','.json','.mem','.gz'):
++    target=dest/p.relative_to(src);target.parent.mkdir(parents=True,exist_ok=True);shutil.copy2(p,target)
++ for name in ('masked_chain.log','software.log','software_final.log','contract_lint.log','model_unit.log','store136.log','boot.log','k1.log','k2.log','slh_variants.log','lms_padding.log','k2_middle.log','frozen_kp.log','synth.log','edges_resume.log'):
++  p=ROOT/'build/stateful_20261008'/name
++  if p.exists():shutil.copy2(p,evidence/name)
++ validation=dict(passed=True,normal_cases=24,masked_chain_unit_cases=15,stateful_edge_cases=len(edges),slh_normal_cases=12,slh_verify_cases=130,slh_variant_cases=len(variants),slh_output_cycles_unchanged=True,rtl_matches_synthesis_snapshot=True,independent_verifier='model/reference/stateful_shake.py',frozen_oracle_commit='67a1cd75',frequency_basis='assumed 150 MHz; no place/route')
++ (OUT/'validation.json').write_text(json.dumps(validation,indent=2)+'\n')
++ deltas={point:{key:area[point][key]-old[point][key] for key in ('lut','ff','lutram','bram36','equivalent_slice')} for point in area}
++ result=dict(configuration=dict(n=32,h=10,hash='experimental SHAKE256',q=0,message_hex='42',clock_period_ns=6.666667,assumed_mhz=150,routed=False,sign_recomputes_full_tree=True,scope='common core; excludes ROM and signature cache'),baseline_commit='67a1cd75',previous_area=old,area_delta=deltas,validation=validation,points=rows)
++ doc=ROOT/'docs/v4.2/Stateful_XMSS_LMS'
++ text='''# XMSS/LMS 实验 SHAKE256 扩展
++
++已实现四个参数集的 Keygen、Sign、Verify。n=32、h=10；omega2/4 表示每个数字 2/4 位，分别为 133/67 条链、最大 3/15 步。沿用冻结 `67a1cd75` 模型配方和私有编码，不宣称 RFC 参数互操作。
++
++Sign 每次完整重算认证树，无整树缓存；q 由外部在签名前持久化占用，复位不允许重复使用。Verify 通过 R、链节点和认证节点恢复根。端点存储为 136×256 bit，XMSS 原地 L-tree、LMS 列表/叶压缩复用原树栈；新算法使用普通请求，SLH 流水批处理不变。
++
++## 共同核面积
++
++器件 xc7a200tffg1156-3，综合约束 6.666667 ns，统计关闭。仅综合，**150 MHz 为假定值，未经布局布线验证**。面积不含镜像 ROM 和顶层签名缓存；LUT 已含 LUTRAM，不重复计数。
++
++| 配置 | LUT | FF | LUTRAM | BRAM | 等效 Slice | ΔLUT | Δ等效 Slice |
++|---|---:|---:|---:|---:|---:|---:|---:|
++'''
++ for point,a in area.items():
++  d=deltas[point];text+=f"| {point} | {a['lut']:,.0f} | {a['ff']:,.0f} | {a['lutram']:,.0f} | {a['bram36']:g} | {a['equivalent_slice']:,.3f} | {d['lut']:+,.0f} | {d['equivalent_slice']:+,.3f} |\n"
++ text+='''
++面积增量相对同约束的原 SLH 共同核：K1P1U1 为 13,725 LUT / 5,725 FF / 4146.875 Slice；K2P1U1 为 18,079 LUT / 7,939 FF / 5512.125 Slice。新增的是配方、调度和存储支持，没有新增 Keccak 引擎。
++
++`等效 Slice=LUT/4+FF/8+232.4×BRAM36+102.4×DSP`；`时间(ms)=计算周期/150000`；`ATP=等效 Slice×时间(ms)`。
++
++## 24 组正常执行
++
++q=0，消息为 1 字节 `42`；完整密钥/标识符输入见归档向量。总周期从复位释放计至完成，计算周期不含启动/结束的 5 拍；无外部停顿。Verify 周期依赖消息及链数字。Hash 是实际 SHAKE 调用数，XMSS masked hash 包含子哈希。Sign 包含完整树计算，不能与历史缓存命中周期直接比较。
++
++| 配置 | 参数集 | 操作 | 计算周期 | 总周期 | Hash | 置换 | 时间 ms（估算） | ATP Slice·ms（估算） |
++|---|---|---|---:|---:|---:|---:|---:|---:|
++'''
++ ops={0:'Keygen',1:'Sign',2:'Verify'}
++ for r in rows:text+=f"| {r['point']} | {r['profile']} | {ops[r['operation']]} | {r['compute_cycles']:,} | {r['total_cycles']:,} | {r['hashes']:,} | {r['permutations']:,} | {r['time_ms']:.3f} | {r['atp_slice_ms']:.3f} |\n"
++ text+='''
++## 验证与证据
++
++- 新算法：24 组正常执行通过；Keygen/Sign 逐字节对照冻结模型，Verify 对照独立 hashlib 验证器。101 项扩展覆盖 q=1/1023、越界、篡改消息/R/链/认证路径/根、消息边界、停顿、截断及复位、异常退出、统计关闭、lane 交换、P4 普通请求和默认 U2。
++- 133 项链与 L-tree 奇数保留由完整树输出对照覆盖；共享存储测试覆盖 127/128 边界和奇数节点晋升；混合 4/32 字节缓存逐项读回通过。四参数正常向量均包含零步和最大步链；另有 15 项 masked chain 检查覆盖普通 P4 反馈、共享/独立状态及默认 U2，按冻结轮函数逐拍对照。
++- SLH：六参数 Keygen/Sign 12 组、Verify 130 项全部通过，原输出、周期和 Hash/置换次数不变；追加 34 项统计关闭、共同核提取及 K/P 配置检查。
++- 两组综合均通过统计寄存器裁剪检查；本轮无布线，无新频率结论，无提交或推送。
++
++[全部实验资料](../../manifests/experiments/stateful_20261008/) · [K1 分层面积](../../manifests/experiments/stateful_20261008/implementation/K1P1U1/core_hierarchical.rpt) · [K2 分层面积](../../manifests/experiments/stateful_20261008/implementation/K2P1U1/core_hierarchical.rpt)
++
++综合快照和配置位于 `implementation/`，完整最终源码补丁为 `final_changes.patch`；最终测试源码与 SLH/单元证据位于 `validation/`，正常及边界向量在 `vectors/`，日志在 `logs/`。`evidence_sha256.json` 绑定所有归档文本和源码快照。
++
++重跑入口：`scripts/stateful_vectors.py`、`scripts/run_stateful.py --k 1/2`、`scripts/verify_stateful_edges.py`、`scripts/verify_stateful_lms_padding.py`、`scripts/verify_stateful_masked_chain.py`、`scripts/verify_stateful_slh.py`、`scripts/verify_stateful_k2_middle.py`、`scripts/synth_stateful.py`、`scripts/report_stateful.py`。修改源码应使用新的实验目录；综合与最终测试快照分别保留，不改写历史基线。
++'''
++ doc.with_suffix('.md').write_text(text);doc.with_suffix('.json').write_text(json.dumps(result,indent=2)+'\n')
++ with doc.with_suffix('.csv').open('w') as f:w=csv.DictWriter(f,fieldnames=rows[0].keys());w.writeheader();w.writerows(rows)
++ for ext in ('.md','.json','.csv'):shutil.copy2(doc.with_suffix(ext),OUT/('report'+ext))
++ patch=subprocess.check_output(['git','diff','--binary'],cwd=ROOT)
++ new=subprocess.check_output(['git','ls-files','--others','--exclude-standard'],cwd=ROOT,text=True).splitlines()
++ for name in new:
++  if name.split('/')[0] in ('model','scripts','tb','tests','docs'):
++   r=subprocess.run(['git','diff','--no-index','--binary','--','/dev/null',name],cwd=ROOT,stdout=subprocess.PIPE)
++   assert r.returncode in (0,1);patch+=r.stdout
++ (OUT/'final_changes.patch').write_bytes(patch)
++ hashes={str(p.relative_to(OUT)):sha(p) for p in OUT.rglob('*') if p.is_file() and p.name!='evidence_sha256.json' and p.suffix in ('.json','.csv','.md','.log','.rpt','.sv','.py','.mem','.gz','.patch','.tcl','.xdc','.bin')}
++ (OUT/'evidence_sha256.json').write_text(json.dumps(hashes,indent=2)+'\n')
++ print('STATEFUL_REPORT_PASS',len(rows),len(edges),flush=True)
++if __name__=='__main__':main()
+diff --git a/scripts/run_stateful.py b/scripts/run_stateful.py
+new file mode 100644
+index 00000000..a52c11d3
+--- /dev/null
++++ b/scripts/run_stateful.py
+@@ -0,0 +1,36 @@
++#!/usr/bin/env python3
++"""Runtime-vector stateful regression and common-core synthesis, no routing."""
++from pathlib import Path
++import sys,subprocess,json,re,hashlib,argparse
++ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
++from v42_common_partition import partition
++from stateful_vectors import OUT
++BUILD=ROOT/'build/stateful_20261008'
++def build(k=2,p=1,u=1,profile=1,swap=0):
++    point=f'K{k}P{p}U{u}_stats{profile}_swap{swap}';d=BUILD/point;d.mkdir(parents=True,exist_ok=True)
++    common,_=partition((ROOT/'rtl/top/mhbs_top.sv').read_text());(d/'mhbs_common.sv').write_text(common)
++    sources=[ROOT/f for f in (ROOT/'manifests/v42_sources.txt').read_text().splitlines() if f!='rtl/top/mhbs_top.sv']+[d/'mhbs_common.sv',ROOT/'tb/integration/tb_mhbs_stateful.sv']
++    ident={str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in sources};binary=d/'obj/Vtb_mhbs_stateful'
++    if not binary.exists() or not (d/'identity.json').exists() or json.loads((d/'identity.json').read_text())!=ident:
++        cmd=['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','--top-module','tb_mhbs_stateful',f'-GLANES={k}',f'-GPIPELINE={p}',f'-GUNROLL={u}',f'-GPROFILE_ENABLE={profile}',f'-GSWAP={swap}','--Mdir',str(d/'obj'),*map(str,sources)]
++        with (d/'compile.log').open('w') as f:subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
++        (d/'identity.json').write_text(json.dumps(ident,indent=2));print('BUILD_PASS',point,flush=True)
++    return binary
++
++def run(binary,vector,options=(),suffix=''):
++    d=OUT/'logs';d.mkdir(exist_ok=True);name='_'.join(vector.relative_to(OUT/'vectors').parts)+'_'+binary.parents[1].name+suffix
++    log=d/(name+'.log')
++    with log.open('w') as f:subprocess.run([str(binary),f'+VECTOR={vector}',*options],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
++    t=log.read_text();m=re.search(r'STATEFUL_PASS (\w+) op=(\d+) cycles=(\d+) total=(\d+) hashes=(\d+) permutations=(\d+)',t)
++    if m:
++        result=dict(point=m[1],operation=int(m[2]),compute_cycles=int(m[3]),total_cycles=int(m[4]),hashes=int(m[5]),permutations=int(m[6]),log=str(log.relative_to(ROOT)))
++        print('PASS',name,result['compute_cycles'],flush=True);return result
++    assert 'INDEX_REJECT_PASS' in t or 'STATEFUL_FAULT_PASS' in t;print('PASS',name,flush=True);return dict(passed=True)
++if __name__=='__main__':
++    a=argparse.ArgumentParser();a.add_argument('--k',type=int,default=2);a.add_argument('--p',type=int,default=1);a.add_argument('--u',type=int,default=1);a.add_argument('--profile',type=int,default=1);a.add_argument('--swap',type=int,default=0);a.add_argument('--name');a.add_argument('--op',type=int);a.add_argument('--build-only',action='store_true');args=a.parse_args()
++    b=build(args.k,args.p,args.u,args.profile,args.swap)
++    if not args.build_only:
++        rows=[]
++        for v in sorted((OUT/'vectors').glob(f'{args.name or "*"}/q0_m1/{args.op if args.op is not None else "[012]"}')):
++            rows.append(dict(profile=v.parents[1].name,**run(b,v)))
++        (OUT/f'K{args.k}P{args.p}U{args.u}_simulation.json').write_text(json.dumps(rows,indent=2)+'\n')
+diff --git a/scripts/stateful_vectors.py b/scripts/stateful_vectors.py
+new file mode 100644
+index 00000000..a028ca52
+--- /dev/null
++++ b/scripts/stateful_vectors.py
+@@ -0,0 +1,42 @@
++#!/usr/bin/env python3
++"""Frozen legacy oracle + independent verifier; vectors for cold-tree RTL."""
++from pathlib import Path
++import sys,json,importlib.util,hashlib
++ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
++from model.unified_hbs import Job,Machine
++from model.stateful import cold_image,encode,PROFILE_CODES
++from model.reference.stateful_shake import verify,parse_signature
++OUT=ROOT/'manifests/experiments/stateful_20261008'
++def mem(path,values,width):path.write_text(''.join(f'{v:0{width}x}\n' for v in values))
++def generate(name,q=0,message=b'\x42'):
++    d=OUT/'vectors'/name/f'q{q}_m{len(message)}';d.mkdir(parents=True,exist_ok=True)
++    if (d/'summary.json').exists():
++        saved=bytes(int(x,16) for x in (d/'1/message.mem').read_text().split())[:len(message)]
++        if saved==message:return d
++        raise ValueError(f'vector directory already contains a different message: {d}')
++    job=Job(*(bytes((i+off)&255 for i in range(32)) for off in (1,41,81,121)),identifier=bytes(range(161,177)),q=q)
++    spec=importlib.util.spec_from_file_location('stateful_frozen',OUT/'baseline/unified_hbs.py');mod=importlib.util.module_from_spec(spec);sys.modules[spec.name]=mod;spec.loader.exec_module(mod)
++    assert (ROOT/'model/profiles.py').read_bytes()==(OUT/'baseline/profiles.py').read_bytes(),'frozen oracle profile dependency changed'
++    old=mod.Machine(mod.compile_image(name),mod.Job(job.secret,job.prf,job.public,job.random,job.identifier,q),index_policy='fixed_q_no_guard')
++    kg=old.run(False);root=old.values[3][:32];sg=old.run(True,message)
++    observed={};assert verify(name,message,sg,job.public,root,job.identifier,observed),name
++    records={}
++    for op in (0,1,2):
++        p=d/str(op);p.mkdir(exist_ok=True);encode(name).write(p)
++        if op<2:
++            m=Machine(cold_image(name),job,index_policy='fixed_q_no_guard',recompute_auth=True);m.values[3]=root
++            data=m.run(bool(op),message if op else b'');assert data==(sg if op else kg),(name,op)
++            hashes,perms=m.hashes,m.permutations
++        else:data=b'';hashes,perms=observed['hashes'],observed['permutations']
++        _,r,chains,auth=parse_signature(name,sg);nodes=[r,*chains,*auth]
++        mem(p/'expected.mem',data or b'\0',2);mem(p/'message.mem',message+bytes(87-len(message)),2)
++        mem(p/'nodes.mem',[int.from_bytes(x,'little') for x in nodes],64)
++        cfg=[int.from_bytes(x,'little') for x in (job.secret,job.prf,job.public,job.random,root,job.identifier)]+[q,op,len(message)]
++        mem(p/'job.mem',cfg,64);mem(p/'meta.mem',[len(data),hashes,perms,len(nodes),int(op==2)],8)
++        records[str(op)]=dict(hashes=hashes,permutations=perms,output_bytes=len(data))
++    (d/'signature.bin').write_bytes(sg);(d/'root.bin').write_bytes(root)
++    (d/'summary.json').write_text(json.dumps(records,indent=2)+'\n');print('VECTOR_PASS',name,q,len(message),flush=True);return d
++if __name__=='__main__':
++    import argparse
++    a=argparse.ArgumentParser();a.add_argument('--name',choices=list(PROFILE_CODES.values()));a.add_argument('--q',type=int,default=0);a.add_argument('--length',type=int,default=1);args=a.parse_args()
++    for name in ([args.name] if args.name else PROFILE_CODES.values()):generate(name,args.q,bytes((66+i)&255 for i in range(args.length)))
+diff --git a/scripts/synth_stateful.py b/scripts/synth_stateful.py
+new file mode 100644
+index 00000000..12f81c21
+--- /dev/null
++++ b/scripts/synth_stateful.py
+@@ -0,0 +1,18 @@
++#!/usr/bin/env python3
++"""Freeze and synthesize the all-algorithm K1/K2P1U1 common cores."""
++import json,tarfile,subprocess
++from pathlib import Path
++from run_lup_sign_atp import snapshot,synth,ROOT,sha
++OUT=ROOT/'manifests/experiments/stateful_20261008/implementation'
++def main():
++ OUT.mkdir(parents=True,exist_ok=True);identity=snapshot(OUT)
++ meta=json.loads((OUT/'inputs.json').read_text());meta.update(scope='all-algorithm common core',operation='Keygen/Sign/Verify',profiles=['slh_128f','slh_192f','slh_256f','slh_128s','slh_192s','slh_256s','xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'])
++ (OUT/'inputs.json').write_text(json.dumps(meta,indent=2)+'\n')
++ (OUT/'changes.patch').write_bytes(subprocess.check_output(['git','diff','--binary'],cwd=ROOT))
++ ws=ROOT/'build/stateful_20261008/synth_source';ws.mkdir(parents=True,exist_ok=True)
++ with tarfile.open(OUT/'source_snapshot.tar.gz') as t:t.extractall(ws,filter='data')
++ assert all(sha(ws/f)==h for f,h in identity.items())
++ rows={}
++ for k in (1,2):rows[f'K{k}P1U1']=synth(OUT,1,ws,lanes=k,point=f'K{k}P1U1')
++ (OUT/'area.json').write_text(json.dumps(rows,indent=2)+'\n')
++if __name__=='__main__':main()
+diff --git a/scripts/verify_stateful_edges.py b/scripts/verify_stateful_edges.py
+new file mode 100644
+index 00000000..5cf21105
+--- /dev/null
++++ b/scripts/verify_stateful_edges.py
+@@ -0,0 +1,41 @@
++#!/usr/bin/env python3
++"""Index, message, corruption, reset, profile and ordinary P>1 coverage."""
++from pathlib import Path
++import sys,json
++from stateful_vectors import generate,OUT,PROFILE_CODES
++from run_stateful import build,run
++
++def main():
++ rows=json.loads((OUT/'edge_results.json').read_text()) if (OUT/'edge_results.json').exists() else {};b=build()
++ names=list(PROFILE_CODES.values())
++ normal={(x["profile"],x["operation"]):x for x in json.loads((OUT/"K2P1U1_simulation.json").read_text())}
++ for name in names:
++  if name+'_sign87' in rows:continue
++  v=OUT/'vectors'/name/'q0_m1'/'2'
++  for t in range(1,6):rows[f'{name}_tamper{t}']=run(b,v,(f'+TAMPER={t}',),f'_tamper{t}')
++  rows[name+'_stall_reset']=run(b,v,('+STALL=1','+REPLAYS=2','+INTERRUPT=1'),'_stall_reset')
++  rows[name+'_truncated_reset']=run(b,v,('+CUT=3',),'_truncated_reset')
++  rows[name+'_fault']=run(b,v,('+FAULT=1',),'_fault')
++  for q in (1024,2147483647):rows[f'{name}_invalid{q}']=run(b,v,(f'+Q={q}','+INVALID=1'),f'_invalid{q}')
++  for q in (1,1023):
++   folder=generate(name,q,b'B')
++   for op in (1,2):rows[f'{name}_q{q}_{op}']=run(b,folder/str(op))
++  for size in (7,8,9,87):
++   folder=generate(name,0,bytes(range(size)))
++   rows[f'{name}_message{size}']=run(b,folder/'2',('+STALL=1',),'_stall')
++  # Boundary message signature additionally checks the signing Hmsg path.
++  rows[name+'_sign87']=run(b,folder/'1',('+STALL=1',),'_stall')
++  (OUT/'edge_results.json').write_text(json.dumps(rows,indent=2)+'\n')
++ for label,kw in [('stats_off',dict(profile=0)),('swap',dict(swap=1)),('P4',dict(p=4)),('default',dict(u=2))]:
++  alt=build(**kw)
++  for name in names:
++   rows[name+'_'+label]=run(alt,OUT/'vectors'/name/'q0_m1'/'2')
++   if label in ('stats_off','swap'):
++    assert rows[name+'_'+label]['compute_cycles']==normal[name,2]['compute_cycles']
++  if label in ('stats_off','swap','P4'):
++   rows['lms_omega2_sign_'+label]=run(alt,OUT/'vectors/lms_omega2/q0_m1/1')
++   if label in ('stats_off','swap'):
++    assert rows['lms_omega2_sign_'+label]['compute_cycles']==normal['lms_omega2',1]['compute_cycles']
++  (OUT/'edge_results.json').write_text(json.dumps(rows,indent=2)+'\n')
++ print('STATEFUL_EDGES_PASS',len(rows),flush=True)
++if __name__=='__main__':main()
+diff --git a/scripts/verify_stateful_k2_middle.py b/scripts/verify_stateful_k2_middle.py
+new file mode 100644
+index 00000000..0fc31f78
+--- /dev/null
++++ b/scripts/verify_stateful_k2_middle.py
+@@ -0,0 +1,28 @@
++#!/usr/bin/env python3
++"""K2P2/P3 regression against the frozen starting source snapshot."""
++from pathlib import Path
++import tarfile,subprocess,json,sys
++from v42_external_flow import ROOT,BASE,simulate_case
++OUT=ROOT/'manifests/experiments/stateful_20261008';BUILD=ROOT/'build/stateful_20261008'
++ws=BUILD/'frozen_kp';ws.mkdir(exist_ok=True)
++with tarfile.open(OUT/'baseline/source_snapshot.tar.gz') as t:t.extractall(ws,filter='data')
++code='''import sys,json
++from pathlib import Path
++sys.path.insert(0,str(Path.cwd()/"scripts"))
++from v42_external_flow import ROOT,BASE,simulate_case
++f=ROOT/"results";f.mkdir(exist_ok=True)
++r={}
++for p in (2,3):
++ label=f"K2P{p}U1"
++ _,r[label]=simulate_case(f,label,BASE/"vectors/slh_128f/sign",lanes=2,pipeline=p,unroll=1)
++(f/"results.json").write_text(json.dumps(r,indent=2)+"\\n")
++'''
++with (BUILD/'frozen_kp.log').open('w') as f:subprocess.run([sys.executable,'-c',code],cwd=ws,stdout=f,stderr=subprocess.STDOUT,check=True)
++ref=json.loads((ws/'results/results.json').read_text());rows=json.loads((OUT/'slh_variants.json').read_text())
++for p in (2,3):
++ label=f'K2P{p}U1';_,r=simulate_case(BUILD/'slh_variants',label,BASE/'vectors/slh_128f/sign',lanes=2,pipeline=p,unroll=1)
++ for k in ('sign_cycles','total_cycles','hashes','permutations','output_sha256'):assert r[k]==ref[label][k],(label,k)
++ rows[label]=r
++(OUT/'slh_variants.json').write_text(json.dumps(rows,indent=2)+'\n')
++(OUT/'frozen_k2_middle.json').write_text(json.dumps(ref,indent=2)+'\n')
++print('K2_MIDDLE_PASS',flush=True)
+diff --git a/scripts/verify_stateful_lms_padding.py b/scripts/verify_stateful_lms_padding.py
+new file mode 100644
+index 00000000..ff051dcd
+--- /dev/null
++++ b/scripts/verify_stateful_lms_padding.py
+@@ -0,0 +1,12 @@
++#!/usr/bin/env python3
++"""LMS Hmsg's 54-byte prefix: messages 81/82/83 cross the SHAKE rate."""
++import json
++from stateful_vectors import generate,OUT
++from run_stateful import build,run
++b=build();rows=json.loads((OUT/'edge_results.json').read_text())
++for name in ('lms_omega2','lms_omega4'):
++ for size in (81,82,83):
++  folder=generate(name,0,bytes(range(size)))
++  rows[f'{name}_message{size}']=run(b,folder/'2',('+STALL=1',),'_stall')
++(OUT/'edge_results.json').write_text(json.dumps(rows,indent=2)+'\n')
++print('STATEFUL_LMS_PADDING_PASS',flush=True)
+diff --git a/scripts/verify_stateful_masked_chain.py b/scripts/verify_stateful_masked_chain.py
+new file mode 100644
+index 00000000..43b7515b
+--- /dev/null
++++ b/scripts/verify_stateful_masked_chain.py
+@@ -0,0 +1,29 @@
++#!/usr/bin/env python3
++"""Independent masked seed/chain vectors, including ordinary P4 feedback."""
++from pathlib import Path
++import subprocess,json,hashlib
++from v42_external_flow import ROOT
++OUT=ROOT/'manifests/experiments/stateful_20261008/masked_chain';OUT.mkdir(exist_ok=True)
++BUILD=ROOT/'build/stateful_20261008/masked_chain';BUILD.mkdir(exist_ok=True)
++def h(x):return hashlib.shake_256(x).digest(32)
++def be(x,n=4):return x.to_bytes(n,'big')
++public=bytes(range(64,96));secret=bytes(range(32));vectors=[]
++for steps,cap in ((0,0),(3,0),(3,3),(15,7),(15,15)):
++ addr=lambda j:bytes(12)+be(0)+be(5)+be(132)+be(j)
++ value=h(be(4,32)+secret+public+addr(0)+be(0));captured=value if cap==0 else None
++ for j in range(steps):
++  key=h(be(3,32)+public+addr(j)+be(0));mask=h(be(3,32)+public+addr(j)+be(1))
++  value=h(bytes(32)+key+bytes(a^b for a,b in zip(value,mask)))
++  if j+1==cap:captured=value
++ seed=(7<<56)|(1<<40);step=(8<<56)|(1<<40)
++ vectors.append((seed<<960)|(step<<896)|(1<<895)|(steps<<890)|(cap<<885)|(132<<877)|(32<<839)|(int.from_bytes(value,'little')<<256)|int.from_bytes(captured,'little'))
++vec=OUT/'vectors.mem';vec.write_text(''.join(f'{v:0256x}\n' for v in vectors))
++sources=(ROOT/'manifests/v42_sources.txt').read_text().split()+['tb/reference/mhbs_shake_pre_direct_ref.sv','tb/reference/mhbs_recipe_pre_direct_ref.sv','tb/unit/tb_mhbs_v42_recipe_lane.sv'];rows=[]
++for u,p,shared in ((1,4,0),(1,4,1),(2,1,0)):
++ name=f'U{u}P{p}_shared{shared}';exe=BUILD/(name+'.vvp');log=OUT/(name+'.log')
++ with log.open('w') as f:
++  subprocess.run(['iverilog','-g2012','-s','tb_mhbs_v42_recipe_lane','-Ptb_mhbs_v42_recipe_lane.PROFILE=2','-Ptb_mhbs_v42_recipe_lane.MASK=65534','-Ptb_mhbs_v42_recipe_lane.CASES=5',f'-Ptb_mhbs_v42_recipe_lane.UNROLL={u}',f'-Ptb_mhbs_v42_recipe_lane.PIPELINE={p}',f'-Ptb_mhbs_v42_recipe_lane.SHARED_STATE={shared}','-o',str(exe),*sources],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
++  subprocess.run(['vvp',str(exe),f'+VECTORS={vec}'],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
++ assert 'UNIFIED_RECIPE_PASS' in log.read_text()
++ rows.append(dict(configuration=name,passed=True,cases=5,log_sha256=hashlib.sha256(log.read_bytes()).hexdigest()));print('MASKED_CHAIN_PASS',name,flush=True)
++(OUT/'results.json').write_text(json.dumps(rows,indent=2)+'\n')
+diff --git a/scripts/verify_stateful_slh.py b/scripts/verify_stateful_slh.py
+new file mode 100644
+index 00000000..5c46564e
+--- /dev/null
++++ b/scripts/verify_stateful_slh.py
+@@ -0,0 +1,33 @@
++#!/usr/bin/env python3
++"""Preserve SLH cycles across existing K/P/U and common/statistics variants."""
++import json,concurrent.futures,shutil
++from pathlib import Path
++from v42_external_flow import ROOT,BASE,NAMES,simulate_case
++from run_stateful import OUT
++F=ROOT/'build/stateful_20261008/slh_variants';F.mkdir(parents=True,exist_ok=True)
++normal=json.loads((ROOT/'build/v4.2/external_job_message/stateful_slh_regression_20261008/simulation.json').read_text())['cases']
++expected={'slh_128f':(29862,729983),'slh_192f':(43654,1249491),'slh_256f':(115766,2579236),'slh_128s':(1909782,15317506),'slh_192s':(2792470,29016918),'slh_256s':(1851926,27069757)}
++for n,(kg,sg) in expected.items():
++ assert normal[n+'_keygen']['keygen_cycles']==kg,(n,'kg')
++ assert normal[n+'_sign']['sign_cycles']==sg,(n,'sg')
++checks={}
++def one(case):
++ n,op,kind=case;kw={'profile_enable':False} if kind=='off' else {'partitioned':True}
++ label=f'{n}_{op}_{kind}';_,r=simulate_case(F,label,BASE/'vectors'/n/op,**kw)
++ ref=normal[n+'_'+op]
++ for key in ('keygen_cycles','sign_cycles','total_cycles','hashes','permutations','output_sha256'):assert r[key]==ref[key],(label,key)
++ return label,r
++with concurrent.futures.ThreadPoolExecutor(3) as pool:
++ checks.update(pool.map(one,[(n,o,k) for n in NAMES for o in ('keygen','sign') for k in ('off','partition')]))
++for k,p,u,cycles in [(1,1,1,2619719),(1,2,1,1402428),(1,3,1,979434),(1,4,1,766014),(2,1,1,1399919),(2,4,1,486328)]:
++ label=f'K{k}P{p}U{u}';_,r=simulate_case(F,label,BASE/'vectors/slh_128f/sign',lanes=k,pipeline=p,unroll=u)
++ assert r['sign_cycles']==cycles,(label,r['sign_cycles'],cycles)
++ assert (r['hashes'],r['permutations'])==(104937,105641)
++ checks[label]=r
++ if p==4:
++  _,s=simulate_case(F,label+'_reset',BASE/'vectors/slh_128f/sign',lanes=k,pipeline=p,unroll=u,options=('+REPLAYS=2','+INTERRUPT=1','+STALL=1','+TAIL_NOISE=1'))
++  assert s['sign_cycles']-s['wait_cycles']==cycles
++  checks[label+'_reset']=s
++(OUT/'slh_variants.json').write_text(json.dumps(checks,indent=2)+'\n')
++shutil.copytree(F/'logs',OUT/'slh_variants_logs',dirs_exist_ok=True)
++print('SLH_VARIANTS_PASS',len(checks),flush=True)
+diff --git a/tb/integration/tb_mhbs_stateful.sv b/tb/integration/tb_mhbs_stateful.sv
+new file mode 100644
+index 00000000..2c79bed5
+--- /dev/null
++++ b/tb/integration/tb_mhbs_stateful.sv
+@@ -0,0 +1,142 @@
++`timescale 1ns/1ps
++// Runtime Job/ROM common-core harness, including the production signature store.
++module tb_mhbs_stateful;
++ parameter integer LANES=2,UNROLL=1,PIPELINE=1,SWAP=0,PROFILE_ENABLE=1;
++ logic clk=0,rst=1;always #5 clk=~clk;
++ reg [63:0] pm[0:15],tm[0:15],dm[0:31];
++ wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
++ wire [63:0] program_data=pm[program_address],template_data=tm[template_address];
++ wire [127:0] descriptor_data={dm[descriptor_addresses[9:5]],dm[descriptor_addresses[4:0]]};
++ reg [255:0] cfg[0:8],nodes_mem[0:143];reg [31:0] meta[0:4];
++ reg [7:0] msg[0:86],expected[0:65535];
++ wire [255:0] job_secret_seed=cfg[0],job_secret_prf=cfg[1],job_public_seed=cfg[2],job_randomizer=cfg[3],job_public_root=cfg[4];
++ wire [127:0] job_identifier=cfg[5][127:0];wire [31:0] job_index=cfg[6][31:0];wire [1:0] job_operation=cfg[7][1:0];
++ wire [6:0] message_length=job_operation==0 ? 0 : cfg[8][6:0];
++ logic [63:0] message_data=0;logic message_valid=0;wire message_ready;
++ logic verify_valid=0;logic [255:0] verify_data=0;wire verify_ready,verify_pass;
++ wire out_valid;wire [255:0] out_data;wire [5:0] out_bytes;wire [1:0] result_kind;
++ wire busy,done,keygen_done,error;wire [15:0] error_code;
++ wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
++ mhbs_common #(.LANES(LANES),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SWAP_PHYSICAL_LANES(SWAP),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
++ logic read_enable=0;logic [10:0] read_address=0;
++ wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
++ mhbs_signature_store cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
++ integer cycles=0,compute=0,cursor=0,sent=0,accepted=0,stall=0,replays=1,interrupt_run=0,invalid=0,tamper=0,override_q=-1,fault=0,cut=0;
++ integer hashes[0:1],perms[0:1];integer computed,elapsed,hcount,pcount;
++ reg [31:0] rng=32'h51c0ffee;string vector;
++ for(genvar l=0;l<2;l++)begin
++  if(l<LANES)begin
++   always @(posedge clk)begin
++    if(dut.core.execution_rst)begin hashes[l]=0;perms[l]=0;end
++    else if(dut.core.lanes[l].lane.permutation_complete)begin
++     perms[l]++;if(dut.core.lanes[l].lane.running_last)hashes[l]++;
++    end
++   end
++  end else initial begin hashes[l]=0;perms[l]=0;end
++ end
++ always @(posedge clk)begin
++  if(dut.core.rst)compute=0;
++  else if(dut.core.state==0&&dut.core.job_valid)compute=0;
++  else if(dut.core.state!=0&&dut.core.state!=32)compute++;
++  if(rst)begin cycles=0;cursor=0;sent=0;accepted=0;end
++  else begin
++   cycles++;
++   if(cycles>400000000)$fatal(1,"timeout state=%0d",dut.core.state);
++   if(error&&!invalid&&!fault)$fatal(1,"error %h state=%0d",error_code,dut.core.state);
++   if(message_valid&&message_ready)sent+=8;
++   if(verify_valid&&verify_ready)accepted++;
++   if(out_valid)begin
++    if(out_bytes!=4&&out_bytes!=16&&out_bytes!=32)$fatal(1,"width %0d",out_bytes);
++    for(integer i=0;i<32;i++)if(i<out_bytes)begin
++     if(cursor>=meta[0]||out_data[i*8+:8]!==expected[cursor])$fatal(1,"byte %0d got %h expected %h state %0d",cursor,out_data[i*8+:8],expected[cursor],dut.core.state);
++     cursor++;
++    end
++   end
++  end
++ end
++ always @(negedge clk)begin
++  if(rst)begin message_valid=0;verify_valid=0;rng=32'h51c0ffee;end
++  else begin
++   rng={rng[30:0],rng[31]^rng[21]^rng[1]^rng[0]};
++   if(!(message_valid&&!message_ready))begin
++    message_valid=job_operation!=0&&sent<message_length&&(!stall||rng[1:0]!=0);
++    message_data=64'hfefdfcfbfaf9f8f7;
++    for(integer i=0;i<8;i++)if(sent+i<message_length)message_data[i*8+:8]=msg[sent+i];
++   end
++   if(!(verify_valid&&!verify_ready))begin
++    verify_valid=job_operation==2&&accepted<meta[3]&&(!cut||accepted<cut)&&(!stall||rng[3:0]==0);
++    verify_data=accepted<meta[3]?nodes_mem[accepted]:0;
++   end
++  end
++ end
++ task tick;begin @(posedge clk);#1;end endtask
++ initial begin
++  if(!$value$plusargs("VECTOR=%s",vector))$fatal(1,"VECTOR");
++  if($value$plusargs("FAULT=%d",fault))begin end
++  if($value$plusargs("CUT=%d",cut))begin end
++  if($value$plusargs("STALL=%d",stall))begin end
++  if($value$plusargs("REPLAYS=%d",replays))begin end
++  if($value$plusargs("INTERRUPT=%d",interrupt_run))begin end
++  if($value$plusargs("INVALID=%d",invalid))begin end
++  if($value$plusargs("TAMPER=%d",tamper))begin end
++  if($value$plusargs("Q=%d",override_q))begin end
++  $readmemh({vector,"/program.mem"},pm);$readmemh({vector,"/template.mem"},tm);$readmemh({vector,"/descriptor.mem"},dm);
++  $readmemh({vector,"/job.mem"},cfg);$readmemh({vector,"/meta.mem"},meta);$readmemh({vector,"/message.mem"},msg);
++  $readmemh({vector,"/expected.mem"},expected);$readmemh({vector,"/nodes.mem"},nodes_mem);
++  if(override_q>=0)cfg[6]=override_q;
++  case(tamper)
++   1:msg[0]^=1;
++   2:nodes_mem[1]^=1;
++   3:nodes_mem[meta[3]-1]^=1;
++   4:cfg[4]^=1;
++   5:nodes_mem[0]^=1;
++  endcase
++  for(integer r=0;r<replays;r++)begin
++   rst=1;read_enable=0;repeat(5)tick();rst=0;
++   if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
++   if(fault)begin
++    while(dut.core.state!=23)tick();force dut.core.lanes[0].lane.error=1;
++    while(!error)tick();
++    if(error_code!=16'h3007)$fatal(1,"fault code");
++    repeat(40)begin tick();if(out_valid||busy||done||verify_ready||verify_pass)$fatal(1,"fault halt");end
++    $display("STATEFUL_FAULT_PASS");$finish;tick();
++   end
++   if(cut)begin
++    while(accepted<cut)tick();while(!verify_ready)tick();repeat(1000)tick();
++    if(done||error||!verify_ready)$fatal(1,"truncated node wait");
++    rst=1;repeat(5)tick();cut=0;rst=0;
++   end
++   while(!done&&!error)tick();
++   computed=compute;elapsed=cycles;hcount=hashes[0]+hashes[1];pcount=perms[0]+perms[1];
++   if(invalid)begin if(!error||error_code!=16'h3008)$fatal(1,"index rejection");end
++   else begin
++    if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
++    if(job_operation==2)begin
++     if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);
++    end
++    if(!tamper)begin
++     if(hcount!=meta[1]||pcount!=meta[2])$fatal(1,"counts %0d/%0d expected %0d/%0d",hcount,pcount,meta[1],meta[2]);
++    end
++    if(PROFILE_ENABLE)begin
++     if(hash_count!=hcount||permutation_count!=pcount)$fatal(1,"statistics mismatch");
++    end else if(hash_count||permutation_count||sign_cycles||keygen_cycles||boot_cycles)$fatal(1,"statistics not disabled");
++    if(job_operation==1)begin
++     if(!complete||length!=cursor||store_error)$fatal(1,"cache metadata");
++     cursor=0;
++     for(integer n=0;n<nodes;n++)begin
++      read_enable=1;read_address=n;tick();
++      if(!read_valid)$fatal(1,"cache read");
++      for(integer b=0;b<32;b++)if(b<read_bytes)begin
++       if(read_data[b*8+:8]!==expected[cursor])$fatal(1,"cache byte %0d",cursor);
++       cursor++;
++      end
++     end
++     read_enable=0;if(cursor!=meta[0])$fatal(1,"cache length");
++    end
++    $display("STATEFUL_PASS K%0dP%0dU%0d op=%0d cycles=%0d total=%0d hashes=%0d permutations=%0d tamper=%0d",LANES,PIPELINE,UNROLL,job_operation,computed,elapsed,hcount,pcount,tamper);
++   end
++  end
++  if(invalid)$display("INDEX_REJECT_PASS");
++  $finish;
++ end
++endmodule
+diff --git a/tests/test_stateful.py b/tests/test_stateful.py
+new file mode 100644
+index 00000000..41a13beb
+--- /dev/null
++++ b/tests/test_stateful.py
+@@ -0,0 +1,42 @@
++"""Experimental image ABI, signature parsing and independent verification."""
++from pathlib import Path
++from dataclasses import replace
++import unittest
++from model.stateful import PROFILE_CODES,encode,cold_image,descriptor_map
++from model.reference.stateful_shake import parse_signature,verify,digits
++ROOT=Path(__file__).resolve().parents[1]
++class StatefulTests(unittest.TestCase):
++ def test_images_and_capacity(self):
++  for code,name in PROFILE_CODES.items():
++   e=encode(name);i=e.decode()
++   self.assertEqual(e.descriptors[1],code);self.assertEqual((len(e.program),len(e.templates),len(e.descriptors)),(16,16,32))
++   self.assertEqual(i,cold_image(name));self.assertLessEqual(len(descriptor_map(i)),32)
++   self.assertEqual(i.omega,2 if name.endswith('2') else 4)
++   self.assertTrue(any(t&(1<<16) for t in e.templates))
++   bad=list(e.templates);bad[0]^=1<<17
++   with self.assertRaises(ValueError):replace(e,templates=tuple(bad)).decode()
++ def test_digits(self):
++  for bits,count in ((2,133),(4,67)):
++   for msg in (bytes(32),b'\xff'*32,bytes(range(32))):
++    ds=digits(msg,bits);self.assertEqual(len(ds),count)
++    maximum=(1<<bits)-1;self.assertTrue(all(0<=x<=maximum for x in ds))
++    c=0
++    for d in ds[256//bits:]:c=(c<<bits)|d
++    self.assertEqual(c,sum(maximum-d for d in ds[:256//bits]))
++ def test_frozen_vectors_and_rejection(self):
++  for name in PROFILE_CODES.values():
++   d=ROOT/'manifests/experiments/stateful_20261008/vectors'/name/'q0_m1'
++   sig=(d/'signature.bin').read_bytes();root=(d/'root.bin').read_bytes();public=bytes(range(81,113));ident=bytes(range(161,177))
++   self.assertTrue(verify(name,b'B',sig,public,root,ident))
++   self.assertFalse(verify(name,b'C',sig,public,root,ident))
++   for off in (0,4,36,len(sig)-1):
++    s=bytearray(sig);s[off]^=1;self.assertFalse(verify(name,b'B',bytes(s),public,root,ident))
++   for s in (sig[:-1],sig+b'\0',(1024).to_bytes(4,'big')+sig[4:]):
++    with self.assertRaises(ValueError):parse_signature(name,s)
++   if name.startswith('lms'):
++    s=bytearray(sig);s[4]^=1
++    with self.assertRaises(ValueError):parse_signature(name,bytes(s))
++    s=bytearray(sig);tree_offset=40+32*(133 if name.endswith('2') else 67);s[tree_offset]^=1
++    with self.assertRaises(ValueError):parse_signature(name,bytes(s))
++    self.assertFalse(verify(name,b'B',sig,public,root,bytes(16)))
++if __name__=='__main__':unittest.main()

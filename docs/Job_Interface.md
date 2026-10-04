@@ -1,6 +1,6 @@
 # mHBS 当前 Job 与流接口
 
-唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，每次复位执行一次 Keygen、Sign 或 Verify。
+唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，以及实验 `xmss_omega2/4`、`lms_omega2/4`；每次复位执行一次 Keygen、Sign 或 Verify。
 
 ## 配置
 
@@ -17,7 +17,7 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
 | `message_data[63:0]` | 低字节先传，尾拍多余字节忽略 |
 | `message_valid` / `message_ready` | 上升沿两者同时为 1 时接收一拍；等待 ready 时保持 valid 和 data |
 | `out_valid` / `out_data[255:0]` | 每个有效拍直接输出一个完整节点，无 out_ready；接收方必须及时接收 |
-| `out_bytes[5:0]` | 有效低位字节数（16/24/32），按低字节到高字节拼接；未用高位忽略 |
+| `out_bytes[5:0]` | 有效低位字节数（4/16/24/32），按低字节到高字节拼接；未用高位忽略 |
 | `result_kind[1:0]` | 0 为 Keygen 的 SK\|\|PK；1 为签名；2 为 Verify |
 | `busy` | 复位时置 1，完成或错误时清零 |
 | `done` | 整项结果输出结束后保持为 1，直到复位；不再提供 out_last/out_keep |
@@ -46,14 +46,15 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
 | `signature_valid` | `done=1` 且签名缓存无错误时为 1；保持至复位 |
 | `signature_length[15:0]` | 已保存的有效字节总数；签名完成后使用 |
 | `signature_nodes[10:0]` | 已保存节点数；签名完成后使用 |
-| `signature_node_bytes[5:0]` | 每节点有效低位字节数，16/24/32 |
+| `signature_node_bytes[5:0]` | 常规节点宽度，16/24/32；混合字段读回使用 signature_read_bytes |
 | `signature_read_enable` / `signature_read_address[10:0]` | 同步读请求，地址为节点索引，从 0 开始 |
 | `signature_read_valid` / `signature_read_data[255:0]` | 请求采样上升沿之后返回数据及有效标志；可每拍请求一个节点，无响应背压 |
+| `signature_read_bytes[5:0]` | 与 read_valid/data 同拍返回本项有效字节数，4/16/24/32 |
 | `signature_error` | 缓存溢出、节点宽度非法/不一致或执行错误；保持至复位 |
 
 只有 `signature_valid=1` 且地址小于 `signature_nodes` 的请求产生读响应；其余请求的
 `signature_read_valid=0`。读数据仅在 valid 为 1 时有意义，未使用高位忽略。
-按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，即为完整签名。
+按地址递增，将每节点的低 `signature_read_bytes` 字节按低字节在先拼接，即为完整签名。
 缓存可重复随机读取，读操作不影响 `done` 或原输出。缓存错误不改变原核心 `error`，调用方
 须检查 `signature_valid` 和 `signature_error` 后再使用缓存。
 
@@ -76,3 +77,20 @@ ROM 路径使用 `PROGRAM_INIT_FILE`、`TEMPLATE_INIT_FILE`、`DESCRIPTOR_INIT_F
 Verify 不输出 out 数据流。done=1、error=0 时读取 verify_pass：1 为根匹配，0 为签名不匹配；不匹配不是协议或执行故障。done/verify_pass 保持到复位。节点供应不足时等待输入，不把停顿判成无效签名；完成后的额外节点不被接受。完整签名字节流的长度及分帧检查由外部负责。
 
 Verify 的 keygen_cycles、sign_cycles 保持零；仿真可观察共同核 cycles，hash/permutation 统计沿用 PROFILE_ENABLE。生产统计仍关闭。消息范围和每次复位一项操作的约束不变。
+
+## XMSS/LMS 的 q 与标识符
+
+`KEY_INDEX[31:0]`、`IDENTIFIER[127:0]` 是新增顶层参数，默认零；共同核分别通过 `job_index`、`job_identifier` 接收。q 为数值 0–1023，超界在执行前报 `0x3008`；标识符按低字节在先表示 16 字节 LMS I。XMSS 忽略 identifier。Keygen 的根与 q 无关，输出的私钥索引字段使用所给 q。
+
+签名前调用方必须持久化占用 q，禁止同一私钥重复使用；复位仅重启硬件，不恢复可用索引。Verify 不消耗索引。核不实现索引分配或持久化。
+
+所有新参数使用 32 字节节点、h=10 和实验 SHAKE256 配方。Sign 格式：
+
+- XMSS：`q[4] || R[32] || WOTS 签名[133/67 × 32] || auth[10 × 32]`，共 4612/2500 字节。
+- LMS：`q[4] || OTS_type[4] || R[32] || LMOTS 签名[133/67 × 32] || tree_type[4] || auth[10 × 32]`，共 4620/2508 字节。
+
+四字节字段按大端字节串输出，线上仍从 out_data 低字节开始读取。LMS 私有类型为 omega2 `0x80000002`、omega4 `0x80000003`、树 `0x80000006`；不是标准 RFC 类型号。
+
+Verify 的外部适配器先用 `model.reference.stateful_shake.parse_signature` 校验精确长度、q 和 LMS 类型，再把 q 放入 KEY_INDEX、I 放入 IDENTIFIER。节点接口只输入 R、133/67 个链节点和 10 个认证节点；q、类型字段不作为节点发送。消息继续使用原接口，根通过 PUBLIC_ROOT 输入。核恢复实际根并比较，不接收预计算叶或中间根。不足节点会等待，额外节点不被接收。
+
+Sign 输出的 4 字节字段各占一个缓存槽，容量仍为 1558 项。以每项 signature_read_bytes 拼接可还原完整签名；SLH 每项长度仍等于 signature_node_bytes。Sign 包含完整认证树重算，不可按旧模型缓存命中的 Sign 周期估算。

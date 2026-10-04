@@ -8,13 +8,14 @@ import re
 
 JOBS = {'SECRET_SEED':'job_secret_seed', 'SECRET_PRF':'job_secret_prf',
         'PUBLIC_SEED':'job_public_seed', 'RANDOMIZER':'job_randomizer',
-        'PUBLIC_ROOT':'job_public_root', 'OPERATION':'job_operation'}
+        'PUBLIC_ROOT':'job_public_root', 'KEY_INDEX':'job_index', 'IDENTIFIER':'job_identifier', 'OPERATION':'job_operation'}
 PORTS = '''
  input wire clk,rst,
  output wire [3:0] program_address,output wire [3:0] template_address,
  input wire [63:0] program_data,template_data,
  output wire [9:0] descriptor_addresses,input wire [127:0] descriptor_data,
  input wire [255:0] job_secret_seed,job_secret_prf,job_public_seed,job_randomizer,job_public_root,
+ input wire [31:0] job_index,input wire [127:0] job_identifier,
  input wire [1:0] job_operation,input wire [6:0] message_length,
  input wire verify_valid,output wire verify_ready,
  input wire [255:0] verify_data,output wire verify_pass,

@@ -11,6 +11,7 @@ module tb_mhbs_verify;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
  wire signature_read_valid,signature_valid,signature_error;
+ wire [5:0] signature_read_bytes;
  wire [255:0] signature_read_data;wire [5:0] signature_node_bytes;
  wire [10:0] signature_nodes;wire [15:0] signature_length;
  wire busy,done,keygen_done,error,out_valid,verify_ready,verify_pass,message_ready;

@@ -21,6 +21,9 @@ class ExternalImage:
         if h>>46:raise ValueError('header reserved')
         kg=(h>>36)&31;sg=(h>>41)&31
         if kg>=16 or sg>=16:raise ValueError('entry exceeds program capacity')
+        if self.descriptors[1] in (8,9,10,11):
+            from model.stateful import decode
+            return decode(self)
         desc=list(self.descriptors);desc[0]&=(1<<36)-1
         # Reuse the independently checked ABI-4 expansion and reference checks.
         # The legacy decoder receives synthetic zero inputs, never caller data.
@@ -50,6 +53,8 @@ def convert_legacy(image):
 
 
 def compile_external(name):
+    from model.stateful import PROFILE_CODES,encode
+    if name in PROFILE_CODES.values():return encode(name)
     n=compile_image(name).n
     zero=bytes(n)
     return convert_legacy(pack(name,Job(zero,zero,zero,zero),b'\0',zero,False))[0]
@@ -58,10 +63,11 @@ def compile_external(name):
 class ExternalMachine:
     def __init__(self,image,job,root,message,sign,observe=None):
         logical=image.decode()
-        if job.q or any(job.identifier):raise ValueError('SLH-only job')
+        if not logical.stateful and (job.q or any(job.identifier)):raise ValueError('SLH-only job')
+        if logical.stateful and not 0<=job.q<1024:raise ValueError('index exhausted')
         if len(root)!=logical.n:raise ValueError('root size')
         if not (1<=len(message)<=87 if sign else len(message)==0):raise ValueError('message length')
-        self.machine=Machine(logical,job,observe)
+        self.machine=Machine(logical,job,observe, index_policy='fixed_q_no_guard' if logical.stateful else 'guarded', recompute_auth=logical.stateful)
         self.message=message;self.sign=bool(sign);self.halted=False
         if sign:self.machine.values[3]=root
 

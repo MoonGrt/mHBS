@@ -6,7 +6,7 @@ module tb_mhbs_signature_store;
     logic [10:0] read_address=0;
     wire read_valid,complete,error;
     wire [255:0] read_data;
-    wire [5:0] node_bytes;
+    wire [5:0] node_bytes,read_bytes;
     wire [10:0] nodes;
     wire [15:0] length;
     mhbs_signature_store dut(.*);
@@ -33,7 +33,7 @@ module tb_mhbs_signature_store;
                 $fatal(1,"full store metadata");
             for(integer n=1557;n>=0;n=n-1)begin
                 read_address=11'(n);tick();
-                if(!read_valid || read_data!==pattern(n))$fatal(1,"readback %0d",n);
+                if(!read_valid || read_data!==pattern(n) || read_bytes!=bytes_per_node)$fatal(1,"readback %0d",n);
             end
             // Jump between all three banks on consecutive requests.
             for(integer n=0;n<1558;n=n+1)begin
@@ -63,6 +63,16 @@ module tb_mhbs_signature_store;
         reset_store();write_valid=1;write_bytes=24;write_data=pattern(7);tick();
         write_valid=0;finish=1;read_enable=1;read_address=0;tick();
         if(!read_valid || read_data!==pattern(7) || length!=24)$fatal(1,"restart");
+        reset_store();
+        for(integer n=0;n<148;n++)begin
+            write_valid=1;write_data=pattern(n);write_bytes=n==0||n==1||n==137 ? 4 : 32;tick();
+        end
+        write_valid=0;finish=1;tick();
+        if(error||!complete||nodes!=148||length!=4652)$fatal(1,"mixed metadata");
+        for(integer n=147;n>=0;n--)begin
+            read_enable=1;read_address=n;tick();
+            if(!read_valid||read_data!==pattern(n)||read_bytes!=(n==0||n==1||n==137 ? 4 : 32))$fatal(1,"mixed bytes");
+        end
         $display("SIGNATURE_STORE_UNIT_PASS");$finish;
     end
 endmodule
