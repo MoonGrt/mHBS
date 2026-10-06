@@ -3,22 +3,23 @@
 // Per-context SLH chain metadata and completion slots. No Keccak duplication:
 // permutations use the same pipeline as the recipe/sponge path.
 module mhbs_chain_pipeline_lane #(
- parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0
+ parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0,
+ localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
 )(
  input wire clk,rst,input wire [5:0] node_bytes,
- input wire request_valid,output wire request_ready,input wire [1:0] request_tag,
+ input wire request_valid,output wire request_ready,input wire [TAG_BITS-1:0] request_tag,
  input wire [4:0] request_steps,request_capture_after,input wire request_capture,
  input wire [255:0] secret_seed,public_seed,
  input wire [4:0] request_layer,input wire [63:0] request_tree,
  input wire [9:0] request_leaf,input wire [6:0] request_a,input wire [31:0] request_b,
  input wire [7:0] seed_domain,step_domain,
- input wire [1:0] read_tag,
+ input wire [TAG_BITS-1:0] read_tag,
  output wire [255:0] read_digest,read_capture,
- output wire response_valid,input wire response_ready,output logic [1:0] response_tag,
+ output wire response_valid,input wire response_ready,output logic [TAG_BITS-1:0] response_tag,
  output wire [255:0] response_digest,response_capture,
  output wire perm_valid,input wire perm_ready,output wire [1599:0] perm_state,
- output wire [1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
- input wire [1:0] perm_result_tag,
+ output wire [TAG_BITS-1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
+ input wire [TAG_BITS-1:0] perm_result_tag,
  output logic [31:0] hash_count,permutation_count
 );
  function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
@@ -31,7 +32,7 @@ module mhbs_chain_pipeline_lane #(
  logic [PIPELINE-1:0] captured_valid;
  assign read_digest=digest[read_tag];
  assign read_capture=captured_valid[read_tag] ? captured[read_tag] : 256'd0;
- wire [1:0] t=perm_result_tag;
+ wire [TAG_BITS-1:0] t=perm_result_tag;
  wire again=perm_done && iteration[t]<steps[t];
  wire capture_now=perm_done && capture_enable[t] && iteration[t]==capture_after[t];
  logic [255:0] next_address;
@@ -60,11 +61,11 @@ module mhbs_chain_pipeline_lane #(
  assign perm_state=block_for(block_address,block_value);
  assign perm_tag=again ? t : request_tag;
  logic response_held;
- logic [1:0] held_tag;
+ logic [TAG_BITS-1:0] held_tag;
  assign response_valid=|complete;
  always_comb begin
   response_tag=0;
-  for(integer j=PIPELINE-1;j>=0;j=j-1)if(complete[j])response_tag=2'(j);
+  for(integer j=PIPELINE-1;j>=0;j=j-1)if(complete[j])response_tag=TAG_BITS'(j);
   if(response_held)response_tag=held_tag;
  end
  assign response_digest=digest[response_tag];

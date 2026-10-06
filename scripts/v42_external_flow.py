@@ -70,7 +70,7 @@ def simulate_case(folder,name,vector,options=(),partitioned=False,profile_enable
  return name,result
 
 def main():
- p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');p.add_argument('--unroll',type=int,default=2);p.add_argument('--pipeline',type=int,choices=range(1,5),default=1);a=p.parse_args()
+ p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');p.add_argument('--unroll',type=int,default=2);p.add_argument('--pipeline',type=int,choices=(1,2,3,4,6,8,12),default=1);a=p.parse_args()
  f=capture(a.tag)
  if a.action=='sim':
   def one(case):

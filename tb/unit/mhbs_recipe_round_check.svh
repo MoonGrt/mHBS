@@ -3,7 +3,7 @@
  for(genvar gs=0;gs<PIPELINE;gs=gs+1)begin: round_checks
   reg [1599:0] expected_stage;
   reg [4:0] expected_base;
-  reg [1:0] expected_tag;
+  reg [(PIPELINE>1 ? $clog2(PIPELINE) : 1)-1:0] expected_tag;
   always @(posedge clk)if(!rst && (PIPELINE==1 ? dut.hash_state==2 : dut.stages[gs].source_valid))begin
    expected_stage=dut.stages[gs].rounds[0];
    expected_base=dut.stages[gs].start_round;expected_tag=dut.stages[gs].source_tag;

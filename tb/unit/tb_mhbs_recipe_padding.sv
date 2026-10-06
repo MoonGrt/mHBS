@@ -29,7 +29,9 @@ module tb_mhbs_recipe_padding;
     wire [391:0] ref_value;wire [255:0] ref_capture;
     wire [31:0] ref_hashes,ref_perms;
     wire [7:0] ref_index0,ref_index1;
-    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) frozen (.batch_mode(1'b0),.batch_request_valid(1'b0),
+    // The frozen ordinary-request reference supports P<=4. Every P>1
+    // retains the same 24/U round latency; P2 is the witness for larger P.
+    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE>4 ? 2 : PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) frozen (.batch_mode(1'b0),.batch_request_valid(1'b0),
         .clk,.rst,.node_bytes,.request_valid,.request_ready(ref_ready),.request_recipe,
         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),

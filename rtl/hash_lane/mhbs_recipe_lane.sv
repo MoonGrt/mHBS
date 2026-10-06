@@ -8,18 +8,19 @@ module mhbs_recipe_lane #(
     parameter integer UNROLL = 2, PIPELINE = 1,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter [15:0] RECIPE_MASK = 16'hffff,
-    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0
+    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0,
+    localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
 ) (
     input wire clk, rst,
     input wire batch_mode,batch_request_valid,output wire batch_request_ready,
-    input wire [1:0] batch_request_tag,
+    input wire [TAG_BITS-1:0] batch_request_tag,
     input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
     input wire [9:0] batch_leaf,input wire [6:0] batch_a,input wire [31:0] batch_b,
     input wire [7:0] batch_seed_domain,batch_step_domain,
     output wire batch_response_valid,input wire batch_response_ready,
-    output wire [1:0] batch_response_tag,
+    output wire [TAG_BITS-1:0] batch_response_tag,
     output wire [255:0] batch_response_digest,batch_response_capture,
-    input wire [1:0] batch_read_tag,
+    input wire [TAG_BITS-1:0] batch_read_tag,
     output wire [255:0] batch_read_digest,batch_read_capture,
     output wire [31:0] batch_hashes,batch_permutations,
     input wire [5:0] node_bytes,
@@ -424,7 +425,7 @@ module mhbs_recipe_lane #(
 
     wire batch_perm_valid,batch_perm_ready,batch_perm_done;
     wire [1599:0] batch_perm_state,batch_perm_digest;
-    wire [1:0] batch_perm_tag,batch_perm_result_tag;
+    wire [TAG_BITS-1:0] batch_perm_tag,batch_perm_result_tag;
     generate if(PIPELINE>1)begin: chain_pipeline
         mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
             .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
@@ -484,7 +485,7 @@ module mhbs_recipe_lane #(
     logic [1599:0] state_reg [0:PIPELINE-1];
     logic [PIPELINE-1:0] stage_valid;
     logic [4:0] stage_base [0:PIPELINE-1];
-    logic [1:0] stage_tag [0:PIPELINE-1];
+    logic [TAG_BITS-1:0] stage_tag [0:PIPELINE-1];
     logic sent;
     wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
         && stage_base[PIPELINE-1]+ROUNDS<24;
@@ -493,13 +494,13 @@ module mhbs_recipe_lane #(
     wire normal_valid=hash_state==HASH_RUN && !sent;
     wire issue_valid=batch_mode ? batch_perm_valid : normal_valid;
     wire [1599:0] issue_state=batch_mode ? batch_perm_state : sponge_state;
-    wire [1:0] issue_tag=batch_mode ? batch_perm_tag : 2'd0;
+    wire [TAG_BITS-1:0] issue_tag=batch_mode ? batch_perm_tag : '0;
     wire [1599:0] finished_state=state_reg[PIPELINE-1];
     wire [1599:0] stage_result[0:PIPELINE-1];
     for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
         wire [1599:0] rounds[0:UNROLL];
         wire [4:0] start_round;
-        wire [1:0] source_tag;
+        wire [TAG_BITS-1:0] source_tag;
         wire source_valid;
         if(s==0)begin: input_stage
             assign rounds[0]=PIPELINE==1 ? sponge_state
@@ -537,7 +538,7 @@ module mhbs_recipe_lane #(
     assign batch_perm_ready=PIPELINE>1 && batch_mode && ready;
     assign batch_perm_done=PIPELINE>1 && batch_mode && finished;
     assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
-    assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : 2'd0;
+    assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : '0;
     if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
     assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
     assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
@@ -568,7 +569,7 @@ module mhbs_recipe_lane #(
     assign compact_capture = captured_value;
 
     initial begin
-        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 4 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 12 || ROUNDS > 24 || (24 % ROUNDS) != 0)
             $error("recipe lane requires positive U/P and U*P dividing 24");
     end
 

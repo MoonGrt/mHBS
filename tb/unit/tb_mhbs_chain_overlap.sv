@@ -1,10 +1,12 @@
 `timescale 1ns/1ps
 module tb_mhbs_chain_overlap;
  parameter integer UNROLL=1,PIPELINE=2;
+ parameter bit SHARED_STATE=(UNROLL==1);
+ localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
  logic clk=0,rst=1,request_valid=0,response_ready=0;
- logic [1:0] request_tag=0;
+ logic [TAG_BITS-1:0] request_tag=0;
  wire request_ready,response_valid;
- wire [1:0] response_tag;
+ wire [TAG_BITS-1:0] response_tag;
  wire [255:0] response_digest,response_capture;
  logic [5:0] node_bytes;
  logic [4:0] request_steps,request_capture_after,request_layer;
@@ -16,10 +18,10 @@ module tb_mhbs_chain_overlap;
  logic [7:0] seed_domain,step_domain;
  wire [255:0] secret_seed=256'h1f1e1d1c1b1a191817161514131211100f0e0d0c0b0a09080706050403020100;
  wire [255:0] public_seed=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
- logic [1:0] read_tag=0;wire [255:0] read_digest,read_capture;
- wire pv,pr,pd;wire [1599:0] ps,po;wire [1:0] pt,ot;
+ logic [TAG_BITS-1:0] read_tag=0;wire [255:0] read_digest,read_capture;
+ wire pv,pr,pd;wire [1599:0] ps,po;wire [TAG_BITS-1:0] pt,ot;
  wire [31:0] hash_count,permutation_count;
- mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(1),.PROFILE_ENABLE(1)) dut(
+ mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.PROFILE_ENABLE(1)) dut(
   .clk,.rst,.node_bytes,.batch_mode(1'b1),
   .batch_request_valid(request_valid),.batch_request_ready(request_ready),.batch_request_tag(request_tag),
   .batch_steps(request_steps),.batch_capture_after(request_capture_after),.batch_capture_enable(request_capture),
@@ -38,9 +40,9 @@ module tb_mhbs_chain_overlap;
  assign pd=dut.batch_perm_done;
  `include "tb/unit/mhbs_recipe_round_check.svh"
  reg [255:0] requests[0:95],digests[0:95],captures[0:95];
- integer ids[0:3],received=0,expected_hashes=0,observed=0,cycles=0,max_live=0,live=0;
- reg [3:0] pending=0;
- reg held=0;reg [1:0] hold_tag;reg [255:0] hold_digest,hold_capture;
+ integer ids[0:PIPELINE-1],received=0,expected_hashes=0,observed=0,cycles=0,max_live=0,live=0;
+ reg [PIPELINE-1:0] pending=0;
+ reg held=0;reg [TAG_BITS-1:0] hold_tag;reg [255:0] hold_digest,hold_capture;
  string dir;
  always #5 clk=~clk;
  always @(posedge clk)begin
@@ -66,7 +68,7 @@ module tb_mhbs_chain_overlap;
  end
  task load(input integer id,input integer tag);
   begin
-   ids[tag]=id;request_tag=2'(tag);
+   ids[tag]=id;request_tag=TAG_BITS'(tag);
    node_bytes=requests[id][5:0];request_steps=requests[id][12:8];request_capture_after=requests[id][20:16];
    request_capture=!requests[id][160];step_domain=requests[id][31:24];seed_domain=step_domain==3 ? 6 : 5;
    request_a=requests[id][38:32];request_b=requests[id][71:40];request_leaf=requests[id][81:72];
@@ -94,7 +96,7 @@ module tb_mhbs_chain_overlap;
     while(pending!=0)begin response_ready=($random & 3)!=0;@(negedge clk);end
     response_ready=0;
     for(integer t=0;t<PIPELINE && base+t<32;t=t+1)begin
-     read_tag=2'(t);repeat(2)@(negedge clk);
+     read_tag=TAG_BITS'(t);repeat(2)@(negedge clk);
      for(integer b=0;b<32;b=b+1)if(b<node_bytes)begin
       if(read_digest[b*8 +:8]!==digests[ids[t]][b*8 +:8])$fatal(1,"retained digest");
       if(read_capture[b*8 +:8]!==captures[ids[t]][b*8 +:8])$fatal(1,"retained capture");

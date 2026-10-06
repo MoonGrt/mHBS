@@ -39,7 +39,9 @@ module tb_mhbs_v42_recipe_lane;
     wire [391:0] ref_value;wire [255:0] ref_capture;
     wire [31:0] ref_hashes,ref_perms;
     wire [7:0] ref_index0,ref_index1;
-    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) frozen(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
+    // The frozen ordinary-request reference supports P<=4. Every P>1
+    // retains the same 24/U round latency; P2 is the witness for larger P.
+    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE>4 ? 2 : PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) frozen(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
      .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
      .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
      .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),

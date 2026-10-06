@@ -123,16 +123,18 @@ module mhbs_hbs #(
     logic [13:0] target, leaf_cursor, node_index;
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
     localparam integer PIPE_BATCH=PIPELINE;
+    localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
+    localparam integer COUNT_BITS=$clog2(PIPELINE+1);
     logic pipe_cache_valid,pipe_batch_used;
-    logic [1:0] pipe_issue_slot;
-    logic [2:0] pipe_pair;
+    logic [TAG_BITS-1:0] pipe_issue_slot;
+    logic [COUNT_BITS-1:0] pipe_pair;
     logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
     wire [255:0] pipe_read_result,pipe_read_capture;
     logic [7:0] pipe_seed_domain,pipe_step_domain;
     wire pipe_direct=!stateful && UNROLL==1 && PIPELINE>1 && operation==1 && indexing!=1;
     wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
     wire pipe_ready,pipe_valid,pipe_selected;
-    wire [1:0] pipe_tag;
+    wire [TAG_BITS-1:0] pipe_tag;
     wire [255:0] pipe_value;
     wire [31:0] pipe_hashes,pipe_permutations;
     wire [255:0] selected_capture=pipe_batch_used ? pipe_read_capture : lane_capture;
@@ -212,7 +214,7 @@ module mhbs_hbs #(
             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
             .clk,.rst(execution_rst),.node_bytes,
             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
-            .batch_request_tag(pipe_issue_slot[1:0]),
+            .batch_request_tag(pipe_issue_slot),
             .batch_steps((macro_flags[3] && leaf_cursor==target) ? digit(batch_chain_index) : chain_descriptor[19:15]),
             .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
             .batch_capture_enable(macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
@@ -222,7 +224,7 @@ module mhbs_hbs #(
             .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
             .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode),.batch_response_tag(pipe_tag),
             .batch_response_digest(pipe_value),.batch_response_capture(),
-            .batch_read_tag(pipe_pair[1:0]),.batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+            .batch_read_tag(TAG_BITS'(pipe_pair)),.batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
             .batch_hashes(pipe_hashes),.batch_permutations(pipe_permutations),
             .request_valid(state==HASH_ISSUE),
             .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
@@ -241,7 +243,7 @@ module mhbs_hbs #(
             .response_value(lane_value),.response_capture(lane_capture),.error(lane_error),
             .hash_count(lane_hashes),.permutation_count(lane_permutations)
         );
-    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>4 ||
+    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>12 ||
         UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported P/U configuration");
 
     // Verify never emits output: share its input-node latch with the output latch.

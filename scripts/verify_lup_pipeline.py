@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Independent SHAKE chain vectors and interleaved U/P unit checks."""
 from pathlib import Path
-import hashlib,json,subprocess,sys,random
+import hashlib,json,subprocess,sys,random,os
 ROOT=Path(__file__).resolve().parents[1]
-OUT=ROOT/'build/lup_shared_units';OUT.mkdir(parents=True,exist_ok=True)
+OUT=Path(os.environ.get('MHBS_UNIT_OUT',ROOT/'build/lup_shared_units'));OUT.mkdir(parents=True,exist_ok=True)
 rng=random.Random(713)
 requests=[];digests=[];captures=[]
 for n in (16,24,32):
@@ -23,10 +23,10 @@ for name,values in [('chain_requests',requests),('chain_digest',digests),('chain
 sources=(ROOT/'manifests/v42_sources.txt').read_text().splitlines()+['tb/reference/mhbs_shake_pre_direct_ref.sv','tb/reference/mhbs_recipe_pre_direct_ref.sv']
 records=[]
 for top in ('tb_mhbs_chain_overlap',):
- for u,p in ((1,2),(1,3),(1,4),(2,2)):
+ for u,p in [(1,p) for p in (2,3,4,6,8,12)]+[(2,p) for p in (2,3,4,6,12)]:
   name=f'{top}_U{u}P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
   with log.open('w') as f:
-   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.UNROLL={u}',f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={OUT}']):
+   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.UNROLL={u}',f'-P{top}.PIPELINE={p}',f'-P{top}.SHARED_STATE={int(u==1)}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary),f'+VECTORS={OUT}']):
     r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
     if r.returncode:print(log.read_text()[-2000:]);raise SystemExit(r.returncode)
   hits=[x for x in log.read_text().splitlines() if '_PASS ' in x];assert hits,name
@@ -44,10 +44,10 @@ padding_file=OUT/'recipe_padding.mem'
 padding_file.write_text(''.join(f'{v:0112x}\n' for v in padding))
 
 for top in ('tb_mhbs_v42_recipe_lane','tb_mhbs_recipe_padding'):
- for p in (1,2,3,4):
-  name=f'{top}_P{p}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
+ for u,p in [(1,p) for p in (1,2,3,4,6,8,12)]+[(2,p) for p in (1,2,3,4,6,12)]:
+  name=f'{top}_P{p}U{u}';log=OUT/(name+'.log');binary=OUT/(name+'.vvp')
   with log.open('w') as f:
-   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary)]+([f'+VECTORS={padding_file}'] if top=='tb_mhbs_recipe_padding' else [])):
+   for cmd in (['iverilog','-g2012','-s',top,f'-P{top}.PIPELINE={p}',f'-P{top}.UNROLL={u}',f'-P{top}.SHARED_STATE={int(u==1)}','-o',str(binary),*sources,f'tb/unit/{top}.sv'],['vvp',str(binary)]+([f'+VECTORS={padding_file}'] if top=='tb_mhbs_recipe_padding' else [])):
     r=subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT)
     if r.returncode:print(log.read_text()[-2000:]);raise SystemExit(r.returncode)
   assert '_PASS' in log.read_text(),name
