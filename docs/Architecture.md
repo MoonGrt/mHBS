@@ -73,11 +73,11 @@ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保�
 
 以下为历史优化来源，资源数字只对应其各自快照：
 
-K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链模块保留单份结果/capture，并向控制器提供按 tag 读口；U1、P>1 签名的 WOTS 完成后按链索引直接写端点，capture 按序输出。普通 sponge 在 U1、P>1 时复用流水末级状态，仅在初始化、吸收和链反馈时通过内部写口修改它。连续补任务候选因 ATP 增加撤回，当前仍保留批次边界。
+K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链模块保留单份结果/capture，并向控制器提供按 tag 读口；P>1 的 SLH 签名 WOTS 完成后按链索引直接写端点，capture 按序输出。普通 sponge 在 P>1 时复用流水末级状态，仅在初始化、吸收和链反馈时通过内部写口修改它。连续补任务候选因 ATP 增加撤回，当前仍保留批次边界。
 
 统一 Keccak 实现：`mhbs_recipe_lane` 内直接展开 P 个级、每级 U 个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 SHAKE 包装层或 `mhbs_keccak_pipeline`。固定块和链反馈共用 `fast_block`，已移除未启用的通用链模板与独立反馈构造。P1 使用唯一状态寄存器及组合轮末完成判断，保持原周期；P>1 保留普通 sponge 与交错链共享流水和末级状态复用。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
 
-第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；U1、P>1 sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。
+第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；P>1 的 SLH sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。
 
 本轮 recipe 直接驱动 Keccak 的源码、周期等价和综合结果见 [Recipe_Direct_Keccak.md](v4.2/Recipe_Direct_Keccak.md)。冻结旧实现仅用于测试，未列入生产源码清单。
 
@@ -92,3 +92,5 @@ XMSS 复用共享端点存储做原地 L-tree 归约，每层奇数尾节点直�
 新镜像只装入可达描述符（XMSS 26、LMS 29），program/template/descriptor 容量仍为 16/16/32。template 位 16 承载 SIGN_ONLY，旧镜像该位为零。共同核 Job 新增 q 与 identifier；统计关闭后仍通过同一综合裁剪检查。
 
 本次功能、面积及周期证据见 [XMSS/LMS 扩展报告](v4.2/Stateful_XMSS_LMS.md)。历史频率不代表扩展后设计的频率。
+
+当前生产路径已将末级状态复用和 WOTS 直接写回扩展到 U2，不再使用 `UNROLL==1` 控制这两项优化。恢复后的 13 组 v4 测量及 Keccak 有效轮利用率见 [单 lane ATP 报告](report/Single_Lane_13_ATP_150_110.md)。

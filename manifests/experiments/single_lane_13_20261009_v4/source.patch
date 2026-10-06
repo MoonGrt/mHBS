@@ -1,0 +1,22 @@
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+index 8d62b20d..694c290d 100644
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -131,7 +131,7 @@ module mhbs_hbs #(
+     logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
+     wire [255:0] pipe_read_result,pipe_read_capture;
+     logic [7:0] pipe_seed_domain,pipe_step_domain;
+-    wire pipe_direct=!stateful && UNROLL==1 && PIPELINE>1 && operation==1 && indexing!=1;
++    wire pipe_direct=!stateful && PIPELINE>1 && operation==1 && indexing!=1;
+     wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
+     wire pipe_ready,pipe_valid,pipe_selected;
+     wire [TAG_BITS-1:0] pipe_tag;
+@@ -210,7 +210,7 @@ module mhbs_hbs #(
+     wire [13:0] batch_leaf_index=leaf_cursor+14'(pipe_issue_slot);
+     assign pipe_selected=state==PIPE_ISSUE && pipe_expected_mask[pipe_issue_slot];
+         mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+-            .SHARED_STATE(UNROLL==1),.RECIPE_MASK(16'hfffe),
++            .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe),
+             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+             .clk,.rst(execution_rst),.node_bytes,
+             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
