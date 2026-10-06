@@ -7,7 +7,7 @@
 module tb_mhbs_external;
  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
  parameter integer OPERATION=1,MESSAGE_BYTES=1;
- parameter integer SWAP=0,LANES=2,UNROLL=2,PIPELINE=1;
+ parameter integer UNROLL=2,PIPELINE=1;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
@@ -27,7 +27,7 @@ module tb_mhbs_external;
  reg [7:0] message_bytes[0:86];
  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.LANES(LANES),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
  `include "tb/integration/mhbs_parent_input_check.svh"
@@ -45,11 +45,11 @@ module tb_mhbs_external;
   else begin
    if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
    previous_output=out_valid;
-   if(LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
-      && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected[0] && `HBS_CORE.pipe_ready[0]
+   if(UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
+      && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected && `HBS_CORE.pipe_ready
       && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
        tail_batches=tail_batches+1;
-   if(done && !coverage_reported && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
+   if(done && !coverage_reported && !fault && OPERATION==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
     coverage_reported=1;
     if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
     $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
@@ -60,28 +60,20 @@ module tb_mhbs_external;
  // Testbench-only observers keep production-disabled statistics independently
  // checkable. Count completed permutations/hashes, not the RTL issue counters.
  integer observed_boot=0,observed_cycles=0;
- integer observed_hashes[0:1],observed_permutations[0:1];
- wire [31:0] measured_hashes=observed_hashes[0]+observed_hashes[1];
- wire [31:0] measured_permutations=observed_permutations[0]+observed_permutations[1];
+ integer observed_hashes,observed_permutations;
+ wire [31:0] measured_hashes=observed_hashes;
+ wire [31:0] measured_permutations=observed_permutations;
  wire [31:0] measured_keygen=OPERATION ? 0 : observed_cycles;
  wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
- genvar lane;
- generate for(lane=0;lane<2;lane=lane+1)begin: observers
-  if(lane<LANES)begin
-  always @(posedge clk)begin
-   if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
-   else begin
-    if(`HBS_CORE.lanes[lane].lane.permutation_complete)begin
-     observed_permutations[lane]=observed_permutations[lane]+1;
-     if(`HBS_CORE.lanes[lane].lane.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
-    end
-    if(`HBS_CORE.lanes[lane].lane.batch_perm_done)begin
-     observed_permutations[lane]=observed_permutations[lane]+1;observed_hashes[lane]=observed_hashes[lane]+1;
-    end
+ always @(posedge clk)begin
+  if(`HBS_CORE.execution_rst)begin observed_hashes=0;observed_permutations=0;end
+  else begin
+   if(`HBS_CORE.lane.permutation_complete)begin
+    observed_permutations++;if(`HBS_CORE.lane.running_last)observed_hashes++;
    end
+   if(`HBS_CORE.lane.batch_perm_done)begin observed_hashes++;observed_permutations++;end
   end
-  end else initial begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
- end endgenerate
+ end
  always @(posedge clk)begin
   if(rst)observed_boot=0;
   else if(`HBS_CORE.rst)observed_boot=observed_boot+1;
@@ -151,8 +143,8 @@ module tb_mhbs_external;
   if(interrupt_run)begin repeat(1000)tick();rst=1;repeat(4)tick();rst=0;end
   if(fault)begin
    if(fault==2)while(cursor<metadata[4])tick();
-   while(!(`HBS_CORE.lane_valid[0] && `HBS_CORE.response_pending[0]))tick();
-   force `HBS_CORE.lanes[0].lane.error=1;
+   while(!(`HBS_CORE.lane_valid))tick();
+   force `HBS_CORE.lane.error=1;
    while(!error)tick();
    repeat(40)begin tick();if(out_valid || busy || done)$fatal(1,"fault halt");end
    $display("V42_FAULT_PASS mode=%0d prefix=%0d",fault,cursor);$finish;
@@ -170,7 +162,7 @@ module tb_mhbs_external;
     $fatal(1,"production statistics must be zero");
    check_parent_input_coverage();
    check_route_source_coverage();
-   $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d swap=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,SWAP,run,wait_cycles,cycles);
+   $display("EXTERNAL_PASS boot=%0d keygen=%0d sign=%0d hashes=%0d permutations=%0d run=%0d wait=%0d total=%0d",observed_boot,measured_keygen,measured_sign,measured_hashes,measured_permutations,run,wait_cycles,cycles);
    for(integer i=0;i<64;i=i+1)if(residency[i])$display("RESIDENCY state=%0d cycles=%0d",i,residency[i]);
    if(OPERATION==1)begin
     if(!signature_valid || signature_error || signature_length!=metadata[0] ||

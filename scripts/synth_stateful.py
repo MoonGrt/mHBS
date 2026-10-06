@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Freeze and synthesize the all-algorithm K1/K2P1U1 common cores."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import json,tarfile,subprocess
 from pathlib import Path
 from run_lup_sign_atp import snapshot,synth,ROOT,sha

@@ -4,11 +4,10 @@ reg [255:0] shared_expected[0:67];
 reg [67:0] shared_initialized=0;
 reg shared_roots_live=0;
 // Only logical lane zero implements the streamed list recipe.
-localparam integer SHARED_STREAM_LANE=SWAP ? LANES-1 : 0;
 wire shared_stream_read =
- (`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.state==2 && `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.shapes[12] &&
-  `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.position>=`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.prefix_bytes &&
-  `HBS_CORE.lanes[SHARED_STREAM_LANE].lane.position<`HBS_CORE.lanes[SHARED_STREAM_LANE].lane.input_length);
+ (`HBS_CORE.lane.state==2 && `HBS_CORE.lane.shapes[12] &&
+  `HBS_CORE.lane.position>=`HBS_CORE.lane.prefix_bytes &&
+  `HBS_CORE.lane.position<`HBS_CORE.lane.input_length);
 always @(posedge clk) begin
  if(`HBS_CORE.execution_rst) begin
   shared_initialized=0; shared_roots_live=0;
@@ -27,25 +26,23 @@ always @(posedge clk) begin
    shared_initialized[`HBS_CORE.group_index]=1;
   end
   if(`HBS_CORE.state==7 && `HBS_CORE.pipe_direct && `HBS_CORE.chain_cursor==0)shared_initialized=0;
-  if(`HBS_CORE.pipe_direct && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_valid[0])begin
+  if(`HBS_CORE.pipe_direct && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_valid)begin
    if(shared_roots_live)$fatal(1,"direct WOTS before FORS compression");
-   shared_expected[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag[0]]=`HBS_CORE.pipe_value[0];
-   shared_initialized[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag[0]]=1;
+   shared_expected[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag]=`HBS_CORE.pipe_value;
+   shared_initialized[`HBS_CORE.chain_cursor+`HBS_CORE.pipe_tag]=1;
   end
   if(`HBS_CORE.state==8) begin
    if(`HBS_CORE.indexing==1) begin
-    if(`HBS_CORE.endpoint_write0 || `HBS_CORE.endpoint_write1)
+    if(`HBS_CORE.endpoint_write)
      $fatal(1,"FORS leaf overwrites shared root storage");
    end else begin
     if(shared_roots_live) $fatal(1,"WOTS starts before FORS root compression completes");
     if(`HBS_CORE.chain_cursor==0) shared_initialized=0;
-    for(integer i=0;i<2;i=i+1) if(`HBS_CORE.active_mask[i]) begin
-     shared_expected[`HBS_CORE.chain_cursor+i]=`HBS_CORE.result[i][255:0];
-     shared_initialized[`HBS_CORE.chain_cursor+i]=1;
-    end
+    shared_expected[`HBS_CORE.chain_cursor]=`HBS_CORE.result[255:0];
+    shared_initialized[`HBS_CORE.chain_cursor]=1;
    end
   end
-  if(`HBS_CORE.state==23 && `HBS_CORE.response_pending[0] && `HBS_CORE.lane_valid[0] &&
+  if(`HBS_CORE.state==23 && `HBS_CORE.lane_valid &&
      `HBS_CORE.task_recipe[59:56]==12 && `HBS_CORE.task_recipe[55:48]==4) begin
    shared_roots_live=0; shared_initialized=0;
   end

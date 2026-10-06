@@ -1,5 +1,7 @@
 # mHBS 当前 Job 与流接口
 
+硬件固定为一个 Hash lane，已删除 `LANES` 和 `SWAP_PHYSICAL_LANES`。`PIPELINE/UNROLL` 仍可配置，默认 P1U2；Job、消息、签名和 Verify 接口不变。
+
 唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，以及实验 `xmss_omega2/4`、`lms_omega2/4`；每次复位执行一次 Keygen、Sign 或 Verify。
 
 ## 配置

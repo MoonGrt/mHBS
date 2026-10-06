@@ -22,8 +22,8 @@ def main():
         (vec/'message.mem').write_text(''.join(f'{x:02x}\n' for x in msg))
         cfgpath=vec/'config.json';write(cfgpath,dict(profile=name,node_bytes=n,nodes=len(sig)//n,message_bytes=len(msg),public_seed=cfg['public_seed'],public_root=cfg['public_root'],source_signature_sha256=sha(source/'expected.mem')))
         binaries={}
-        def binary(swap=0,stats=True,part=False,bad_root=False,root_bit=0,root_noise=False):
-            key=f's{swap}_p{int(stats)}_c{int(part)}_r{int(bad_root)}_b{root_bit}_h{int(root_noise)}'
+        def binary(stats=True,part=False,bad_root=False,root_bit=0,root_noise=False):
+            key=f'p{int(stats)}_c{int(part)}_r{int(bad_root)}_b{root_bit}_h{int(root_noise)}'
             if key in binaries:return binaries[key]
             d=vec/key;d.mkdir(exist_ok=True);sources=rtl();defines=[]
             if part:
@@ -31,35 +31,25 @@ def main():
                 sources=[x for x in sources if x!='rtl/top/mhbs_top.sv']+[str(d/'common.sv'),str(d/'top.sv')];defines=['-DMHBS_PARTITIONED']
             root=int.from_bytes(bytes.fromhex(cfg['public_root']),'little')^(int(bad_root)<<root_bit)
             if root_noise:root|=((1<<(256-8*n))-1)<<(8*n)
-            options=[f"-GPUBLIC_SEED=256'h{int.from_bytes(bytes.fromhex(cfg['public_seed']),'little'):064x}",f"-GPUBLIC_ROOT=256'h{root:064x}",f'-GMESSAGE_BYTES={len(msg)}',f'-GNODE_BYTES={n}',f'-GNODES={len(sig)//n}',f'-GSWAP={swap}',f'-GPROFILE_ENABLE={int(stats)}']
+            options=[f"-GPUBLIC_SEED=256'h{int.from_bytes(bytes.fromhex(cfg['public_seed']),'little'):064x}",f"-GPUBLIC_ROOT=256'h{root:064x}",f'-GMESSAGE_BYTES={len(msg)}',f'-GNODE_BYTES={n}',f'-GNODES={len(sig)//n}',f'-GPROFILE_ENABLE={int(stats)}']
             exe=d/'obj/Vtb_mhbs_verify'
             run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_verify',*options,'--Mdir',str(exe.parent),*sources,'tb/integration/tb_mhbs_verify.sv'],d/'compile.log')
             binaries[key]=exe;return exe
         cases={}
-        def case(label,opts=(),swap=0,stats=True,part=False,bad_root=False,root_bit=0,root_noise=False):
-            exe=binary(swap,stats,part,bad_root,root_bit,root_noise);log=vec/(label+'.log')
+        def case(label,opts=(),stats=True,part=False,bad_root=False,root_bit=0,root_noise=False):
+            exe=binary(stats,part,bad_root,root_bit,root_noise);log=vec/(label+'.log')
             run([str(exe),'+IMAGE='+str(BASE/'images'/name),'+VECTOR='+str(vec),*opts],log)
             if label=='fault':assert 'VERIFY_FAULT_PASS' in log.read_text();row=dict(passed=True)
             else:
                 hits=re.findall(r'VERIFY_PASS accepted=(\d+) nodes=(\d+) cycles=(\d+) waits=(\d+) hashes=(\d+) permutations=(\d+) zero=(\d+) full=(\d+)',log.read_text());assert hits,label
                 row=dict(zip(('accepted','nodes','cycles','waits','hashes','permutations','zero','full'),map(int,hits[-1])));row['passed']=True
-                coverage=re.findall(r'VERIFY_COVERAGE asymmetric=(\d+) zero_left=(\d+) zero_right=(\d+) both_zero=(\d+) auth_left=(\d+) auth_right=(\d+)',log.read_text());assert coverage
-                row['coverage']=dict(zip(('asymmetric','zero_left','zero_right','both_zero','auth_left','auth_right'),map(int,coverage[-1])))
+                coverage=re.findall(r'VERIFY_COVERAGE zero=(\d+) full=(\d+) auth_left=(\d+) auth_right=(\d+)',log.read_text());assert coverage
+                row['coverage']=dict(zip(('zero','full','auth_left','auth_right'),map(int,coverage[-1])))
             row['log_sha256']=sha(log);cases[label]=row
             return row
         reference=case('normal');assert reference['zero'] and reference['full']
-        assert all(v for k,v in reference['coverage'].items() if k!='both_zero'),(name,reference['coverage'])
+        assert all(reference['coverage'].values()),(name,reference['coverage'])
         if not args.quick:
-            # Find a deterministic malformed-message vector that exercises every
-            # pair boundary. It still uses the independent software verifier.
-            for mask in range(2,256):
-                changed=bytes([msg[0]^mask])+msg[1:]
-                assert not slh_dsa.verify_internal(params,changed,sig,pk)
-                row=case('pair_boundaries',(f'+BAD_MESSAGE={mask}','+EXPECT=0'))
-                if all(row['coverage'].values()):
-                    row['message_xor']=mask
-                    break
-            else:raise AssertionError('pair boundary coverage')
             tests=[('randomizer',0),('fors_secret',1),('fors_auth',2),('wots',1+params.k*(params.a+1)),('xmss_auth',1+params.k*(params.a+1)+params.wots_len),('last_auth',len(sig)//n-1)]
             for label,index in tests:
                 changed=bytearray(sig);changed[index*n]^=1;assert not slh_dsa.verify_internal(params,msg,changed,pk)
@@ -81,7 +71,7 @@ def main():
                 row=case(label,opts)
                 for field in ('hashes','permutations','nodes'):assert row[field]==reference[field],(label,field)
                 assert row['cycles']-row['waits']==reference['cycles'],label
-            for label,opts,kw in [('stall',('+STALL=1',),{}),('reset_replay',('+ABORT_AT=4','+REPLAY=1'),{}),('truncated_wait_reset',('+CUT=5',),{}),('swap',(),dict(swap=1)),('no_profile',(),dict(stats=False)),('partition',(),dict(part=True))]:
+            for label,opts,kw in [('stall',('+STALL=1',),{}),('reset_replay',('+ABORT_AT=4','+REPLAY=1'),{}),('truncated_wait_reset',('+CUT=5',),{}),('no_profile',(),dict(stats=False)),('partition',(),dict(part=True))]:
                 row=case(label,opts,**kw)
                 for field in ('hashes','permutations','nodes'):assert row[field]==reference[field],(label,field)
                 assert row['cycles']-row['waits']==reference['cycles'],label

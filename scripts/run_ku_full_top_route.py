@@ -4,6 +4,8 @@
 Four K points run concurrently in each U batch; each Vivado has six threads.
 The signature store and actual 128f ROM images are part of the top-level netlist.
 """
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import hashlib
 import json
 import math

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Resumable 128f Sign K/P/U cycle and common-core synthesis matrix."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import concurrent.futures, csv, hashlib, json, os, re, shutil, subprocess, tarfile, threading, time
 from datetime import datetime, timezone
 from pathlib import Path

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Reproducible L2U1P1-P4 common-core area/time sweep; no place/route."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 from pathlib import Path
 import argparse,csv,hashlib,json,re,shutil,subprocess,sys,tarfile,time
 from v42_external_flow import ROOT,BASE,simulate_case,sha,write,rtl

@@ -5,6 +5,8 @@ K2 uses the current production controller with only its elaboration guard
 relaxed for U1/U3/U4. K1/K3/K4 use the archived generic K controller, linked
 to current datapath sources. These points are synthesis experiments only.
 """
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import hashlib
 import json
 import re

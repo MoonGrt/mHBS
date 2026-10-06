@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """LMS Hmsg's 54-byte prefix: messages 81/82/83 cross the SHAKE rate."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import json
 from stateful_vectors import generate,OUT
 from run_stateful import build,run

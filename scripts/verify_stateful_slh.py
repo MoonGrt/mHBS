@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Preserve SLH cycles across existing K/P/U and common/statistics variants."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import json,concurrent.futures,shutil
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,NAMES,simulate_case

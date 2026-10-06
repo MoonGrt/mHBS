@@ -1,16 +1,17 @@
 # mHBS v4.2
 
-默认 L2U2P1 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
+固定单 lane、默认 P1U2 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
 
-此前封存的 L2U2P1 版本：**21,043 LUT、7,932 FF、1,112 LUTRAM、6252.250 等效 Slice**，BRAM/DSP 为零。这是共同核综合数据；没有该版本的新布线频率。详见[当前面积报告](docs/v4.2/LUT21k.md)和[六参数周期](docs/v4.2/Cycles.md)。
+`LANES` 与 `SWAP_PHYSICAL_LANES` 已删除，不能通过参数恢复多 lane。只保留 `PIPELINE/UNROLL`（P/U）：P>1 时普通哈希和多上下文链共用一套 P×U 轮逻辑。十种算法参数和三种操作均保留。
 
-新增 L/U/P 实验：L 为 lane 数、U 为每级轮展开数、P 为流水级数。P>1 时，普通哈希和多上下文链共用同一套 P×U 轮逻辑。本轮仅验证 128f sign，参见 [LUP ATP 报告](docs/v4.2/LUP_128f_Sign_ATP.md)。历史 K 与 L 同义；冻结证据的路径与名称保持原样。
+最新单 lane 裁剪、周期等价与共同核面积见 [单 lane 优化报告](docs/report/Single_Lane_Optimization.md)。历史 K/L 报告、路径和源码快照保持原样，不能作为当前版本的面积或周期。
 
 ## 构建与验证
 
 ```bash
-make lup-unit-test
-make lup-atp LUP_TAG=lup_shared_128f_20261007_v2  # 四组共同核综合，无布线
+make pu-unit-test
+make pu-atp PU_TAG=my_pu      # P1–P4/U1–U2，共同核综合，无布线
+make single-lane-regression   # 对照冻结旧 L1：十参数三操作与边界检查
 make contract-test lint
 make smoke TAG=my_smoke       # 模型、单元、12 组 KG/SG、6 组 Verify 和封存证据
 make verify TAG=my_full       # 再含扩展、共同核等价、统计关闭、故障及完整 Verify
@@ -39,9 +40,9 @@ make reproduce-v42 reproduce-ku
 - `rtl/`：源清单中的生产模块；FORS 根和 WOTS 端点共用 `mhbs_value_store`。
 - `model/`、`tests/`、`tb/`：当前镜像生成、软件参考、协议和密码运算回归；旧命名的模型仍属于编译依赖。
 - `scripts/`、`experiments/v4.2/external_job_message/`：当前验证、综合、布线及 ROM 映射工具。
-- 当前源码快照、原始综合报告、DCP、完整回归日志和哈希由 `manifests/experiments/unified_hbs_v4.2/external_job_message/current_core.json` 指向。
+- 本轮源码快照、原始分层报告和验证日志在 `manifests/experiments/single_lane_20261008/`；`current_core.json` 仍指向历史封存版本。
 - [最新 K/U 报告](docs/v4.2/KU_Sign_ATP_150_110_67_48.md)和[原始 K/U 归档](manifests/experiments/ku_sign_latest/README.md)独立保留；`make report-ku`、`make reproduce-ku` 不依赖 build。
 - 旧候选、重复报告和实验驱动已删除，可从 Git 恢复。清理清单：`manifests/cleanup_20261002.json`。
 - `source/`、`tmp/` 是本地研究资料和工作笔记，不属于生产源码或已提交备份。
 
-当前 K1P1U1～K1P4U1 的统一 Keccak 实现及最新共同核综合结果见 [第二轮 ATP 报告](docs/v4.2/KPU_ATP_Unified_Optimization.md)。150 MHz 为假定频率，未布线。
+历史 K1P1U1～K1P4U1 的统一 Keccak 实现及当时共同核综合结果见 [第二轮 ATP 报告](docs/v4.2/KPU_ATP_Unified_Optimization.md)。150 MHz 为假定频率，未布线。

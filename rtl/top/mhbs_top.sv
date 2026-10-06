@@ -1,8 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 module mhbs_top #(
-    parameter integer LANES=2,UNROLL=2,PIPELINE=1,
-    parameter bit SWAP_PHYSICAL_LANES=0,
+    parameter integer UNROLL=2,PIPELINE=1,
     parameter bit SIGNATURE_STORE_ENABLE=1,
     // Statistics are observable in simulation, absent from production hardware.
 `ifdef SYNTHESIS
@@ -75,8 +74,7 @@ module mhbs_top #(
                                                : core_descriptor_addresses;
     assign result_kind=OPERATION;
     assign message_ready=(phase==RUN) && core_message_ready;
-    mhbs_hbs #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.LANES(LANES),.PROFILE_ENABLE(PROFILE_ENABLE),
-        .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES)) core (
+    mhbs_hbs #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
         .program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,

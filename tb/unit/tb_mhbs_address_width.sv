@@ -4,19 +4,19 @@ module tb_mhbs_address_width;
  logic [63:0] profile_descriptor=0;
  integer a,k,hp,group_number,leaf_number,node_number,height;
  integer checked=0;
- reg [63:0] expected0,expected1,global_node;
+ reg [63:0] expected0,global_node;
  mhbs_hbs dut(.clk,.rst,.profile_descriptor,.descriptor_data(128'd0),
   .job_valid(1'b0),.program_data(64'd0),.template_data(64'd0),
   .message_valid(1'b0),.verify_valid(1'b0));
  task automatic tick;
   #1;clk=1;#1;clk=0;#1;
  endtask
- task automatic check_b(input [63:0] b0,input [63:0] b1);
+ task automatic check_b(input [63:0] b0);
   begin
-   if(b0>=64'h100000 || b1>=64'h100000)$fatal(1,"reference exceeds 20-bit bound");
-   if(dut.task_b[0]!==20'(b0) || dut.task_b[1]!==20'(b1))
-    $fatal(1,"latched address mismatch expected=%h/%h actual=%h/%h",b0,b1,dut.task_b[0],dut.task_b[1]);
-   if(dut.lanes[0].lane.request_b!==b0[31:0] || dut.lanes[1].lane.request_b!==b1[31:0])
+   if(b0>=64'h100000)$fatal(1,"reference exceeds 20-bit bound");
+   if(dut.task_b!==20'(b0))
+    $fatal(1,"latched address mismatch expected=%h actual=%h",b0,dut.task_b);
+   if(dut.lane.request_b!==b0[31:0])
     $fatal(1,"32-bit lane address or zero extension mismatch");
    if(dut.error)$fatal(1,"unexpected controller error");
    checked=checked+1;
@@ -37,7 +37,7 @@ module tb_mhbs_address_width;
    dut.macro_flags=0;dut.scalar_leaf=0;dut.chain_cursor=0;
    dut.endpoint_count=67;dut.saved_chain_descriptor=0;
    // All algorithm groups, plus the 6-bit field maximum as a conservative
-   // bound. Even leaf cursors ensure both scheduled lanes stay in the tree.
+   // bound. Exercise both boundary and randomized leaf indices.
    for(integer g=0;g<=k;g=g+1)begin
     group_number=g==k ? 63 : g;
     dut.group_index=6'(group_number);dut.indexing=1;dut.tree_height=4'(a);
@@ -53,12 +53,12 @@ module tb_mhbs_address_width;
      dut.operation=1;dut.leaf_cursor=14'(leaf_number);dut.target=0;
      dut.state=dut.CHAIN_SETUP;tick();
      expected0=64'(group_number)*(64'd1<<a)+64'(leaf_number);
-     check_b(expected0,expected0+1);
+     check_b(expected0);
      if(dut.state!==dut.HASH_ISSUE)$fatal(1,"sign chain setup latency changed");
      // Verify accepts either parity, including the final leaf of a tree.
      dut.operation=2;dut.target=14'(leaf_number+(t&1));
      dut.state=dut.CHAIN_SETUP;tick();
-     expected0=expected0+64'(t&1);check_b(expected0,expected0);
+     expected0=expected0+64'(t&1);check_b(expected0);
      if(dut.state!==dut.VERIFY_INPUT)$fatal(1,"verify setup latency changed");
     end
     for(integer level=0;level<a;level=level+1)
@@ -70,19 +70,19 @@ module tb_mhbs_address_width;
       default:node_number=$random & ((1<<(a-level))-1);
      endcase
      dut.operation=2;dut.node_level=4'(level);dut.node_index=14'(node_number);
-     expected1=64'(dut.task_b[1]);dut.state=dut.PARENT_SETUP;tick();
+     dut.state=dut.PARENT_SETUP;tick();
      // Independently compute the global node's parent in 64-bit arithmetic.
      global_node=64'(group_number)*(64'd1<<a)+64'(node_number)*(64'd1<<level);
-     expected0=global_node/(64'd1<<(level+1));check_b(expected0,expected1);
+     expected0=global_node/(64'd1<<(level+1));check_b(expected0);
      if(dut.state!==dut.HASH_ISSUE)$fatal(1,"FORS parent setup latency changed");
     end
    end
    // WOTS restore steps are four-bit values; upper address bits must clear.
    for(integer step=0;step<16;step=step+1)begin
-    dut.operation=2;dut.active_mask=3;
-    dut.task_b[0]=20'hffff0|20'(step);dut.task_b[1]=20'hffff0|20'(15-step);
+    dut.operation=2;
+    dut.task_b=20'hffff0|20'(step);
     dut.state=dut.VERIFY_CHAIN_ADVANCE;tick();
-    check_b(64'((step+1)&15),64'((16-step)&15));
+    check_b(64'((step+1)&15));
     if(dut.state!==dut.VERIFY_CHAIN_RUN)$fatal(1,"WOTS advance latency changed");
    end
   end
@@ -95,13 +95,13 @@ module tb_mhbs_address_width;
    node_number=t==0 ? 0 : t==1 ? 1 : t==2 ? (1<<(height-level))-1 : $random & ((1<<(height-level))-1);
    dut.indexing=mode==0 ? 0 : 2;dut.operation=2;dut.macro_flags=0;
    dut.tree_height=4'(height);dut.node_level=4'(level);dut.node_index=14'(node_number);
-   expected1=64'(dut.task_b[1]);dut.state=dut.PARENT_SETUP;tick();
+   dut.state=dut.PARENT_SETUP;tick();
    expected0=64'(node_number)/2;
    if(mode)expected0=expected0+(64'd1<<(height-level-1));
-   check_b(expected0,expected1);
+   check_b(expected0);
    if(dut.state!==dut.HASH_ISSUE)$fatal(1,"XMSS/heap parent setup latency changed");
   end
-  $display("ADDRESS_WIDTH_PASS cases=%0d six_profiles all_groups field_max pair_carry target_parity parent_levels zero_extend WOTS_wrap",checked);
+  $display("ADDRESS_WIDTH_PASS cases=%0d six_profiles all_groups field_max leaf_bounds target_parity parent_levels zero_extend WOTS_wrap",checked);
   $finish;
  end
 endmodule

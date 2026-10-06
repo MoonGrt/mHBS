@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """K2P2/P3 regression against the frozen starting source snapshot."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 from pathlib import Path
 import tarfile,subprocess,json,sys
 from v42_external_flow import ROOT,BASE,simulate_case

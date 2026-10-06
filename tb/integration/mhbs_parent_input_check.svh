@@ -1,15 +1,14 @@
 // Freeze the old PARENT_SETUP operands in the testbench and compare the
 // actual lane pins until PARENT_DONE, including request/response stalls.
 // Reset/abort invalidates the scoreboard without clearing datapath storage.
-localparam integer PARENT_PHYSICAL_LANE = SWAP ? LANES-1 : 0;
 reg parent_inputs_live=0;
 reg [255:0] parent_expected_left,parent_expected_right;
 integer parent_input_cycles=0,parent_input_requests=0;
 integer parent_verify_left=0,parent_verify_right=0;
 wire [255:0] parent_observed_left =
- `HBS_CORE.lanes[PARENT_PHYSICAL_LANE].lane.request_left;
+ `HBS_CORE.lane.request_left;
 wire [255:0] parent_observed_right =
- `HBS_CORE.lanes[PARENT_PHYSICAL_LANE].lane.request_right;
+ `HBS_CORE.lane.request_right;
 always @(posedge clk)begin
  if(`HBS_CORE.execution_rst)begin
   parent_inputs_live=0;parent_input_cycles=0;parent_input_requests=0;

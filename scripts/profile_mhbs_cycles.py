@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Read-only RTL observers for the six-profile K2U2 cycle breakdown."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import argparse
 import concurrent.futures
 import hashlib

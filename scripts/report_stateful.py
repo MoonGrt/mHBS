@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Assemble measured stateful results and source-bound verification evidence."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 from pathlib import Path
 import json,csv,hashlib,shutil,subprocess,tarfile
 from run_stateful import OUT,ROOT

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Measure KxP1U1 128f sign with a frozen common-core synthesis source."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import argparse,csv,json,subprocess,tarfile
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,simulate_case,write,sha

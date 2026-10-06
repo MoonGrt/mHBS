@@ -4,6 +4,8 @@
 Instrument only a build copy of the integration bench. Count stage input valids
 (the rounds actually consumed at the next edge), rather than register presence.
 """
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 from pathlib import Path
 import argparse,hashlib,json,re,subprocess,tarfile
 ROOT=Path(__file__).resolve().parents[1]

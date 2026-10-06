@@ -46,6 +46,18 @@ class UnifiedRtlContractTests(unittest.TestCase):
             for removed in ('state_next_q', 'state_commit_', 'consumed_index', 'guard_current_q'):
                 self.assertNotIn(removed, text)
 
+    def test_fixed_single_lane(self):
+        # No compatibility parameter may silently recreate a second lane.
+        for path in (ROOT / 'manifests/v42_sources.txt').read_text().split():
+            self.assertNotRegex((ROOT / path).read_text(), r'\b(?:LANES|SWAP_PHYSICAL_LANES)\b')
+        import sys
+        sys.path.insert(0, str(ROOT / 'scripts'))
+        from v42_common_partition import partition
+        common, shell = partition((ROOT / 'rtl/top/mhbs_top.sv').read_text())
+        self.assertNotRegex(common + shell, r'\b(?:LANES|SWAP_PHYSICAL_LANES)\b')
+        self.assertRegex(common, r'parameter integer UNROLL=2')
+        self.assertNotIn('LANES', (ROOT / 'experiments/v4.2/external_job_message/synth.tcl').read_text())
+
     def test_production_source_closure(self):
         sources = (ROOT / 'manifests/v42_sources.txt').read_text().split()
         self.assertEqual(len(sources), len(set(sources)))

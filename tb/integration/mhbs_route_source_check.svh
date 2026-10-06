@@ -12,18 +12,18 @@ always @(posedge clk) begin
    route_check_live=0; route_checks=route_checks+1;
   end
   case(`HBS_CORE.state)
-   14: if(!(`HBS_CORE.indexing!=1 && `HBS_CORE.chain_cursor+LANES<`HBS_CORE.endpoint_count)
+   14: if(!(`HBS_CORE.indexing!=1 && `HBS_CORE.chain_cursor+1<`HBS_CORE.endpoint_count)
        && `HBS_CORE.standalone_chain && `HBS_CORE.chain_descriptor[13:12]==0) begin
     route_expected={136'd0,`HBS_CORE.node_value};route_check_live=1;
    end
    16: if(`HBS_CORE.standalone_chain) begin
-    route_expected=`HBS_CORE.result[0];route_check_live=1;
+    route_expected=`HBS_CORE.result;route_check_live=1;
    end
    21: begin
     route_expected={136'd0,(!`HBS_CORE.verifying && `HBS_CORE.macro_flags[3]
       ? `HBS_CORE.value[3] : `HBS_CORE.node_value)};route_check_live=1;
    end
-   24: begin route_expected=`HBS_CORE.result[0];route_check_live=1;end
+   24: begin route_expected=`HBS_CORE.result;route_check_live=1;end
    34: begin route_expected={136'd0,`HBS_CORE.emit_value};route_check_live=1;end
   endcase
  end

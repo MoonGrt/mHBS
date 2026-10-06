@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare K2U2 pruning with the sealed baseline and statistics-disabled RTL."""
+"""Compare fixed single-lane statistics-enabled/disabled and partitioned RTL."""
 import argparse
 import concurrent.futures
 import json
@@ -8,12 +8,10 @@ from v42_external_flow import BASE, NAMES, build_binary, capture, identity, run,
 
 
 def verify(tag, baseline=None):
-    if baseline is None:
-        baseline = json.loads((BASE / 'current_core.json').read_text())['candidate']
     folder = capture(tag)
     normal = json.loads((folder / 'simulation.json').read_text())
-    old_file = BASE / 'candidates' / baseline / 'simulation.json'
-    old = json.loads(old_file.read_text())
+    old_file = BASE / 'candidates' / baseline / 'simulation.json' if baseline else None
+    old = json.loads(old_file.read_text()) if old_file else normal
     assert normal['passed'] and normal['rtl_sha256'] == identity()
     keys = ('boot_cycles', 'keygen_cycles', 'sign_cycles', 'hashes',
             'permutations', 'total_cycles', 'output_sha256')
@@ -68,8 +66,8 @@ def verify(tag, baseline=None):
     write(folder/'faults.json', dict(passed=True, rtl_sha256=identity(), cases=faults))
     evidence['faults.json'] = sha(folder/'faults.json')
     write(folder/'pruning_verification.json', dict(
-        passed=True, rtl_sha256=identity(), baseline=baseline, baseline_sha256=sha(old_file),
-        cycle_equivalence_pass=True, node_output_cycle_formula_pass=False,
+        passed=True, rtl_sha256=identity(), baseline=baseline, baseline_sha256=sha(old_file) if old_file else None,
+        cycle_equivalence_pass=bool(baseline), node_output_cycle_formula_pass=False,
         statistics_equivalence_pass=True,
         baseline_cases=len(old['cases']), statistics_disabled_cases=4*len(NAMES), statistics_disabled_extended=2,
         fault_cases=2*len(NAMES), evidence_sha256=evidence))
@@ -79,6 +77,6 @@ def verify(tag, baseline=None):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('tag')
-    parser.add_argument('--baseline', help='defaults to the accepted current_core.json candidate')
+    parser.add_argument('--baseline', help='optional frozen single-lane reference; no historical multi-lane default')
     args = parser.parse_args()
     verify(args.tag, args.baseline)

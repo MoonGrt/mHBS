@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Measure an isolated single-lane U1 derivative of the frozen K2U2 experiment."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import argparse
 import concurrent.futures
 import difflib

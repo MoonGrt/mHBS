@@ -40,7 +40,7 @@ def audit(tag):
 
     normal_names = {n + '_' + op for n in NAMES for op in ('keygen', 'sign')}
     extended_names = {n + '_' + label for n in NAMES for label in (
-        'root_transfer', 'swap', 'stall', 'replay', 'keygen_replay',
+        'root_transfer', 'stall', 'replay', 'keygen_replay',
         'message_1', 'message_7', 'message_8', 'message_9', 'message_87', 'message_87_stall')}
     groups = {}
     for filename, expected in (
@@ -74,12 +74,12 @@ def audit(tag):
     for profile, cases in verify['profiles'].items():
         expected_cases = {'normal', 'randomizer', 'fors_secret', 'fors_auth',
             'wots', 'xmss_auth', 'last_auth', 'message', 'root', 'stall',
-            'reset_replay', 'truncated_wait_reset', 'swap', 'no_profile', 'partition', 'fault', 'node_padding', 'second_node_delay', 'poison_reset', 'pair_boundaries'}
+            'reset_replay', 'truncated_wait_reset', 'no_profile', 'partition', 'fault', 'node_padding', 'second_node_delay', 'poison_reset'}
         if not profile.startswith('slh_128'):expected_cases.add('root_middle')
         if profile.startswith('slh_256'):expected_cases.add('root_upper')
         else:expected_cases.add('root_padding')
         assert set(cases)==expected_cases
-        assert all(cases['pair_boundaries']['coverage'].values())
+        assert all(cases['normal']['coverage'].values())
         for label, row in cases.items():
             assert row['passed']
             assert sha(folder / 'verify' / profile / (label + '.log')) == row['log_sha256']

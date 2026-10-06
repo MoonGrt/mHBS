@@ -4,6 +4,8 @@
 The source snapshot and Vivado reports live outside build so a later build
 cleanup does not erase the evidence.  Runs are deliberately sequential by U.
 """
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import hashlib
 import json
 import re

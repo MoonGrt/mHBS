@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Index, message, corruption, reset, profile and ordinary P>1 coverage."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 from pathlib import Path
 import sys,json
 from stateful_vectors import generate,OUT,PROFILE_CODES

@@ -57,7 +57,7 @@ def main():
         assert set(normal['cases']) == {name + '_' + op for name in NAMES for op in ('keygen', 'sign')}
         for name, row in normal['cases'].items():
             assert row['passed']
-            for key in ('output_sha256', 'boot_cycles', 'keygen_cycles', 'sign_cycles', 'hashes', 'permutations', 'total_cycles'):
+            for key in ('output_sha256', 'hashes', 'permutations'):
                 if name in baseline['cases']:assert row[key] == baseline['cases'][name][key], (name, key)
             assert sha(folder / 'logs' / (name + '.actual.mem')) == row['output_sha256']
             assert sha(folder / 'logs' / (name + '.log')) == row['log_sha256']
@@ -69,7 +69,7 @@ def main():
             assert row['passed'] and row['accepted'] == 1
             assert sha(folder / 'verify' / name / 'normal.log') == row['log_sha256']
         result.update(passed=True, status='completed', current_stage=None,
-                      baseline_match=True, source_snapshot_sha256=inputs['snapshot_sha256'],
+                      legacy_output_agreement=True, source_snapshot_sha256=inputs['snapshot_sha256'],
                       results=str(folder.relative_to(ROOT)))
     except Exception as error:
         result.update(status='failed', error=repr(error))

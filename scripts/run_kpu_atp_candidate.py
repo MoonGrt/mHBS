@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """K1P1-4U1 ATP candidate: simulate, synthesize, validate a winning candidate."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import argparse,csv,json,shutil,subprocess,tarfile
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,simulate_case,build_binary,run,write,sha

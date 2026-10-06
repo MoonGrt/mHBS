@@ -27,17 +27,17 @@ def profile(name):
  kg_file=f/'logs'/(name+'_keygen.actual.mem');kg=bytes(int(x,16) for x in kg_file.read_text().split());root=kg[3*n:4*n]
  assert root==kg[5*n:6*n]
  v=vector(f/'extended_vectors'/name/'rtl_root',name,job,root,msg)
- for label,swap,opts in [('root_transfer',0,()),('swap',1,()),('stall',0,('+STALL=1','+TAIL_NOISE=1')),('replay',0,('+INTERRUPT=1','+REPLAYS=2'))]:
-  k,r=simulate_case(f,name+'_'+label,v,swap,opts)
+ for label,opts in [('root_transfer',()),('stall',('+STALL=1','+TAIL_NOISE=1')),('replay',('+INTERRUPT=1','+REPLAYS=2'))]:
+  k,r=simulate_case(f,name+'_'+label,v,options=opts)
   assert r['sign_cycles']-r['wait_cycles']==normal['cases'][name+'_sign']['sign_cycles']
   r['keygen_output_sha256']=sha(kg_file);result[k]=r
- k,r=simulate_case(f,name+'_keygen_replay',BASE/'vectors'/name/'keygen',1,('+INTERRUPT=1','+REPLAYS=2'))
+ k,r=simulate_case(f,name+'_keygen_replay',BASE/'vectors'/name/'keygen',options=('+INTERRUPT=1','+REPLAYS=2'))
  assert r['keygen_cycles']==normal['cases'][name+'_keygen']['keygen_cycles'];result[k]=r
  for size in (1,7,8,9,87):
   v=vector(f/'extended_vectors'/name/str(size),name,job,root,bytes(range(size)))
-  k,r=simulate_case(f,name+'_message_'+str(size),v,0,('+TAIL_NOISE=1',));result[k]=r
+  k,r=simulate_case(f,name+'_message_'+str(size),v,options=('+TAIL_NOISE=1',));result[k]=r
   if size==87:
-   k,t=simulate_case(f,name+'_message_87_stall',v,0,('+TAIL_NOISE=1','+STALL=1'))
+   k,t=simulate_case(f,name+'_message_87_stall',v,options=('+TAIL_NOISE=1','+STALL=1'))
    assert t['sign_cycles']-t['wait_cycles']==r['sign_cycles'];result[k]=t
  return result
 if '--append-stall' in sys.argv:
@@ -45,7 +45,7 @@ if '--append-stall' in sys.argv:
  shutil.copy2(f/'extended.json',f/'extended_previous.json');cases=previous['cases']
  for name in NAMES:
   v=f/'extended_vectors'/name/'87'
-  k,r=simulate_case(f,name+'_message_87_stall',v,0,('+TAIL_NOISE=1','+STALL=1'))
+  k,r=simulate_case(f,name+'_message_87_stall',v,options=('+TAIL_NOISE=1','+STALL=1'))
   assert r['sign_cycles']-r['wait_cycles']==cases[name+'_message_87']['sign_cycles'];cases[k]=r
 else:
  with concurrent.futures.ThreadPoolExecutor(3) as pool:

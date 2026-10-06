@@ -13,7 +13,7 @@ foreach p $sources {if {$p ne "rtl/top/mhbs_top.sv"} {read_verilog -sv $p}}
 set f [open [file join $out clock.xdc] w];puts $f {create_clock -name clk -period 10.0 [get_ports clk]};close $f
 read_xdc [file join $out clock.xdc]
 read_verilog -sv [file join $out mhbs_common.sv]
-synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic LANES=2 -generic UNROLL=2 -generic PROFILE_ENABLE=0
+synth_design -top mhbs_common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=1 -generic UNROLL=2 -generic PROFILE_ENABLE=0
 report_utilization -file [file join $out core_utilization.rpt]
 report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
 report_timing_summary -file [file join $out core_timing.rpt]

@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """Single-lane U1 P1-P4 128f sign sweep, synthesis only at assumed 150 MHz."""
+from legacy_lane_guard import require_legacy_lanes
+require_legacy_lanes()
 import argparse
 import csv
 import json

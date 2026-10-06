@@ -14,8 +14,8 @@ Job 参数、message_length、消息流 ─────────────�
 ```
 
 - 生产核支持 **SLH-DSA-128f、192f、256f、128s、192s、256s**。每个参数点有一组三份镜像，同一执行核支持六者。新增实验 SHAKE256 XMSS/LMS omega2/4，支持外部索引 q；不实现树缓存或索引 guard。
-- 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部仍可并行使用两个 Hash lane。
-- `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。目前常用配置为双 Hash lane、U2 Keccak；`LANES`、`UNROLL` 是硬件参数，**不是镜像字段**。
+- 五类宏操作为 `HASH=1`、`CHAIN=2`、`TREE=3`、`TRANSFORM=4`、`EMIT=5`。镜像决定执行顺序、循环、配方和结果路由。FSM 执行宏内部链步、树归约、存储访问与 Hash lane 调度。任一时刻只发射一条宏命令，宏内部可在唯一 Hash lane 的 P 个上下文间交错执行。
+- `mhbs_top` 内有三个独立、由 `$readmemh` 初始化的分布式 ROM 数组；生产 RTL 没有显式 ROM 模块或 `mhbs_processor`。固定一个 Hash lane，默认 P1U2；`PIPELINE`、`UNROLL` 是硬件参数，**不是镜像字段**。
 - Job 和消息不占 program 地址。五个 256 位 Job 参数从顶层进入，按 profile 只取低 `n` 字节。Sign 的 `PUBLIC_ROOT` 由调用方配置，例如使用独立 Keygen 输出。
 - 镜像的完整格式和引用检查在离线工具中完成。RTL **不扫描或全面校验镜像**；非法镜像不属于硬件运行契约。顶层仍检查消息长度，执行器仍处理运行故障。
 

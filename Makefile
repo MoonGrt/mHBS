@@ -3,7 +3,6 @@ PYTHON ?= python3
 VERILATOR ?= verilator
 PROFILE ?= all
 OPERATION ?= all
-SWAP ?= 0
 TAG ?= external_v42
 SIM_TAG ?= $(TAG)
 MHBS_RTL := $(shell cat manifests/v42_sources.txt)
@@ -29,7 +28,7 @@ lint:
 rtl-unit-test:
 	$(PYTHON) scripts/verify_v42_external_units.py
 rtl-profile-test:
-	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --profile $(PROFILE) --operation $(OPERATION) --swap $(SWAP)
+	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --profile $(PROFILE) --operation $(OPERATION)
 rtl-all-profiles:
 	$(MAKE) rtl-profile-test PROFILE=all OPERATION=all
 rtl-test:
@@ -58,12 +57,16 @@ reproduce-v42:
 reproduce-ku:
 	$(PYTHON) scripts/verify_ku_archive.py
 
-LUP_TAG ?= lup_shared_128f_20261007_v2
-.PHONY: lup-unit-test lup-atp report-lu reproduce-lu
-lup-unit-test:
+
+PU_TAG ?= pu_single_lane_20261008_v1
+.PHONY: pu-unit-test pu-atp single-lane-regression report-lu reproduce-lu
+pu-unit-test:
 	$(PYTHON) scripts/verify_lup_pipeline.py
-lup-atp:
-	$(PYTHON) scripts/run_lup_sign_atp.py --tag $(LUP_TAG)
+pu-atp:
+	$(PYTHON) scripts/run_pu_cycle_synth_matrix.py run --tag $(PU_TAG)
+single-lane-regression:
+	$(PYTHON) scripts/verify_single_lane.py
+	$(PYTHON) scripts/verify_single_lane_edges.py
 # Read-only historical report entry points; original KU archive paths stay frozen.
 report-lu: report-ku
 reproduce-lu: reproduce-ku

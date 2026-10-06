@@ -6,7 +6,7 @@
 `endif
 module tb_mhbs_verify;
  parameter [255:0] PUBLIC_SEED=0,PUBLIC_ROOT=0;
- parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068,SWAP=0,LANES=2;
+ parameter integer MESSAGE_BYTES=1,NODE_BYTES=16,NODES=1068;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
@@ -25,30 +25,26 @@ module tb_mhbs_verify;
  integer sent=0,node_sent=0,cycles=0,wait_cycles=0,stall=0,replay=0,cut=0,fault=0;
  integer expected=1,flip=-1,bad_message=0,abort_at=0;
  integer delay_at=-1,delay_cycles=0,delay_left=0,poison_reset=0,abort_delay=7,noise=0;
- integer asymmetric=0,zero_left=0,zero_right=0,both_zero=0,auth_left=0,auth_right=0;
- reg [1:0] bypass_expected=0;reg [255:0] bypass_node[0:1];
- integer hashes[0:1],permutations[0:1],zero_steps=0,full_steps=0;
+ integer auth_left=0,auth_right=0;
+ reg bypass_expected=0;reg [255:0] bypass_node;
+ integer hashes,permutations,zero_steps=0,full_steps=0;
  reg [31:0] rng=32'h15c0ffee;
  string image_dir,vector_dir;
- mhbs_top #(.LANES(LANES),.PUBLIC_SEED(PUBLIC_SEED),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(2),
- .PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),
+ mhbs_top #(.PUBLIC_SEED(PUBLIC_SEED),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(2),
+ .PROFILE_ENABLE(PROFILE_ENABLE),
  .PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
  `include "tb/integration/mhbs_parent_input_check.svh"
  `include "tb/integration/mhbs_route_source_check.svh"
  task tick;begin @(posedge clk);#1;end endtask
- genvar l;
- generate for(l=0;l<2;l=l+1)begin: observe
-  always @(posedge clk)begin
-   if(`HBS_CORE.execution_rst)begin hashes[l]=0;permutations[l]=0;end
-   else if(`HBS_CORE.lanes[l].lane.hash_state==2 &&
-           `HBS_CORE.lanes[l].lane.round_index+2>=24)begin
-    permutations[l]=permutations[l]+1;
-    if(`HBS_CORE.lanes[l].lane.running_last)hashes[l]=hashes[l]+1;
-   end
+ always @(posedge clk)begin
+  if(`HBS_CORE.execution_rst)begin hashes=0;permutations=0;end
+  else if(`HBS_CORE.lane.permutation_complete)begin
+   permutations=permutations+1;
+   if(`HBS_CORE.lane.running_last)hashes=hashes+1;
   end
- end endgenerate
+ end
  always @(negedge clk)begin
   if(rst)begin message_valid=0;verify_valid=0;message_data=0;verify_data=0;rng=32'h15c0ffee;delay_left=delay_cycles;end
   else begin
@@ -67,7 +63,7 @@ module tb_mhbs_verify;
   end
  end
  always @(posedge clk)begin
-  if(rst)begin sent=0;node_sent=0;cycles=0;wait_cycles=0;bypass_expected=0;zero_steps=0;full_steps=0;asymmetric=0;zero_left=0;zero_right=0;both_zero=0;auth_left=0;auth_right=0;end
+  if(rst)begin sent=0;node_sent=0;cycles=0;wait_cycles=0;bypass_expected=0;zero_steps=0;full_steps=0;auth_left=0;auth_right=0;end
   else begin
    cycles=cycles+1;
    if(message_valid && message_ready)sent=sent+8;
@@ -80,22 +76,14 @@ module tb_mhbs_verify;
    if(out_valid || keygen_done)$fatal(1,"verify generated a signing output");
    if(error && !fault)$fatal(1,"verify error %h",error_code);
    if(`HBS_CORE.state==8 /* CHAIN_STORE */ && `HBS_CORE.indexing!=1)begin
-    for(integer i=0;i<2;i=i+1)if(`HBS_CORE.active_mask[i] && bypass_expected[i])
-     for(integer b=0;b<NODE_BYTES;b=b+1)
-      if(`HBS_CORE.result[i][8*b +:8]!==bypass_node[i][8*b +:8])$fatal(1,"zero-step endpoint changed lane=%0d",i);
+    if(bypass_expected)for(integer b=0;b<NODE_BYTES;b=b+1)
+     if(`HBS_CORE.result[8*b +:8]!==bypass_node[8*b +:8])$fatal(1,"zero-step endpoint changed");
    end
    if(`HBS_CORE.state==35 /* VERIFY_CHAIN_INPUT */ && `HBS_CORE.indexing!=1)begin
-    if(!`HBS_CORE.verify_lane)bypass_expected=0;
-    bypass_expected[`HBS_CORE.verify_lane]=`HBS_CORE.task_b[`HBS_CORE.verify_lane]==15;
-    bypass_node[`HBS_CORE.verify_lane]=nodes[node_sent-1];
-    if(`HBS_CORE.task_b[`HBS_CORE.verify_lane]==15)zero_steps=zero_steps+1;
-    if(`HBS_CORE.task_b[`HBS_CORE.verify_lane]==0)full_steps=full_steps+1;
-    if(`HBS_CORE.verify_lane)begin
-     if(`HBS_CORE.task_b[0]!=`HBS_CORE.task_b[1])asymmetric=asymmetric+1;
-     if(`HBS_CORE.task_b[0]==15 && `HBS_CORE.task_b[1]!=15)zero_left=zero_left+1;
-     if(`HBS_CORE.task_b[1]==15 && `HBS_CORE.task_b[0]!=15)zero_right=zero_right+1;
-     if(`HBS_CORE.task_b[0]==15 && `HBS_CORE.task_b[1]==15)both_zero=both_zero+1;
-    end
+    bypass_expected=`HBS_CORE.task_b==15;
+    bypass_node=nodes[node_sent-1];
+    if(`HBS_CORE.task_b==15)zero_steps=zero_steps+1;
+    if(`HBS_CORE.task_b==0)full_steps=full_steps+1;
    end
    if(`HBS_CORE.state==18 /* PARENT_SETUP */)begin
     if(`HBS_CORE.node_index[0])auth_left=auth_left+1;else auth_right=auth_right+1;
@@ -138,8 +126,8 @@ module tb_mhbs_verify;
    rst=1;repeat(4)tick();cut=0;rst=0;
   end
   if(fault)begin
-   while(!(`HBS_CORE.lane_valid[0] && `HBS_CORE.response_pending[0]))tick();
-   force `HBS_CORE.lanes[0].lane.error=1;
+   while(!(`HBS_CORE.state==23 && `HBS_CORE.lane_valid))tick();
+   force `HBS_CORE.lane.error=1;
    while(!error)tick();
    if(error_code!=16'h3007)$fatal(1,"fault code");
    repeat(40)begin tick();if(busy || done || verify_ready || verify_pass)$fatal(1,"fault halt");end
@@ -150,13 +138,13 @@ module tb_mhbs_verify;
    if(verify_pass!==expected[0] || node_sent!=NODES || result_kind!=2 || error)
     $fatal(1,"verify result=%0d expected=%0d nodes=%0d/%0d",verify_pass,expected,node_sent,NODES);
    if(PROFILE_ENABLE)begin
-    if(hash_count!=hashes[0]+hashes[1] || permutation_count!=permutations[0]+permutations[1])$fatal(1,"verify statistics");
+    if(hash_count!=hashes || permutation_count!=permutations)$fatal(1,"verify statistics");
    end else if({boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count}!==160'd0)$fatal(1,"statistics not pruned");
    if(keygen_cycles!=0 || sign_cycles!=0)$fatal(1,"verify polluted sign/keygen cycles");
    check_parent_input_coverage();
    check_route_source_coverage();
-   $display("VERIFY_PASS accepted=%0d nodes=%0d cycles=%0d waits=%0d hashes=%0d permutations=%0d zero=%0d full=%0d",verify_pass,node_sent,cycles,wait_cycles,hashes[0]+hashes[1],permutations[0]+permutations[1],zero_steps,full_steps);
-   $display("VERIFY_COVERAGE asymmetric=%0d zero_left=%0d zero_right=%0d both_zero=%0d auth_left=%0d auth_right=%0d",asymmetric,zero_left,zero_right,both_zero,auth_left,auth_right);
+   $display("VERIFY_PASS accepted=%0d nodes=%0d cycles=%0d waits=%0d hashes=%0d permutations=%0d zero=%0d full=%0d",verify_pass,node_sent,cycles,wait_cycles,hashes,permutations,zero_steps,full_steps);
+   $display("VERIFY_COVERAGE zero=%0d full=%0d auth_left=%0d auth_right=%0d",zero_steps,full_steps,auth_left,auth_right);
    repeat(40)begin tick();if(!done || busy || verify_ready || message_ready)$fatal(1,"completion halt");end
    if(run<replay)begin rst=1;repeat(4)tick();rst=0;end
   end
