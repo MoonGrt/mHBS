@@ -1,0 +1,1721 @@
+diff --git a/Makefile b/Makefile
+index 2e8d463d..32bd0f7e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -10,15 +10,15 @@ MHBS_RTL := $(shell cat manifests/v42_sources.txt)
+ .PHONY: all test smoke verify contract-test compile-microcode lint rtl-unit-test rtl-profile-test rtl-all-profiles rtl-test rtl-verification synth-common synth-core route-common freeze-common report-v42 reproduce-v42 report-ku reproduce-ku
+ all: test
+ smoke:
+-	$(PYTHON) scripts/smoke_current.py $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py freeze $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py unit $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py quick $(TAG)
+ # Keep generation and unit evidence ahead of snapshot capture, including make -j.
+ test:
+ 	$(MAKE) contract-test lint
+-	$(MAKE) compile-microcode
+-	$(MAKE) rtl-test
++	$(MAKE) fixed-p4u2-test TAG=$(TAG)
+ verify: test
+-	$(MAKE) rtl-verification
+-	$(PYTHON) scripts/verify_v42_current.py $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py external $(TAG)
+ contract-test:
+ 	$(PYTHON) -m unittest tests.test_unified_rtl_contract tests.test_v42_external_flow tests.test_v42_external_route -v
+ compile-microcode:
+@@ -26,19 +26,17 @@ compile-microcode:
+ lint:
+ 	$(VERILATOR) --lint-only --timing -Wno-fatal -Wno-WIDTH -Wno-UNOPTFLAT --top-module mhbs_top $(MHBS_RTL)
+ rtl-unit-test:
+-	$(PYTHON) scripts/verify_v42_external_units.py
++	$(PYTHON) scripts/fixed_p4u2.py freeze $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py unit $(TAG)
+ rtl-profile-test:
+ 	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --profile $(PROFILE) --operation $(OPERATION)
+ rtl-all-profiles:
+ 	$(MAKE) rtl-profile-test PROFILE=all OPERATION=all
+ rtl-test:
+-	$(MAKE) rtl-unit-test
+-	$(MAKE) rtl-all-profiles
++	$(MAKE) fixed-p4u2-test TAG=$(TAG)
+ rtl-verification:
+-	$(PYTHON) scripts/verify_v42_external_rtl.py $(TAG)
+-	$(PYTHON) scripts/v42_external_flow.py sim --tag $(TAG) --partition
+-	$(PYTHON) scripts/verify_v42_pruning.py $(TAG)
+-	$(PYTHON) scripts/verify_v42_verify.py $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py regression $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py external $(TAG)
+ synth-core:
+ 	$(PYTHON) scripts/v42_external_synth.py $(TAG) --core-only
+ 	$(PYTHON) scripts/collect_v42_external.py $(TAG) --sim-tag $(SIM_TAG) --core-only
+@@ -61,12 +59,20 @@ reproduce-ku:
+ PU_TAG ?= pu_single_lane_20261008_v1
+ .PHONY: pu-unit-test pu-atp single-lane-regression report-lu reproduce-lu
+ pu-unit-test:
+-	$(PYTHON) scripts/verify_lup_pipeline.py
++	$(PYTHON) scripts/fixed_p4u2.py freeze $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py unit $(TAG)
+ pu-atp:
+-	$(PYTHON) scripts/run_pu_cycle_synth_matrix.py run --tag $(PU_TAG)
++	@echo "Current RTL is fixed P4U2; use make fixed-p4u2-test / fixed-p4u2-synth TAG=<fresh-label>"
++	@exit 2
+ single-lane-regression:
+-	$(PYTHON) scripts/verify_single_lane.py
+-	$(PYTHON) scripts/verify_single_lane_edges.py
++	$(PYTHON) scripts/fixed_p4u2.py regression $(TAG)
+ # Read-only historical report entry points; original KU archive paths stay frozen.
+ report-lu: report-ku
+ reproduce-lu: reproduce-ku
++
++.PHONY: fixed-p4u2-test fixed-p4u2-synth
++fixed-p4u2-test: pu-unit-test
++	$(PYTHON) scripts/fixed_p4u2.py regression $(TAG)
++	$(PYTHON) scripts/fixed_p4u2.py quick $(TAG) --stats 0
++fixed-p4u2-synth:
++	$(PYTHON) scripts/fixed_p4u2.py synth $(TAG)
+diff --git a/README.md b/README.md
+index 4b2d04c1..9d5c558a 100644
+--- a/README.md
++++ b/README.md
+@@ -1,29 +1,23 @@
+ # mHBS v4.2
+ 
+-固定单 lane、默认 P1U2 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
++固定单 lane、P4U2 共同核，支持 SLH-DSA SHAKE **128f、192f、256f、128s、192s、256s** 的 Keygen、Sign 和外部节点 Verify。新增实验 SHAKE256 XMSS/LMS（n=32、h=10、omega=2/4）的三种操作，见 [扩展报告](docs/v4.2/Stateful_XMSS_LMS.md)。唯一顶层为 `rtl/top/mhbs_top.sv`，每次同步复位后执行一次操作。
+ 
+-`LANES` 与 `SWAP_PHYSICAL_LANES` 已删除，不能通过参数恢复多 lane。只保留 `PIPELINE/UNROLL`（P/U）：P>1 时普通哈希和多上下文链共用一套 P×U 轮逻辑。十种算法参数和三种操作均保留。
++`LANES` 与 `SWAP_PHYSICAL_LANES` 已删除，不能通过参数恢复多 lane。`PIPELINE/UNROLL`（P/U）也已删除：普通哈希和四上下文链共用四级、每级两轮的 Keccak 数据通路。十种算法参数和三种操作均保留。
+ 
+-最新单 lane 裁剪、周期等价与共同核面积见 [单 lane 优化报告](docs/report/Single_Lane_Optimization.md)。历史 K/L 报告、路径和源码快照保持原样，不能作为当前版本的面积或周期。
++固定 P4U2 的结构、回归与综合对比见 [固定 P4U2 优化报告](docs/report/Fixed_P4U2_Optimization.md)。历史 P/U 报告和快照保持原样，不代表当前可配置性。
+ 
+ ## 构建与验证
+ 
+ ```bash
+-make pu-unit-test
+-make pu-atp PU_TAG=my_pu      # P1–P4/U1–U2，共同核综合，无布线
+-make single-lane-regression   # 对照冻结旧 L1：十参数三操作与边界检查
+ make contract-test lint
+-make smoke TAG=my_smoke       # 模型、单元、12 组 KG/SG、6 组 Verify 和封存证据
+-make verify TAG=my_full       # 再含扩展、共同核等价、统计关闭、故障及完整 Verify
+-make synth-core TAG=my_full   # Vivado 共同核综合
+-make synth-common TAG=my_full # 共同核与十二个参数外壳
+-make route-common TAG=my_full
+-make reproduce-v42 reproduce-ku
++make fixed-p4u2-test TAG=my_fixed  # 冻结源码、Verilator 单元和十参数三操作逐周期对照
++make fixed-p4u2-synth TAG=my_fixed # 同一快照共同核综合，无布线
++python3 scripts/fixed_p4u2.py external my_fixed # 顶层/共同核及统计关闭对照
++make rtl-profile-test TAG=probe PROFILE=slh_192f OPERATION=sign
++make reproduce-v42 reproduce-ku   # 只读历史封存证据
+ ```
+ 
+-仿真使用 Python、Icarus Verilog、Verilator、GNU Make 和 C++ 编译器；综合/布线使用 Vivado。完整流程见[验证指南](docs/Verification.md)。修改源码后使用新的 TAG。
+-
+-单点：`make rtl-profile-test TAG=probe PROFILE=slh_192f OPERATION=sign`。
++当前固定配置流程使用 Python、Verilator、GNU Make 和 C++ 编译器，不运行 Icarus；综合使用 Vivado。修改源码或测试后使用新的 TAG。旧 P/U 矩阵须从对应冻结源码运行。完整流程见[验证指南](docs/Verification.md)。
+ 
+ ## 接口与镜像
+ 
+diff --git a/docs/Architecture.md b/docs/Architecture.md
+index b0816b7e..a7b582b2 100644
+--- a/docs/Architecture.md
++++ b/docs/Architecture.md
+@@ -11,11 +11,11 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+       ├─ mhbs_program_sequencer：RUN / LOOP → 单个待完成宏指令
+       ├─ mhbs_value_store：136 项共享存储，分时保存 FORS 根与 WOTS 链端点
+       └─ mhbs_recipe_lane（唯一实例 core.lane）：块构造、吸收、状态、链反馈与流水控制
+-          ├─ mhbs_chain_pipeline_lane（P>1）：多上下文链任务与 capture 管理
+-          └─ P×U 个 mhbs_keccak：每级 U 轮，默认 P1U2
++          ├─ mhbs_chain_pipeline_lane（四上下文）：多上下文链任务与 capture 管理
++          └─ 8 个 mhbs_keccak：固定四级、每级两轮（P4U2）
+ ```
+ 
+-五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；固定一个 lane 支持完整 recipe 集，控制器直接持有标量任务与结果；不存在 lane 数量或物理交换参数。P>1 的独立链并行位于宏操作内部。
++五类宏操作为 HASH、CHAIN、TREE、TRANSFORM、EMIT。Sequencer 等待当前宏操作完成后才提交下一条；固定一个 lane 支持完整 recipe 集，控制器直接持有标量任务与结果；不存在 lane 数量或物理交换参数。四上下文独立链并行位于宏操作内部。
+ 
+ 核使用 256 位节点存储，由 descriptor 中的 profile 编码选择有效的 16/24/32 字节。FORS 根与 WOTS 链端点共享深度为 136 的存储；树栈和认证路径各为 16 个节点。消息缓冲上限为 87 字节。
+ 
+@@ -37,11 +37,11 @@ mhbs_top：三组镜像 ROM、启动控制、固定 Job 参数、外部消息
+ 
+ `scripts/v42_common_partition.py` 从顶层标记区域提取启动控制和执行核，生成构建用的 `mhbs_common`。Job、消息和 ROM 数据成为该区域输入，内部连接保持不变。既有 SLH 流程中，共同区域综合一次，十二个 Keygen/Sign 参数外壳分别链接同一网表；验收检查内部结构指纹、ROM 初始化映射以及提取前后的完整 RTL 输出和周期一致性。
+ 
+-既有 SLH 流程支持共同核 post-synth，以及十二个 Keygen/Sign 参数外壳分别进行的布局布线；本次新算法只测共同核综合。`route-common` 完成布线和验收，`freeze-common` 封存已验收的结果。频率口径为 OOC 核内寄存器间路径，核内同步控制参与检查，外部输入/输出路径排除。0 ns 外部输入假设下的端口 hold 违例单独保留，接口尚未时序签核。资源或频率结论绑定实际测量的源码快照，当前结果见 [单 lane 优化报告](report/Single_Lane_Optimization.md)。
++既有 SLH 流程支持共同核 post-synth，以及十二个 Keygen/Sign 参数外壳分别进行的布局布线；本次新算法只测共同核综合。`route-common` 完成布线和验收，`freeze-common` 封存已验收的结果。频率口径为 OOC 核内寄存器间路径，核内同步控制参与检查，外部输入/输出路径排除。0 ns 外部输入假设下的端口 hold 违例单独保留，接口尚未时序签核。资源或频率结论绑定实际测量的源码快照，当前固定配置结果见 [P4U2 优化报告](report/Fixed_P4U2_Optimization.md)。
+ 
+ ## 固定单 lane 数据通路
+ 
+-默认配置为 `UNROLL=2, PIPELINE=1`。`LANES` 和 `SWAP_PHYSICAL_LANES` 已删除；任务、完成握手、结果与计数全部为标量。移除第二路寄存器、双路启动/完成掩码、FORS 成对消费和第二路输出状态；多上下文窗口只与 P 有关。唯一 lane 的 `RECIPE_MASK=16'hfffe` 保留全部现用算法配方。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。XMSS 启用 masked 配方及跨中间哈希的值寄存器；LMS 启用 prefix 配方。两者复用既有 Keccak 数据通路。
++当前固定为 P4U2，已删除 `UNROLL/PIPELINE` 参数。`LANES` 和 `SWAP_PHYSICAL_LANES` 已删除；任务、完成握手、结果与计数全部为标量。移除第二路寄存器、双路启动/完成掩码、FORS 成对消费和第二路输出状态；多上下文窗口固定为四槽。唯一 lane 的 `RECIPE_MASK=16'hfffe` 保留全部现用算法配方。SLH 普通链复用 sponge 保留的摘要，普通链和 compact chain 共用 sponge capture 寄存器；请求字段仍保持到响应握手，不增加流水级。XMSS 启用 masked 配方及跨中间哈希的值寄存器；LMS 启用 prefix 配方。两者复用既有 Keccak 数据通路。
+ 
+ 统计开关沿 top/common/core/lane 传递，生产综合关闭，仿真保留。综合阶段检查实际网表，禁止统计寄存器和被替代的重复值/capture 寄存器残留。
+ 
+@@ -65,17 +65,17 @@ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保
+ 
+ 六种 SHAKE 参数共用同一单 lane 核。descriptor[1] 编码 0/1/2 为 128f/192f/256f，4/5/6 为 128s/192s/256s，3/7 非法，软件镜像检查拒绝。FORS 目标、叶游标和节点索引为 14 位；XMSS 叶地址保持 10 位（s 最大需要 9 位）。树栈/认证路径各 16 项、共享列表为支持 XMSS/LMS 扩至 136 项、摘要暂存 49 字节及 ROM 容量均不扩大。s 摘要使用 7 字节树索引，128s/192s 的叶索引按大端两字节解码；256s 使用一字节。
+ 
+-## P/U 流水配置
++## 固定 P4U2 数据通路
+ 
+-`PIPELINE/UNROLL` 分别对应 P/U，默认 P1U2。P 的合法范围为 1～4，U 为正整数且 P×U 整除 24。P 个级各有 U 轮，普通 sponge 与交错链共用 Keccak。WOTS/FORS 每批最多 P 个任务，FORS 按叶顺序消费；同一链的反馈遵守数据依赖。
++四个流水级，每级两个组合 Keccak 轮；每个置换循环三遍完成 24 轮。四个上下文携带各自 tag 和轮控制信息；末级 1600 位状态同时承接普通 sponge 的初始化、吸收和跨块状态。仅允许排空后写入，完成同拍的合法反馈保持原优先级。
+ 
+-`make pu-unit-test` 验证轮级等价与链交错；`make pu-atp PU_TAG=<新标签>` 测 P1～P4/U1～U2 的 128f sign 周期与共同核综合。约束 6.666667 ns，不布线。历史 K/L 标签只用于冻结证据，多 lane 实验驱动在当前源码上明确报错。
++`make fixed-p4u2-test TAG=<新标签>` 使用 Verilator 验证；`make fixed-p4u2-synth TAG=<同标签>` 综合已冻结源码。约束 6.666667 ns，不布线。历史 P/U 矩阵只能从其冻结源码重放。
+ 
+ 以下为历史优化来源，资源数字只对应其各自快照：
+ 
+ K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链模块保留单份结果/capture，并向控制器提供按 tag 读口；P>1 的 SLH 签名 WOTS 完成后按链索引直接写端点，capture 按序输出。普通 sponge 在 P>1 时复用流水末级状态，仅在初始化、吸收和链反馈时通过内部写口修改它。连续补任务候选因 ATP 增加撤回，当前仍保留批次边界。
+ 
+-统一 Keccak 实现：`mhbs_recipe_lane` 内直接展开 P 个级、每级 U 个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 SHAKE 包装层或 `mhbs_keccak_pipeline`。固定块和链反馈共用 `fast_block`，已移除未启用的通用链模板与独立反馈构造。P1 使用唯一状态寄存器及组合轮末完成判断，保持原周期；P>1 保留普通 sponge 与交错链共享流水和末级状态复用。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
++统一 Keccak 实现：`mhbs_recipe_lane` 内直接展开四个级、每级两个 `mhbs_keccak`，级间状态、轮号、tag、有效位和循环反馈均在此模块管理；不再实例化独立 SHAKE 包装层或 `mhbs_keccak_pipeline`。固定块和链反馈共用 `fast_block`，已移除未启用的通用链模板与独立反馈构造。已删除 P1 分支和独立 sponge 状态分支，固定复用末级状态。轮函数仅保留 `mhbs_keccak` 一份实现。第二轮测量见 [统一结构与 ATP 报告](v4.2/KPU_ATP_Unified_Optimization.md)。
+ 
+ 第二轮最终保留 capture 有效位及 WOTS 批次控制优化：capture 仅在实际捕获时写入，未有效时读口返回零；P>1 的 SLH sign 路径跳过无效尾槽，capture 可连续逐节点输出，整批消费后直接准备下一批。仍无跨批连续补任务。U1 遍次计数/固定级轮常量译码候选因最低 ATP 增加撤回。
+ 
+@@ -87,7 +87,7 @@ K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链
+ 
+ XMSS 复用共享端点存储做原地 L-tree 归约，每层奇数尾节点直接保留；LMS 对端点列表做 prefix hash，随后计算叶哈希，树采用堆式地址。两者复用原树栈和认证路径。Sign 每次重新计算完整树，不依赖历史 Keygen 或树缓存。
+ 
+-新算法只走普通链/普通请求路径；即使 P>1 也不使用 SLH 多上下文批处理。普通链按一条顺序执行，存储提供相邻两个节点读取，地址为 8 位。SLH 的六种参数和批处理调度保持原路径。
++新算法只走普通链/普通请求路径；不使用 SLH 四上下文批处理。普通链按一条顺序执行，存储提供相邻两个节点读取，地址为 8 位。SLH 的六种参数和批处理调度保持原路径。
+ 
+ 新镜像只装入可达描述符（XMSS 26、LMS 29），program/template/descriptor 容量仍为 16/16/32。template 位 16 承载 SIGN_ONLY，旧镜像该位为零。共同核 Job 新增 q 与 identifier；统计关闭后仍通过同一综合裁剪检查。
+ 
+diff --git a/docs/Job_Interface.md b/docs/Job_Interface.md
+index 71b4473e..086b9687 100644
+--- a/docs/Job_Interface.md
++++ b/docs/Job_Interface.md
+@@ -1,6 +1,6 @@
+ # mHBS 当前 Job 与流接口
+ 
+-硬件固定为一个 Hash lane，已删除 `LANES` 和 `SWAP_PHYSICAL_LANES`。`PIPELINE/UNROLL` 仍可配置，默认 P1U2；Job、消息、签名和 Verify 接口不变。
++硬件固定为一个 Hash lane，已删除 `LANES` 和 `SWAP_PHYSICAL_LANES`。`PIPELINE/UNROLL` 配置接口也已删除，数据通路固定为 P4U2；Job、消息、签名和 Verify 接口不变。
+ 
+ 唯一生产顶层为 `rtl/top/mhbs_top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，以及实验 `xmss_omega2/4`、`lms_omega2/4`；每次复位执行一次 Keygen、Sign 或 Verify。
+ 
+diff --git a/docs/Verification.md b/docs/Verification.md
+index 5c2c3bad..184d8c28 100644
+--- a/docs/Verification.md
++++ b/docs/Verification.md
+@@ -1,59 +1,49 @@
+ # 当前项目的构建与验证
+ 
+-## 固定单 lane
++## 固定单 lane、P4U2
+ 
+-生产 RTL 只有 `core.lane` 一个实例；`LANES`、`SWAP_PHYSICAL_LANES` 和仿真命令行的 lane/swap 选项均已删除。默认 P1U2，P/U 参数继续保留。历史多 lane 驱动在当前源码上报错；复现旧实验应使用对应冻结源码，不能把旧 L2 周期当作当前单 lane 基线。
++生产 RTL 只有 `core.lane` 一个实例，P/U 参数也已删除。当前拓扑固定为四个流水级、每级两轮、四个交错上下文；共同核和顶层均不可覆盖此配置。
+ 
+-当前裁剪验收使用提交 `9dbcac8f` 的冻结实现，并明确固定其 LANES=1。逐周期比较 Job/消息/Verify 握手、输出、完成、错误、周期和 Hash/置换计数。冻结模块只进入测试，不在生产源码清单中。
++本轮对照 `113648d7` 的冻结 P4U2 实现，逐周期比较 Job/消息/Verify 握手、输出、完成、错误、周期和 Hash/置换计数。冻结模块仅参与验证；各候选读取独立源码快照。
+ 
+ ```bash
+ make contract-test lint
+-python3 scripts/verify_v42_units.py
+-make single-lane-regression
++make fixed-p4u2-test TAG=my_fixed
++make fixed-p4u2-synth TAG=my_fixed
++python3 scripts/fixed_p4u2.py external my_fixed
+ ```
+ 
+-`verify_single_lane.py` 检查 P1U1 下六种 SLH 与四种 XMSS/LMS 的 Keygen/Sign/Verify，共 30 组，输出逐字节比较软件向量。`verify_single_lane_edges.py` 检查 P1～P4/U1～U2、统计关闭、P4 普通 stateful 请求、停顿、复位重放、截断、异常退出、q 边界、消息边界和签名篡改。二者完整日志写入 `manifests/experiments/single_lane_20261008/`，编译输出写入 `build/single_lane_20261008/`。
++固定配置入口仅使用 Verilator。单元检查交错链、三种节点宽度、普通/compact chain、capture、末级共享状态、padding 和冻结轮函数逐级对照；整核检查十参数三操作，并补充停顿、复位重放、故障和消息/节点/根篡改。`external` 对比完整顶层与提取共同核的输出、周期，以及关闭统计后的行为。
+ 
+-## 工具与常规流程
++输出位于 `manifests/experiments/fixed_p4u2_20261009/<标签>/`，编译缓存位于 `build/fixed_p4u2_20261009/`。历史 P/U 矩阵脚本在当前源码上明确报错；其原始快照不改写。旧流程与历史证据说明保留如下，不是本轮固定配置的执行入口。
+ 
+-在仓库根目录运行。依赖 Python、GNU Make、Icarus Verilog、Verilator 和 C++ 编译器；综合使用 Vivado 2025.2、xc7a200tffg1156-3。
++## 工具与入口
+ 
+-```bash
+-make smoke TAG=my_smoke
+-make verify TAG=my_full
+-```
+-
+-`smoke` 检查合同、lint、模型、单元、12 组 SLH Keygen/Sign、六参数正常 Verify 和封存证据。历史参考只比较输出和 Hash/置换次数，当前周期由冻结单 lane 对照验收。
+-
+-`verify` 追加 SLH 消息/复位扩展、共同核提取等价、统计关闭、异常退出和完整 Verify 测试。单 lane Verify 删除了物理交换与双链不对称专项，保留零步/最大步、左右认证节点、节点延迟、污染后复位等检查，共 118 项。
++在仓库根目录运行，依赖 Python、Verilator、GNU Make 和 C++ 编译器；综合使用 Vivado 2025.2、xc7a200tffg1156-3。本轮不运行 Icarus。
+ 
+ | 入口 | 内容 |
+ |---|---|
+-| `make contract-test lint` | 接口、无 lane 参数、源闭包、快照合同、RTL lint |
+-| `make compile-microcode` | 六参数模型、独立参考和 f 参数 ACVP KAT，生成镜像与向量 |
+-| `make rtl-unit-test` | 启动、单写相邻双读存储、sequencer、配方、padding、路由和地址检查 |
+-| `make rtl-profile-test TAG=probe PROFILE=slh_192f OPERATION=sign` | 单点 SLH 仿真 |
+-| `make rtl-verification TAG=...` | 已有正常结果上的扩展、共同核、统计关闭、故障和 Verify |
+-| `python3 scripts/verify_v42_current.py <tag>` | 核验已有完整 SLH 证据 |
+-| `python3 scripts/run_stateful.py --p 1 --u 1` | 固定单 lane 的四参数 XMSS/LMS 三操作 |
+-| `make pu-unit-test` | 独立 SHAKE 向量、三节点宽度、交错链和 capture |
++| `make contract-test lint` | 接口、不存在 lane/P/U 参数、源闭包、快照合同、RTL lint |
++| `make smoke TAG=<新标签>` | 冻结源码、单元、128f sign 逐周期对照 |
++| `make verify TAG=<新标签>` | 单元、十参数三操作、边界回归、统计关闭、共同核提取 |
++| `make fixed-p4u2-test TAG=<新标签>` | 同上，但不含额外顶层/共同核对照 |
++| `python3 scripts/fixed_p4u2.py external <已有标签>` | 顶层与共同核、统计开启/关闭的签名比较 |
++| `make rtl-profile-test TAG=probe PROFILE=slh_192f OPERATION=sign` | 固定 P4U2 单点 SLH 仿真 |
++| `python3 scripts/run_stateful.py` | 固定 P4U2 的 XMSS/LMS 软件向量检查 |
+ | `make reproduce-v42 reproduce-ku` | 只读核验历史封存证据 |
+ 
+-单元 scoreboard 检查共享列表初始化、FORS/WOTS 切换、父节点输入稳定性/左右顺序和 ROUTE 消费值。存储单元覆盖 68/136 项、奇偶写入、127/128 边界和奇数尾节点归约。
+-
+-常规 SLH 流程输出在 `build/v4.2/external_job_message/<tag>/`，包括源码快照、哈希、日志和结果。源码或测试修改后使用新的 TAG；模型和单元证据应先于快照生成。
++旧 `verify_v42_units.py`、P/U 扫描和历史综合脚本不用于当前固定配置，入口会提示使用新流程或原始源码快照。每次源码或测试发生变化后使用新的标签，禁止将旧测量覆盖成新版本结果。
+ 
+ ## 共同核测量
+ 
+ ```bash
+-make pu-atp PU_TAG=my_pu
++make fixed-p4u2-test TAG=my_fixed
++make fixed-p4u2-synth TAG=my_fixed
+ ```
+ 
+-该入口只测单 lane 的 P1～P4/U1～U2、128f sign：冻结源码，逐字节对照软件向量，再综合共同核。约束 6.666667 ns，PROFILE_ENABLE=0，不布线；检查网表中统计寄存器已裁剪。LUT 包含 LUTRAM，不重复计数。150 MHz 如用于时间/ATP，是假定值，不是实测频率。
+-
+-默认 P1U2 的既有流程也可使用 `make synth-core TAG=...`；其约束为 10 ns，不能与 6.666667 ns 实验混作同约束对照。`synth-common`/`route-common` 另含十二个 SLH 外壳；OOC 核内频率与外部接口时序签核仍需区分。本轮不执行布线。
++综合读取同标签冻结源码。约束 6.666667 ns，PROFILE_ENABLE=0，不布线；检查统计寄存器裁剪。LUT 包含 LUTRAM，不重复计数。时间和 ATP 采用假定 110 MHz，不代表实测频率。
+ 
+-当前测量、候选差异及验收明细见 [单 lane 优化报告](report/Single_Lane_Optimization.md)。历史 K/U、K/P/U 和 XMSS/LMS 扩展报告保持原始数据，不代表当前源码。
++历史 `synth-core`、`synth-common` 和 `route-common` 流程使用不同约束或外壳，不能混入本轮同约束比较。当前资源及候选验收见 [P4U2 优化报告](report/Fixed_P4U2_Optimization.md)；旧 K/U、P/U 和 XMSS/LMS 报告保持原数据。
+ 
+ ## XMSS/LMS 软件参考
+ 
+diff --git a/rtl/hash_lane/mhbs_chain_pipeline_lane.sv b/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+index ea8b3df0..37e80f7d 100644
+--- a/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
++++ b/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+@@ -3,8 +3,8 @@
+ // Per-context SLH chain metadata and completion slots. No Keccak duplication:
+ // permutations use the same pipeline as the recipe/sponge path.
+ module mhbs_chain_pipeline_lane #(
+- parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0,
+- localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
++ parameter bit PROFILE_ENABLE=0,
++ localparam integer TAG_BITS=2
+ )(
+  input wire clk,rst,input wire [5:0] node_bytes,
+  input wire request_valid,output wire request_ready,input wire [TAG_BITS-1:0] request_tag,
+@@ -25,11 +25,11 @@ module mhbs_chain_pipeline_lane #(
+  function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
+  wire [255:0] seed_address={be32(request_b),be32({25'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+  wire [255:0] step_address={be32(request_b),be32({25'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+- logic [255:0] address[0:PIPELINE-1];
+- logic [4:0] steps[0:PIPELINE-1],iteration[0:PIPELINE-1],capture_after[0:PIPELINE-1];
+- logic [PIPELINE-1:0] busy,complete,capture_enable,preserve_counter;
+- logic [255:0] digest[0:PIPELINE-1],captured[0:PIPELINE-1];
+- logic [PIPELINE-1:0] captured_valid;
++ logic [255:0] address[0:3];
++ logic [4:0] steps[0:3],iteration[0:3],capture_after[0:3];
++ logic [3:0] busy,complete,capture_enable,preserve_counter;
++ logic [255:0] digest[0:3],captured[0:3];
++ logic [3:0] captured_valid;
+  assign read_digest=digest[read_tag];
+  assign read_capture=captured_valid[read_tag] ? captured[read_tag] : 256'd0;
+  wire [TAG_BITS-1:0] t=perm_result_tag;
+@@ -52,7 +52,7 @@ module mhbs_chain_pipeline_lane #(
+    block_data[1087]=1;block_for=block_data;
+   end
+  endfunction
+- assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && !busy[request_tag];
++ assign request_ready=!rst && !again && perm_ready && request_tag<4 && !busy[request_tag];
+  wire accept=request_valid && request_ready;
+  assign perm_valid=again || accept;
+  // Select operands before the common width and padding formatter.
+@@ -65,7 +65,7 @@ module mhbs_chain_pipeline_lane #(
+  assign response_valid=|complete;
+  always_comb begin
+   response_tag=0;
+-  for(integer j=PIPELINE-1;j>=0;j=j-1)if(complete[j])response_tag=TAG_BITS'(j);
++  for(integer j=4-1;j>=0;j=j-1)if(complete[j])response_tag=TAG_BITS'(j);
+   if(response_held)response_tag=held_tag;
+  end
+  assign response_digest=digest[response_tag];
+diff --git a/rtl/hash_lane/mhbs_recipe_lane.sv b/rtl/hash_lane/mhbs_recipe_lane.sv
+index fc51639d..255ba873 100644
+--- a/rtl/hash_lane/mhbs_recipe_lane.sv
++++ b/rtl/hash_lane/mhbs_recipe_lane.sv
+@@ -1,15 +1,14 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+-// ABI 4 byte recipes and local chain feedback. Both physical lanes use this
+-// module. The dispatcher keeps all request fields stable through response.
++// ABI 4 byte recipes, fixed P4U2 datapath and local chain feedback.
++// The dispatcher keeps all request fields stable through response.
+ module mhbs_recipe_lane #(
+     parameter integer N = 16,
+     parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
+-    parameter integer UNROLL = 2, PIPELINE = 1,
+     parameter integer MAX_MESSAGE_BYTES = 87,
+     parameter [15:0] RECIPE_MASK = 16'hffff,
+-    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0,
+-    localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
++    parameter bit PROFILE_ENABLE = 0,
++    localparam integer TAG_BITS=2
+ ) (
+     input wire clk, rst,
+     input wire batch_mode,batch_request_valid,output wire batch_request_ready,
+@@ -426,8 +425,8 @@ module mhbs_recipe_lane #(
+     wire batch_perm_valid,batch_perm_ready,batch_perm_done;
+     wire [1599:0] batch_perm_state,batch_perm_digest;
+     wire [TAG_BITS-1:0] batch_perm_tag,batch_perm_result_tag;
+-    generate if(PIPELINE>1)begin: chain_pipeline
+-        mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
++    generate begin: chain_pipeline
++        mhbs_chain_pipeline_lane #(.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
+             .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
+             .request_tag(batch_request_tag),.request_steps(batch_steps),.request_capture_after(batch_capture_after),
+             .request_capture(batch_capture_enable),.secret_seed,.public_seed,
+@@ -439,12 +438,6 @@ module mhbs_recipe_lane #(
+             .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
+             .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
+             .hash_count(batch_hashes),.permutation_count(batch_permutations));
+-    end else begin
+-        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
+-        assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
+-        assign batch_response_digest=0;assign batch_response_capture=0;
+-        assign batch_read_digest=0;assign batch_read_capture=0;
+-        assign batch_hashes=0;assign batch_permutations=0;
+     end endgenerate
+     // Direct Keccak datapath and absorb/chain control.
+     localparam logic [1:0] HASH_IDLE = 2'd0;
+@@ -469,62 +462,57 @@ module mhbs_recipe_lane #(
+     logic [3:0] chain_counter;
+     logic [4:0] chain_iteration;
+     logic [N*8-1:0] captured_value;
+-    logic [4:0] round_index;
+     wire [1599:0] advanced_state;
+     wire round_complete;
+-    wire round_update;
+     wire [3:0] counter_next = chain_counter + 1'b1;
+     wire [3:0] transition_counter =
+         saved_chain_prefix && chain_iteration == 1
+             ? chain_counter : counter_next;
+ 
+-    // One P-stage datapath for both serial and interleaved execution. P1
+-    // writes its sole state through the sponge word enables, without launch
+-    // or return bubbles. P>1 carries valid/round/tag through the same stages.
+-    localparam integer ROUNDS=UNROLL*PIPELINE;
+-    logic [1599:0] state_reg [0:PIPELINE-1];
+-    logic [PIPELINE-1:0] stage_valid;
+-    logic [4:0] stage_base [0:PIPELINE-1];
+-    logic [TAG_BITS-1:0] stage_tag [0:PIPELINE-1];
++    // Four stages, two combinational rounds per stage; three traversals.
++    // The final state register also holds ordinary sponge absorption state.
++    localparam integer ROUNDS=8;
++    logic [1599:0] state_reg [0:3];
++    logic [3:0] stage_valid;
++    logic [4:0] stage_base [0:3];
++    logic [TAG_BITS-1:0] stage_tag [0:3];
+     logic sent;
+-    wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
+-        && stage_base[PIPELINE-1]+ROUNDS<24;
++    wire recycle=stage_valid[3]
++        && stage_base[3]+ROUNDS<24;
+     wire ready=!rst && !recycle;
+-    wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
++    wire finished=!rst && stage_valid[3] && !recycle;
+     wire normal_valid=hash_state==HASH_RUN && !sent;
+     wire issue_valid=batch_mode ? batch_perm_valid : normal_valid;
+     wire [1599:0] issue_state=batch_mode ? batch_perm_state : sponge_state;
+     wire [TAG_BITS-1:0] issue_tag=batch_mode ? batch_perm_tag : '0;
+-    wire [1599:0] finished_state=state_reg[PIPELINE-1];
+-    wire [1599:0] stage_result[0:PIPELINE-1];
+-    for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
+-        wire [1599:0] rounds[0:UNROLL];
++    wire [1599:0] finished_state=state_reg[3];
++    wire [1599:0] stage_result[0:3];
++    for(genvar s=0;s<4;s=s+1)begin: stages
++        wire [1599:0] rounds[0:2];
+         wire [4:0] start_round;
+         wire [TAG_BITS-1:0] source_tag;
+         wire source_valid;
+         if(s==0)begin: input_stage
+-            assign rounds[0]=PIPELINE==1 ? sponge_state
+-                : recycle ? state_reg[PIPELINE-1] : issue_state;
+-            assign start_round=PIPELINE==1 ? round_index
+-                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
+-            assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
+-            assign source_valid=PIPELINE>1 && (recycle || issue_valid);
++            assign rounds[0]=recycle ? state_reg[3] : issue_state;
++            assign start_round=recycle ? stage_base[3]+5'(ROUNDS) : 5'd0;
++            assign source_tag=recycle ? stage_tag[3] : issue_tag;
++            assign source_valid=(recycle || issue_valid);
+         end else begin: following_stage
+             assign rounds[0]=state_reg[s-1];
+             assign start_round=stage_base[s-1];
+             assign source_tag=stage_tag[s-1];
+             assign source_valid=stage_valid[s-1];
+         end
+-        for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
++        for(genvar r=0;r<2;r=r+1)begin: unrolled
+             mhbs_keccak round_logic(.state_in(rounds[r]),
+-                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
++                .round_index(start_round+5'(s*2+r)),.state_out(rounds[r+1]));
+         end
+-        assign stage_result[s]=rounds[UNROLL];
++        assign stage_result[s]=rounds[2];
+         for(genvar w=0;w<25;w=w+1)begin: words
+             always_ff @(posedge clk)if(!rst)begin
+-                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
++                if((s==3) && state_write_enable[w])
+                     state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
+-                else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
++                else if(source_valid)state_reg[s][64*w +:64]<=rounds[2][64*w +:64];
+             end
+         end
+         always_ff @(posedge clk)begin
+@@ -535,14 +523,13 @@ module mhbs_recipe_lane #(
+             end
+         end
+     end
+-    assign batch_perm_ready=PIPELINE>1 && batch_mode && ready;
+-    assign batch_perm_done=PIPELINE>1 && batch_mode && finished;
+-    assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
+-    assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : '0;
+-    if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
+-    assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
+-    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
+-    assign round_update=hash_state==HASH_RUN && (PIPELINE==1 || round_complete);
++    assign batch_perm_ready=batch_mode && ready;
++    assign batch_perm_done=batch_mode && finished;
++    assign batch_perm_digest=finished_state;
++    assign batch_perm_result_tag=stage_tag[3];
++    assign sponge_state=finished_state;
++    assign advanced_state=finished_state;
++    assign round_complete=!batch_mode && finished;
+     always_ff @(posedge clk)begin
+         if(rst)sent<=0;
+         else if(!batch_mode)begin
+@@ -551,8 +538,8 @@ module mhbs_recipe_lane #(
+         end
+     end
+     // synthesis translate_off
+-    always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
+-        if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
++    always @(posedge clk)if(!rst && |state_write_enable)
++        if(|(stage_valid & ~(finished ? 4'b1000 : 4'b0000)))$fatal(1,"sponge write while pipeline occupied");
+     // synthesis translate_on
+     wire permutation_complete=hash_state==HASH_RUN && round_complete;
+ 
+@@ -568,10 +555,6 @@ module mhbs_recipe_lane #(
+     assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+     assign compact_capture = captured_value;
+ 
+-    initial begin
+-        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 12 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+-            $error("recipe lane requires positive U/P and U*P dividing 24");
+-    end
+ 
+     // Mutually exclusive word updates expose one data mux instead of a
+     // priority network for whole-state loads mixed with partial absorption.
+@@ -608,8 +591,7 @@ module mhbs_recipe_lane #(
+         else assign fast_word=64'd0;
+         // The register enable suppresses idle cycles. The default data can
+         // therefore be the permutation result without a 1,600-bit HASH_RUN mask.
+-        wire [63:0] round_or_clear=(clear_stream || (SHARED_STATE && PIPELINE>1)) ? 64'd0
+-            : advanced_state[word_index*64 +:64];
++        wire [63:0] round_or_clear=64'd0;
+         wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
+         wire [63:0] next_word;
+             assign next_word=(take_fast || take_feedback) ? fast_word
+@@ -618,11 +600,7 @@ module mhbs_recipe_lane #(
+         // A completed permutation already resides in the shared register.
+         // Only absorption, initialization or a new chain block needs a write.
+         assign state_write_enable[word_index]=!rst &&
+-            (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
+-        if(!SHARED_STATE && PIPELINE>1)begin: private_state
+-            always_ff @(posedge clk)
+-                if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
+-        end
++            (take_feedback || take_fast || select_stream || clear_stream);
+     end endgenerate
+ 
+     always_ff @(posedge clk) begin
+@@ -640,7 +618,6 @@ module mhbs_recipe_lane #(
+             chains_remaining <= '0;
+             chain_counter <= '0;
+             chain_iteration <= '0;
+-            round_index <= '0;
+             hash_error <= 1'b0;
+         end else begin
+             hash_error <= 1'b0;
+@@ -661,7 +638,6 @@ module mhbs_recipe_lane #(
+                             ? (request_steps+5'd1) : 5'd1;
+                         chain_counter <= 0;
+                         chain_iteration <= 1;
+-                        round_index <= 0;
+                         hash_state <= HASH_RUN;
+                     end else
+                         hash_state <= HASH_WAIT_BLOCK;
+@@ -675,7 +651,6 @@ module mhbs_recipe_lane #(
+                         ? saved_chain_count : 5'd1;
+                     chain_counter <= 0;
+                     chain_iteration <= 1;
+-                    round_index <= 0;
+                     hash_state <= HASH_RUN;
+                 end else if (staged_valid) begin
+                     if (append_index == 8) begin
+@@ -689,7 +664,6 @@ module mhbs_recipe_lane #(
+                                 ? saved_chain_count : 5'd1;
+                             chain_counter <= 0;
+                             chain_iteration <= 1;
+-                            round_index <= 0;
+                             hash_state <= HASH_RUN;
+                         end
+                     end else begin
+@@ -708,7 +682,6 @@ module mhbs_recipe_lane #(
+                                      && chain_iteration == 1))
+                                 chain_counter <= chain_counter + 1'b1;
+                             chain_iteration <= chain_iteration + 1'b1;
+-                            round_index <= 0;
+                         end else begin
+                             if (running_last) begin
+                                 hash_state <= HASH_IDLE;
+@@ -717,8 +690,6 @@ module mhbs_recipe_lane #(
+                                 hash_state <= HASH_WAIT_BLOCK;
+                             end
+                         end
+-                    end else if(PIPELINE==1) begin
+-                        round_index <= round_index + UNROLL;
+                     end
+                 end
+                 default: hash_state <= HASH_IDLE;
+diff --git a/rtl/top/mhbs_hbs.sv b/rtl/top/mhbs_hbs.sv
+index 694c290d..c3a7afb0 100644
+--- a/rtl/top/mhbs_hbs.sv
++++ b/rtl/top/mhbs_hbs.sv
+@@ -2,7 +2,6 @@
+ `default_nettype none
+ // Single-lane ABI 4 macro executor for SLH and experimental XMSS/LMS.
+ module mhbs_hbs #(
+-    parameter integer UNROLL=2, PIPELINE=1,
+     parameter bit PROFILE_ENABLE=0
+ ) (
+     input wire [63:0] image_header, profile_descriptor,
+@@ -122,17 +121,17 @@ module mhbs_hbs #(
+     logic [1:0] indexing;
+     logic [13:0] target, leaf_cursor, node_index;
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+-    localparam integer PIPE_BATCH=PIPELINE;
+-    localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
+-    localparam integer COUNT_BITS=$clog2(PIPELINE+1);
++    localparam integer PIPE_BATCH=4;
++    localparam integer TAG_BITS=2;
++    localparam integer COUNT_BITS=3;
+     logic pipe_cache_valid,pipe_batch_used;
+     logic [TAG_BITS-1:0] pipe_issue_slot;
+     logic [COUNT_BITS-1:0] pipe_pair;
+     logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
+     wire [255:0] pipe_read_result,pipe_read_capture;
+     logic [7:0] pipe_seed_domain,pipe_step_domain;
+-    wire pipe_direct=!stateful && PIPELINE>1 && operation==1 && indexing!=1;
+-    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
++    wire pipe_direct=!stateful && operation==1 && indexing!=1;
++    wire pipe_mode=(state==PIPE_ISSUE || state==PIPE_WAIT);
+     wire pipe_ready,pipe_valid,pipe_selected;
+     wire [TAG_BITS-1:0] pipe_tag;
+     wire [255:0] pipe_value;
+@@ -209,8 +208,8 @@ module mhbs_hbs #(
+     wire [INDEX_BITS-1:0] batch_chain_index=chain_cursor+INDEX_BITS'(pipe_issue_slot);
+     wire [13:0] batch_leaf_index=leaf_cursor+14'(pipe_issue_slot);
+     assign pipe_selected=state==PIPE_ISSUE && pipe_expected_mask[pipe_issue_slot];
+-        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+-            .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe),
++        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
++            .RECIPE_MASK(16'hfffe),
+             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+             .clk,.rst(execution_rst),.node_bytes,
+             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
+@@ -243,8 +242,6 @@ module mhbs_hbs #(
+             .response_value(lane_value),.response_capture(lane_capture),.error(lane_error),
+             .hash_count(lane_hashes),.permutation_count(lane_permutations)
+         );
+-    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>12 ||
+-        UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported P/U configuration");
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+     logic [255:0] emit_value;
+@@ -363,11 +360,11 @@ module mhbs_hbs #(
+     // stays intact until the final output beat, then the whole batch is free.
+     task automatic advance_direct_batch;
+         begin
+-            if(chain_cursor+PIPELINE<endpoint_count)begin
+-                chain_cursor<=chain_cursor+PIPELINE;
++            if(chain_cursor+4<endpoint_count)begin
++                chain_cursor<=chain_cursor+4;
+                 pipe_pair<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
+                 for(integer q=0;q<PIPE_BATCH;q=q+1)
+-                    pipe_expected_mask[q]<=32'(chain_cursor)+PIPELINE+q<endpoint_count;
++                    pipe_expected_mask[q]<=32'(chain_cursor)+4+q<endpoint_count;
+                 enter_state(PIPE_ISSUE);
+             end else begin
+                 chain_cursor<=endpoint_count-1'b1;enter_state(CHAIN_NEXT);
+@@ -452,7 +449,7 @@ module mhbs_hbs #(
+         end else begin
+             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
+             if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
+-            if(PIPELINE>1 && pipe_mode)begin
++            if(pipe_mode)begin
+                 if(pipe_valid)begin
+                     pipe_done_mask[pipe_tag]<=1;
+                     if(pipe_direct && chain_cursor==0 && pipe_tag==0 && standalone_chain)
+@@ -547,7 +544,7 @@ module mhbs_hbs #(
+                             task_a<=indexing==1 ? 0 : chain_cursor;
+                             task_b<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor);
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+-                    end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
++                    end else if(!stateful && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
+                         if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
+                         else begin
+                             pipe_pair<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
+@@ -573,7 +570,7 @@ module mhbs_hbs #(
+                 end
+                 PIPE_ISSUE: begin
+                     if(!pipe_expected_mask[pipe_issue_slot] || pipe_ready)begin
+-                        if(pipe_issue_slot+1>=PIPELINE ||
++                        if(pipe_issue_slot+1>=4 ||
+                            (pipe_direct && (pipe_expected_mask>>(pipe_issue_slot+1))==0))enter_state(PIPE_WAIT);
+                         else pipe_issue_slot<=pipe_issue_slot+1'b1;
+                     end
+@@ -589,7 +586,7 @@ module mhbs_hbs #(
+                 end
+                 PIPE_LOAD: begin
+                     pipe_batch_used<=1;
+-                    pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(pipe_pair+1))!=0);
++                    pipe_cache_valid<=pipe_pair+1<4 && ((pipe_expected_mask>>(pipe_pair+1))!=0);
+                     result<={{(V-W){1'b0}},pipe_read_result};
+                     enter_state(CHAIN_STORE);
+                 end
+@@ -757,7 +754,7 @@ module mhbs_hbs #(
+                 end
+                 OUTPUT_CHUNK: begin
+                     if(pipe_direct && output_return==PIPE_CAPTURE_NEXT)begin
+-                        if(pipe_pair<PIPELINE && (pipe_expected_mask>>pipe_pair)!=0)begin
++                        if(pipe_pair<4 && (pipe_expected_mask>>pipe_pair)!=0)begin
+                             emit_value<=pipe_read_capture;pipe_pair<=pipe_pair+1'b1;
+                         end else advance_direct_batch();
+                     end else enter_state(output_return);
+diff --git a/rtl/top/mhbs_top.sv b/rtl/top/mhbs_top.sv
+index 0a225174..d8d3cdd3 100644
+--- a/rtl/top/mhbs_top.sv
++++ b/rtl/top/mhbs_top.sv
+@@ -1,7 +1,6 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+ module mhbs_top #(
+-    parameter integer UNROLL=2,PIPELINE=1,
+     parameter bit SIGNATURE_STORE_ENABLE=1,
+     // Statistics are observable in simulation, absent from production hardware.
+ `ifdef SYNTHESIS
+@@ -74,7 +73,7 @@ module mhbs_top #(
+                                                : core_descriptor_addresses;
+     assign result_kind=OPERATION;
+     assign message_ready=(phase==RUN) && core_message_ready;
+-    mhbs_hbs #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
++    mhbs_hbs #(.PROFILE_ENABLE(PROFILE_ENABLE)) core (
+         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
+         .program_address,.program_data,.template_address,.template_data,
+         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
+diff --git a/scripts/diagnose_single_lane_p2u2_clock.py b/scripts/diagnose_single_lane_p2u2_clock.py
+index b807b4c0..c790c3ad 100644
+--- a/scripts/diagnose_single_lane_p2u2_clock.py
++++ b/scripts/diagnose_single_lane_p2u2_clock.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Run the separately prepared 110 MHz P2U2 synthesis diagnostic."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import argparse
+ import fcntl
+ import importlib.util
+diff --git a/scripts/fixed_p4u2.py b/scripts/fixed_p4u2.py
+new file mode 100644
+index 00000000..63e6d8a0
+--- /dev/null
++++ b/scripts/fixed_p4u2.py
+@@ -0,0 +1,165 @@
++#!/usr/bin/env python3
++"""Frozen P4U2 specialization: Verilator equivalence and OOC synthesis only."""
++import argparse, concurrent.futures, fcntl, hashlib, json, os, re, shutil, signal, subprocess, tarfile
++from pathlib import Path
++from experiment_support import snapshot, area, PART
++ROOT=Path(__file__).resolve().parents[1]
++OUT=ROOT/'manifests/experiments/fixed_p4u2_20261009'
++BUILD=ROOT/'build/fixed_p4u2_20261009'
++BASE=BUILD/'baseline'
++
++def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
++def write(p,x):p.parent.mkdir(parents=True,exist_ok=True);p.write_text(json.dumps(x,indent=2)+'\n')
++def tool(cmd,log,cwd=ROOT):
++ log.parent.mkdir(parents=True,exist_ok=True)
++ with log.open('w') as stream:
++  proc=subprocess.Popen(list(map(str,cmd)),cwd=cwd,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
++  try:
++   code=proc.wait(timeout=1200 if Path(str(cmd[0])).name=='vivado' else None)
++  except subprocess.TimeoutExpired:
++   os.killpg(proc.pid,signal.SIGTERM)
++   try:proc.wait(timeout=10)
++   except subprocess.TimeoutExpired:os.killpg(proc.pid,signal.SIGKILL);proc.wait()
++   write(log.with_suffix('.timeout.json'),dict(timeout_seconds=1200,measured=False,command=list(map(str,cmd))))
++   raise RuntimeError(f'Vivado synthesis timed out after 1200 s; no measured area: {log}')
++ if code:raise RuntimeError(f'{log}: exit {code}\n'+log.read_text()[-2500:])
++
++def freeze(label):
++ if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]*',label):raise ValueError('invalid label')
++ d=OUT/label;d.mkdir(parents=True,exist_ok=True);snapshot(d)
++ meta=json.loads((d/'inputs.json').read_text());meta['frequency_mhz_assumed']=110;meta['scope']='fixed P4U2 common core';write(d/'inputs.json',meta)
++ (d/'source.patch').write_bytes(subprocess.check_output(['git','diff','HEAD','--','rtl','tb','scripts','tests','Makefile','README.md','docs','manifests/v42_sources.txt'],cwd=ROOT))
++ source=BUILD/label/'source';source.mkdir(parents=True,exist_ok=True)
++ with tarfile.open(d/'source_snapshot.tar.gz') as t:t.extractall(source,filter='data')
++ return source
++
++def frozen_partition(source):
++ ns={};exec((source/'scripts/v42_common_partition.py').read_text(),ns)
++ return ns['partition']((source/'rtl/top/mhbs_top.sv').read_text())
++
++def source_for(label):
++ source=BUILD/label/'source';meta=json.loads((OUT/label/'inputs.json').read_text())
++ assert sha(OUT/label/'source_snapshot.tar.gz')==meta['snapshot_sha256']
++ if not source.exists():
++  with tarfile.open(OUT/label/'source_snapshot.tar.gz') as archive:archive.extractall(source,filter='data')
++ for f,h in meta['source_sha256'].items():assert sha(source/f)==h,f
++ return source
++
++def references(d):
++ """Rename every frozen module, so the comparison shares no live logic."""
++ baseline_meta=json.loads((OUT/'baseline/inputs.json').read_text())
++ assert sha(OUT/'baseline/source_snapshot.tar.gz')==baseline_meta['snapshot_sha256']
++ if not (BASE/'rtl/top/mhbs_top.sv').exists():
++  with tarfile.open(OUT/'baseline/source_snapshot.tar.gz') as archive:archive.extractall(BASE,filter='data')
++ for path,digest in baseline_meta['source_sha256'].items():assert sha(BASE/path)==digest,path
++ paths=(BASE/'manifests/v42_sources.txt').read_text().split();names=[Path(f).stem for f in paths]+['mhbs_common']
++ def rename(s):return re.sub(r'\b('+'|'.join(names)+r')\b',lambda m:'frozen_'+m[0],s)
++ refs=[]
++ for f in paths:
++  if f.endswith('mhbs_top.sv'):continue
++  dest=d/('frozen_'+Path(f).name);dest.write_text(rename((BASE/f).read_text()));refs.append(dest)
++ ns={};exec((BASE/'scripts/v42_common_partition.py').read_text(),ns)
++ common,_=ns['partition']((BASE/'rtl/top/mhbs_top.sv').read_text())
++ dest=d/'frozen_common.sv';dest.write_text(rename(common));refs.append(dest)
++ return refs
++
++def compile_tb(label,top,params=(),equiv=False,stats=1):
++ source=source_for(label);name=top+'_'+str(stats)+'_'+hashlib.sha256(str(params).encode()).hexdigest()[:8]
++ d=BUILD/label/name;d.mkdir(parents=True,exist_ok=True)
++ with (d/'compile.lock').open('a') as lock:
++  fcntl.flock(lock,fcntl.LOCK_EX)
++  refs=references(d)
++  # Unit oracles use the exact pre-specialization recipe and context modules.
++  tb=(source/('tb/integration' if top=='tb_mhbs_stateful' else 'tb/unit')/(top+'.sv')).read_text()
++  tb=tb.replace('mhbs_recipe_pre_direct_ref','frozen_mhbs_recipe_lane').replace('mhbs_chain_pipeline_lane_ref','frozen_mhbs_chain_pipeline_lane')
++  (d/(top+'.sv')).write_text(tb)
++  common,_=frozen_partition(source);(d/'common.sv').write_text(common)
++  files=[source/f for f in (source/'manifests/v42_sources.txt').read_text().split() if not f.endswith('mhbs_top.sv')]+[d/'common.sv',*refs,d/(top+'.sv')]
++  identity={str(f):sha(f) for f in files}
++  identity.update({str(f):sha(f) for f in (source/'tb').rglob('*.svh')})
++  exe=d/'obj'/('V'+top)
++  if not exe.exists() or not (d/'identity.json').exists() or json.loads((d/'identity.json').read_text())!=identity:
++   tool(['verilator','--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module',top,*(['-DSINGLE_LANE_EQUIV',f'-GPROFILE_ENABLE={stats}'] if equiv else []),*params,'--Mdir',exe.parent,*files],OUT/label/'logs'/(name+'_compile.log'),source)
++   write(d/'identity.json',identity)
++  return exe
++
++def unit(label):
++ source=source_for(label);v=OUT/'vectors';v.mkdir(exist_ok=True)
++ for name,digest in json.loads((OUT/'vectors_sha256.json').read_text()).items():
++  assert sha(v/name)==digest,name
++ cases=[('rounds','tb_mhbs_round_decode',[],[]),('overlap','tb_mhbs_chain_overlap',[],[f'+VECTORS={v}']),('padding','tb_mhbs_recipe_padding',[],[f'+VECTORS={v}/recipe_padding.mem']),('format','tb_mhbs_chain_format_equiv',[],[])]
++ for i in range(3):
++  cases += [(f'recipe_{i}','tb_mhbs_v42_recipe_lane',[f'-GPROFILE={i}'],[]),(f'capture_{i}','tb_mhbs_v42_recipe_lane',[f'-GPROFILE={i}','-GMASK=6','-GCASES=12'],[f'+VECTORS={v}/chain_capture_{i}.mem'])]
++ def one(c):
++  name,top,params,opts=c;exe=compile_tb(label,top,params);log=OUT/label/'logs'/(name+'.log');tool([exe,*opts],log,source)
++  assert 'PASS' in log.read_text(),name
++  print('UNIT_PASS',label,name,flush=True);return name,dict(passed=True,log_sha256=sha(log),binary_sha256=sha(exe))
++ with concurrent.futures.ThreadPoolExecutor(3) as pool:rows=dict(pool.map(one,cases))
++ write(OUT/label/'unit.json',rows)
++
++def vector(name,op):
++ folder=OUT/'vectors/jobs'/name/str(op)
++ identities=json.loads((OUT/'vectors_sha256.json').read_text())
++ for path in folder.iterdir():
++  if path.is_file():assert sha(path)==identities[str(path.relative_to(OUT/'vectors'))],path
++ return folder
++
++def regression(label,quick=False,stats=1):
++ exe=compile_tb(label,'tb_mhbs_stateful',equiv=True,stats=stats);source=source_for(label)
++ names=['slh_128f','slh_192f','slh_256f','slh_128s','slh_192s','slh_256s','xmss_omega2','xmss_omega4','lms_omega2','lms_omega4']
++ cases=[(n+'_'+str(op),vector(n,op),[]) for n in names for op in range(3)]
++ if quick:cases=[('slh_128f_1',vector('slh_128f',1),[])]
++ else:
++  cases += [('sign_stall_reset',vector('slh_128f',1),['+STALL=1','+INTERRUPT=1','+REPLAYS=2']),('fault',vector('slh_128f',1),['+FAULT=1']),('verify_stall_reset',vector('slh_128f',2),['+STALL=1','+INTERRUPT=1','+REPLAYS=2'])]
++  for n in ['slh_128f','xmss_omega4','lms_omega4']:
++   cases += [(n+'_tamper_'+str(t),vector(n,2),[f'+TAMPER={t}']) for t in range(1,6)]
++ def one(c):
++  name,v,opts=c;log=OUT/label/'logs'/(name+f'_stats{stats}.log');tool([exe,f'+VECTOR={v}',*opts],log,source)
++  t=log.read_text();m=re.findall(r'STATEFUL_PASS \w+ op=(\d+) cycles=(\d+) total=(\d+) hashes=(\d+) permutations=(\d+)',t)
++  if m:
++   r=dict(zip(('operation','compute_cycles','total_cycles','hashes','permutations'),map(int,m[-1])))
++   if name=='slh_128f_1':assert (r['compute_cycles'],r['hashes'],r['permutations'])==(412170,104937,105641),r
++  else:assert 'STATEFUL_FAULT_PASS' in t;r={}
++  r.update(passed=True,cycle_equivalence=True,log_sha256=sha(log),binary_sha256=sha(exe),vectors_sha256={f.name:sha(f) for f in v.iterdir() if f.is_file()})
++  print('EQUIV_PASS',label,name,r.get('compute_cycles'),flush=True);return name,r
++ with concurrent.futures.ThreadPoolExecutor(6) as pool:rows=dict(pool.map(one,cases))
++ write(OUT/label/(('quick' if quick else 'regression')+f'_stats{stats}.json'),rows)
++
++def synth(label):
++ source=source_for(label);d=OUT/label/'synthesis';d.mkdir(exist_ok=True);work=BUILD/label/'synthesis';work.mkdir(exist_ok=True)
++ common,_=frozen_partition(source);(d/'common.sv').write_text(common)
++ (d/'clock.xdc').write_text('create_clock -name clk -period 6.666667 [get_ports clk]\n')
++ lines=['set_param general.maxThreads 2',f'create_project -in_memory -part {PART}']
++ lines += [f'read_verilog -sv {{{source/f}}}' for f in (source/'manifests/v42_sources.txt').read_text().split() if not f.endswith('mhbs_top.sv')]
++ lines += [f'read_verilog -sv {{{d/"common.sv"}}}',f'read_xdc {{{d/"clock.xdc"}}}',f'synth_design -top mhbs_common -part {PART} -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic PROFILE_ENABLE=0',f'report_utilization -file {{{d/"core_utilization.rpt"}}}',f'report_utilization -hierarchical -file {{{d/"core_hierarchical.rpt"}}}',f'report_timing_summary -file {{{d/"core_timing.rpt"}}}',
++ 'set bad {}','foreach c [get_cells -hier -filter {IS_PRIMITIVE == 1}] {if {[string match FD* [get_property REF_NAME $c]] && [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $c]} {lappend bad $c}}','if {[llength $bad]} {error "statistics remain: $bad"}',f'write_checkpoint -force {{{work/"post_synth.dcp"}}}','puts "FIXED_P4U2_SYNTH_PASS"','exit']
++ (d/'synth.tcl').write_text('\n'.join(lines)+'\n');tool(['vivado','-mode','batch','-nolog','-nojournal','-source',d/'synth.tcl'],d/'vivado.log',work)
++ assert 'FIXED_P4U2_SYNTH_PASS' in (d/'vivado.log').read_text()
++ r=dict(area=area(d/'core_utilization.rpt'),statistics_pruned=True,routed=False,clock_period_ns=6.666667,assumed_mhz=110,source_snapshot_sha256=sha(OUT/label/'source_snapshot.tar.gz'),evidence_sha256={f.name:sha(f) for f in d.iterdir() if f.is_file()})
++ write(OUT/label/'synthesis.json',r);print('SYNTH_PASS',label,r['area'],flush=True)
++
++def external(label):
++ import v42_external_flow as flow
++ source=source_for(label);folder=BUILD/label/'external'
++ flow.ROOT=source;flow.BASE=source/'manifests/experiments/unified_hbs_v4.2/external_job_message'
++ def run(cmd,log,cwd=source):
++  cmd=list(cmd)
++  if cmd[0]=='verilator':cmd[cmd.index('-j')+1]='2'
++  tool(cmd,log,source)
++ flow.run=run
++ rows={}
++ for partitioned,stats in ((False,True),(True,True),(True,False)):
++  name=f'partition{int(partitioned)}_stats{int(stats)}'
++  _,r=flow.simulate_case(folder,name,flow.BASE/'vectors/slh_128f/sign',partitioned=partitioned,profile_enable=stats)
++  assert (r['sign_cycles'],r['hashes'],r['permutations'])==(412170,104937,105641)
++  rows[name]=r
++ assert len({r['output_sha256'] for r in rows.values()})==1
++ shutil.copytree(folder/'logs',OUT/label/'external_logs',dirs_exist_ok=True)
++ write(OUT/label/'external.json',rows)
++
++def main():
++ a=argparse.ArgumentParser(description=__doc__);a.add_argument('action',choices=['freeze','unit','quick','regression','synth','external']);a.add_argument('label');a.add_argument('--stats',type=int,choices=[0,1],default=1);args=a.parse_args()
++ if args.action=='freeze':freeze(args.label)
++ elif args.action in ('quick','regression'):regression(args.label,args.action=='quick',args.stats)
++ else:globals()[args.action](args.label)
++if __name__=='__main__':main()
+diff --git a/scripts/launch_single_lane_13.py b/scripts/launch_single_lane_13.py
+index 9a2e302d..aec8baa3 100644
+--- a/scripts/launch_single_lane_13.py
++++ b/scripts/launch_single_lane_13.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Start the frozen single-lane matrix in a detached user service."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import argparse
+ import hashlib
+ import json
+diff --git a/scripts/legacy_lane_guard.py b/scripts/legacy_lane_guard.py
+index 064dccbe..aca1b083 100644
+--- a/scripts/legacy_lane_guard.py
++++ b/scripts/legacy_lane_guard.py
+@@ -5,4 +5,4 @@ import re
+ def require_legacy_lanes():
+     root=Path(__file__).resolve().parents[1]
+     if not re.search(r'\bLANES\s*=', (root/'rtl/top/mhbs_hbs.sv').read_text()):
+-        raise SystemExit('Historical multi-lane driver: use its frozen source snapshot. Current RTL has one fixed lane; use run_pu_cycle_synth_matrix.py or verify_single_lane.py.')
++        raise SystemExit('Historical multi-lane driver: use its frozen source snapshot. Current RTL has one fixed lane; use fixed_p4u2.py.')
+diff --git a/scripts/profile_kpu_utilization.py b/scripts/profile_kpu_utilization.py
+index ad5d8e95..c9dd4576 100644
+--- a/scripts/profile_kpu_utilization.py
++++ b/scripts/profile_kpu_utilization.py
+@@ -4,6 +4,9 @@
+ Instrument only a build copy of the integration bench. Count stage input valids
+ (the rounds actually consumed at the next edge), rather than register presence.
+ """
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ from pathlib import Path
+diff --git a/scripts/profile_mhbs_k1u1.py b/scripts/profile_mhbs_k1u1.py
+index 82be6a60..f240c569 100644
+--- a/scripts/profile_mhbs_k1u1.py
++++ b/scripts/profile_mhbs_k1u1.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Measure an isolated single-lane U1 derivative of the frozen K2U2 experiment."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ import argparse
+diff --git a/scripts/report_fixed_p4u2.py b/scripts/report_fixed_p4u2.py
+new file mode 100644
+index 00000000..bed1bfd6
+--- /dev/null
++++ b/scripts/report_fixed_p4u2.py
+@@ -0,0 +1,52 @@
++#!/usr/bin/env python3
++"""Report fixed P4U2 candidates using measured common-core synthesis evidence."""
++import csv,hashlib,json
++from pathlib import Path
++ROOT=Path(__file__).resolve().parents[1]
++OUT=ROOT/'manifests/experiments/fixed_p4u2_20261009'
++DOC=ROOT/'docs/report/Fixed_P4U2_Optimization'
++def main():
++ decisions=json.loads((OUT/'decisions.json').read_text())
++ assert decisions['status']=='complete', 'Candidate decisions are not final'
++ def digest(path):return hashlib.sha256(path.read_bytes()).hexdigest()
++ def check_synthesis(label,record):
++  for name,value in record['evidence_sha256'].items():
++   assert digest(OUT/label/'synthesis'/name)==value,(label,name)
++  assert record['statistics_pruned'] and not record['routed']
++  assert record['clock_period_ns']==6.666667
++
++ old=ROOT/'manifests/experiments/single_lane_13_20261009_v4/P4U2'
++ area=json.loads((old/'synthesis.json').read_text())['area']
++ rows=[dict(candidate='113648d7 P4U2',parent='',retained=True,reason='original baseline',**area,compute_cycles=412170,total_cycles=412175,hashes=104937,permutations=105641,evidence=str(old.relative_to(ROOT)))]
++ for label in decisions['order']:
++  if not (OUT/label/'synthesis.json').exists():continue
++  syn=json.loads((OUT/label/'synthesis.json').read_text())
++  check_synthesis(label,syn)
++  sim=json.loads((OUT/label/'quick_stats1.json').read_text())['slh_128f_1']
++  assert sim['passed'] and sim['cycle_equivalence']
++  assert (sim['hashes'],sim['permutations'])==(104937,105641)
++  rows.append(dict(candidate=label,**decisions[label],**syn['area'],**{k:sim[k] for k in ('compute_cycles','total_cycles','hashes','permutations')},evidence=str((OUT/label).relative_to(ROOT))))
++ for r in rows:
++  r.update(assumed_mhz=110,routed=False,time_ms=r['compute_cycles']/110000,atp_slice_ms=r['equivalent_slice']*r['compute_cycles']/110000,keccak_effective_round_utilization_percent=100*r['permutations']*24/(8*r['compute_cycles']))
++ final=decisions['final'];live={p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest() for p in (ROOT/'manifests/v42_sources.txt').read_text().split()}
++ source=json.loads((OUT/final/'inputs.json').read_text())['source_sha256']
++ assert all(source[p]==h for p,h in live.items()),'Current RTL differs from accepted measured candidate'
++ gate=json.loads((OUT/'final_validation.json').read_text())
++ assert gate['passed'] and gate['candidate']==final and gate['rtl_sha256']==live
++ data=dict(validation=gate,unmeasured_candidates={k:decisions[k] for k in ['round_pass',*decisions['order']] if not (OUT/k/'synthesis.json').exists()},baseline_commit='113648d7',final=final,frequency_note='110 MHz assumed; not routed',device='xc7a200tffg1156-3',synthesis_clock_ns=6.666667,rows=rows,current_rtl_sha256=live)
++ DOC.with_suffix('.json').write_text(json.dumps(data,indent=2)+'\n')
++ keys=list(rows[0]);keys += [k for r in rows for k in r if k not in keys]
++ keys=list(dict.fromkeys(keys))
++ with DOC.with_suffix('.csv').open('w') as f:
++  w=csv.DictWriter(f,fieldnames=keys);w.writeheader();w.writerows(rows)
++  for label,item in data['unmeasured_candidates'].items():
++   w.writerow(dict(candidate=label,parent=item['parent'],retained=False,reason=item['reason'],assumed_mhz=110,routed=False,evidence=str((OUT/label).relative_to(ROOT))))
++ lines=['# 固定 P4U2 优化','','固定单 lane、四级流水、每级两轮；十参数三操作保留。共同核综合、PROFILE_ENABLE=0、xc7a200tffg1156-3、6.666667 ns，不布线。**110 MHz 为假定频率，未经布线验证。**','','| 候选 | LUT | FF | LUTRAM | BRAM / DSP | 等效 Slice | 128f sign 周期 | ATP（Slice·ms） | 结论 |','|---|---:|---:|---:|---|---:|---:|---:|---|']
++ for r in rows:lines.append(f"| {r['candidate']} | {r['lut']:,.0f} | {r['ff']:,.0f} | {r['lutram']:,.0f} | {r['bram36']:g} / {r['dsp']:g} | {r['equivalent_slice']:,.3f} | {r['compute_cycles']:,} | {r['atp_slice_ms']:,.3f} | {r['reason']} |")
++ last=next(r for r in rows if r['candidate']==final)
++ lines += ['',f"最终保留 **{final}**；相对原始 P4U2，LUT 变化 {last['lut']-area['lut']:+,.0f}，FF 变化 {last['ff']-area['ff']:+,.0f}，等效 Slice 变化 {last['equivalent_slice']-area['equivalent_slice']:+,.3f}。",
++ '', '## 未完成测量的候选', '', *[f"- `{name}`：{row['reason']}。未获得面积结果，不计入上表，也不保留其 RTL 改动。" for name,row in data['unmeasured_candidates'].items()], '', '## 实现与验收', '', '- 固定结构：移除生产 P/U 参数、P1 串行路径和独立 sponge 状态；tag 两位、槽位计数三位、掩码四位。仅固定参数的综合资源与基线完全一致。', '- 轮控制候选：每级两位遍次编号，轮号按遍次/固定位置拼接，第三遍结束返回。', '- 原双位相等终止判断候选 `round_pass` 通过功能回归，但综合超过 13 分钟仍在时序优化，后改用只检查最高位的 `round_pass_bit`；原任务主动停止，没有面积结果，不参与面积比较。', '- 四槽存储候选 `four_slots` 将部分 LUTRAM 转成 FF，等效 Slice 增加，撤回。修订候选 `four_control` 保留原数组写端口，仅简化固定优先级、无效范围判断及尾批后缀检查。总 LUT 不增加、等效 Slice 严格下降、功能通过且周期不增加才保留。', '- 外部数据接口、输出次序、Keccak 轮函数、端点存储和批次调度保持原行为。', '', '## 验证', '', f"- 最终验证证据：`{gate['evidence_label']}`；测试与被接受候选的全部生产 RTL 哈希一致。", '- Verilator 对冻结 `113648d7` P4U2 整核逐周期对照，检查握手、输出、完成、错误和统计；十参数三操作以及停顿、复位重放、故障、消息/节点/根篡改。', '- 全 24 轮另以零值、全一和随机状态完成 816 次冻结轮函数比对。', '- 单元覆盖三节点宽度、普通/compact chain、交错上下文、capture 禁用/未命中/槽位复用、反馈冲突、背压和共享状态写入隔离；独立 hashlib 向量和冻结轮函数为参考。', '- 完整顶层/提取共同核及统计关闭均对照软件签名；128f sign 为 412,170 计算周期、412,175 总周期、104937 Hash / 105641 次置换。', '- 历史链格式测试的 pending 记分板有多进程更新竞争，本轮改为单 posedge 更新；修正后覆盖 354 次接受和 252 次同拍完成/新请求。初始失败日志保留，属于测试问题，不作为通过证据。', '', '## 面积和证据口径', '', '等效 Slice = LUT/4 + FF/8 + 232.4×BRAM36 + 102.4×DSP；LUT 已含 LUTRAM，不重复计数。时间(ms)=计算周期/110000；ATP=等效 Slice×时间。有效轮利用率=置换次数×24/(8×计算周期)，已完成仿真的候选均为约 76.89%。', '', f"[最终分层报告](../../{(OUT/final/'synthesis/core_hierarchical.rpt').relative_to(ROOT)})", '', '所有独立候选的源码快照、补丁、输入哈希、仿真日志和综合报告位于 `manifests/experiments/fixed_p4u2_20261009/`。旧 13 点报告保持原样。本轮不提交、不推送。']
++ # docs/report -> repository root needs two parent components.
++ DOC.with_suffix('.md').write_text('\n'.join(lines)+'\n')
++ print('REPORT_PASS',final)
++if __name__=='__main__':main()
+diff --git a/scripts/resynth_single_lane_p2u2.py b/scripts/resynth_single_lane_p2u2.py
+index 6c8f4cab..c3c36e03 100644
+--- a/scripts/resynth_single_lane_p2u2.py
++++ b/scripts/resynth_single_lane_p2u2.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Resynthesize only P2U2 with eight threads using the original frozen source."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import argparse
+ import csv
+ import fcntl
+diff --git a/scripts/run_kpu_atp_candidate.py b/scripts/run_kpu_atp_candidate.py
+index 2d01939b..e23a23be 100644
+--- a/scripts/run_kpu_atp_candidate.py
++++ b/scripts/run_kpu_atp_candidate.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """K1P1-4U1 ATP candidate: simulate, synthesize, validate a winning candidate."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ import argparse,csv,json,shutil,subprocess,tarfile
+diff --git a/scripts/run_kpu_cycle_synth_matrix.py b/scripts/run_kpu_cycle_synth_matrix.py
+index acfeb437..a2d59885 100644
+--- a/scripts/run_kpu_cycle_synth_matrix.py
++++ b/scripts/run_kpu_cycle_synth_matrix.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Resumable 128f Sign K/P/U cycle and common-core synthesis matrix."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ import concurrent.futures, csv, hashlib, json, os, re, shutil, subprocess, tarfile, threading, time
+diff --git a/scripts/run_kpu_lane_sweep.py b/scripts/run_kpu_lane_sweep.py
+index 1e47daaf..8d629cd2 100644
+--- a/scripts/run_kpu_lane_sweep.py
++++ b/scripts/run_kpu_lane_sweep.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Measure KxP1U1 128f sign with a frozen common-core synthesis source."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ import argparse,csv,json,subprocess,tarfile
+diff --git a/scripts/run_lup_sign_atp.py b/scripts/run_lup_sign_atp.py
+index 35e9d3b5..e3a0ca42 100644
+--- a/scripts/run_lup_sign_atp.py
++++ b/scripts/run_lup_sign_atp.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Reproducible L2U1P1-P4 common-core area/time sweep; no place/route."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from legacy_lane_guard import require_legacy_lanes
+ require_legacy_lanes()
+ from pathlib import Path
+diff --git a/scripts/run_pu_cycle_synth_matrix.py b/scripts/run_pu_cycle_synth_matrix.py
+index aeaf0b49..b3b2161a 100644
+--- a/scripts/run_pu_cycle_synth_matrix.py
++++ b/scripts/run_pu_cycle_synth_matrix.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Resumable 128f Sign P/U cycle and common-core synthesis matrix."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import concurrent.futures, csv, hashlib, json, os, re, shutil, subprocess, tarfile, threading, time
+ from datetime import datetime, timezone
+ from pathlib import Path
+diff --git a/scripts/run_single_lane_13.py b/scripts/run_single_lane_13.py
+index 74b5e7e2..38fb96bd 100644
+--- a/scripts/run_single_lane_13.py
++++ b/scripts/run_single_lane_13.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Resumable 128f Sign P/U cycle and common-core synthesis matrix."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import concurrent.futures, csv, hashlib, json, os, re, shutil, subprocess, tarfile, threading, time, signal, sys, fcntl
+ from datetime import datetime, timezone
+ from pathlib import Path
+diff --git a/scripts/run_stateful.py b/scripts/run_stateful.py
+index 09063af0..14b6ca3e 100644
+--- a/scripts/run_stateful.py
++++ b/scripts/run_stateful.py
+@@ -7,13 +7,13 @@ from v42_common_partition import partition
+ from stateful_vectors import OUT as VECTORS
+ OUT=ROOT/'manifests/experiments/single_lane_stateful';OUT.mkdir(exist_ok=True)
+ BUILD=ROOT/'build/single_lane_stateful'
+-def build(p=1,u=1,profile=1):
+-    point=f'P{p}U{u}_stats{profile}';d=BUILD/point;d.mkdir(parents=True,exist_ok=True)
++def build(profile=1):
++    point=f'P4U2_stats{profile}';d=BUILD/point;d.mkdir(parents=True,exist_ok=True)
+     common,_=partition((ROOT/'rtl/top/mhbs_top.sv').read_text());(d/'mhbs_common.sv').write_text(common)
+     sources=[ROOT/f for f in (ROOT/'manifests/v42_sources.txt').read_text().splitlines() if f!='rtl/top/mhbs_top.sv']+[d/'mhbs_common.sv',ROOT/'tb/integration/tb_mhbs_stateful.sv']
+     ident={str(f):hashlib.sha256(f.read_bytes()).hexdigest() for f in sources};binary=d/'obj/Vtb_mhbs_stateful'
+     if not binary.exists() or not (d/'identity.json').exists() or json.loads((d/'identity.json').read_text())!=ident:
+-        cmd=['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','--top-module','tb_mhbs_stateful',f'-GPIPELINE={p}',f'-GUNROLL={u}',f'-GPROFILE_ENABLE={profile}','--Mdir',str(d/'obj'),*map(str,sources)]
++        cmd=['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','--top-module','tb_mhbs_stateful',f'-GPROFILE_ENABLE={profile}','--Mdir',str(d/'obj'),*map(str,sources)]
+         with (d/'compile.log').open('w') as f:subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
+         (d/'identity.json').write_text(json.dumps(ident,indent=2));print('BUILD_PASS',point,flush=True)
+     return binary
+@@ -28,10 +28,10 @@ def run(binary,vector,options=(),suffix=''):
+         print('PASS',name,result['compute_cycles'],flush=True);return result
+     assert 'INDEX_REJECT_PASS' in t or 'STATEFUL_FAULT_PASS' in t;print('PASS',name,flush=True);return dict(passed=True)
+ if __name__=='__main__':
+-    a=argparse.ArgumentParser();a.add_argument('--p',type=int,default=1);a.add_argument('--u',type=int,default=1);a.add_argument('--profile',type=int,default=1);a.add_argument('--name');a.add_argument('--op',type=int);a.add_argument('--build-only',action='store_true');args=a.parse_args()
+-    b=build(args.p,args.u,args.profile)
++    a=argparse.ArgumentParser();a.add_argument('--profile',type=int,default=1);a.add_argument('--name');a.add_argument('--op',type=int);a.add_argument('--build-only',action='store_true');args=a.parse_args()
++    b=build(args.profile)
+     if not args.build_only:
+         rows=[]
+         for v in sorted((VECTORS/'vectors').glob(f'{args.name or "*"}/q0_m1/{args.op if args.op is not None else "[012]"}')):
+             rows.append(dict(profile=v.parents[1].name,**run(b,v)))
+-        (OUT/f'P{args.p}U{args.u}_simulation.json').write_text(json.dumps(rows,indent=2)+'\n')
++        (OUT/'P4U2_simulation.json').write_text(json.dumps(rows,indent=2)+'\n')
+diff --git a/scripts/smoke_current.py b/scripts/smoke_current.py
+index 0f111174..40838f98 100644
+--- a/scripts/smoke_current.py
++++ b/scripts/smoke_current.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Fresh functional smoke test of the slimmed production tree; no Vivado."""
++if __name__ == "__main__":
++    raise SystemExit("Fixed P4U2: use make smoke, make verify, or scripts/fixed_p4u2.py. Historical checks require their original source snapshot.")
++
+ import argparse
+ import hashlib
+ import json
+diff --git a/scripts/synth_single_lane.py b/scripts/synth_single_lane.py
+index afe96cac..3423a6d9 100644
+--- a/scripts/synth_single_lane.py
++++ b/scripts/synth_single_lane.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Source-frozen single-lane common-core synthesis, no routing."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from pathlib import Path
+ import sys,json,tarfile,subprocess,concurrent.futures
+ from experiment_support import snapshot,area,PART
+diff --git a/scripts/v42_common_partition.py b/scripts/v42_common_partition.py
+index e1ae56e5..c280c70e 100644
+--- a/scripts/v42_common_partition.py
++++ b/scripts/v42_common_partition.py
+@@ -33,8 +33,8 @@ def partition(source, *, stub=False):
+     start=source.index(begin);stop=source.index(end)+len(end)
+     body=source[source.index('\n',start)+1:source.index(end)]
+     body=re.sub(r'\b('+'|'.join(JOBS)+r')\b',lambda m:JOBS[m[0]],body)
+-    common='`timescale 1ns/1ps\n`default_nettype none\nmodule mhbs_common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENABLE=1)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
+-    params='' if stub else ' #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE))'
++    common='`timescale 1ns/1ps\n`default_nettype none\nmodule mhbs_common #(parameter bit PROFILE_ENABLE=1)('+PORTS+');\n'+body+'endmodule\n`default_nettype wire\n'
++    params='' if stub else ' #(.PROFILE_ENABLE(PROFILE_ENABLE))'
+     instance='    (* DONT_TOUCH="yes" *) mhbs_common'+params+' common (\n'
+     instance+=','.join('.'+v+'('+k+')' for k,v in JOBS.items())+',\n'
+     instance+=' .clk,.rst,.message_length,.message_data,.message_valid,.message_ready,\n'
+diff --git a/scripts/v42_external_flow.py b/scripts/v42_external_flow.py
+index d38c5726..68dee240 100644
+--- a/scripts/v42_external_flow.py
++++ b/scripts/v42_external_flow.py
+@@ -39,13 +39,13 @@ def capture(tag):
+  write(f/'inputs.json',dict(version='v4.2',layout_revision=3,tag=tag,rtl_sha256=identity(),source_sha256=source,snapshot_sha256=sha(f/'source_snapshot.tar.gz'),software_gate_sha256=sha(BASE/'software_gate.json'),baseline_commit='366b614',tool_versions={'verilator':tool_version('verilator','--version'),'iverilog':tool_version('iverilog','-V')}))
+  return f
+ 
+-def build_binary(folder,cfg,partitioned=False,profile_enable=True,unroll=2,pipeline=1):
+- key=hashlib.sha256(json.dumps((cfg,identity(),partitioned,profile_enable,unroll,pipeline,[(str(p),sha(p)) for p in sorted((ROOT/"tb/integration").glob("*.svh"))],sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
++def build_binary(folder,cfg,partitioned=False,profile_enable=True):
++ key=hashlib.sha256(json.dumps((cfg,identity(),partitioned,profile_enable,[(str(p),sha(p)) for p in sorted((ROOT/"tb/integration").glob("*.svh"))],sha(ROOT/'tb/integration/tb_mhbs_external.sv'),sha(ROOT/'scripts/v42_common_partition.py')),sort_keys=True).encode()).hexdigest()[:16]
+  d=folder/'binaries'/key;binary=d/'obj/Vtb_mhbs_external'
+  if not binary.exists():
+   d.mkdir(parents=True,exist_ok=True)
+   parameters=[f"-G{k.upper()}=256'h{int.from_bytes(bytes.fromhex(cfg[k]),'little'):064x}" for k in PARAMS]
+-  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GPROFILE_ENABLE={int(profile_enable)}',f'-GUNROLL={unroll}',f'-GPIPELINE={pipeline}']
++  parameters += [f"-GOPERATION={cfg['operation']}",f"-GMESSAGE_BYTES={cfg['message_bytes']}",f'-GPROFILE_ENABLE={int(profile_enable)}']
+   sources=rtl();defines=[]
+   if partitioned:
+    from v42_common_partition import partition
+@@ -56,8 +56,8 @@ def build_binary(folder,cfg,partitioned=False,profile_enable=True,unroll=2,pipel
+   run(['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-Wno-WIDTH','-Wno-UNOPTFLAT',*defines,'--top-module','tb_mhbs_external',*parameters,'--Mdir',str(binary.parent),*sources,'tb/integration/tb_mhbs_external.sv'],d/'compile.log')
+  return binary
+ 
+-def simulate_case(folder,name,vector,options=(),partitioned=False,profile_enable=True,unroll=2,pipeline=1):
+- cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,partitioned,profile_enable,unroll,pipeline)
++def simulate_case(folder,name,vector,options=(),partitioned=False,profile_enable=True):
++ cfg=json.loads((vector/'job.json').read_text());binary=build_binary(folder,cfg,partitioned,profile_enable)
+  log=folder/'logs'/(name+'.log');log.parent.mkdir(parents=True,exist_ok=True)
+  dump=log.with_suffix('.actual.mem')
+  cmd=[str(binary),'+IMAGE='+str(BASE/'images'/cfg['profile']),'+VECTOR='+str(vector),'+DUMP='+str(dump),*options]
+@@ -65,16 +65,16 @@ def simulate_case(folder,name,vector,options=(),partitioned=False,profile_enable
+  hits=re.findall(r'EXTERNAL_PASS boot=(\d+) keygen=(\d+) sign=(\d+) hashes=(\d+) permutations=(\d+) run=(\d+) wait=(\d+) total=(\d+)',log.read_text())
+  assert len(hits)==(2 if '+REPLAYS=2' in options else 1),str(log)
+  result=dict(zip(('boot_cycles','keygen_cycles','sign_cycles','hashes','permutations','run','wait_cycles','total_cycles'),map(int,hits[-1])))
+- result.update(passed=True,unroll=unroll,pipeline=pipeline,profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
++ result.update(passed=True,topology="P4U2",profile_enable=profile_enable,statistics_source="testbench completed-permutation observer",log_sha256=sha(log),output_sha256=sha(dump),binary_sha256=sha(binary),config=cfg,vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
+  write(log.with_suffix('.json'),result);print('EXTERNAL_SIM_PASS',name,result['keygen_cycles'],result['sign_cycles'],flush=True)
+  return name,result
+ 
+ def main():
+- p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');p.add_argument('--unroll',type=int,default=2);p.add_argument('--pipeline',type=int,choices=(1,2,3,4,6,8,12),default=1);a=p.parse_args()
++ p=argparse.ArgumentParser();p.add_argument('action',choices=['capture','sim']);p.add_argument('--tag',required=True);p.add_argument('--profile',choices=['all',*NAMES],default='all');p.add_argument('--operation',choices=['all','keygen','sign'],default='all');p.add_argument('--partition',action='store_true');p.add_argument('--no-profile',action='store_true');a=p.parse_args()
+  f=capture(a.tag)
+  if a.action=='sim':
+   def one(case):
+-   n,o=case;return simulate_case(f,n+'_'+o+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,partitioned=a.partition,profile_enable=not a.no_profile,unroll=a.unroll,pipeline=a.pipeline)
++   n,o=case;return simulate_case(f,n+'_'+o+('_partition' if a.partition else '')+('_no_profile' if a.no_profile else ''),BASE/'vectors'/n/o,partitioned=a.partition,profile_enable=not a.no_profile)
+   with concurrent.futures.ThreadPoolExecutor(3) as pool:r=dict(pool.map(one,[(n,o) for n in NAMES if a.profile in ('all',n) for o in ('keygen','sign') if a.operation in ('all',o)]))
+   filename='simulation_partition' if a.partition else 'simulation'
+   if a.no_profile:filename+='_no_profile'
+diff --git a/scripts/verify_kpu_chain_format.py b/scripts/verify_kpu_chain_format.py
+index 18cf8da8..c0e9f706 100644
+--- a/scripts/verify_kpu_chain_format.py
++++ b/scripts/verify_kpu_chain_format.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Cycle equivalence against the frozen pre-round-two chain formatter."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ import argparse,subprocess,tarfile,json,hashlib
+ from pathlib import Path
+ ROOT=Path(__file__).resolve().parents[1]
+diff --git a/scripts/verify_lup_pipeline.py b/scripts/verify_lup_pipeline.py
+index d9c67612..0cb78034 100644
+--- a/scripts/verify_lup_pipeline.py
++++ b/scripts/verify_lup_pipeline.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Independent SHAKE chain vectors and interleaved U/P unit checks."""
++if __name__ == "__main__":
++    raise SystemExit("Current RTL is fixed P4U2. Use scripts/fixed_p4u2.py; replay P/U matrices from their frozen source snapshot.")
++
+ from pathlib import Path
+ import hashlib,json,subprocess,sys,random,os
+ ROOT=Path(__file__).resolve().parents[1]
+diff --git a/scripts/verify_single_lane.py b/scripts/verify_single_lane.py
+index 5f3d9c34..f56f262e 100644
+--- a/scripts/verify_single_lane.py
++++ b/scripts/verify_single_lane.py
+@@ -1,75 +1,5 @@
+ #!/usr/bin/env python3
+-"""Cycle-exact comparison with the frozen pre-specialization single-lane core."""
+-from pathlib import Path
+-import sys,json,subprocess,re,hashlib,shutil,concurrent.futures,argparse,tarfile
+-ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
+-from v42_common_partition import partition
+-OUT=ROOT/'manifests/experiments/single_lane_20261008';BUILD=ROOT/'build/single_lane_20261008'
+-BASE=ROOT/'manifests/experiments/unified_hbs_v4.2/external_job_message'
+-def sha(p):return hashlib.sha256(p.read_bytes()).hexdigest()
+-def mem(p,words,width):p.write_text(''.join(f'{w:0{width}x}\n' for w in words))
+-def prepare_vectors():
+- oldver=json.loads((BASE/'candidates/lut21k_20261002_v1_route_alias/verify/results.json').read_text())['profiles']
+- for name in ('slh_128f','slh_192f','slh_256f','slh_128s','slh_192s','slh_256s'):
+-  for op in (0,1,2):
+-   src=BASE/'vectors'/name/('keygen' if op==0 else 'sign');d=OUT/'vectors'/name/str(op);d.mkdir(parents=True,exist_ok=True)
+-   cfg=json.loads((src/'job.json').read_text());meta=[int(x,16) for x in (src/'metadata.mem').read_text().split()]
+-   data=bytes(int(x,16) for x in (src/'expected.mem').read_text().split());n=len(bytes.fromhex(cfg['public_seed']))
+-   message=bytes(int(x,16) for x in (src/'message.mem').read_text().split()) if (src/'message.mem').exists() else b''
+-   for f in ('program','template','descriptor'):shutil.copy2(BASE/'images'/name/(f+'.mem'),d/(f+'.mem'))
+-   mem(d/'expected.mem',data if op!=2 else b'\0',2);mem(d/'message.mem',message+bytes(87-len(message)),2)
+-   nodes=[int.from_bytes(data[i:i+n],'little') for i in range(0,len(data),n)] if op==2 else [0]
+-   mem(d/'nodes.mem',nodes,64)
+-   job=[int.from_bytes(bytes.fromhex(cfg[k]),'little') for k in ('secret_seed','secret_prf','public_seed','randomizer','public_root')]+[0,0,op,cfg['message_bytes']]
+-   mem(d/'job.mem',job,64)
+-   if op==2:meta=[0,oldver[name]['normal']['hashes'],oldver[name]['normal']['permutations'],len(nodes),1]
+-   else:meta=[len(data),meta[1],meta[2],1,0]
+-   mem(d/'meta.mem',meta,8)
+-
+-def build(p=1,u=1,stats=1):
+- name=f'P{p}U{u}_stats{stats}';d=BUILD/name;d.mkdir(parents=True,exist_ok=True)
+- frozen=BUILD/'baseline'
+- if not (frozen/'rtl/top/mhbs_top.sv').exists():
+-  with tarfile.open(OUT/'baseline/source_snapshot.tar.gz') as archive:archive.extractall(frozen,filter='data')
+- original=(frozen/'rtl/top/mhbs_top.sv').read_text()
+- # Load the frozen extraction function without importing the current version.
+- ns={};exec((frozen/'scripts/v42_common_partition.py').read_text(),ns);old,_=ns['partition'](original)
+- paths=(ROOT/'manifests/v42_sources.txt').read_text().split();modules=[Path(x).stem for x in paths]+['mhbs_common']
+- def rename(s):return re.sub(r'\b('+'|'.join(modules)+r')\b',lambda m:'frozen_'+m[0],s)
+- oldfiles=[]
+- for path in paths:
+-  if path.endswith('mhbs_top.sv'):continue
+-  dest=d/('frozen_'+Path(path).name);dest.write_text(rename((frozen/path).read_text()));oldfiles.append(dest)
+- (d/'frozen_common.sv').write_text(rename(old));oldfiles.append(d/'frozen_common.sv')
+- live,_=partition((ROOT/'rtl/top/mhbs_top.sv').read_text());(d/'common.sv').write_text(live)
+- sources=[ROOT/x for x in paths if not x.endswith('mhbs_top.sv')]+[d/'common.sv',*oldfiles,ROOT/'tb/integration/tb_mhbs_stateful.sv']
+- identity={str(f):sha(f) for f in sources+[ROOT/'tb/integration/mhbs_single_lane_equiv.svh']};exe=d/'obj/Vtb_mhbs_stateful'
+- if not exe.exists() or not (d/'inputs.json').exists() or json.loads((d/'inputs.json').read_text())!=identity:
+-  cmd=['verilator','--binary','--timing','-O3','-j','8','-Wno-fatal','-DSINGLE_LANE_EQUIV','--top-module','tb_mhbs_stateful',f'-GPIPELINE={p}',f'-GUNROLL={u}',f'-GPROFILE_ENABLE={stats}','--Mdir',str(exe.parent),*map(str,sources)]
+-  with (d/'compile.log').open('w') as f:subprocess.run(cmd,cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
+-  (d/'inputs.json').write_text(json.dumps(identity,indent=2)+'\n');print('BUILD_PASS',name,flush=True)
+- return exe
+-
+-def run(exe,vector,label,options=()):
+- logs=OUT/'logs';logs.mkdir(exist_ok=True);log=logs/(label+'.log')
+- with log.open('w') as f:subprocess.run([str(exe),f'+VECTOR={vector}',*options],cwd=ROOT,stdout=f,stderr=subprocess.STDOUT,check=True)
+- text=log.read_text();m=re.findall(r'STATEFUL_PASS (P\d+U\d+) op=(\d+) cycles=(\d+) total=(\d+) hashes=(\d+) permutations=(\d+)',text)
+- if m:
+-  x=m[-1];r=dict(point=x[0],operation=int(x[1]),compute_cycles=int(x[2]),total_cycles=int(x[3]),hashes=int(x[4]),permutations=int(x[5]),passed=True)
+- else:assert 'STATEFUL_FAULT_PASS' in text or 'INDEX_REJECT_PASS' in text;text='';r=dict(passed=True)
+- r.update(log=str(log.relative_to(ROOT)),log_sha256=sha(log),binary_sha256=sha(exe),build_inputs_sha256=sha(exe.parents[1]/'inputs.json'));print('EQUIV_PASS',label,r.get('compute_cycles'),flush=True);return r
+-
+-def main():
+- ap=argparse.ArgumentParser();ap.add_argument('--p',type=int,default=1);ap.add_argument('--u',type=int,default=1);ap.add_argument('--stats',type=int,default=1);ap.add_argument('--profile');ap.add_argument('--operation',type=int);a=ap.parse_args()
+- prepare_vectors();exe=build(a.p,a.u,a.stats);cases=[]
+- for name in ('slh_128f','slh_192f','slh_256f','slh_128s','slh_192s','slh_256s','xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'):
+-  if a.profile and name!=a.profile:continue
+-  for op in (0,1,2):
+-   if a.operation is not None and op!=a.operation:continue
+-   vector=OUT/'vectors'/name/str(op) if name.startswith('slh') else ROOT/'manifests/experiments/stateful_20261008/vectors'/name/'q0_m1'/str(op)
+-   cases.append((name,op,vector))
+- def one(case):
+-  n,op,v=case;label=f'{n}_{op}_P{a.p}U{a.u}_stats{a.stats}';return label,run(exe,v,label)
+- with concurrent.futures.ThreadPoolExecutor(3) as pool:rows=dict(pool.map(one,cases))
+- (OUT/f'equivalence_P{a.p}U{a.u}_stats{a.stats}.json').write_text(json.dumps(rows,indent=2)+'\n')
+-if __name__=='__main__':main()
++"""Verify the fixed P4U2 executor against its frozen pre-specialization core."""
++from fixed_p4u2 import main
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/verify_single_lane_edges.py b/scripts/verify_single_lane_edges.py
+index 1c0db27e..f56f262e 100644
+--- a/scripts/verify_single_lane_edges.py
++++ b/scripts/verify_single_lane_edges.py
+@@ -1,33 +1,5 @@
+ #!/usr/bin/env python3
+-"""Single-lane topology, protocol and boundary regression against frozen L1 RTL."""
+-import concurrent.futures,json
+-from verify_single_lane import ROOT,OUT,build,run,prepare_vectors
+-VECTORS=ROOT/'manifests/experiments/stateful_20261008/vectors'
+-NAMES=('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4')
+-def main():
+- prepare_vectors()
+- def topology(point):
+-  p,u,stats=point;exe=build(p,u,stats);label=f'P{p}U{u}_stats{stats}';rows={}
+-  def case(name,v,opts=()):rows[label+'_'+name]=run(exe,v,label+'_'+name,opts)
+-  for op in (0,1,2):case('slh128f_'+str(op),OUT/'vectors/slh_128f'/str(op))
+-  case('slh128f_sign_reset',OUT/'vectors/slh_128f/1',('+STALL=1','+INTERRUPT=1','+REPLAYS=2'))
+-  case('fault',OUT/'vectors/slh_128f/1',('+FAULT=1',))
+-  for name in NAMES:case(name+'_verify',VECTORS/name/'q0_m1/2')
+-  if (p,u,stats)==(4,1,1):
+-   for name in NAMES:case(name+'_sign',VECTORS/name/'q0_m1/1')
+-  (OUT/('edges_'+label+'.json')).write_text(json.dumps(rows,indent=2)+'\n');return rows
+- with concurrent.futures.ThreadPoolExecutor(3) as pool:
+-  rows={k:v for r in pool.map(topology,[(2,1,1),(3,1,1),(4,1,1),(1,2,1),(2,2,1),(3,2,1),(4,2,1),(1,1,0),(4,1,0)]) for k,v in r.items()}
+- exe=build()
+- for name in NAMES:
+-  v=VECTORS/name/'q0_m1/2'
+-  for t in range(1,6):
+-   label=f'{name}_tamper{t}';rows[label]=run(exe,v,label,(f'+TAMPER={t}',))
+-  for label,opts in [('stall_reset',('+STALL=1','+INTERRUPT=1','+REPLAYS=2')),('cut',('+CUT=3',)),('fault',('+FAULT=1',)),('q1024',('+Q=1024','+INVALID=1')),('qmax',('+Q=2147483647','+INVALID=1'))]:
+-   key=name+'_'+label;rows[key]=run(exe,v,key,opts)
+-  for path in sorted((VECTORS/name).glob('q*/2')):
+-   if path.parent.name=='q0_m1':continue
+-   label=name+'_'+path.parent.name;rows[label]=run(exe,path,label,('+STALL=1',))
+- (OUT/'edges.json').write_text(json.dumps(dict(passed=True,cases=rows),indent=2)+'\n')
+- print('SINGLE_LANE_EDGES_PASS',len(rows),flush=True)
+-if __name__=='__main__':main()
++"""Verify the fixed P4U2 executor against its frozen pre-specialization core."""
++from fixed_p4u2 import main
++if __name__ == '__main__':
++    main()
+diff --git a/scripts/verify_stateful_masked_chain.py b/scripts/verify_stateful_masked_chain.py
+index 43b7515b..1ac3096e 100644
+--- a/scripts/verify_stateful_masked_chain.py
++++ b/scripts/verify_stateful_masked_chain.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Independent masked seed/chain vectors, including ordinary P4 feedback."""
++if __name__ == "__main__":
++    raise SystemExit("Fixed P4U2: use make smoke, make verify, or scripts/fixed_p4u2.py. Historical checks require their original source snapshot.")
++
+ from pathlib import Path
+ import subprocess,json,hashlib
+ from v42_external_flow import ROOT
+diff --git a/scripts/verify_v42_external_units.py b/scripts/verify_v42_external_units.py
+index 5b7fb015..6300f6b4 100644
+--- a/scripts/verify_v42_external_units.py
++++ b/scripts/verify_v42_external_units.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Protocol wrapper units plus existing macro/storage/Hash units."""
++if __name__ == "__main__":
++    raise SystemExit("Fixed P4U2: use make smoke, make verify, or scripts/fixed_p4u2.py. Historical checks require their original source snapshot.")
++
+ import hashlib,json,shutil,subprocess,sys
+ from pathlib import Path
+ from v42_external_flow import ROOT,BASE,BUILD,identity,sha,write,run
+diff --git a/scripts/verify_v42_units.py b/scripts/verify_v42_units.py
+index 8afbd332..a6eb10d7 100644
+--- a/scripts/verify_v42_units.py
++++ b/scripts/verify_v42_units.py
+@@ -1,5 +1,8 @@
+ #!/usr/bin/env python3
+ """Icarus 12 units for the trusted-image SLH-only core."""
++if __name__ == "__main__":
++    raise SystemExit("Fixed P4U2: use make smoke, make verify, or scripts/fixed_p4u2.py. Historical checks require their original source snapshot.")
++
+ from pathlib import Path
+ import hashlib,json,re,subprocess,sys
+ 
+diff --git a/tb/integration/mhbs_single_lane_equiv.svh b/tb/integration/mhbs_single_lane_equiv.svh
+index e0ca9882..5e851e1a 100644
+--- a/tb/integration/mhbs_single_lane_equiv.svh
++++ b/tb/integration/mhbs_single_lane_equiv.svh
+@@ -1,10 +1,10 @@
+-// Frozen pre-specialization executor at LANES=1. ROMs and all traffic are
++// Frozen P4U2 executor before specialization. ROMs and all traffic are
+ // independent ports; compare external events every cycle, including stalls.
+ wire [3:0] old_pa,old_ta;wire [9:0] old_da;
+ wire old_mr,old_vr,old_vp,old_ov,old_busy,old_done,old_kg,old_error;
+ wire [255:0] old_out;wire [5:0] old_bytes;wire [1:0] old_kind;
+ wire [15:0] old_code;wire [31:0] old_boot,old_kc,old_sc,old_hash,old_perm;
+-frozen_mhbs_common #(.LANES(1),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) frozen(
++frozen_mhbs_common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) frozen(
+  .clk,.rst,.program_address(old_pa),.template_address(old_ta),.descriptor_addresses(old_da),
+  .program_data(pm[old_pa]),.template_data(tm[old_ta]),.descriptor_data({dm[old_da[9:5]],dm[old_da[4:0]]}),
+  .job_secret_seed,.job_secret_prf,.job_public_seed,.job_randomizer,.job_public_root,.job_identifier,.job_index,.job_operation,
+diff --git a/tb/integration/tb_mhbs_external.sv b/tb/integration/tb_mhbs_external.sv
+index c01a7580..20c16a8f 100644
+--- a/tb/integration/tb_mhbs_external.sv
++++ b/tb/integration/tb_mhbs_external.sv
+@@ -7,7 +7,7 @@
+ module tb_mhbs_external;
+  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
+  parameter integer OPERATION=1,MESSAGE_BYTES=1;
+- parameter integer UNROLL=2,PIPELINE=1;
++ localparam integer UNROLL=2,PIPELINE=4;
+  parameter bit PROFILE_ENABLE=1;
+  logic clk=0,rst=1;
+  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
+@@ -27,7 +27,7 @@ module tb_mhbs_external;
+  reg [7:0] message_bytes[0:86];
+  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
+  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
+- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
++ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.PROFILE_ENABLE(PROFILE_ENABLE),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+  always #5 clk=~clk;
+  `include "tb/integration/mhbs_shared_store_check.svh"
+  `include "tb/integration/mhbs_parent_input_check.svh"
+@@ -45,11 +45,11 @@ module tb_mhbs_external;
+   else begin
+    if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
+    previous_output=out_valid;
+-   if(UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
++   if(`HBS_CORE.pipe_direct
+       && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected && `HBS_CORE.pipe_ready
+       && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
+        tail_batches=tail_batches+1;
+-   if(done && !coverage_reported && !fault && OPERATION==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
++   if(done && !coverage_reported && !fault && OPERATION==1 && `HBS_CORE.node_bytes==16)begin
+     coverage_reported=1;
+     if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
+     $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
+diff --git a/tb/integration/tb_mhbs_stateful.sv b/tb/integration/tb_mhbs_stateful.sv
+index 218dd112..1314e120 100644
+--- a/tb/integration/tb_mhbs_stateful.sv
++++ b/tb/integration/tb_mhbs_stateful.sv
+@@ -1,7 +1,8 @@
+ `timescale 1ns/1ps
+ // Runtime Job/ROM common-core harness, including the production signature store.
+ module tb_mhbs_stateful;
+- parameter integer UNROLL=1,PIPELINE=1,PROFILE_ENABLE=1;
++ parameter integer PROFILE_ENABLE=1;
++ localparam integer UNROLL=2,PIPELINE=4;
+  logic clk=0,rst=1;always #5 clk=~clk;
+  reg [63:0] pm[0:15],tm[0:15],dm[0:31];
+  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
+@@ -17,7 +18,7 @@ module tb_mhbs_stateful;
+  wire out_valid;wire [255:0] out_data;wire [5:0] out_bytes;wire [1:0] result_kind;
+  wire busy,done,keygen_done,error;wire [15:0] error_code;
+  wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+- mhbs_common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
++ mhbs_common #(.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
+  logic read_enable=0;logic [10:0] read_address=0;
+  wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
+  mhbs_signature_store cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
+@@ -100,7 +101,7 @@ module tb_mhbs_stateful;
+    if(fault)begin
+     while(dut.core.state!=23)tick();force dut.core.lane.error=1;
+     `ifdef SINGLE_LANE_EQUIV
+-    force frozen.core.lanes[0].lane.error=1;
++    force frozen.core.lane.error=1;
+     `endif
+     while(!error)tick();
+     if(error_code!=16'h3007)$fatal(1,"fault code");
+diff --git a/tb/unit/mhbs_external_core_stub.sv b/tb/unit/mhbs_external_core_stub.sv
+index e584c04f..7a3cf7bb 100644
+--- a/tb/unit/mhbs_external_core_stub.sv
++++ b/tb/unit/mhbs_external_core_stub.sv
+@@ -2,7 +2,6 @@
+ `default_nettype none
+ // One ABI 4 SLH macro executor for n=16/24/32.
+ module mhbs_hbs #(
+-    parameter integer UNROLL=2, PIPELINE=1,
+     parameter bit PROFILE_ENABLE=0
+ ) (
+     input wire [63:0] image_header, profile_descriptor,
+diff --git a/tb/unit/tb_mhbs_chain_format_equiv.sv b/tb/unit/tb_mhbs_chain_format_equiv.sv
+index 04058079..4f0e4e7e 100644
+--- a/tb/unit/tb_mhbs_chain_format_equiv.sv
++++ b/tb/unit/tb_mhbs_chain_format_equiv.sv
+@@ -2,7 +2,7 @@
+ // Frozen adapter oracle: legal interleaved completions, deterministic stalls,
+ // all node widths, disabled/missed captures, tag reuse and simultaneous events.
+ module tb_mhbs_chain_format_equiv;
+- parameter integer PIPELINE=4;
++ localparam integer PIPELINE=4;
+  logic clk=0,rst=1;
+  always #5 clk=~clk;
+  logic [5:0] node_bytes=16;
+@@ -24,7 +24,7 @@ module tb_mhbs_chain_format_equiv;
+  wire [31:0] hash_count,permutation_count;
+  wire rr,rv,pv;wire [1:0] rt,pt;
+  wire [255:0] rd,rc,vd,vc;wire [1599:0] ps;wire [31:0] hc,pc;
+- mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(.*);
++ mhbs_chain_pipeline_lane #(.PROFILE_ENABLE(1)) dut(.*);
+  mhbs_chain_pipeline_lane_ref #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) ref_dut(
+  .clk,.rst,.node_bytes,.request_valid,.request_tag,.request_steps,.request_capture_after,.request_capture,
+  .secret_seed,.public_seed,.request_layer,.request_tree,.request_leaf,.request_a,.request_b,.seed_domain,.step_domain,
+@@ -33,33 +33,33 @@ module tb_mhbs_chain_format_equiv;
+  .response_digest(vd),.response_capture(vc),.perm_valid(pv),.perm_state(ps),.perm_tag(pt),.hash_count(hc),.permutation_count(pc));
+  logic [PIPELINE-1:0] pending=0,known=0;
+  integer cycle=0,accepted=0,simultaneous=0;
+- always @(posedge clk)if(!rst)begin
++ always @(posedge clk)if(rst)begin pending=0;known=0;end else begin
+   if({request_ready,response_valid,perm_valid,hash_count,permutation_count}!=={rr,rv,pv,hc,pc})$fatal(1,"control mismatch");
+   if(perm_valid && {perm_state,perm_tag}!=={ps,pt})$fatal(1,"block/tag mismatch");
+   if(response_valid && {response_tag,response_digest,response_capture}!=={rt,vd,vc})$fatal(1,"response mismatch");
+   if(known[read_tag] && read_capture!==rc)$fatal(1,"capture readback mismatch");
+   if(request_valid && request_ready)begin known[request_tag]=1;accepted=accepted+1;if(perm_done)simultaneous=simultaneous+1;end
++  if(perm_done)pending[perm_result_tag]=0;
+   if(perm_valid && perm_ready)pending[perm_tag]=1;
+  end
+  initial begin
+   for(integer width=0;width<3;width=width+1)begin
+-   @(negedge clk);rst=1;request_valid=0;perm_done=0;pending=0;known=0;
++   @(negedge clk);rst=1;request_valid=0;perm_done=0;
+    repeat(2)@(negedge clk);rst=0;node_bytes=6'(16+8*width);
+    for(integer i=0;i<600;i=i+1)begin
+     @(negedge clk);
+-    request_valid=i<500 && i%5!=0;request_tag=2'(i%PIPELINE);read_tag=2'((i/3)%PIPELINE);
++    request_valid=i<500 && i%5!=0;request_tag=2'((i/3)%PIPELINE);read_tag=2'((i/3)%PIPELINE);
+     request_steps=5'(i%6);request_capture_after=5'((i/7)%8);request_capture=i%3!=0;
+     request_b=32'hffffffff-i;request_a=7'(i);request_leaf=10'(i*3);request_tree=64'hfedcba9876543210+i;request_layer=5'(i);
+     step_domain=i%2 ? 3 : 0;seed_domain=i%2 ? 6 : 5;response_ready=i%7!=0;
+     perm_done=0;
+     for(integer t=PIPELINE-1;t>=0;t=t-1)if(pending[t])begin perm_done=1;perm_result_tag=2'(t);end
+-    if(perm_done)pending[perm_result_tag]=0;
+     perm_ready=perm_done || i%4!=0;
+     for(integer w=0;w<50;w=w+1)perm_digest[w*32 +:32]=$random;
+    end
+   end
+   @(negedge clk);request_valid=0;
+-  if(accepted<30 || (PIPELINE>1 && simultaneous==0))$fatal(1,"coverage missing");
++  if(accepted<30 || (PIPELINE>1 && simultaneous==0))$fatal(1,"coverage missing accepted=%0d simultaneous=%0d",accepted,simultaneous);
+   $display("CHAIN_FORMAT_EQUIV_PASS P=%0d accepted=%0d simultaneous=%0d",PIPELINE,accepted,simultaneous);$finish;
+  end
+ endmodule
+diff --git a/tb/unit/tb_mhbs_chain_overlap.sv b/tb/unit/tb_mhbs_chain_overlap.sv
+index ecf237af..c1919408 100644
+--- a/tb/unit/tb_mhbs_chain_overlap.sv
++++ b/tb/unit/tb_mhbs_chain_overlap.sv
+@@ -1,7 +1,7 @@
+ `timescale 1ns/1ps
+ module tb_mhbs_chain_overlap;
+- parameter integer UNROLL=1,PIPELINE=2;
+- parameter bit SHARED_STATE=(UNROLL==1);
++ localparam integer UNROLL=2,PIPELINE=4;
++ localparam bit SHARED_STATE=1;
+  localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
+  logic clk=0,rst=1,request_valid=0,response_ready=0;
+  logic [TAG_BITS-1:0] request_tag=0;
+@@ -21,7 +21,7 @@ module tb_mhbs_chain_overlap;
+  logic [TAG_BITS-1:0] read_tag=0;wire [255:0] read_digest,read_capture;
+  wire pv,pr,pd;wire [1599:0] ps,po;wire [TAG_BITS-1:0] pt,ot;
+  wire [31:0] hash_count,permutation_count;
+- mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.PROFILE_ENABLE(1)) dut(
++ mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.PROFILE_ENABLE(1)) dut(
+   .clk,.rst,.node_bytes,.batch_mode(1'b1),
+   .batch_request_valid(request_valid),.batch_request_ready(request_ready),.batch_request_tag(request_tag),
+   .batch_steps(request_steps),.batch_capture_after(request_capture_after),.batch_capture_enable(request_capture),
+diff --git a/tb/unit/tb_mhbs_recipe_padding.sv b/tb/unit/tb_mhbs_recipe_padding.sv
+index 24785e15..c5f8df1a 100644
+--- a/tb/unit/tb_mhbs_recipe_padding.sv
++++ b/tb/unit/tb_mhbs_recipe_padding.sv
+@@ -1,7 +1,7 @@
+ `timescale 1ns/1ps
+ module tb_mhbs_recipe_padding;
+-    parameter integer PIPELINE=1,UNROLL=2;
+-    parameter bit SHARED_STATE=1;
++    localparam integer PIPELINE=4,UNROLL=2;
++    localparam bit SHARED_STATE=1;
+     logic clk=0,rst=1,request_valid=0,response_ready=0;
+     logic [5:0] node_bytes;
+     wire request_ready,response_valid,error;
+@@ -14,7 +14,7 @@ module tb_mhbs_recipe_padding;
+     logic [447:0] vectors[0:9];
+     integer i,j,cycles=0,old_hashes,old_permutations;
+     string vector_file;
+-    mhbs_recipe_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.batch_mode(1'b0),.batch_request_valid(1'b0),
++    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),
+         .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
+         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
+         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),
+diff --git a/tb/unit/tb_mhbs_round_decode.sv b/tb/unit/tb_mhbs_round_decode.sv
+index 2b2d71d9..c5f209b3 100644
+--- a/tb/unit/tb_mhbs_round_decode.sv
++++ b/tb/unit/tb_mhbs_round_decode.sv
+@@ -1,32 +1,31 @@
+ `timescale 1ns/1ps
++// Fixed P4U2 round positions, checked against the frozen full round function.
+ module tb_mhbs_round_decode;
+- parameter integer STRIDE=1,SPECIALIZED=0;
+- logic [1599:0] state_in;
+- logic [4:0] pass_index;
+- wire [1599:0] result[0:STRIDE-1];
++ logic [1599:0] state_in,pattern_state;
++ logic [1:0] pass_index;
++ wire [1599:0] result[0:7];
+  `include "tb/reference/keccak_round_frozen.svh"
+- for(genvar stage=0;stage<STRIDE;stage=stage+1)begin: stages
+-  if(SPECIALIZED)begin: fixed_map
+-   mhbs_keccak #(.ROUND_STRIDE(STRIDE),.ROUND_OFFSET(stage)) dut(
+-    .state_in,.round_index(pass_index),.state_out(result[stage]));
+-  end else begin: absolute_map
++ for(genvar stage=0;stage<4;stage=stage+1)begin: stages
++  for(genvar round_id=0;round_id<2;round_id=round_id+1)begin: rounds
+    mhbs_keccak dut(.state_in,
+-    .round_index(pass_index<24/STRIDE ? 5'(pass_index*STRIDE+stage) : 5'd31),.state_out(result[stage]));
++    .round_index({pass_index,2'(stage),1'(round_id)}),.state_out(result[stage*2+round_id]));
+   end
+  end
+  integer checks=0;
+  initial begin
+   for(integer pattern=0;pattern<34;pattern=pattern+1)begin
+-   for(integer w=0;w<50;w=w+1)state_in[32*w +:32]=pattern==0 ? 0 : pattern==1 ? '1 : $random;
+-   for(integer pass=0;pass<32;pass=pass+1)begin
+-    pass_index=5'(pass);#1;
+-    for(integer stage=0;stage<STRIDE;stage=stage+1)begin
+-     if(result[stage]!==keccak_round(state_in,pass<24/STRIDE ? 5'(pass*STRIDE+stage) : 5'd31))
+-      $fatal(1,"round mismatch stride=%0d pass=%0d stage=%0d",STRIDE,pass,stage);
+-     checks=checks+1;
++   for(integer w=0;w<50;w=w+1)pattern_state[32*w +:32]=pattern==0 ? 0 : pattern==1 ? '1 : $random;
++   state_in=pattern_state;#1;
++   for(integer pass=0;pass<3;pass=pass+1)begin
++    pass_index=2'(pass);#1;
++    for(integer position=0;position<8;position=position+1)begin
++     if(result[position]!==keccak_round(state_in,5'(pass*8+position)))
++      $fatal(1,"round mismatch pass=%0d position=%0d",pass,position);
++     checks++;
+     end
+    end
+   end
+-  $display("ROUND_DECODE_PASS stride=%0d specialized=%0d checks=%0d",STRIDE,SPECIALIZED,checks);$finish;
++  if(checks!=816)$fatal(1,"round coverage");
++  $display("ROUND_DECODE_PASS checks=%0d",checks);$finish;
+  end
+ endmodule
+diff --git a/tb/unit/tb_mhbs_v42_recipe_lane.sv b/tb/unit/tb_mhbs_v42_recipe_lane.sv
+index 689a58de..0c3200b6 100644
+--- a/tb/unit/tb_mhbs_v42_recipe_lane.sv
++++ b/tb/unit/tb_mhbs_v42_recipe_lane.sv
+@@ -1,7 +1,8 @@
+ `timescale 1ns/1ps
+ module tb_mhbs_v42_recipe_lane;
+-    parameter integer PROFILE=0,PIPELINE=1,UNROLL=2;
+-    parameter bit SHARED_STATE=1;
++    parameter integer PROFILE=0;
++    localparam integer PIPELINE=4,UNROLL=2;
++    localparam bit SHARED_STATE=1;
+     parameter [15:0] MASK=16'h101e;
+     parameter integer CASES=7;
+     localparam integer N=PROFILE==0 ? 16 : PROFILE==1 ? 24 : 32;
+@@ -30,7 +31,7 @@ module tb_mhbs_v42_recipe_lane;
+     logic [1023:0] vectors[0:CASES-1];
+     integer i,j,cycles=0,length;
+     logic [M*8-1:0] expected;
+-    mhbs_recipe_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
++    mhbs_recipe_lane #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut(.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_tag(2'd0),
+      .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+      .batch_leaf(10'd0),.batch_a(7'd0),.batch_b(32'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
+      .batch_response_ready(1'b0),.batch_request_ready(),.batch_response_valid(),.batch_response_tag(),
+diff --git a/tests/test_unified_rtl_contract.py b/tests/test_unified_rtl_contract.py
+index af1251b1..9d800f07 100644
+--- a/tests/test_unified_rtl_contract.py
++++ b/tests/test_unified_rtl_contract.py
+@@ -49,13 +49,13 @@ class UnifiedRtlContractTests(unittest.TestCase):
+     def test_fixed_single_lane(self):
+         # No compatibility parameter may silently recreate a second lane.
+         for path in (ROOT / 'manifests/v42_sources.txt').read_text().split():
+-            self.assertNotRegex((ROOT / path).read_text(), r'\b(?:LANES|SWAP_PHYSICAL_LANES)\b')
++            self.assertNotRegex((ROOT / path).read_text(), r'\b(?:LANES|SWAP_PHYSICAL_LANES|PIPELINE|UNROLL)\b')
+         import sys
+         sys.path.insert(0, str(ROOT / 'scripts'))
+         from v42_common_partition import partition
+         common, shell = partition((ROOT / 'rtl/top/mhbs_top.sv').read_text())
+-        self.assertNotRegex(common + shell, r'\b(?:LANES|SWAP_PHYSICAL_LANES)\b')
+-        self.assertRegex(common, r'parameter integer UNROLL=2')
++        self.assertNotRegex(common + shell, r'\b(?:LANES|SWAP_PHYSICAL_LANES|PIPELINE|UNROLL)\b')
++        self.assertRegex(common, r'parameter bit PROFILE_ENABLE=1')
+         self.assertNotIn('LANES', (ROOT / 'experiments/v4.2/external_job_message/synth.tcl').read_text())
+ 
+     def test_production_source_closure(self):
