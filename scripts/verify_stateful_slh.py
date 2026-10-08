@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Preserve SLH cycles across existing K/P/U and common/statistics variants."""
+"""Preserve SLH cycles across existing L/U and common/statistics variants."""
 import json,concurrent.futures,shutil
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,NAMES,simulate_case
@@ -19,15 +19,11 @@ def one(case):
  return label,r
 with concurrent.futures.ThreadPoolExecutor(3) as pool:
  checks.update(pool.map(one,[(n,o,k) for n in NAMES for o in ('keygen','sign') for k in ('off','partition')]))
-for k,p,u,cycles in [(1,1,1,2619719),(1,2,1,1402428),(1,3,1,979434),(1,4,1,766014),(2,1,1,1399919),(2,4,1,486328)]:
- label=f'K{k}P{p}U{u}';_,r=simulate_case(F,label,BASE/'vectors/slh_128f/sign',lanes=k,pipeline=p,unroll=u)
+for lanes,u,cycles in [(1,1,2619719),(2,1,1399919),(2,2,729983)]:
+ label=f'L{lanes}U{u}';_,r=simulate_case(F,label,BASE/'vectors/slh_128f/sign',lanes=lanes,unroll=u)
  assert r['sign_cycles']==cycles,(label,r['sign_cycles'],cycles)
  assert (r['hashes'],r['permutations'])==(104937,105641)
  checks[label]=r
- if p==4:
-  _,s=simulate_case(F,label+'_reset',BASE/'vectors/slh_128f/sign',lanes=k,pipeline=p,unroll=u,options=('+REPLAYS=2','+INTERRUPT=1','+STALL=1','+TAIL_NOISE=1'))
-  assert s['sign_cycles']-s['wait_cycles']==cycles
-  checks[label+'_reset']=s
 (OUT/'slh_variants.json').write_text(json.dumps(checks,indent=2)+'\n')
 shutil.copytree(F/'logs',OUT/'slh_variants_logs',dirs_exist_ok=True)
 print('SLH_VARIANTS_PASS',len(checks),flush=True)

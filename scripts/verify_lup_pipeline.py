@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Independent SHAKE chain vectors and interleaved U/P unit checks."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 from pathlib import Path
 import hashlib,json,subprocess,sys,random
 ROOT=Path(__file__).resolve().parents[1]

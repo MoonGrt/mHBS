@@ -44,4 +44,6 @@ make reproduce-v42 reproduce-ku
 - 旧候选、重复报告和实验驱动已删除，可从 Git 恢复。清理清单：`manifests/cleanup_20261002.json`。
 - `source/`、`tmp/` 是本地研究资料和工作笔记，不属于生产源码或已提交备份。
 
-当前 K1P1U1～K1P4U1 的统一 Keccak 实现及最新共同核综合结果见 [第二轮 ATP 报告](docs/v4.2/KPU_ATP_Unified_Optimization.md)。150 MHz 为假定频率，未布线。
+历史 K1P1U1～K1P4U1 的统一 Keccak 实现及共同核综合结果见 [第二轮 ATP 报告](docs/v4.2/KPU_ATP_Unified_Optimization.md)。150 MHz 为假定频率，未布线。
+
+当前生产结构固定 P=1，仅支持 L/U 配置，默认 L2U2。参见 [架构](docs/Architecture.md)；验证与综合入口 `scripts/run_lu_p1.py`，不再接受 PIPELINE 参数。

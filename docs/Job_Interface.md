@@ -94,3 +94,8 @@ Verify 的 keygen_cycles、sign_cycles 保持零；仿真可观察共同核 cycl
 Verify 的外部适配器先用 `model.reference.stateful_shake.parse_signature` 校验精确长度、q 和 LMS 类型，再把 q 放入 KEY_INDEX、I 放入 IDENTIFIER。节点接口只输入 R、133/67 个链节点和 10 个认证节点；q、类型字段不作为节点发送。消息继续使用原接口，根通过 PUBLIC_ROOT 输入。核恢复实际根并比较，不接收预计算叶或中间根。不足节点会等待，额外节点不被接收。
 
 Sign 输出的 4 字节字段各占一个缓存槽，容量仍为 1558 项。以每项 signature_read_bytes 拼接可还原完整签名；SLH 每项长度仍等于 signature_node_bytes。Sign 包含完整认证树重算，不可按旧模型缓存命中的 Sign 周期估算。
+
+
+## L/U 配置
+
+当前版本固定 P=1，删除 `PIPELINE` 参数。仅保留 `LANES/UNROLL`：默认 L2U2；U1 支持 L1/2/3/4/6/8/12/24，U2 支持 L1/2/3/4/6/12。外部 Job、消息、签名缓存和 Verify 节点接口不变。物理 lane 交换仍可用于验证，逻辑 lane0 始终承担消息、列表和父节点计算。

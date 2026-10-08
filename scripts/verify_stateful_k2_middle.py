@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """K2P2/P3 regression against the frozen starting source snapshot."""
-from pathlib import Path
+from pathlib raise SystemExit("Removed pipeline configurations: use scripts/verify_lu_p1.py and frozen historical sources.")
+import Path
 import tarfile,subprocess,json,sys
 from v42_external_flow import ROOT,BASE,simulate_case
 OUT=ROOT/'manifests/experiments/stateful_20261008';BUILD=ROOT/'build/stateful_20261008'

@@ -5,23 +5,13 @@
 module mhbs_recipe_lane #(
     parameter integer N = 16,
     parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
-    parameter integer UNROLL = 2, PIPELINE = 1,
+    parameter integer UNROLL = 2,
     parameter integer MAX_MESSAGE_BYTES = 87,
     parameter [15:0] RECIPE_MASK = 16'hffff,
-    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0
+    parameter bit CHAIN_ONLY = 0,
+    parameter bit PROFILE_ENABLE = 0
 ) (
     input wire clk, rst,
-    input wire batch_mode,batch_request_valid,output wire batch_request_ready,
-    input wire [1:0] batch_request_tag,
-    input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
-    input wire [9:0] batch_leaf,input wire [6:0] batch_a,input wire [31:0] batch_b,
-    input wire [7:0] batch_seed_domain,batch_step_domain,
-    output wire batch_response_valid,input wire batch_response_ready,
-    output wire [1:0] batch_response_tag,
-    output wire [255:0] batch_response_digest,batch_response_capture,
-    input wire [1:0] batch_read_tag,
-    output wire [255:0] batch_read_digest,batch_read_capture,
-    output wire [31:0] batch_hashes,batch_permutations,
     input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
     input wire [63:0] request_recipe, request_step_recipe,
@@ -112,7 +102,8 @@ module mhbs_recipe_lane #(
         end
     end
     wire [7:0] domain = recipe[55:48];
-    wire [7:0] arity = recipe[47:40];
+    // Independent lanes never evaluate a two-node parent or list.
+    wire [7:0] arity = CHAIN_ONLY ? 8'd1 : recipe[47:40];
     wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
     wire [31:0] a = request_a;
     wire [31:0] b = chain_feedback_valid
@@ -422,29 +413,6 @@ module mhbs_recipe_lane #(
         end
     end
 
-    wire batch_perm_valid,batch_perm_ready,batch_perm_done;
-    wire [1599:0] batch_perm_state,batch_perm_digest;
-    wire [1:0] batch_perm_tag,batch_perm_result_tag;
-    generate if(PIPELINE>1)begin: chain_pipeline
-        mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
-            .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
-            .request_tag(batch_request_tag),.request_steps(batch_steps),.request_capture_after(batch_capture_after),
-            .request_capture(batch_capture_enable),.secret_seed,.public_seed,
-            .request_layer,.request_tree,.request_leaf(batch_leaf),.request_a(batch_a),.request_b(batch_b),
-            .seed_domain(batch_seed_domain),.step_domain(batch_step_domain),
-            .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
-            .response_digest(batch_response_digest),.response_capture(batch_response_capture),
-            .read_tag(batch_read_tag),.read_digest(batch_read_digest),.read_capture(batch_read_capture),
-            .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
-            .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
-            .hash_count(batch_hashes),.permutation_count(batch_permutations));
-    end else begin
-        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
-        assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
-        assign batch_response_digest=0;assign batch_response_capture=0;
-        assign batch_read_digest=0;assign batch_read_capture=0;
-        assign batch_hashes=0;assign batch_permutations=0;
-    end endgenerate
     // Direct Keccak datapath and absorb/chain control.
     localparam logic [1:0] HASH_IDLE = 2'd0;
     localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
@@ -477,82 +445,15 @@ module mhbs_recipe_lane #(
         saved_chain_prefix && chain_iteration == 1
             ? chain_counter : counter_next;
 
-    // One P-stage datapath for both serial and interleaved execution. P1
-    // writes its sole state through the sponge word enables, without launch
-    // or return bubbles. P>1 carries valid/round/tag through the same stages.
-    localparam integer ROUNDS=UNROLL*PIPELINE;
-    logic [1599:0] state_reg [0:PIPELINE-1];
-    logic [PIPELINE-1:0] stage_valid;
-    logic [4:0] stage_base [0:PIPELINE-1];
-    logic [1:0] stage_tag [0:PIPELINE-1];
-    logic sent;
-    wire recycle=PIPELINE>1 && stage_valid[PIPELINE-1]
-        && stage_base[PIPELINE-1]+ROUNDS<24;
-    wire ready=!rst && !recycle;
-    wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
-    wire normal_valid=hash_state==HASH_RUN && !sent;
-    wire issue_valid=batch_mode ? batch_perm_valid : normal_valid;
-    wire [1599:0] issue_state=batch_mode ? batch_perm_state : sponge_state;
-    wire [1:0] issue_tag=batch_mode ? batch_perm_tag : 2'd0;
-    wire [1599:0] finished_state=state_reg[PIPELINE-1];
-    wire [1599:0] stage_result[0:PIPELINE-1];
-    for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
-        wire [1599:0] rounds[0:UNROLL];
-        wire [4:0] start_round;
-        wire [1:0] source_tag;
-        wire source_valid;
-        if(s==0)begin: input_stage
-            assign rounds[0]=PIPELINE==1 ? sponge_state
-                : recycle ? state_reg[PIPELINE-1] : issue_state;
-            assign start_round=PIPELINE==1 ? round_index
-                : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
-            assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
-            assign source_valid=PIPELINE>1 && (recycle || issue_valid);
-        end else begin: following_stage
-            assign rounds[0]=state_reg[s-1];
-            assign start_round=stage_base[s-1];
-            assign source_tag=stage_tag[s-1];
-            assign source_valid=stage_valid[s-1];
-        end
-        for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
-            mhbs_keccak round_logic(.state_in(rounds[r]),
-                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
-        end
-        assign stage_result[s]=rounds[UNROLL];
-        for(genvar w=0;w<25;w=w+1)begin: words
-            always_ff @(posedge clk)if(!rst)begin
-                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
-                    state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
-                else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
-            end
-        end
-        always_ff @(posedge clk)begin
-            if(rst)stage_valid[s]<=0;
-            else begin
-                stage_valid[s]<=source_valid;
-                if(source_valid)begin stage_base[s]<=start_round;stage_tag[s]<=source_tag;end
-            end
-        end
+    wire [1599:0] rounds[0:UNROLL];
+    assign rounds[0]=sponge_state;
+    for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
+        (* keep_hierarchy="yes" *) mhbs_keccak round_logic(.state_in(rounds[r]),
+            .round_index(round_index+5'(r)),.state_out(rounds[r+1]));
     end
-    assign batch_perm_ready=PIPELINE>1 && batch_mode && ready;
-    assign batch_perm_done=PIPELINE>1 && batch_mode && finished;
-    assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
-    assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : 2'd0;
-    if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
-    assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
-    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
-    assign round_update=hash_state==HASH_RUN && (PIPELINE==1 || round_complete);
-    always_ff @(posedge clk)begin
-        if(rst)sent<=0;
-        else if(!batch_mode)begin
-            if(normal_valid && ready)sent<=1;
-            if(finished)sent<=0;
-        end
-    end
-    // synthesis translate_off
-    always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
-        if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
-    // synthesis translate_on
+    assign advanced_state=rounds[UNROLL];
+    assign round_complete=round_index+UNROLL>=24;
+    assign round_update=hash_state==HASH_RUN;
     wire permutation_complete=hash_state==HASH_RUN && round_complete;
 
     assign hash_ready = hash_state == HASH_IDLE;
@@ -568,8 +469,8 @@ module mhbs_recipe_lane #(
     assign compact_capture = captured_value;
 
     initial begin
-        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 4 || ROUNDS > 24 || (24 % ROUNDS) != 0)
-            $error("recipe lane requires positive U/P and U*P dividing 24");
+        if (UNROLL != 1 && UNROLL != 2)
+            $error("recipe lane supports U1/U2");
     end
 
     // Mutually exclusive word updates expose one data mux instead of a
@@ -607,7 +508,7 @@ module mhbs_recipe_lane #(
         else assign fast_word=64'd0;
         // The register enable suppresses idle cycles. The default data can
         // therefore be the permutation result without a 1,600-bit HASH_RUN mask.
-        wire [63:0] round_or_clear=(clear_stream || (SHARED_STATE && PIPELINE>1)) ? 64'd0
+        wire [63:0] round_or_clear=clear_stream ? 64'd0
             : advanced_state[word_index*64 +:64];
         wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
         wire [63:0] next_word;
@@ -617,11 +518,9 @@ module mhbs_recipe_lane #(
         // A completed permutation already resides in the shared register.
         // Only absorption, initialization or a new chain block needs a write.
         assign state_write_enable[word_index]=!rst &&
-            (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
-        if(!SHARED_STATE && PIPELINE>1)begin: private_state
-            always_ff @(posedge clk)
-                if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
-        end
+            (round_update || take_fast || select_stream || clear_stream);
+        always_ff @(posedge clk)
+            if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
     end endgenerate
 
     always_ff @(posedge clk) begin
@@ -716,7 +615,7 @@ module mhbs_recipe_lane #(
                                 hash_state <= HASH_WAIT_BLOCK;
                             end
                         end
-                    end else if(PIPELINE==1) begin
+                    end else begin
                         round_index <= round_index + UNROLL;
                     end
                 end

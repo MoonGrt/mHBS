@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Reproducible L2U1P1-P4 common-core area/time sweep; no place/route."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 from pathlib import Path
 import argparse,csv,hashlib,json,re,shutil,subprocess,sys,tarfile,time
 from v42_external_flow import ROOT,BASE,simulate_case,sha,write,rtl

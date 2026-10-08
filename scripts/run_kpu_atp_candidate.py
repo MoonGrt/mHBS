@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """K1P1-4U1 ATP candidate: simulate, synthesize, validate a winning candidate."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 import argparse,csv,json,shutil,subprocess,tarfile
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,simulate_case,build_binary,run,write,sha

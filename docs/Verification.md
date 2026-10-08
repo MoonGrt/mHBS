@@ -50,17 +50,19 @@ make route-common TAG=my_full
 
 共同核综合为 10 ns、8 线程、PROFILE_ENABLE=0；面积包括 LUTRAM。完整顶层流程另检查十二个外壳的 ROM 初始化及共同核结构指纹。布线频率仅覆盖 OOC 核内时序，外部接口需要系统级签核。
 
-当前采用版本见 [面积报告](v4.2/LUT21k.md)。归档快照包含验收时完整源码；当前树删除了无实例的独立根存储，七个保留 RTL 的内容与归档一致。面积仍引用该冻结网表，本次清理不声明重新测量 PPA。
+历史采用版本见 [面积报告](v4.2/LUT21k.md)。归档快照包含验收时完整源码；当前树删除了无实例的独立根存储，七个保留 RTL 的内容与归档一致。面积仍引用该冻结网表，本次清理不声明重新测量 PPA。
 
 [KU 最新报告](v4.2/KU_Sign_ATP_150_110_67_48.md)列出历史 L2 共同核与实验性 L1/L3/L4 综合面积；历史周期和频率不构成新源码的功能或时序验收。历史转换入口和旧实验驱动已删除，旧版本可从 Git 恢复。
 
-## K/P/U 流水实验
+## 历史 K/P/U 流水实验
+
+以下流水接口与命令仅对应历史冻结源码，当前生产源码不再提供 P 配置；当前入口见文末 L/U 验证。
 
 参数 `LANES/PIPELINE/UNROLL` 分别为 K/P/U，默认 K2P1U2。每 lane 的 P 个流水级各包含 U 轮，共用普通 sponge 与交错链任务；每个上下文的链反馈遵守数据依赖。WOTS 和 FORS 每批最多 K×P 个任务；K1U1、P>1 sign 的 WOTS 完成直接写回，capture 与 FORS 节点仍按原索引消费。仅新增内部 batch 接口，外部接口不变。
 
 `make lup-unit-test` 验证轮级等价与链交错；`make lup-atp LUP_TAG=<新标签>` 执行 128f sign 的 L2U1P1～P4 仿真、共同核综合和 ATP 报告。频率统一假定 150 MHz，不布线。P>1 的其他参数集/操作未作本轮端到端验收。历史 K 标签只用于冻结证据，当前命名统一使用 L。
 
-## K1P1U1～K1P4U1 ATP 优化验证
+## 历史 K1P1U1～K1P4U1 ATP 优化验证
 
 本轮结果见 [ATP 优化报告](v4.2/KPU_ATP_Optimization.md)，证据保存在 `manifests/experiments/kpu_atp_opt_20261007/`。最终候选为 `c4b_shared_sponge_write`；仅验收 128f sign 的四组性能，不将节点宽度单元测试视为其他参数集/操作的端到端验收。
 
@@ -76,14 +78,22 @@ make route-common TAG=my_full
 
 ```bash
 python3 scripts/stateful_vectors.py
-python3 scripts/run_stateful.py --k 1
-python3 scripts/run_stateful.py --k 2
+python3 scripts/run_stateful.py --lanes 1
+python3 scripts/run_stateful.py --lanes 2
 python3 scripts/verify_stateful_edges.py
 python3 scripts/verify_stateful_lms_padding.py
 python3 scripts/verify_stateful_masked_chain.py
 python3 -m unittest tests.test_stateful
 ```
 
-运行时 Job/ROM 集成 bench 执行真实共同核，逐字节检查 Keygen/Sign、Verify 结果、Hash/置换统计及混合长度缓存读回。边界覆盖 q=0/1/1023、超界索引、7/8/9/81/82/83/87 字节消息、签名/消息/根篡改、输入等待、截断后复位、运行中复位重放、lane 错误、统计关闭、lane 交换、P4 普通请求和默认 U2 配置。
+运行时 Job/ROM 集成 bench 执行真实共同核，逐字节检查 Keygen/Sign、Verify 结果、Hash/置换统计及混合长度缓存读回。边界覆盖 q=0/1/1023、超界索引、7/8/9/81/82/83/87 字节消息、签名/消息/根篡改、输入等待、截断后复位、运行中复位重放、lane 错误、统计关闭、lane 交换、非二次幂 L3 及默认 U2 配置。
 
 实测数据及独立综合快照保存在 `manifests/experiments/stateful_20261008/`；报告见 [Stateful_XMSS_LMS.md](v4.2/Stateful_XMSS_LMS.md)。本轮只做综合，不布线，150 MHz 是估算假设。
+
+## 当前 L/U、P=1 验证
+
+`make lu-freeze LU_TAG=<新标签>` 冻结源码；`make lu-matrix` 对 14 个合法 L/U 配置执行 128f Sign 字节检查与 10 ns OOC 综合；`make lu-regress` 对五个代表配置执行十参数三操作；`make lu-protocol` 检查统计开关、物理交换、输入停顿、复位重放、错误清空及 Verify 篡改拒绝。全部使用 Verilator，每项编译 2 线程，综合全局最多 6 个任务、每项 4 线程。
+
+`verify_lu_equivalence.py` 对照冻结 `9dbcac8f` 的四组 P1 配置，逐拍检查接口、地址、输出、统计和完成时刻。`mhbs_lu_check.svh` 检查未接受请求稳定性、奇偶 bank 写回和 FORS 槽位范围；recipe 单元通过冻结轮函数检查 U 轮组合结果，通过独立 SHAKE 向量检查 capture 和填充边界。
+
+历史流水测试移至 `tb/reference/pipeline_history`；旧矩阵入口明确拒绝当前源码。历史报告及冻结源码不改写。新证据集中在 `manifests/experiments/lu_p1_20261012`。

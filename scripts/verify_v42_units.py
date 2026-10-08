@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Icarus 12 units for the trusted-image SLH-only core."""
+"""Verilator units for the trusted-image SLH-only core."""
 from pathlib import Path
 import hashlib,json,re,subprocess,sys
 
@@ -24,12 +24,14 @@ def one(name,top,files,params=(),runs=((),)):
     assert logic()==identity
     files=list(dict.fromkeys(files+refs))
     used_sources.update(files)
-    binary=BUILD/(name+'.vvp')
+    obj=BUILD/name
+    binary=obj/('V'+top)
+    params=[re.sub(r'^-P'+re.escape(top)+r'\.', '-G', p) for p in params]
     with (OUT/(name+'.log')).open('w') as log:
-        subprocess.run(['iverilog','-g2012','-s',top,*params,'-o',str(binary),*files],
+        subprocess.run(['verilator','--binary','--timing','-j','2','-Wno-fatal','-Wno-WIDTH','--top-module',top,*params,'--Mdir',str(obj),*files],
                        cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
         for options in runs:
-            subprocess.run(['vvp',str(binary),*options],cwd=ROOT,stdout=log,
+            subprocess.run([str(binary),*options],cwd=ROOT,stdout=log,
                            stderr=subprocess.STDOUT,check=True)
     records[name]=hashlib.sha256((OUT/(name+'.log')).read_bytes()).hexdigest()
     print('SLH_UNIT_PASS',name,flush=True)
@@ -112,5 +114,5 @@ assert logic()==identity
 (OUT/'results.json').write_text(json.dumps({'passed':True,'logic_sha256':identity,
     'test_source_sha256':{p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
                           for p in sorted(used_sources)},
-    'tool':subprocess.check_output(['iverilog','-V'],text=True,stderr=subprocess.DEVNULL).splitlines()[0],
+    'tool':subprocess.check_output(['verilator','--version'],text=True,stderr=subprocess.DEVNULL).splitlines()[0],
     'logs':records},indent=2)+'\n')

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Measure KxP1U1 128f sign with a frozen common-core synthesis source."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 import argparse,csv,json,subprocess,tarfile
 from pathlib import Path
 from v42_external_flow import ROOT,BASE,simulate_case,write,sha

@@ -1,0 +1,33 @@
+--- production
++++ test-throttled
+@@ -227,12 +227,19 @@
+     genvar physical;
+     generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
+         localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
++        reg [5:0] test_phase;
++        always @(posedge clk)if(execution_rst)test_phase<=0;else test_phase<=test_phase+1'b1;
++        wire test_request_block=test_phase<6'(3+(L*7)%19);
++        wire test_response_block=test_phase<6'(7+(L*11)%37);
++        wire test_ready,test_valid;
++        assign lane_ready[L]=test_ready && !test_request_block;
++        assign lane_valid[L]=test_valid && !test_response_block;
+         mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+             .RECIPE_MASK(L==0 ? 16'hfffe : 16'h0786),.CHAIN_ONLY(L!=0),
+             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+             .clk,.rst(execution_rst),.node_bytes,
+-            .request_valid(state==HASH_ISSUE && launch_pending[L]),
+-            .request_ready(lane_ready[L]), .request_recipe(task_recipe), .request_step_recipe(task_step),
++            .request_valid(state==HASH_ISSUE && launch_pending[L] && !test_request_block),
++            .request_ready(test_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
+             .request_chain(task_chain), .request_steps(task_steps[L]),
+             .request_capture_after(task_capture_after[L]),
+             .request_capture(task_capture[L]),
+@@ -244,7 +251,7 @@
+             .list_index0(lane_list0[L]),.list_index1(lane_list1[L]),
+             .list_data0(endpoint_value0),
+             .list_data1(endpoint_value1),
+-            .response_valid(lane_valid[L]),.response_ready(state==HASH_WAIT && response_pending[L]),
++            .response_valid(test_valid),.response_ready(state==HASH_WAIT && response_pending[L] && !test_response_block),
+             .response_value(lane_value[L]),.response_capture(lane_capture[L]),.error(lane_error[L]),
+             .hash_count(lane_hashes[L]),.permutation_count(lane_permutations[L])
+         );

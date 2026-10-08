@@ -1,7 +1,6 @@
 `timescale 1ns/1ps
 module tb_mhbs_recipe_padding;
-    parameter integer PIPELINE=1,UNROLL=2;
-    parameter bit SHARED_STATE=1;
+    parameter integer UNROLL=2;
     logic clk=0,rst=1,request_valid=0,response_ready=0;
     logic [5:0] node_bytes;
     wire request_ready,response_valid,error;
@@ -14,8 +13,7 @@ module tb_mhbs_recipe_padding;
     logic [447:0] vectors[0:9];
     integer i,j,cycles=0,old_hashes,old_permutations;
     string vector_file;
-    mhbs_recipe_lane #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.batch_mode(1'b0),.batch_request_valid(1'b0),
-        .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
+    mhbs_recipe_lane #(.UNROLL(UNROLL),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) dut (.clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),
         .secret_prf,.public_seed,.root,.randomizer,.identifier(128'd0),
@@ -29,7 +27,7 @@ module tb_mhbs_recipe_padding;
     wire [391:0] ref_value;wire [255:0] ref_capture;
     wire [31:0] ref_hashes,ref_perms;
     wire [7:0] ref_index0,ref_index1;
-    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.SHARED_STATE(SHARED_STATE),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) frozen (.batch_mode(1'b0),.batch_request_valid(1'b0),
+    mhbs_recipe_pre_direct_ref #(.UNROLL(UNROLL),.N(32),.DIGEST_BYTES(49),.RECIPE_MASK(16'h101e),.PROFILE_ENABLE(1)) frozen (.batch_mode(1'b0),.batch_request_valid(1'b0),
         .clk,.rst,.node_bytes,.request_valid,.request_ready(ref_ready),.request_recipe,
         .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
         .request_capture_after(5'd0),.request_capture(1'b0),.secret_seed(256'd0),

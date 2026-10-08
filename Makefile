@@ -67,3 +67,14 @@ lup-atp:
 # Read-only historical report entry points; original KU archive paths stay frozen.
 report-lu: report-ku
 reproduce-lu: reproduce-ku
+
+LU_TAG ?= structure
+.PHONY: lu-freeze lu-matrix lu-regress lu-protocol
+lu-freeze:
+	$(PYTHON) scripts/run_lu_p1.py freeze --label $(LU_TAG)
+lu-matrix:
+	$(PYTHON) scripts/run_lu_p1.py matrix --label $(LU_TAG)
+lu-regress:
+	$(PYTHON) scripts/run_lu_p1.py regress --label $(LU_TAG)
+lu-protocol:
+	$(PYTHON) scripts/verify_lu_p1.py $(LU_TAG)

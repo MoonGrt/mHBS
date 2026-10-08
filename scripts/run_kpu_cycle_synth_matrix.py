@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Resumable 128f Sign K/P/U cycle and common-core synthesis matrix."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 import concurrent.futures, csv, hashlib, json, os, re, shutil, subprocess, tarfile, threading, time
 from datetime import datetime, timezone
 from pathlib import Path

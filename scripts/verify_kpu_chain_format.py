@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Cycle equivalence against the frozen pre-round-two chain formatter."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 import argparse,subprocess,tarfile,json,hashlib
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]

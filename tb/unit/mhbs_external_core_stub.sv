@@ -2,7 +2,7 @@
 `default_nettype none
 // One ABI 4 SLH macro executor for n=16/24/32.
 module mhbs_hbs #(
-    parameter integer UNROLL=2, LANES=2, PIPELINE=1,
+    parameter integer UNROLL=2, LANES=2,
     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
 ) (
     input wire [63:0] image_header, profile_descriptor,

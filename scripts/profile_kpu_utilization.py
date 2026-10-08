@@ -4,6 +4,9 @@
 Instrument only a build copy of the integration bench. Count stage input valids
 (the rounds actually consumed at the next edge), rather than register presence.
 """
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 from pathlib import Path
 import argparse,hashlib,json,re,subprocess,tarfile
 ROOT=Path(__file__).resolve().parents[1]

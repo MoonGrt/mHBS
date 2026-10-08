@@ -2,7 +2,7 @@
 `default_nettype none
 // One ABI 4 SLH macro executor for n=16/24/32.
 module mhbs_hbs #(
-    parameter integer UNROLL=2, LANES=2, PIPELINE=1,
+    parameter integer UNROLL=2, LANES=2,
     parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
 ) (
     input wire [63:0] image_header, profile_descriptor,
@@ -67,9 +67,7 @@ module mhbs_hbs #(
         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
         VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
-        // Keep retired enum positions stable for historical cycle observers.
-        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
-        LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM
+        LT_SETUP=44, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM
     } state_t;
     state_t state, hash_return, output_return;
     task automatic enter_state(input state_t next_state);
@@ -84,7 +82,7 @@ module mhbs_hbs #(
     logic [1:0] operation;
     wire verifying = operation==2;
     state_t verify_return;
-    logic verify_lane;
+    logic [LANE_BITS-1:0] verify_lane;
     // Boot loader owns immutable Job registers for this reset epoch.
     wire [255:0] secret_seed=job_secret_seed, secret_prf=job_secret_prf;
     wire [255:0] public_seed=job_public_seed, randomizer=job_randomizer;
@@ -118,34 +116,26 @@ module mhbs_hbs #(
 
     logic [4:0] chain_id, parent_id;
     wire [63:0] chain_descriptor = saved_chain_descriptor;
-    logic standalone_chain, fors_pair_pending;
+    localparam integer LANE_BITS=LANES>1 ? $clog2(LANES) : 1;
+    localparam integer COUNT_BITS=$clog2(LANES+1);
+    localparam integer SECOND=LANES>1 ? 1 : 0;
+    logic standalone_chain;
+    logic [COUNT_BITS-1:0] fors_remaining, fors_slot, store_cursor, output_slot;
+    wire [LANE_BITS-1:0] capture_lane=LANE_BITS'(target-leaf_cursor);
+    wire second_active=LANES>1 && active_mask[SECOND];
     logic [3:0] tree_height, node_level, auth_level;
     logic [1:0] indexing;
     logic [13:0] target, leaf_cursor, node_index;
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
-    logic [1:0] chain_batch_mask;
-    localparam integer PIPE_BATCH=LANES*PIPELINE;
-    logic pipe_cache_valid,pipe_batch_used;
-    logic [2:0] pipe_issue_slot,pipe_pair;
-    logic [1:0] pipe_issue_accepted;
-    logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
-    wire [255:0] pipe_read_result[0:1],pipe_read_capture[0:1];
-    logic [7:0] pipe_seed_domain,pipe_step_domain;
-    wire pipe_direct=!stateful && LANES==1 && UNROLL==1 && PIPELINE>1 && operation==1 && indexing!=1;
-    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT);
-    wire [1:0] pipe_ready,pipe_valid,pipe_selected;
-    wire [1:0] pipe_issue_mask=pipe_expected_mask[LANES*pipe_issue_slot +:LANES];
-    wire [1:0] pipe_tag[0:1];
-    wire [255:0] pipe_value[0:1],pipe_captured[0:1];
-    wire [31:0] pipe_hashes[0:1],pipe_permutations[0:1];
-    wire [255:0] selected_capture[0:1];
+    logic [LANES-1:0] chain_batch_mask;
+    wire [255:0] selected_capture[0:LANES-1];
     for(genvar pc=0;pc<LANES;pc=pc+1)begin
-        assign selected_capture[pc]=pipe_batch_used ? pipe_read_capture[pc] : lane_capture[pc];
+        assign selected_capture[pc]=lane_capture[pc];
     end
     always_comb begin
         chain_batch_mask=0;
         for(int lane_index=0; lane_index<LANES; lane_index=lane_index+1)
-            if(indexing==1 || chain_cursor+lane_index<endpoint_count)
+            if(indexing==1 ? (verifying ? lane_index==0 : 32'(leaf_cursor)+lane_index<(32'(1)<<tree_height)) : 32'(chain_cursor)+lane_index<endpoint_count)
                 chain_batch_mask[lane_index]=1;
     end
     logic [255:0] node_value;
@@ -169,11 +159,15 @@ module mhbs_hbs #(
     end
     logic [63:0] task_recipe, task_step;
     logic task_chain;
-    logic [1:0] task_capture;
-    logic [4:0] task_steps [0:1], task_capture_after [0:1];
-    logic [9:0] task_leaf [0:1];
-    logic [INDEX_BITS-1:0] task_a [0:1];
-    logic [31:0] task_b [0:1];
+    logic [LANES-1:0] task_capture;
+    logic [4:0] task_steps [0:LANES-1], task_capture_after [0:LANES-1];
+    logic [9:0] task_leaf_base;
+    wire [9:0] task_leaf [0:LANES-1];
+    for(genvar leaf_lane=0;leaf_lane<LANES;leaf_lane++)begin
+        assign task_leaf[leaf_lane]=task_leaf_base;
+    end
+    logic [INDEX_BITS-1:0] task_a [0:LANES-1];
+    logic [31:0] task_b [0:LANES-1];
     logic [255:0] task_left0;
     // Parent operands stay unchanged through HASH_ISSUE/HASH_WAIT and are
     // updated only in PARENT_DONE. Other recipes do not consume the right
@@ -183,16 +177,18 @@ module mhbs_hbs #(
     // leaf/chain hashes take their input from these existing result registers.
     wire verify_chain_source = verifying &&
         (hash_return==VERIFY_CHAIN_ADVANCE || (hash_return==LEAF_SETUP && indexing==1));
-    logic [1:0] active_mask, launch_pending, response_pending;
-    wire [1:0] verify_step_mask = {chain_batch_mask[1] && task_b[1][3:0]!=chain_max,
-                                 chain_batch_mask[0] && task_b[0][3:0]!=chain_max};
-    wire [1:0] lane_ready, lane_valid, lane_error;
-    wire [V-1:0] lane_value [0:1];
-    wire [255:0] lane_capture [0:1];
-    wire [INDEX_BITS-1:0] lane_list0 [0:1], lane_list1 [0:1];
-    wire [31:0] lane_hashes [0:1], lane_permutations [0:1];
+    logic [LANES-1:0] active_mask, launch_pending, response_pending;
+    wire [LANES-1:0] verify_step_mask;
+    for(genvar vs=0;vs<LANES;vs=vs+1)begin
+        assign verify_step_mask[vs]=chain_batch_mask[vs] && task_b[vs][3:0]!=chain_max;
+    end
+    wire [LANES-1:0] lane_ready, lane_valid, lane_error;
+    wire [V-1:0] lane_value [0:LANES-1];
+    wire [255:0] lane_capture [0:LANES-1];
+    wire [INDEX_BITS-1:0] lane_list0 [0:LANES-1], lane_list1 [0:LANES-1];
+    wire [31:0] lane_hashes [0:LANES-1], lane_permutations [0:LANES-1];
     logic [31:0] hash_base, permutation_base;
-    logic [V-1:0] result [0:1];
+    logic [V-1:0] result [0:LANES-1];
     // ROUTE consumes these registers before it can update any source. Keep
     // the original staging cycle, but remember only the source selection.
     localparam logic [1:0] ROUTE_HASH=0, ROUTE_NODE=1, ROUTE_SAVED=2, ROUTE_EMIT=3;
@@ -202,8 +198,14 @@ module mhbs_hbs #(
                         : route_source==ROUTE_SAVED ? value[3] : emit_value)};
     // The sponge retains capture through response and output stalls. No new
     // request is issued before CHAIN_OUTPUT0/1 has consumed both captures.
-    wire [31:0] total_hashes = lane_hashes[0]+lane_hashes[1]+pipe_hashes[0]+pipe_hashes[1];
-    wire [31:0] total_permutations = lane_permutations[0]+lane_permutations[1]+pipe_permutations[0]+pipe_permutations[1];
+    logic [31:0] total_hashes,total_permutations;
+    always_comb begin
+        total_hashes=0;total_permutations=0;
+        for(integer lane_index=0;lane_index<LANES;lane_index=lane_index+1)begin
+            total_hashes=total_hashes+lane_hashes[lane_index];
+            total_permutations=total_permutations+lane_permutations[lane_index];
+        end
+    end
     assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
     assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
 
@@ -225,27 +227,10 @@ module mhbs_hbs #(
     genvar physical;
     generate for (physical=0; physical<LANES; physical=physical+1) begin: lanes
         localparam integer L=SWAP_PHYSICAL_LANES ? LANES-1-physical : physical;
-        wire [INDEX_BITS-1:0] batch_chain_index=chain_cursor+INDEX_BITS'(LANES*pipe_issue_slot+L);
-        wire [13:0] batch_leaf_index=leaf_cursor+14'(LANES*pipe_issue_slot+L);
-        assign pipe_selected[L]=state==PIPE_ISSUE && pipe_issue_slot<PIPELINE
-            && pipe_expected_mask[LANES*pipe_issue_slot+L] && !pipe_issue_accepted[L];
-        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
-            .SHARED_STATE(LANES==1 && UNROLL==1),.RECIPE_MASK(L==0 ? 16'hfffe : 16'h0786),
+        mhbs_recipe_lane #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+            .RECIPE_MASK(L==0 ? 16'hfffe : 16'h0786),.CHAIN_ONLY(L!=0),
             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
             .clk,.rst(execution_rst),.node_bytes,
-            .batch_mode(pipe_mode),.batch_request_valid(pipe_selected[L]),.batch_request_ready(pipe_ready[L]),
-            .batch_request_tag(pipe_issue_slot[1:0]),
-            .batch_steps((macro_flags[3] && leaf_cursor==target) ? digit(batch_chain_index) : chain_descriptor[19:15]),
-            .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
-            .batch_capture_enable(macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
-            .batch_leaf(indexing==1 ? scalar_leaf : leaf_cursor[9:0]),
-            .batch_a(indexing==1 ? 7'd0 : batch_chain_index),
-            .batch_b(indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
-            .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
-            .batch_response_valid(pipe_valid[L]),.batch_response_ready(pipe_mode),.batch_response_tag(pipe_tag[L]),
-            .batch_response_digest(pipe_value[L]),.batch_response_capture(pipe_captured[L]),
-            .batch_read_tag(pipe_pair[1:0]),.batch_read_digest(pipe_read_result[L]),.batch_read_capture(pipe_read_capture[L]),
-            .batch_hashes(pipe_hashes[L]),.batch_permutations(pipe_permutations[L]),
             .request_valid(state==HASH_ISSUE && launch_pending[L]),
             .request_ready(lane_ready[L]), .request_recipe(task_recipe), .request_step_recipe(task_step),
             .request_chain(task_chain), .request_steps(task_steps[L]),
@@ -264,20 +249,10 @@ module mhbs_hbs #(
             .hash_count(lane_hashes[L]),.permutation_count(lane_permutations[L])
         );
     end
-    if(LANES==1)begin: unused_lane
-        assign lane_ready[1]=0; assign lane_valid[1]=0; assign lane_error[1]=0;
-        assign lane_value[1]=0; assign lane_capture[1]=0;
-        assign lane_list0[1]=0; assign lane_list1[1]=0;
-        assign lane_hashes[1]=0; assign lane_permutations[1]=0;
-        assign pipe_ready[1]=0; assign pipe_valid[1]=0; assign pipe_selected[1]=0;
-        assign pipe_tag[1]=0; assign pipe_value[1]=0; assign pipe_captured[1]=0;
-        assign pipe_hashes[1]=0; assign pipe_permutations[1]=0;
-        assign selected_capture[1]=0;
-        assign pipe_read_result[1]=0;assign pipe_read_capture[1]=0;
-    end
     endgenerate
-    initial if((LANES!=1 && LANES!=2) || UNROLL<1 || PIPELINE<1 || PIPELINE>4 ||
-        UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported L/U/P configuration");
+    initial if(!((UNROLL==1 && (LANES==1 || LANES==2 || LANES==3 || LANES==4 || LANES==6 || LANES==8 || LANES==12 || LANES==24)) ||
+                 (UNROLL==2 && (LANES==1 || LANES==2 || LANES==3 || LANES==4 || LANES==6 || LANES==12))))
+        $fatal(1,"Unsupported L/U configuration");
 
     // Verify never emits output: share its input-node latch with the output latch.
     logic [255:0] emit_value;
@@ -392,22 +367,7 @@ module mhbs_hbs #(
     task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
         begin emit_value<=v; emit_length<=length; output_return<=ret; enter_state(OUTPUT_CHUNK); end
     endtask
-    // All slots have completed before this transition. Their capture data
-    // stays intact until the final output beat, then the whole batch is free.
-    task automatic advance_direct_batch;
-        begin
-            if(chain_cursor+PIPELINE<endpoint_count)begin
-                chain_cursor<=chain_cursor+PIPELINE;
-                pipe_pair<=0;pipe_issue_slot<=0;pipe_issue_accepted<=0;pipe_done_mask<=0;
-                for(integer q=0;q<PIPE_BATCH;q=q+1)
-                    pipe_expected_mask[q]<=32'(chain_cursor)+PIPELINE+q<endpoint_count;
-                enter_state(PIPE_ISSUE);
-            end else begin
-                chain_cursor<=endpoint_count-1'b1;enter_state(CHAIN_NEXT);
-            end
-        end
-    endtask
-    task automatic start_hash(input [63:0] selected_recipe, input [1:0] mask, input state_t ret);
+    task automatic start_hash(input [63:0] selected_recipe, input [LANES-1:0] mask, input state_t ret);
         begin
             task_recipe<=selected_recipe; active_mask<=mask;
             launch_pending<=mask; response_pending<=mask;
@@ -424,25 +384,19 @@ module mhbs_hbs #(
     always_comb begin
         endpoint_write0=0; endpoint_write1=0;
         endpoint_address0=chain_cursor; endpoint_address1=chain_cursor+1'b1;
-        endpoint_data0=result[0][W-1:0]; endpoint_data1=result[1][W-1:0];
+        endpoint_data0=result[0][W-1:0]; endpoint_data1=result[SECOND][W-1:0];
         endpoint_read0=lane_list0[0]; endpoint_read1=lane_list1[0];
-        if(pipe_direct && pipe_mode)begin
-            endpoint_address0=(chain_cursor+INDEX_BITS'(pipe_tag[0])) & ~INDEX_BITS'(1);
-            endpoint_address1=(chain_cursor+INDEX_BITS'(pipe_tag[0])) | INDEX_BITS'(1);
-            endpoint_data0=pipe_value[0];endpoint_data1=pipe_value[0];
-            endpoint_write0=pipe_valid[0] && !((chain_cursor+INDEX_BITS'(pipe_tag[0])) & 1);
-            endpoint_write1=pipe_valid[0] &&  ((chain_cursor+INDEX_BITS'(pipe_tag[0])) & 1);
-        end else if (state==CHAIN_STORE && indexing!=1) begin
-            // FORS leaves go directly to the tree stack, not the list store.
-            if(LANES==1)begin
-                // A single lane produces alternating even/odd WOTS endpoints.
-                endpoint_address0={chain_cursor[INDEX_BITS-1:1],1'b0};
-                endpoint_address1={chain_cursor[INDEX_BITS-1:1],1'b1};
-                endpoint_data1=result[0][W-1:0];
-                endpoint_write0=active_mask[0] && !chain_cursor[0];
-                endpoint_write1=active_mask[0] && chain_cursor[0];
-            end else begin
-                endpoint_write0=active_mask[0]; endpoint_write1=active_mask[1];
+        if(state==CHAIN_STORE && indexing!=1)begin
+            for(integer port=0;port<2;port=port+1)begin
+                if(store_cursor+port<LANES && active_mask[store_cursor+port])begin
+                    if((chain_cursor+INDEX_BITS'(store_cursor)+INDEX_BITS'(port)) & 1)begin
+                        endpoint_write1=1;endpoint_address1=chain_cursor+INDEX_BITS'(store_cursor)+INDEX_BITS'(port);
+                        endpoint_data1=result[store_cursor+port][W-1:0];
+                    end else begin
+                        endpoint_write0=1;endpoint_address0=chain_cursor+INDEX_BITS'(store_cursor)+INDEX_BITS'(port);
+                        endpoint_data0=result[store_cursor+port][W-1:0];
+                    end
+                end
             end
         end else if(state==LT_STORE || state==LT_COPY) begin
             endpoint_address0={1'b0,lt_cursor[7:2],1'b0};
@@ -500,24 +454,14 @@ module mhbs_hbs #(
             task_chain<=0; task_capture<=0;
             hash_base<=0; permutation_base<=0; layer<=0;
             task_recipe<=0; task_step<=0; message_received<=0;
-            fors_pair_pending<=0;lt_count<=0;lt_cursor<=0;lt_level<=0;
-            pipe_cache_valid<=0;pipe_batch_used<=0;pipe_pair<=0;pipe_issue_slot<=0;
-            pipe_issue_accepted<=0;pipe_done_mask<=0;pipe_expected_mask<=0;
-            for(i=0;i<2;i=i+1) begin
+            fors_remaining<=0;fors_slot<=1;store_cursor<=0;output_slot<=1;lt_count<=0;lt_cursor<=0;lt_level<=0;
+            for(i=0;i<LANES;i=i+1) begin
                 task_steps[i]<=0; task_capture_after[i]<=0;
-                task_leaf[i]<=0; task_a[i]<=0; task_b[i]<=0;
+                task_leaf_base<=0; task_a[i]<=0; task_b[i]<=0;
             end
         end else begin
             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
             if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
-            if(PIPELINE>1 && pipe_mode)begin
-                for(integer pl=0;pl<LANES;pl=pl+1)if(pipe_valid[pl])begin
-                    pipe_done_mask[LANES*pipe_tag[pl]+pl]<=1;
-                    if(pipe_direct && chain_cursor==0 && pipe_tag[pl]==0 && standalone_chain)
-                        node_value<=pipe_value[pl];
-
-                end
-            end
             case(state)
                 IDLE: if(job_valid) begin
                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
@@ -552,8 +496,8 @@ module mhbs_hbs #(
                     end else if(cmd_valid) begin
                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
                         macro_flags<=cmd[27:24]; layer<=cmd[23:19]; group_index<=cmd[18:13];
-                        task_chain<=0; task_capture<=0;pipe_cache_valid<=0;pipe_batch_used<=0;
-                        for(i=0;i<2;i=i+1) task_steps[i]<=0;
+                        task_chain<=0; task_capture<=0;
+                        for(i=0;i<LANES;i=i+1) task_steps[i]<=0;
                         enter_state(LOAD_DESCRIPTOR);
                     end
                 end
@@ -561,7 +505,7 @@ module mhbs_hbs #(
                 DECODE: begin
                     case(macro_op)
                     1: begin
-                           task_leaf[0]<=scalar_leaf;
+                           task_leaf_base<=scalar_leaf;
                            task_a[0]<=0; task_b[0]<=0;
                            // The sign program starts with PRF_msg. Verification
                            // supplies that R as the first external node.
@@ -569,7 +513,7 @@ module mhbs_hbs #(
                                read_verify_node(SF_RANDOM);
                            else if(verifying && saved_descriptor[59:56]==3)
                                read_verify_node(VERIFY_RANDOM);
-                           else start_hash(saved_descriptor,2'b01,HASH_RESULT);
+                           else start_hash(saved_descriptor,LANES'(1),HASH_RESULT);
                        end
                     2: begin
                            chain_id<=macro_desc; standalone_chain<=1; indexing<=0;
@@ -583,9 +527,8 @@ module mhbs_hbs #(
                 endcase
                 end
                 TREE_INIT: begin
-                    pipe_cache_valid<=0;pipe_batch_used<=0;
                     saved_chain_descriptor<=descriptors[6];
-                    fors_pair_pending<=0;
+                    fors_remaining<=0;fors_slot<=1;store_cursor<=0;output_slot<=1;
                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
                     indexing<=descriptor[33:32]; standalone_chain<=0;
                     target<=stateful ? {4'd0,job_index[9:0]} : descriptor[37:36]==1 ? fors_target(group_index)
@@ -601,29 +544,18 @@ module mhbs_hbs #(
                     if(verifying) begin
                         task_chain<=0; task_capture<=0; task_step<=descriptors[5];
                         verify_lane<=0;
-                        for(i=0;i<2;i=i+1) begin
+                        for(i=0;i<LANES;i=i+1) begin
                             task_steps[i]<=0;
-                            task_leaf[i]<=scalar_leaf;
+                            task_leaf_base<=scalar_leaf;
                             task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
                             task_b[i]<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor+i);
                         end
                         read_verify_node(VERIFY_CHAIN_INPUT);
-                    end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
-                        if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
-                        else begin
-                            pipe_pair<=0;pipe_issue_slot<=0;pipe_issue_accepted<=0;pipe_done_mask<=0;
-                            for(integer q=0;q<PIPE_BATCH;q=q+1)
-                                pipe_expected_mask[q]<=indexing==1 ? (32'(leaf_cursor)+q < (32'd1<<tree_height))
-                                    : (32'(chain_cursor)+q < endpoint_count);
-                            pipe_seed_domain<=descriptors[4][55:48];pipe_step_domain<=descriptors[5][55:48];
-                            enter_state(PIPE_ISSUE);
-                        end
                     end else begin
-                    pipe_batch_used<=0;
                     task_chain<=1; task_step<=descriptors[5];
-                    for(i=0;i<2;i=i+1) begin
+                    for(i=0;i<LANES;i=i+1) begin
                         task_capture[i]<=(indexing==1 ? leaf_cursor+i==target : leaf_cursor==target) && macro_flags[0];
-                        task_leaf[i]<=indexing==1 ? scalar_leaf : leaf_cursor;
+                        task_leaf_base<=indexing==1 ? scalar_leaf : leaf_cursor;
                         task_a[i]<=indexing==1 ? 0 : chain_cursor+i;
                         task_b[i]<=indexing==1 ? (group_index<<FORS_A)+leaf_cursor+i : 0;
                         task_steps[i]<=(sign_only || (macro_flags[3] && leaf_cursor==target))
@@ -633,42 +565,25 @@ module mhbs_hbs #(
                     start_hash(descriptors[4],chain_batch_mask,CHAIN_STORE);
                     end
                 end
-                PIPE_ISSUE: begin
-                    if(((pipe_issue_accepted | (pipe_ready & pipe_selected)) &
-                         pipe_issue_mask)==pipe_issue_mask)begin
-                        pipe_issue_accepted<=0;
-                        if(pipe_issue_slot+1>=PIPELINE ||
-                           (pipe_direct && (pipe_expected_mask>>(pipe_issue_slot+1))==0))enter_state(PIPE_WAIT);
-                        else pipe_issue_slot<=pipe_issue_slot+1'b1;
-                    end else pipe_issue_accepted<=pipe_issue_accepted | (pipe_ready & pipe_selected);
-                end
-                PIPE_WAIT: if((pipe_done_mask & pipe_expected_mask)==pipe_expected_mask)begin
-                    if(pipe_direct)begin
-                        pipe_cache_valid<=0;pipe_batch_used<=1;pipe_pair<=0;
-                        if(macro_flags[0] && leaf_cursor==target)begin
-                            start_output(pipe_read_capture[0],node_bytes,PIPE_CAPTURE_NEXT);
-                            pipe_pair<=1;
-                        end else advance_direct_batch();
-                    end else enter_state(PIPE_LOAD);
-                end
-                PIPE_LOAD: begin
-                    pipe_batch_used<=1;
-                    pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(LANES*(pipe_pair+1)))!=0);
-                    active_mask<=pipe_expected_mask[LANES*pipe_pair +:LANES];
-                    for(integer pl=0;pl<LANES;pl=pl+1)
-                        result[pl]<={{(V-W){1'b0}},pipe_read_result[pl]};
-                    enter_state(CHAIN_STORE);
-                end
                 CHAIN_STORE: begin
-                    if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
-                    task_chain<=0;
-                    if(sign_only || (!verifying && macro_flags[0] && (leaf_cursor==target || (indexing==1 && active_mask[1] && leaf_cursor+1==target)))) enter_state(CHAIN_OUTPUT0);
-                    else enter_state(CHAIN_NEXT);
+                    if(indexing!=1 && (active_mask>>(store_cursor+2))!=0)store_cursor<=store_cursor+2;
+                    else begin
+                        store_cursor<=0;output_slot<=1;
+                        if(standalone_chain && chain_cursor==0)node_value<=result[0][W-1:0];
+                        task_chain<=0;
+                        if(sign_only || (!verifying && macro_flags[0] &&
+                           (indexing==1 ? target>=leaf_cursor && target<leaf_cursor+LANES && target<(32'(1)<<tree_height) : leaf_cursor==target)))enter_state(CHAIN_OUTPUT0);
+                        else enter_state(CHAIN_NEXT);
+                    end
                 end
-                CHAIN_OUTPUT0: start_output(sign_only ? result[0][W-1:0] : indexing==1 && active_mask[1] && target[0]
-                    ? selected_capture[1] : selected_capture[0],node_bytes,
-                    active_mask[1] && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
-                CHAIN_OUTPUT1: start_output(sign_only ? result[1][W-1:0] : selected_capture[1],node_bytes,CHAIN_NEXT);
+                CHAIN_OUTPUT0: start_output(sign_only ? result[0][W-1:0] :
+                    selected_capture[indexing==1 ? capture_lane : LANE_BITS'(0)],node_bytes,
+                    second_active && indexing!=1 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+                CHAIN_OUTPUT1: begin
+                    start_output(sign_only ? result[output_slot][W-1:0] : selected_capture[output_slot],node_bytes,
+                        (active_mask>>(output_slot+1))!=0 ? CHAIN_OUTPUT1 : CHAIN_NEXT);
+                    output_slot<=output_slot+1'b1;
+                end
                 CHAIN_NEXT: begin
                     if(indexing!=1 && chain_cursor+LANES<endpoint_count) begin chain_cursor<=chain_cursor+LANES; enter_state(CHAIN_SETUP); end
                     else if(sign_only)complete_macro();
@@ -679,7 +594,7 @@ module mhbs_hbs #(
                     else if(!verifying && macro_flags[3] && leaf_cursor==target) begin
                         node_value<=0; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
                     end else if(chain_descriptor[13:12]==0) begin
-                        fors_pair_pending<=indexing==1 && active_mask[1];
+                        fors_remaining<=indexing==1 ? COUNT_BITS'($countones(active_mask))-1'b1 : COUNT_BITS'(0);fors_slot<=1;
                         node_value<=result[0][W-1:0]; node_level<=0; node_index<=leaf_cursor; enter_state(PUSH_NODE);
                     end else begin
                         enter_state(REDUCE_SETUP);
@@ -687,16 +602,16 @@ module mhbs_hbs #(
                 end
                 REDUCE_SETUP: begin
                     task_chain<=0; task_capture<=0; task_steps[0]<=0;
-                    task_leaf[0]<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
-                    start_hash(descriptors[4],2'b01,stateful ? SF_REDUCED : LEAF_SETUP);
+                    task_leaf_base<=leaf_cursor; task_a[0]<=0; task_b[0]<=0;
+                    start_hash(descriptors[4],LANES'(1),stateful ? SF_REDUCED : LEAF_SETUP);
                 end
                 LT_SETUP: begin
                     if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
                     else begin
                         task_chain<=0;task_capture<=0;task_steps[0]<=0;
-                        task_leaf[0]<=leaf_cursor;task_a[0]<=lt_level;task_b[0]<=lt_cursor>>1;
+                        task_leaf_base<=leaf_cursor;task_a[0]<=lt_level;task_b[0]<=lt_cursor>>1;
                         task_left0<=endpoint_value0;node_value<=endpoint_value1;
-                        start_hash(descriptors[4],2'b01,LT_STORE);
+                        start_hash(descriptors[4],LANES'(1),LT_STORE);
                     end
                 end
                 LT_STORE,LT_COPY:enter_state(LT_NEXT);
@@ -713,8 +628,8 @@ module mhbs_hbs #(
                 SF_REDUCED:enter_state(SF_LEAF);
                 SF_LEAF:begin
                     task_chain<=0;task_capture<=0;task_steps[0]<=0;
-                    task_leaf[0]<=leaf_cursor;task_a[0]<=0;task_b[0]<=32'd1024+leaf_cursor;
-                    task_left0<=result[0][W-1:0];start_hash(descriptors[0],2'b01,SF_LEAF_DONE);
+                    task_leaf_base<=leaf_cursor;task_a[0]<=0;task_b[0]<=32'd1024+leaf_cursor;
+                    task_left0<=result[0][W-1:0];start_hash(descriptors[0],LANES'(1),SF_LEAF_DONE);
                 end
                 SF_LEAF_DONE:begin
                     node_value<=result[0][W-1:0];
@@ -723,7 +638,7 @@ module mhbs_hbs #(
                 end
                 SF_RANDOM:begin
                     value[0]<=emit_value;
-                    if(xmss)complete_macro();else start_hash(saved_descriptor,2'b01,HASH_RESULT);
+                    if(xmss)complete_macro();else start_hash(saved_descriptor,LANES'(1),HASH_RESULT);
                 end
                 LEAF_SETUP: if(standalone_chain)route_result(ROUTE_HASH);
                     else begin node_value<=result[0][W-1:0]; node_level<=0;
@@ -735,10 +650,10 @@ module mhbs_hbs #(
                         else enter_state(TREE_FINISH);
                     end else if(verifying) read_verify_node(PARENT_SETUP);
                     else if(node_index[0]) enter_state(PARENT_SETUP);
-                    else if(fors_pair_pending) begin
-                        node_value<=result[1][W-1:0]; node_level<=0;
-                        node_index<=leaf_cursor+1'b1; leaf_cursor<=leaf_cursor+1'b1;
-                        fors_pair_pending<=0;
+                    else if(fors_remaining!=0) begin
+                        node_value<=result[fors_slot][W-1:0];node_level<=0;
+                        node_index<=leaf_cursor+1'b1;leaf_cursor<=leaf_cursor+1'b1;
+                        fors_remaining<=fors_remaining-1'b1;fors_slot<=fors_slot+1'b1;
                     end else begin
                         leaf_cursor<=leaf_cursor+1'b1; chain_cursor<=0; enter_state(CHAIN_SETUP);
                     end
@@ -748,12 +663,12 @@ module mhbs_hbs #(
                         node_value<=0; node_index<=node_index>>1; node_level<=node_level+1'b1; enter_state(PUSH_NODE);
                     end else begin
                         task_chain<=0; task_capture<=0; task_steps[0]<=0;
-                        task_leaf[0]<=indexing==1 ? scalar_leaf : 0;
+                        task_leaf_base<=indexing==1 ? scalar_leaf : 0;
                         task_a[0]<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
                         task_b[0]<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
                         task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
-                        start_hash(descriptors[4],2'b01,PARENT_DONE);
+                        start_hash(descriptors[4],LANES'(1),PARENT_DONE);
                     end
                 end
                 PARENT_DONE: begin
@@ -773,7 +688,7 @@ module mhbs_hbs #(
                     if((launch_pending & ~lane_ready)==0) enter_state(HASH_WAIT);
                 end
                 HASH_WAIT: begin
-                    for(i=0;i<2;i=i+1) if(response_pending[i] && lane_valid[i]) begin
+                    for(i=0;i<LANES;i=i+1) if(response_pending[i] && lane_valid[i]) begin
                         result[i]<=lane_value[i];
                     end
                     response_pending<=response_pending & ~lane_valid;
@@ -823,9 +738,9 @@ module mhbs_hbs #(
                 VERIFY_CHAIN_INPUT: begin
                     // A WOTS digit of 15 already is an endpoint: zero hashes.
                     result[verify_lane]<={{(V-W){1'b0}},emit_value};
-                    if(indexing==1) start_hash(task_step,2'b01,LEAF_SETUP);
-                    else if(!verify_lane && chain_batch_mask[1]) begin
-                        verify_lane<=1; read_verify_node(VERIFY_CHAIN_INPUT);
+                    if(indexing==1) start_hash(task_step,LANES'(1),LEAF_SETUP);
+                    else if((chain_batch_mask>>(verify_lane+1))!=0) begin
+                        verify_lane<=verify_lane+1'b1; read_verify_node(VERIFY_CHAIN_INPUT);
                     end else enter_state(VERIFY_CHAIN_RUN);
                 end
                 VERIFY_CHAIN_RUN: begin
@@ -834,18 +749,12 @@ module mhbs_hbs #(
                     end else start_hash(descriptors[0],verify_step_mask,VERIFY_CHAIN_ADVANCE);
                 end
                 VERIFY_CHAIN_ADVANCE: begin
-                    for(i=0;i<2;i=i+1) if(active_mask[i]) begin
+                    for(i=0;i<LANES;i=i+1) if(active_mask[i]) begin
                         task_b[i]<={28'd0,task_b[i][3:0]+4'd1};
                     end
                     enter_state(VERIFY_CHAIN_RUN);
                 end
-                OUTPUT_CHUNK: begin
-                    if(pipe_direct && output_return==PIPE_CAPTURE_NEXT)begin
-                        if(pipe_pair<PIPELINE && (pipe_expected_mask>>pipe_pair)!=0)begin
-                            emit_value<=pipe_read_capture[0];pipe_pair<=pipe_pair+1'b1;
-                        end else advance_direct_batch();
-                    end else enter_state(output_return);
-                end
+                OUTPUT_CHUNK: enter_state(output_return);
                 DRAIN: enter_state(FINISH);
                 FINISH: begin
                     done<=1; enter_state(IDLE);

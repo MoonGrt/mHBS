@@ -7,7 +7,7 @@
 module tb_mhbs_external;
  parameter [255:0] SECRET_SEED=0,SECRET_PRF=0,PUBLIC_SEED=0,RANDOMIZER=0,PUBLIC_ROOT=0;
  parameter integer OPERATION=1,MESSAGE_BYTES=1;
- parameter integer SWAP=0,LANES=2,UNROLL=2,PIPELINE=1;
+ parameter integer SWAP=0,LANES=2,UNROLL=2;
  parameter bit PROFILE_ENABLE=1;
  logic clk=0,rst=1;
  logic signature_read_enable=0;logic [10:0] signature_read_address=0;
@@ -27,7 +27,7 @@ module tb_mhbs_external;
  reg [7:0] message_bytes[0:86];
  integer sent=0,wait_cycles=0,stall=0,tail_noise=0;reg [31:0] rng=32'h51c0ffee;
  mhbs_top #(.SECRET_SEED(SECRET_SEED),.SECRET_PRF(SECRET_PRF),.PUBLIC_SEED(PUBLIC_SEED),
- .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.LANES(LANES),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
+ .RANDOMIZER(RANDOMIZER),.PUBLIC_ROOT(PUBLIC_ROOT),.OPERATION(OPERATION),.LANES(LANES),.UNROLL(UNROLL),.PROFILE_ENABLE(PROFILE_ENABLE),.SWAP_PHYSICAL_LANES(SWAP),.PROGRAM_INIT_FILE(""),.TEMPLATE_INIT_FILE(""),.DESCRIPTOR_INIT_FILE("")) dut(.*);
  always #5 clk=~clk;
  `include "tb/integration/mhbs_shared_store_check.svh"
  `include "tb/integration/mhbs_parent_input_check.svh"
@@ -39,34 +39,18 @@ module tb_mhbs_external;
  reg [7:0] expected_bytes[0:65535];
  integer cursor=0,cycles=0,replays=1,interrupt_run=0,dump_file=0;
  integer residency[0:63];
- integer tail_batches=0,consecutive_outputs=0;logic previous_output=0,coverage_reported=0;
- always @(posedge clk)begin
-  if(rst)begin tail_batches=0;consecutive_outputs=0;previous_output=0;coverage_reported=0;end
-  else begin
-   if(out_valid && previous_output)consecutive_outputs=consecutive_outputs+1;
-   previous_output=out_valid;
-   if(LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.pipe_direct
-      && `HBS_CORE.pipe_mode && `HBS_CORE.pipe_selected[0] && `HBS_CORE.pipe_ready[0]
-      && `HBS_CORE.pipe_issue_slot==0 && `HBS_CORE.chain_cursor+PIPELINE>`HBS_CORE.endpoint_count)
-       tail_batches=tail_batches+1;
-   if(done && !coverage_reported && !fault && OPERATION==1 && LANES==1 && UNROLL==1 && PIPELINE>1 && `HBS_CORE.node_bytes==16)begin
-    coverage_reported=1;
-    if(consecutive_outputs==0 || tail_batches==0)$fatal(1,"batch/output coverage missing");
-    $display("BATCH_OUTPUT_PASS P=%0d tails=%0d consecutive=%0d",PIPELINE,tail_batches,consecutive_outputs);
-   end
-  end
- end
-
  // Testbench-only observers keep production-disabled statistics independently
  // checkable. Count completed permutations/hashes, not the RTL issue counters.
  integer observed_boot=0,observed_cycles=0;
- integer observed_hashes[0:1],observed_permutations[0:1];
- wire [31:0] measured_hashes=observed_hashes[0]+observed_hashes[1];
- wire [31:0] measured_permutations=observed_permutations[0]+observed_permutations[1];
+ integer observed_hashes[0:LANES-1],observed_permutations[0:LANES-1];
+ logic [31:0] measured_hashes,measured_permutations;
+ always_comb begin measured_hashes=0;measured_permutations=0;
+ for(integer i=0;i<LANES;i++)begin measured_hashes+=observed_hashes[i];measured_permutations+=observed_permutations[i];end end
+
  wire [31:0] measured_keygen=OPERATION ? 0 : observed_cycles;
  wire [31:0] measured_sign=OPERATION ? observed_cycles : 0;
  genvar lane;
- generate for(lane=0;lane<2;lane=lane+1)begin: observers
+ generate for(lane=0;lane<LANES;lane=lane+1)begin: observers
   if(lane<LANES)begin
   always @(posedge clk)begin
    if(`HBS_CORE.execution_rst)begin observed_hashes[lane]=0;observed_permutations[lane]=0;end
@@ -75,9 +59,7 @@ module tb_mhbs_external;
      observed_permutations[lane]=observed_permutations[lane]+1;
      if(`HBS_CORE.lanes[lane].lane.running_last)observed_hashes[lane]=observed_hashes[lane]+1;
     end
-    if(`HBS_CORE.lanes[lane].lane.batch_perm_done)begin
-     observed_permutations[lane]=observed_permutations[lane]+1;observed_hashes[lane]=observed_hashes[lane]+1;
-    end
+
    end
   end
   end else initial begin observed_hashes[lane]=0;observed_permutations[lane]=0;end

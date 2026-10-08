@@ -1,0 +1,1 @@
+These frozen testbenches exercise the removed multi-context pipeline. They are not part of current L/U verification. Reproduce them using the corresponding archived RTL and scripts; the current production source has no batch/tag/PIPELINE interface.

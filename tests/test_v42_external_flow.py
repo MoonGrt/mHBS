@@ -31,7 +31,7 @@ class ExternalFlowTests(unittest.TestCase):
 
     @staticmethod
     def simulation_tools_only(command, **kwargs):
-        if command[0] not in ('verilator', 'iverilog'):
+        if command[0] != 'verilator':
             raise FileNotFoundError(command[0])
         return command[0] + ' test-version\n'
 
@@ -39,8 +39,8 @@ class ExternalFlowTests(unittest.TestCase):
         with patch.object(flow.subprocess, 'check_output', side_effect=self.simulation_tools_only) as run:
             folder = flow.capture('simulation_only')
         inputs = json.loads((folder / 'inputs.json').read_text())
-        self.assertEqual(set(inputs['tool_versions']), {'verilator', 'iverilog'})
-        self.assertEqual(run.call_count, 2)
+        self.assertEqual(set(inputs['tool_versions']), {'verilator'})
+        self.assertEqual(run.call_count, 1)
         self.assertEqual(flow.sha(folder / 'source_snapshot.tar.gz'), inputs['snapshot_sha256'])
         self.assertIn('manifests/unified_sources.txt', inputs['source_sha256'])
         self.assertIn('docs/Verification.md', inputs['source_sha256'])

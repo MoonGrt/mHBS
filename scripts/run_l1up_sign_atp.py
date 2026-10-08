@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 """Single-lane U1 P1-P4 128f sign sweep, synthesis only at assumed 150 MHz."""
+
+if __name__ == "__main__":
+    raise SystemExit("Pipeline support removed. Use scripts/run_lu_p1.py; historical experiments require their frozen source snapshots.")
 import argparse
 import csv
 import json
