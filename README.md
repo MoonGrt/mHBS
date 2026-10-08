@@ -4,6 +4,8 @@
 
 `LANES` 与 `SWAP_PHYSICAL_LANES` 已删除，不能通过参数恢复多 lane。只保留 `PIPELINE/UNROLL`（P/U）：P>1 时普通哈希和多上下文链共用一套 P×U 轮逻辑。十种算法参数和三种操作均保留。
 
+XMSS/LMS 的 Keygen、Sign、Verify 已接入 P>1 链上下文；P1 保留原路径，L-tree、列表压缩和 Merkle 父节点仍顺序执行。实现与测量见 [XMSS/LMS 链流水报告](docs/report/Stateful_Pipeline_20261012.md)。
+
 最新单 lane 裁剪、周期等价与共同核面积见 [单 lane 优化报告](docs/report/Single_Lane_Optimization.md)。历史 K/L 报告、路径和源码快照保持原样，不能作为当前版本的面积或周期。
 
 ## 构建与验证

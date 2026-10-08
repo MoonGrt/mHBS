@@ -58,3 +58,15 @@ make pu-atp PU_TAG=my_pu
 ## XMSS/LMS 软件参考
 
 `stateful_vectors.py` 对照冻结 `67a1cd75` 模型和独立 hashlib 签名验证器；当前冷启动模型包含完整认证路径重算。原始向量保留于 `manifests/experiments/stateful_20261008/vectors/`，当前单 lane 测试结果写入独立目录。索引由外部持久化管理，复位不表示允许重复使用索引。
+
+## XMSS/LMS 链上下文验证
+
+`scripts/stateful_pipeline_experiment.py` 使用 Verilator，实验目录为 `manifests/experiments/stateful_pipeline_20261012`。`baseline` 冻结 `01486e3f` 的生产 RTL；`candidate2` 冻结新增三算法族链上下文的 RTL。`matrix` 对 P1/P4/P12 × U1/U2 的四参数三操作逐字节比对向量，`regression` 比较 SLH 输出与周期，`edges` 检查索引、节点篡改、停顿、复位、异常清空及统计关闭，`partition` 逐周期比较完整 top 与提取共同核。
+
+`units` 对 11 个 P>1 配置运行 `tb_mhbs_stateful_pipeline`，每点 72 个独立 hashlib 向量；检查最高 tag、链索引 132、零步/最大步、子步骤、capture、反馈冲突、尾批、背压和槽位复用，且每级轮输出对照冻结轮函数。P1 的两个配置通过普通路径完整操作验证。集成观察器记录实际同时在途上下文数，P>1 的新算法操作必须出现多上下文交错并完成排空。
+
+后续面积实验由 `scripts/stateful_pipeline_area.py` 驱动，证据保存于 `manifests/experiments/stateful_pipeline_area_20261012/`。冻结 `5d53fa6e`，使用 Verilator 对全部 13 种 P/U 逐周期比较；P>1 比较批量请求、置换块、响应和有效读数据，P1 比较普通 sponge 的握手、计数和多块填充结果。另以六种上下文深度检查混合算法的乱序返回，并断言确实发生了初值接受/置换返回同拍以及 XMSS key 返回。
+
+正常矩阵仍包含六配置 × 四参数 × 三操作的 72 组；补充六种 SLH 三操作、统计关闭、q 边界、停顿、复位、异常退出与共同核等价。P4U2 仅跳过综合，功能验证保留；P12U2 不新增综合。四个面积点为 P1U1/P1U2/P4U1/P12U1。各候选的源码、父版本差异、生成的测试平台、日志和保留决定见 [面积优化报告](report/Stateful_Pipeline_Area_Optimization.md)。本轮不运行 Icarus，不布局布线。
+
+`synth` 仅综合共同核，最多 6 个 Vivado、每任务 4 线程，约束 6.666667 ns，检查统计寄存器裁剪。完整结果和验收范围以 [本轮报告](report/Stateful_Pipeline_20261012.md) 为准。

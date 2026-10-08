@@ -24,7 +24,9 @@ module tb_mhbs_chain_format_equiv;
  wire [31:0] hash_count,permutation_count;
  wire rr,rv,pv;wire [1:0] rt,pt;
  wire [255:0] rd,rc,vd,vc;wire [1599:0] ps;wire [31:0] hc,pc;
- mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(.*);
+ mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) dut(
+ .request_family(2'd0),.request_no_seed(1'b0),.request_start(4'd0),
+ .request_initial_value(256'd0),.identifier(128'd0),.*);
  mhbs_chain_pipeline_lane_ref #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(1)) ref_dut(
  .clk,.rst,.node_bytes,.request_valid,.request_tag,.request_steps,.request_capture_after,.request_capture,
  .secret_seed,.public_seed,.request_layer,.request_tree,.request_leaf,.request_a,.request_b,.seed_domain,.step_domain,
@@ -39,7 +41,10 @@ module tb_mhbs_chain_format_equiv;
   if(response_valid && {response_tag,response_digest,response_capture}!=={rt,vd,vc})$fatal(1,"response mismatch");
   if(known[read_tag] && read_capture!==rc)$fatal(1,"capture readback mismatch");
   if(request_valid && request_ready)begin known[request_tag]=1;accepted=accepted+1;if(perm_done)simultaneous=simultaneous+1;end
+  if(perm_done)pending[perm_result_tag]=0;
   if(perm_valid && perm_ready)pending[perm_tag]=1;
+  if($test$plusargs("DEBUG") && cycle<25)$display("DEBUG cycle=%0d req=%b/%b tag=%0d perm=%b/%b tag=%0d done=%b pending=%b busy=%b complete=%b",cycle,request_valid,request_ready,request_tag,perm_valid,perm_ready,perm_tag,perm_done,pending,dut.busy,dut.complete);
+  cycle++;
  end
  initial begin
   for(integer width=0;width<3;width=width+1)begin
@@ -53,13 +58,12 @@ module tb_mhbs_chain_format_equiv;
     step_domain=i%2 ? 3 : 0;seed_domain=i%2 ? 6 : 5;response_ready=i%7!=0;
     perm_done=0;
     for(integer t=PIPELINE-1;t>=0;t=t-1)if(pending[t])begin perm_done=1;perm_result_tag=2'(t);end
-    if(perm_done)pending[perm_result_tag]=0;
     perm_ready=perm_done || i%4!=0;
     for(integer w=0;w<50;w=w+1)perm_digest[w*32 +:32]=$random;
    end
   end
   @(negedge clk);request_valid=0;
-  if(accepted<30 || (PIPELINE>1 && simultaneous==0))$fatal(1,"coverage missing");
+  if(accepted<30 || (PIPELINE>1 && simultaneous==0))$fatal(1,"coverage missing accepted=%0d simultaneous=%0d",accepted,simultaneous);
   $display("CHAIN_FORMAT_EQUIV_PASS P=%0d accepted=%0d simultaneous=%0d",PIPELINE,accepted,simultaneous);$finish;
  end
 endmodule

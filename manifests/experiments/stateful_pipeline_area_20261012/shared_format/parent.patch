@@ -1,0 +1,192 @@
+--- a/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
++++ b/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+@@ -20,7 +20,9 @@
+  output wire [255:0] read_digest,read_capture,
+  output wire response_valid,input wire response_ready,output logic [TAG_BITS-1:0] response_tag,
+  output wire [255:0] response_digest,response_capture,
+- output wire perm_valid,input wire perm_ready,output wire [1599:0] perm_state,
++ output wire perm_valid,input wire perm_ready,
++ output wire [1:0] block_family,output wire [2:0] block_phase,
++ output wire [255:0] block_address,block_value,block_key,output wire [3:0] block_step,
+  output wire [TAG_BITS-1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
+  input wire [TAG_BITS-1:0] perm_result_tag,
+  output logic [31:0] hash_count,permutation_count
+@@ -50,52 +52,17 @@
+   next_address=address[t];
+   if(!preserve_counter[t])next_address[224 +:32]=be32({27'd0,next_step});
+  end
+- function automatic [1599:0] block_for(input [255:0] adr,input [255:0] val);
+-  reg [1599:0] block_data;
+-  begin
+-   block_data=0;
+-   case(node_bytes)
+-    16:begin block_data[511:0]={val[127:0],adr,public_seed[127:0]};block_data[512 +:8]=8'h1f;end
+-    24:begin block_data[639:0]={val[191:0],adr,public_seed[191:0]};block_data[640 +:8]=8'h1f;end
+-    default:begin block_data[767:0]={val,adr,public_seed};block_data[768 +:8]=8'h1f;end
+-   endcase
+-   block_data[1087]=1;block_for=block_data;
+-  end
+- endfunction
+- function automatic [1599:0] stateful_block(input [1:0] kind,input [2:0] subphase,
+-     input [255:0] adr,val,key,input [3:0] step);
+-  reg [1599:0] data;
+-  reg [255:0] masked_address;
+-  begin
+-   data=0;
+-   masked_address={be32(subphase==MASK ? 32'd1 : 32'd0),be32({28'd0,step}),adr[223:192],adr[191:160],adr[159:128],96'd0};
+-   if(kind==2)begin
+-    data[127:0]=identifier;data[159:128]=adr[191:160];
+-    data[167:160]=0;data[175:168]=adr[223:216];data[183:176]=subphase==SEED ? 8'hff : {4'd0,step};
+-    data[439:184]=val;data[447:440]=8'h1f;
+-   end else if(subphase==SEED)begin
+-    // XMSS seed domain: 32-byte 4 || SK.seed || PK.seed || ADRS || 0.
+-    data[255:248]=8'd4;data[511:256]=secret_seed;data[767:512]=public_seed;
+-    data[1023:768]=masked_address;data[1031:1024]=8'h1f;
+-   end else if(subphase==KEY || subphase==MASK)begin
+-    data[255:248]=8'd3;data[511:256]=public_seed;data[767:512]=masked_address;data[775:768]=8'h1f;
+-   end else begin
+-    data[511:256]=key;data[767:512]=val;data[775:768]=8'h1f;
+-   end
+-   data[1087]=1;stateful_block=data;
+-  end
+- endfunction
+  assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && !busy[request_tag];
+  wire accept=request_valid && request_ready;
+  wire zero_request=request_no_seed && request_steps==0;
+  assign perm_valid=again || (accept && !zero_request);
+  // Select operands before the common width and padding formatter.
+- wire [255:0] block_address=again ? next_address : request_no_seed ? step_address : seed_address;
+- wire [1:0] block_family=again ? family[t] : request_family;
+- wire [2:0] block_phase=again ? next_phase : !request_no_seed ? SEED : request_family==1 ? KEY : STEP;
+- wire [3:0] block_step=again ? next_step[3:0] : request_start;
+- wire [255:0] block_value=again ? (phase[t]==MASK ? digest[t]^perm_digest[255:0] : perm_digest[255:0]) : request_no_seed ? request_initial_value : secret_seed;
+- assign perm_state=block_family==0 ? block_for(block_address,block_value) : stateful_block(block_family,block_phase,block_address,block_value,key_value[t],block_step);
++ assign block_address=again ? next_address : request_no_seed ? step_address : seed_address;
++ assign block_family=again ? family[t] : request_family;
++ assign block_phase=again ? next_phase : !request_no_seed ? SEED : request_family==1 ? KEY : STEP;
++ assign block_step=again ? next_step[3:0] : request_start;
++ assign block_value=again ? (phase[t]==MASK ? digest[t]^perm_digest[255:0] : perm_digest[255:0]) : request_no_seed ? request_initial_value : secret_seed;
++ assign block_key=key_value[t];
+  assign perm_tag=again ? t : request_tag;
+  logic response_held;
+  logic [TAG_BITS-1:0] held_tag;
+--- a/rtl/hash_lane/mhbs_recipe_lane.sv
++++ b/rtl/hash_lane/mhbs_recipe_lane.sv
+@@ -300,6 +300,13 @@
+     end
+     // Select shared frame fields before alignment. This avoids replicating
+     // every seed/value/key/mask selector for all three node lengths.
++    wire [1:0] batch_block_family;
++    wire [2:0] batch_block_phase;
++    wire [3:0] batch_block_step;
++    wire [255:0] batch_block_address,batch_block_value,batch_block_key;
++    wire [255:0] batch_masked_address={be32(batch_block_phase==3 ? 32'd1 : 32'd0),
++        be32({28'd0,batch_block_step}),batch_block_address[223:192],
++        batch_block_address[191:160],batch_block_address[159:128],96'd0};
+     logic [255:0] frame0,frame1,frame2,frame3;
+     logic [183:0] frame_prefix;
+     logic [7:0] frame_domain;
+@@ -343,24 +350,45 @@
+             end
+             default:begin end
+         endcase
++        // Batch operands enter the same alignment/padding network as ordinary
++        // recipes. The chain scheduler contains no 1600-bit block formatter.
++        if(PIPELINE>1 && batch_mode)begin
++            frame0=0;frame1=0;frame2=0;frame3=0;
++            frame_prefix=0;frame_domain=0;frame_two=0;
++            if(batch_block_family==0)begin
++                frame_layout=0;frame0=public_seed;frame1=batch_block_address;
++                frame2=batch_block_value;
++            end else if(batch_block_family==2)begin
++                frame_layout=4;frame1=batch_block_value;
++                frame_prefix={batch_block_phase==0 ? 8'hff : {4'd0,batch_block_step},
++                    batch_block_address[223:216],8'd0,batch_block_address[191:160],identifier};
++            end else if(batch_block_phase==0)begin
++                frame_layout=2;frame_domain=4;frame1=secret_seed;
++                frame2=public_seed;frame3=batch_masked_address;
++            end else if(batch_block_phase==2 || batch_block_phase==3)begin
++                frame_layout=1;frame_domain=3;frame1=public_seed;frame2=batch_masked_address;
++            end else begin
++                frame_layout=3;frame1=batch_block_key;frame2=batch_block_value;
++            end
++        end
+     end
+     always @* begin
+         fast_block=0;
+         case(node_bytes)
+             16: begin
+                 fast_block[0 +:128]=public_seed[127:0];
+-                fast_block[128 +:256]=address;
+-                fast_block[384 +:128]=chain_feedback_valid ? finish_digest[127:0] : shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+-                if(shapes[ADDRESS_VALUE] && arity==2) begin
++                fast_block[128 +:256]=PIPELINE>1 && batch_mode ? batch_block_address : address;
++                fast_block[384 +:128]=PIPELINE>1 && batch_mode ? batch_block_value[127:0] : chain_feedback_valid ? finish_digest[127:0] : shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
++                if(!(PIPELINE>1 && batch_mode) && shapes[ADDRESS_VALUE] && arity==2) begin
+                     fast_block[512 +:128]=request_right[127:0];
+                     fast_block[640 +:8]=8'h1f;
+                 end else fast_block[512 +:8]=8'h1f;
+             end
+             24: begin
+                 fast_block[0 +:192]=public_seed[191:0];
+-                fast_block[192 +:256]=address;
+-                fast_block[448 +:192]=chain_feedback_valid ? finish_digest[191:0] : shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+-                if(shapes[ADDRESS_VALUE] && arity==2) begin
++                fast_block[192 +:256]=PIPELINE>1 && batch_mode ? batch_block_address : address;
++                fast_block[448 +:192]=PIPELINE>1 && batch_mode ? batch_block_value[191:0] : chain_feedback_valid ? finish_digest[191:0] : shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
++                if(!(PIPELINE>1 && batch_mode) && shapes[ADDRESS_VALUE] && arity==2) begin
+                     fast_block[640 +:192]=request_right[191:0];
+                     fast_block[832 +:8]=8'h1f;
+                 end else fast_block[640 +:8]=8'h1f;
+@@ -426,7 +454,8 @@
+     end
+ 
+     wire batch_perm_valid,batch_perm_ready,batch_perm_done;
+-    wire [1599:0] batch_perm_state,batch_perm_digest;
++    wire [1599:0] batch_perm_state={512'd0,fast_block};
++    wire [1599:0] batch_perm_digest;
+     wire [TAG_BITS-1:0] batch_perm_tag,batch_perm_result_tag;
+     generate if(PIPELINE>1)begin: chain_pipeline
+         mhbs_chain_pipeline_lane #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
+@@ -440,11 +469,15 @@
+             .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
+             .response_digest(batch_response_digest),.response_capture(batch_response_capture),
+             .read_tag(batch_read_tag),.read_digest(batch_read_digest),.read_capture(batch_read_capture),
+-            .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
++            .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.block_family(batch_block_family),.block_phase(batch_block_phase),
++            .block_address(batch_block_address),.block_value(batch_block_value),
++            .block_key(batch_block_key),.block_step(batch_block_step),.perm_tag(batch_perm_tag),
+             .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
+             .hash_count(batch_hashes),.permutation_count(batch_permutations));
+     end else begin
+-        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
++        assign batch_perm_valid=0;assign batch_perm_tag=0;
++        assign batch_block_family=0;assign batch_block_phase=0;assign batch_block_address=0;
++        assign batch_block_value=0;assign batch_block_key=0;assign batch_block_step=0;
+         assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
+         assign batch_response_digest=0;assign batch_response_capture=0;
+         assign batch_read_digest=0;assign batch_read_capture=0;
+--- a/tb/unit/tb_mhbs_chain_format_equiv.sv
++++ b/tb/unit/tb_mhbs_chain_format_equiv.sv
+@@ -21,6 +21,21 @@
+  wire [1:0] response_tag,perm_tag;
+  wire [255:0] read_digest,read_capture,response_digest,response_capture;
+  wire [1599:0] perm_state;
++ wire [1:0] block_family;
++ wire [2:0] block_phase;
++ wire [3:0] block_step;
++ wire [255:0] block_address,block_value,block_key;
++ reg [1599:0] test_block;
++ always @* begin
++  test_block=0;
++  case(node_bytes)
++   16:begin test_block[511:0]={block_value[127:0],block_address,public_seed[127:0]};test_block[519:512]=8'h1f;end
++   24:begin test_block[639:0]={block_value[191:0],block_address,public_seed[191:0]};test_block[647:640]=8'h1f;end
++   default:begin test_block[767:0]={block_value,block_address,public_seed};test_block[775:768]=8'h1f;end
++  endcase
++  test_block[1087]=1;
++ end
++ assign perm_state=test_block;
+  wire [31:0] hash_count,permutation_count;
+  wire rr,rv,pv;wire [1:0] rt,pt;
+  wire [255:0] rd,rc,vd,vc;wire [1599:0] ps;wire [31:0] hc,pc;

@@ -24,6 +24,16 @@ module tb_mhbs_stateful;
  integer cycles=0,compute=0,cursor=0,sent=0,accepted=0,stall=0,replays=1,interrupt_run=0,invalid=0,tamper=0,override_q=-1,fault=0,cut=0;
  integer hashes[0:1],perms[0:1];integer computed,elapsed,hcount,pcount;
  reg [31:0] rng=32'h51c0ffee;string vector;
+ integer batch_live=0,batch_max_live=0,batch_requests=0,batch_returns=0;
+ always @(posedge clk)begin
+  if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;end
+  else begin
+   if(dut.core.pipe_selected&&dut.core.pipe_ready)begin batch_live++;batch_requests++;end
+   if(batch_live>batch_max_live)batch_max_live=batch_live;
+   if(dut.core.pipe_mode&&dut.core.pipe_valid)begin batch_live--;batch_returns++;end
+   if(batch_live<0)$fatal(1,"duplicate batch return");
+  end
+ end
  always @(posedge clk)begin
   if(dut.core.execution_rst)begin hashes[0]=0;perms[0]=0;end
   else begin
@@ -98,7 +108,9 @@ module tb_mhbs_stateful;
    rst=1;read_enable=0;repeat(5)tick();rst=0;
    if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
    if(fault)begin
-    while(dut.core.state!=23)tick();force dut.core.lane.error=1;
+    if(fault==2)begin while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();end
+    else begin while(dut.core.state!=23)tick();end
+    force dut.core.lane.error=1;
     `ifdef SINGLE_LANE_EQUIV
     force frozen.core.lanes[0].lane.error=1;
     `endif
@@ -116,6 +128,9 @@ module tb_mhbs_stateful;
    computed=compute;elapsed=cycles;hcount=hashes[0]+hashes[1];pcount=perms[0]+perms[1];
    if(invalid)begin if(!error||error_code!=16'h3008)$fatal(1,"index rejection");end
    else begin
+    if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
+     $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);
+    $display("BATCH_OBSERVED requests=%0d returns=%0d max_live=%0d",batch_requests,batch_returns,batch_max_live);
     if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
     if(job_operation==2)begin
      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);

@@ -25,6 +25,7 @@ module tb_mhbs_chain_overlap;
   .clk,.rst,.node_bytes,.batch_mode(1'b1),
   .batch_request_valid(request_valid),.batch_request_ready(request_ready),.batch_request_tag(request_tag),
   .batch_steps(request_steps),.batch_capture_after(request_capture_after),.batch_capture_enable(request_capture),
+  .batch_family(2'd0),.batch_no_seed(1'b0),.batch_start(4'd0),.batch_initial_value(256'd0),
   .secret_seed,.public_seed,.request_layer,.request_tree,
   .batch_leaf(request_leaf),.batch_a(request_a),.batch_b(request_b),
   .batch_seed_domain(seed_domain),.batch_step_domain(step_domain),

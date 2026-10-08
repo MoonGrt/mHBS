@@ -67,7 +67,7 @@ Sign 顶层默认同时将输出写入 1558 × 256 bit 签名缓存，完整保�
 
 ## P/U 流水配置
 
-`PIPELINE/UNROLL` 分别对应 P/U，默认 P1U2。P 的合法范围为 1～4，U 为正整数且 P×U 整除 24。P 个级各有 U 轮，普通 sponge 与交错链共用 Keccak。WOTS/FORS 每批最多 P 个任务，FORS 按叶顺序消费；同一链的反馈遵守数据依赖。
+`PIPELINE/UNROLL` 分别对应 P/U，默认 P1U2。当前实验支持 U1 的 P1/2/3/4/6/8/12、U2 的 P1/2/3/4/6/12，P×U 整除 24。P 个级各有 U 轮，普通 sponge 与交错链共用 Keccak。WOTS/FORS 每批最多 P 个任务，FORS 按叶顺序消费；同一链的反馈遵守数据依赖。
 
 `make pu-unit-test` 验证轮级等价与链交错；`make pu-atp PU_TAG=<新标签>` 测 P1～P4/U1～U2 的 128f sign 周期与共同核综合。约束 6.666667 ns，不布线。历史 K/L 标签只用于冻结证据，多 lane 实验驱动在当前源码上明确报错。
 
@@ -87,7 +87,11 @@ K1P1U1～K1P4U1 的 ATP 优化见 [报告](v4.2/KPU_ATP_Optimization.md)。链�
 
 XMSS 复用共享端点存储做原地 L-tree 归约，每层奇数尾节点直接保留；LMS 对端点列表做 prefix hash，随后计算叶哈希，树采用堆式地址。两者复用原树栈和认证路径。Sign 每次重新计算完整树，不依赖历史 Keygen 或树缓存。
 
-新算法只走普通链/普通请求路径；即使 P>1 也不使用 SLH 多上下文批处理。普通链按一条顺序执行，存储提供相邻两个节点读取，地址为 8 位。SLH 的六种参数和批处理调度保持原路径。
+XMSS/LMS 在 P1 保留普通链路径；P>1 的 Keygen、Sign、Verify 每批使用最多 P 个链上下文。批请求携带算法族、8 位链索引、起始步号、剩余步数和可选初始值。LMS 直接构造 identifier/q/链号/步号前缀；XMSS 每槽保存链值和临时 key，按种子、key、mask、节点哈希的依赖推进，mask 返回时直接异或当前链值，复用同一 Keccak 流水。
+
+Verify 依次接受外部链节点，零剩余步直接完成；等待后续输入期间，已接收上下文继续执行。完成握手仅记录完成标记；整批完成后按链索引读取槽内结果，经原单写口写回或按序输出，结果/capture 消费完毕后才复用整批槽位。消息、多块列表压缩、L-tree 和 Merkle 父节点仍走普通路径，不跨树预取。存储维持 136 项，相邻双节点读口及 SLH 原调度保留。新测量见 [XMSS/LMS 链流水报告](report/Stateful_Pipeline_20261012.md)。
+
+上下文存储采用单写入口：Verify 初值先复用 `key_value`，XMSS 首次 key 返回时将初值转入 `digest`，同时保存返回的 key。LMS 初值直接用于首次请求，零步结果由读旁路返回；初始位置的 capture 同样先旁路，必要时在首次 key 返回时转存。反馈优先使 key 返回与初值接受互斥，不增加握手等待；各槽完成后仍可读回，直至下一次接受任务。此改动恢复了分布式 RAM 映射，周期不变；共用普通/批量块构造的独立候选因 P4U1 面积增加撤回。面积证据见 [流水面积优化报告](report/Stateful_Pipeline_Area_Optimization.md)，P4U2 综合按用户要求跳过。
 
 新镜像只装入可达描述符（XMSS 26、LMS 29），program/template/descriptor 容量仍为 16/16/32。template 位 16 承载 SIGN_ONLY，旧镜像该位为零。共同核 Job 新增 q 与 identifier；统计关闭后仍通过同一综合裁剪检查。
 

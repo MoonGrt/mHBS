@@ -1,0 +1,75 @@
+--- a/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
++++ b/rtl/hash_lane/mhbs_chain_pipeline_lane.sv
+@@ -36,9 +36,9 @@
+  logic [1:0] family[0:PIPELINE-1];
+  logic [2:0] phase[0:PIPELINE-1];
+  logic [255:0] key_value[0:PIPELINE-1];
+- logic [PIPELINE-1:0] captured_valid;
+- assign read_digest=digest[read_tag];
+- assign read_capture=captured_valid[read_tag] ? captured[read_tag] : 256'd0;
++ logic [PIPELINE-1:0] captured_valid,initial_pending,capture_initial;
++ assign read_digest=initial_pending[read_tag] ? key_value[read_tag] : digest[read_tag];
++ assign read_capture=captured_valid[read_tag] ? (capture_initial[read_tag] ? key_value[read_tag] : captured[read_tag]) : 256'd0;
+  wire [TAG_BITS-1:0] t=perm_result_tag;
+  wire node_done=phase[t]==SEED || phase[t]==STEP || phase[t]==FINAL;
+  wire again=perm_done && (!node_done || iteration[t]<steps[t]);
+@@ -105,10 +105,29 @@
+   for(integer j=PIPELINE-1;j>=0;j=j-1)if(complete[j])response_tag=TAG_BITS'(j);
+   if(response_held)response_tag=held_tag;
+  end
+- assign response_digest=digest[response_tag];
+- assign response_capture=captured_valid[response_tag] ? captured[response_tag] : 256'd0;
++ assign response_digest=initial_pending[response_tag] ? key_value[response_tag] : digest[response_tag];
++ assign response_capture=captured_valid[response_tag] ? (capture_initial[response_tag] ? key_value[response_tag] : captured[response_tag]) : 256'd0;
++ // A KEY return always feeds MASK immediately, so feedback priority excludes
++ // accepting an initial value on the same edge. Each bank has one write port.
++ wire key_return=perm_done && phase[t]==KEY;
++ wire initial_transfer=key_return && initial_pending[t];
++ wire key_write=key_return || (accept && request_no_seed);
++ wire [TAG_BITS-1:0] key_write_tag=key_return ? t : request_tag;
++ wire [255:0] key_write_data=key_return ? perm_digest[255:0] : request_initial_value;
++ wire digest_write=perm_done && (node_done || initial_transfer);
++ wire [255:0] digest_write_data=initial_transfer ? key_value[t] : perm_digest[255:0];
++ wire capture_transfer=initial_transfer && capture_initial[t];
++ wire captured_write=capture_now || capture_transfer;
++ wire [255:0] captured_write_data=capture_transfer ? key_value[t] : perm_digest[255:0];
+  always_ff @(posedge clk)begin
+-  if(rst)begin captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;hash_count<=0;permutation_count<=0;end
++  if(!rst)begin
++   if(key_write)key_value[key_write_tag]<=key_write_data;
++   if(digest_write)digest[t]<=digest_write_data;
++   if(captured_write)captured[t]<=captured_write_data;
++  end
++ end
++ always_ff @(posedge clk)begin
++  if(rst)begin initial_pending<=0;capture_initial<=0;captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;hash_count<=0;permutation_count<=0;end
+   else begin
+    if(response_valid && !response_ready && !response_held)begin response_held<=1;held_tag<=response_tag;end
+    if(response_valid && response_ready)response_held<=0;
+@@ -117,20 +136,21 @@
+     busy[request_tag]<=1;steps[request_tag]<=request_steps+{1'b0,request_start};iteration[request_tag]<=request_no_seed ? {1'b0,request_start}+1'b1 : 5'd0;
+     family[request_tag]<=request_family;
+     phase[request_tag]<=!request_no_seed ? SEED : request_family==1 ? KEY : STEP;
+-    if(request_no_seed)digest[request_tag]<=request_initial_value;
++    initial_pending[request_tag]<=request_no_seed;
+     if(zero_request)complete[request_tag]<=1;
+     capture_after[request_tag]<=request_capture_after;capture_enable[request_tag]<=request_capture;
+     preserve_counter[request_tag]<=step_domain==3;address[request_tag]<=step_address;
+     captured_valid[request_tag]<=0;
++    capture_initial[request_tag]<=0;
+     if(request_no_seed && request_capture && request_capture_after=={1'b0,request_start})begin
+-     captured[request_tag]<=request_initial_value;captured_valid[request_tag]<=1;
++     capture_initial[request_tag]<=1;captured_valid[request_tag]<=1;
+     end
+    end
+    if(perm_done)begin
+     if(PROFILE_ENABLE)begin hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;end
+-    if(capture_now)begin captured[t]<=perm_digest[255:0];captured_valid[t]<=1;end
+-    if(phase[t]==KEY)key_value[t]<=perm_digest[255:0];
+-    if(node_done)digest[t]<=perm_digest[255:0];
++    if(capture_now)begin capture_initial[t]<=0;captured_valid[t]<=1;end
++    if(capture_transfer)capture_initial[t]<=0;
++    if(digest_write)initial_pending[t]<=0;
+     if(again)begin
+      phase[t]<=next_phase;
+      if(node_done)iteration[t]<=iteration[t]+1'b1;
