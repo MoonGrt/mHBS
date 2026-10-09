@@ -4,7 +4,7 @@ The legacy model remains the cached-execution oracle. New images preserve its
 byte recipes and encodings but recompute the authentication tree during Sign.
 """
 from dataclasses import replace
-from model.unified_hbs import compile_image, field, Kind, Macro, Image, validate
+from model.executor import compile_image, field, Kind, Macro, Image, validate
 
 PROFILE_CODES={8:'xmss_omega2',9:'xmss_omega4',10:'lms_omega2',11:'lms_omega4'}
 REFS={Kind.CHAIN:(52,44,36,28),Kind.TREE:(52,44),Kind.EMIT:(52,)}
@@ -32,7 +32,7 @@ def descriptor_map(image):
     return order
 
 def encode(name):
-    from model.slh64_external import ExternalImage
+    from model.mHBS import ExternalImage
     image=cold_image(name);order=descriptor_map(image);mapping={v:i for i,v in enumerate(order)}
     d=[0]*32;t=[0]*16;p=[0]*16
     for j,i in enumerate(order):
