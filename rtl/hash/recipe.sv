@@ -18,6 +18,7 @@ module recipe #(
     input wire [9:0] batch_leaf,input wire [7:0] batch_a,input wire [31:0] batch_b,
     input wire [1:0] batch_family,input wire batch_no_seed,
     input wire [3:0] batch_start,input wire [255:0] batch_initial_value,
+    input wire [3:0] batch_fixed_shape,input wire batch_pair,input wire [255:0] batch_right,
     input wire [7:0] batch_seed_domain,batch_step_domain,
     output wire batch_response_valid,input wire batch_response_ready,
     output wire [TAG_BITS-1:0] batch_response_tag,
@@ -41,7 +42,7 @@ module recipe #(
     input wire [INDEX_BITS-1:0] request_a,
     input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
-    output wire [INDEX_BITS-1:0] list_index0, list_index1,
+    output wire [INDEX_BITS-1:0] list_index0, list_index1,list_next_index0,
     input wire [N*8-1:0] list_data0, list_data1,
     output wire response_valid, input wire response_ready,
     output wire [DIGEST_BYTES*8-1:0] response_value,
@@ -53,7 +54,9 @@ module recipe #(
         MESSAGE_DIGEST=4, INDEX_PRF=5, ROOT_MESSAGE=6, MASKED_SEED=7,
         MASKED_VALUE=8, PREFIX_SEED=9, PREFIX_VALUE=10, PREFIX_MESSAGE=11,
         ADDRESS_LIST=12, PREFIX_LIST=13, PREFIX_LEAF=14, PREFIX_PARENT=15;
-    typedef enum logic [2:0] {IDLE, START, STREAM, WAIT_HASH, RESPONSE} state_t;
+    localparam bit UNIFIED_FIXED=PIPELINE==4 && UNROLL==1;
+    localparam bit LEGACY_MASKED=RECIPE_MASK[MASKED_VALUE] && !UNIFIED_FIXED;
+    typedef enum logic [2:0] {IDLE, START, STREAM, WAIT_HASH, RESPONSE,FIXED_ISSUE,FIXED_WAIT} state_t;
     state_t state;
     wire chain_feedback_valid;
     wire [3:0] chain_feedback_counter;
@@ -63,7 +66,7 @@ module recipe #(
     // Masked legacy recipes need a value across intermediate hashes. SLH
     // chains instead reuse the sponge's retained digest at the next START.
     logic [N*8-1:0] legacy_value, temporary_key, mask0, mask1;
-    wire [N*8-1:0] current_value = RECIPE_MASK[MASKED_VALUE] ? legacy_value
+    wire [N*8-1:0] current_value = LEGACY_MASKED ? legacy_value
         : seed_phase ? request_left : digest[N*8-1:0];
     localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858)!=0;
     logic [4:0] rate_block;
@@ -116,7 +119,7 @@ module recipe #(
     end
     wire [7:0] domain = recipe[55:48];
     wire [7:0] arity = recipe[47:40];
-    wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
+    wire compact_chain = !UNIFIED_FIXED && RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
     wire [31:0] a = request_a;
     wire [31:0] b = chain_feedback_valid
         ? (request_step_recipe[55:48]==3 ? request_b : {28'd0,chain_feedback_counter})
@@ -126,17 +129,17 @@ module recipe #(
     wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
     wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
     wire [31:0] leaf = {22'd0, request_leaf};
-    wire [12:0] input_length = RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE]
+    wire [12:0] input_length = LEGACY_MASKED && shapes[MASKED_VALUE]
         && compound < arity+1 ? 13'd96
         : request_chain && !seed_phase ? step_length : seed_length;
     wire [5:0] stream_node_bytes={stream_node_words,3'b0};
     logic [1087:0] fast_block;
-    logic [63:0] stream_data;
+    logic [127:0] stream_data;
     logic [255:0] address, masked_address;
-    wire fixed_block = (RECIPE_MASK & 16'h3858)==0 || shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]
+    wire fixed_block = !UNIFIED_FIXED && ((RECIPE_MASK & 16'h3858)==0 || shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]
         || shapes[INDEX_PRF] || shapes[MASKED_SEED] || shapes[MASKED_VALUE]
         || shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]
-        || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT];
+        || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT]);
     wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
     wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
     wire stream_last = rate_offset+13'd136 > input_length;
@@ -146,27 +149,30 @@ module recipe #(
     logic hash_error;
     wire completed = finish_valid;
     wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
-    assign response_value=digest;
-    assign response_capture=compact_capture;
+    assign response_value=bridge_response ? {{(DIGEST_BYTES*8-N*8){1'b0}},engine_digest[N*8-1:0]} : digest;
+    assign response_capture=UNIFIED_FIXED ? engine_capture[N*8-1:0] : compact_capture;
     // Capture both chain modes in the sponge's existing register bank, on
     // the same final-round edge used by the former lane-local copy.
     wire capture_single = request_capture
-        && !(RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1)
+        && !(LEGACY_MASKED && shapes[MASKED_VALUE] && compound < arity+1)
         && (seed_phase ? request_capture_after==0 : request_capture_after==iteration+1);
     wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
     logic staged_valid, staged_last;
     logic [127:0] staged_data;
     wire stream_accept = !staged_valid || block_ready;
-    // The producer emits exactly eight bytes per accepted STREAM cycle.
-    // Keeping that cursor avoids a rate_block*136 + beat*16 adder chain
+    // P4 emits sixteen bytes per STREAM cycle, then the final eight bytes
+    // of the 136-byte rate. Other configurations retain eight-byte beats.
+    // Keeping a cursor avoids a rate_block*136 + beat*16 adder chain
     // ahead of the source selector and each padding-byte comparator.
     logic [12:0] position;
     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
     logic [INDEX_BITS-1:0] list_cursor;
     logic [5:0] list_remainder;
-    wire [4:0] stream_advance = 5'd8;
+    wire [4:0] stream_advance = UNIFIED_FIXED && beat!=8 ? 5'd16 : 5'd8;
     wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
     assign list_index0 = list_cursor;
+    assign list_next_index0=state==IDLE && request_valid ? INDEX_BITS'(0)
+        : state==STREAM && stream_accept && position>=prefix_bytes && next_remainder>=stream_node_bytes ? list_cursor+1'b1 : list_cursor;
     assign list_index1 = list_index0+1'b1;
     assign request_ready = state == IDLE;
     assign response_valid = state == RESPONSE;
@@ -263,31 +269,32 @@ module recipe #(
     end
     // Legal list offsets are whole 64-bit words (SLH), or two bytes
     // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
-    logic [79:0] list_word_window;
+    logic [143:0] list_word_window;
     always @* begin
         case(list_remainder[4:3])
-            0:list_word_window=list_pair[79:0];
-            1:list_word_window=list_pair[143:64];
-            2:list_word_window=list_pair[207:128];
-            default:list_word_window=list_pair[271:192];
+            0:list_word_window=list_pair[143:0];
+            1:list_word_window=list_pair[207:64];
+            2:list_word_window=list_pair[271:128];
+            default:list_word_window=list_pair[335:192];
         endcase
     end
     // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
     // a node boundary; do not retain the legacy two-node byte window.
-    wire [63:0] list_window=RECIPE_MASK[PREFIX_LIST]
-        ? (list_remainder[1] ? list_word_window[79:16] : list_word_window[63:0])
-        : node_word(list_data0,{4'd0,list_remainder[4:3]});
+    wire [127:0] list_window=RECIPE_MASK[PREFIX_LIST]
+        ? (list_remainder[1] ? (UNIFIED_FIXED ? list_word_window[143:16] : {64'd0,list_word_window[79:16]}) : (UNIFIED_FIXED ? list_word_window[127:0] : {64'd0,list_word_window[63:0]}))
+        : {64'd0,node_word(list_data0,{4'd0,list_remainder[4:3]})};
     wire [5:0] stream_word_index=position[8:3];
-    logic [63:0] stream_payload;
-    logic [127:0] source_window;
+    logic [127:0] stream_payload;
+    logic [191:0] source_window;
     always_comb begin
-        source_window={source_word(stream_word_index+6'd1,1'b1),source_word(stream_word_index,1'b0)};
-        stream_payload=source_window[63:0];
+        source_window={source_word(stream_word_index+6'd2,1'b1),
+            source_word(stream_word_index+6'd1,!UNIFIED_FIXED),source_word(stream_word_index,1'b0)};
+        stream_payload=UNIFIED_FIXED ? source_window[127:0] : {64'd0,source_window[63:0]};
         if(shapes[PREFIX_MESSAGE]) begin
-            stream_payload=source_window[79:16];
-            if(position==0) stream_payload=identifier[63:0];
-            else if(position==8) stream_payload=identifier[127:64];
-            else if(position==16) stream_payload[47:0]={16'h8181,be32(leaf)};
+            stream_payload=UNIFIED_FIXED ? source_window[143:16] : {64'd0,source_window[79:16]};
+            if(position==0)stream_payload=UNIFIED_FIXED ? identifier : {64'd0,identifier[63:0]};
+            else if(!UNIFIED_FIXED && position==8)stream_payload[63:0]=identifier[127:64];
+            else if(position==16)stream_payload[47:0]={16'h8181,be32(leaf)};
         end else if((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position>=prefix_bytes)
             stream_payload=list_window;
     end
@@ -321,7 +328,7 @@ module recipe #(
             shapes[MASKED_SEED]: if(RECIPE_MASK[MASKED_SEED]) begin
                 frame_layout=2;frame_domain=4;frame1=secret_seed;frame2=public_seed;frame3=masked_address;
             end
-            shapes[MASKED_VALUE]: if(RECIPE_MASK[MASKED_VALUE]) begin
+            shapes[MASKED_VALUE]: if(LEGACY_MASKED) begin
                 if(compound<arity+1) begin
                     frame_layout=1;frame_domain=3;frame1=public_seed;frame2=masked_address;
                 end else begin
@@ -346,7 +353,7 @@ module recipe #(
     end
     always @* begin
         fast_block=0;
-        case(node_bytes)
+        if(!UNIFIED_FIXED)case(node_bytes)
             16: begin
                 fast_block[0 +:128]=public_seed[127:0];
                 fast_block[128 +:256]=address;
@@ -415,12 +422,12 @@ module recipe #(
     end
     always_comb begin
         stream_data = stream_payload;
-        for (i=0; i<8; i=i+1) begin
+        for (i=0; i<16; i=i+1) begin
             absolute = position+i;
-            if (beat*16+stream_half*8+i < 136) begin
+            if ((UNIFIED_FIXED || i<8) && beat*16+(UNIFIED_FIXED ? 0 : stream_half*8)+i < 136) begin
                 if (absolute >= input_length) stream_data[i*8 +: 8] = 0;
                 if (absolute == input_length) stream_data[i*8 +: 8] = 8'h1f;
-                if (stream_last && beat*16+stream_half*8+i == 135) stream_data[i*8+7] = 1'b1;
+                if (stream_last && beat*16+(UNIFIED_FIXED ? 0 : stream_half*8)+i == 135) stream_data[i*8+7] = 1'b1;
             end else stream_data[i*8 +: 8] = 0;
         end
     end
@@ -428,26 +435,55 @@ module recipe #(
     wire batch_perm_valid,batch_perm_ready,batch_perm_done;
     wire [1599:0] batch_perm_state,batch_perm_digest;
     wire [TAG_BITS-1:0] batch_perm_tag,batch_perm_result_tag;
+    logic bridge_response;
+    wire scalar_bridge=UNIFIED_FIXED && bridge_response;
+    wire engine_mode=batch_mode || scalar_bridge;
+    wire engine_ready,engine_valid;
+    wire [255:0] engine_digest,engine_capture;
+    wire [3:0] scalar_shape=request_recipe[59:56];
+    wire scalar_fixed=UNIFIED_FIXED && RECIPE_MASK[scalar_shape]
+        && (scalar_shape==1 || scalar_shape==2 || scalar_shape==5 || scalar_shape==7 || scalar_shape==8
+            || scalar_shape==9 || scalar_shape==10 || scalar_shape==14 || scalar_shape==15);
+    wire scalar_no_seed=!(request_chain && (scalar_shape==1 || scalar_shape==7 || scalar_shape==9))
+        && scalar_shape!=7;
+    wire [1:0] scalar_family=(scalar_shape==1 || scalar_shape==2) ? 2'd0
+        : (scalar_shape==9 || scalar_shape==10 || scalar_shape==14 || scalar_shape==15) ? 2'd2 : 2'd1;
+    assign batch_request_ready=engine_ready && !scalar_bridge;
+    assign batch_response_valid=engine_valid && !scalar_bridge;
+    assign batch_read_digest=engine_digest;
+    assign batch_read_capture=engine_capture;
     generate if(PIPELINE>1)begin: chain_pipeline
-        pipeline #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) engine(
-            .clk,.rst,.node_bytes,.request_valid(batch_request_valid),.request_ready(batch_request_ready),
-            .request_tag(batch_request_tag),.request_steps(batch_steps),.request_capture_after(batch_capture_after),
-            .request_capture(batch_capture_enable),.secret_seed,.public_seed,
-            .request_family(batch_family),.request_no_seed(batch_no_seed),.request_start(batch_start),
-            .request_initial_value(batch_initial_value),.identifier,
-            .request_layer,.request_tree,.request_leaf(batch_leaf),.request_a(batch_a),.request_b(batch_b),
-            .seed_domain(batch_seed_domain),.step_domain(batch_step_domain),
-            .response_valid(batch_response_valid),.response_ready(batch_response_ready),.response_tag(batch_response_tag),
-            .response_digest(batch_response_digest),.response_capture(batch_response_capture),
-            .read_tag(batch_read_tag),.read_digest(batch_read_digest),.read_capture(batch_read_capture),
+        pipeline #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.UNIFIED_FIXED(UNIFIED_FIXED)) engine(
+            .clk,.rst,.node_bytes,
+            .request_valid(scalar_bridge ? state==FIXED_ISSUE : batch_request_valid),.request_ready(engine_ready),
+            .request_tag(scalar_bridge ? TAG_BITS'(0) : batch_request_tag),
+            .request_steps(scalar_bridge ? (request_chain ? request_steps : 5'd0) : batch_steps),
+            .request_capture_after(scalar_bridge ? (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) : batch_capture_after),
+            .request_capture(scalar_bridge ? request_capture : batch_capture_enable),.secret_seed,.public_seed,
+            .request_family(scalar_bridge ? scalar_family : batch_family),
+            .request_no_seed(scalar_bridge ? scalar_no_seed : batch_no_seed),
+            .request_start(scalar_bridge ? 4'd0 : batch_start),
+            .request_fixed_shape(scalar_bridge ? (request_chain ? 4'd0 : scalar_shape) : batch_fixed_shape),
+            .request_pair(scalar_bridge ? request_recipe[47:40]==2 : batch_pair),
+            .request_right(scalar_bridge ? 256'(request_right) : batch_right),
+            .request_initial_value(scalar_bridge ? (scalar_shape==5 ? 256'(secret_prf) : 256'(request_left)) : batch_initial_value),.identifier,
+            .request_layer,.request_tree,
+            .request_leaf(scalar_bridge ? request_leaf : batch_leaf),
+            .request_a(scalar_bridge ? 8'(request_a) : batch_a),.request_b(scalar_bridge ? request_b : batch_b),
+            .seed_domain(scalar_bridge ? request_recipe[55:48] : batch_seed_domain),
+            .step_domain(scalar_bridge ? (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) : batch_step_domain),
+            .response_valid(engine_valid),.response_ready(scalar_bridge ? state==FIXED_WAIT : batch_response_ready),
+            .response_tag(batch_response_tag),.response_digest(),.response_capture(),
+            .read_tag(scalar_bridge ? TAG_BITS'(0) : batch_read_tag),.read_digest(engine_digest),.read_capture(engine_capture),
             .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
             .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
             .hash_count(batch_hashes),.permutation_count(batch_permutations));
+        assign batch_response_digest=engine_digest;assign batch_response_capture=engine_capture;
     end else begin
         assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
-        assign batch_request_ready=0;assign batch_response_valid=0;assign batch_response_tag=0;
+        assign engine_ready=0;assign engine_valid=0;assign batch_response_tag=0;
+        assign engine_digest=0;assign engine_capture=0;
         assign batch_response_digest=0;assign batch_response_capture=0;
-        assign batch_read_digest=0;assign batch_read_capture=0;
         assign batch_hashes=0;assign batch_permutations=0;
     end endgenerate
     // Direct Keccak datapath and absorb/chain control.
@@ -496,9 +532,9 @@ module recipe #(
     wire ready=!rst && !recycle;
     wire finished=PIPELINE>1 && !rst && stage_valid[PIPELINE-1] && !recycle;
     wire normal_valid=hash_state==HASH_RUN && !sent;
-    wire issue_valid=batch_mode ? batch_perm_valid : normal_valid;
-    wire [1599:0] issue_state=batch_mode ? batch_perm_state : sponge_state;
-    wire [TAG_BITS-1:0] issue_tag=batch_mode ? batch_perm_tag : '0;
+    wire issue_valid=engine_mode ? batch_perm_valid : normal_valid;
+    wire [1599:0] issue_state=engine_mode ? batch_perm_state : sponge_state;
+    wire [TAG_BITS-1:0] issue_tag=engine_mode ? batch_perm_tag : '0;
     wire [1599:0] finished_state=state_reg[PIPELINE-1];
     wire [1599:0] stage_result[0:PIPELINE-1];
     for(genvar s=0;s<PIPELINE;s=s+1)begin: stages
@@ -520,7 +556,7 @@ module recipe #(
             assign source_valid=stage_valid[s-1];
         end
         for(genvar r=0;r<UNROLL;r=r+1)begin: unrolled
-            keccak round_logic(.state_in(rounds[r]),
+            (* keep_hierarchy="yes" *) keccak round_logic(.state_in(rounds[r]),
                 .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
         end
         assign stage_result[s]=rounds[UNROLL];
@@ -539,17 +575,17 @@ module recipe #(
             end
         end
     end
-    assign batch_perm_ready=PIPELINE>1 && batch_mode && ready;
-    assign batch_perm_done=PIPELINE>1 && batch_mode && finished;
+    assign batch_perm_ready=PIPELINE>1 && engine_mode && ready;
+    assign batch_perm_done=PIPELINE>1 && engine_mode && finished;
     assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
     assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : '0;
     if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
     assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
-    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
+    assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !engine_mode && finished;
     assign round_update=hash_state==HASH_RUN && (PIPELINE==1 || round_complete);
     always_ff @(posedge clk)begin
         if(rst)sent<=0;
-        else if(!batch_mode)begin
+        else if(!engine_mode)begin
             if(normal_valid && ready)sent<=1;
             if(finished)sent<=0;
         end
@@ -736,7 +772,7 @@ module recipe #(
             staged_valid<=0; staged_last<=0; staged_data<=0;
             position<=0;
             list_cursor<=0; list_remainder<=0;
-            state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
+            bridge_response<=0;state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
             seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
         end else begin
             if(STREAM_ENABLE && staged_valid && block_ready) staged_valid<=0;
@@ -749,8 +785,11 @@ module recipe #(
                     error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
                     legacy_value <= request_left;
                     rate_block <= 0; beat <= 0; stream_half<=0;
-                    state <= START;
+                    bridge_response<=scalar_fixed;
+                    state <= scalar_fixed ? FIXED_ISSUE : START;
                 end
+                FIXED_ISSUE:if(engine_ready)state<=FIXED_WAIT;
+                FIXED_WAIT:if(engine_valid)state<=RESPONSE;
                 START: if (hash_ready) begin
                     if (PROFILE_ENABLE) begin
                         hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
@@ -759,13 +798,14 @@ module recipe #(
                     state <= fixed_block ? WAIT_HASH : STREAM;
                 end
                 STREAM: if (STREAM_ENABLE && stream_accept) begin
-                    position<=position+13'd8;
-                    if(stream_half) staged_data[127:64]<=stream_data;
-                    else staged_data[63:0]<=stream_data;
-                    staged_valid<=stream_half || beat==8;
+                    position<=position+13'(stream_advance);
+                    if(UNIFIED_FIXED)staged_data<=stream_data;
+                    else if(stream_half) staged_data[127:64]<=stream_data[63:0];
+                    else staged_data[63:0]<=stream_data[63:0];
+                    staged_valid<=UNIFIED_FIXED || stream_half || beat==8;
                     staged_last<=stream_last;
                     if(beat==8) staged_data[127:64]<=0;
-                    stream_half<=beat==8 ? 1'b0 : !stream_half;
+                    stream_half<=UNIFIED_FIXED || beat==8 ? 1'b0 : !stream_half;
                     begin
                         if(position < prefix_bytes) begin
                             if(position+stream_advance >= prefix_bytes)
@@ -780,12 +820,12 @@ module recipe #(
                         if (PROFILE_ENABLE) permutation_count <= permutation_count+1;
                         if (stream_last) state <= WAIT_HASH;
                         else rate_block <= rate_block+1'b1;
-                    end else if(stream_half) beat <= beat+1'b1;
+                    end else if(UNIFIED_FIXED || stream_half) beat <= beat+1'b1;
                 end
                 WAIT_HASH: if (completed) begin
                     if (compact_chain) begin
                         state <= RESPONSE;
-                    end else if (RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1) begin
+                    end else if (LEGACY_MASKED && shapes[MASKED_VALUE] && compound < arity+1) begin
                         case (compound)
                             0: temporary_key <= completed_value[N*8-1:0];
                             1: mask0 <= completed_value[N*8-1:0];
@@ -805,7 +845,7 @@ module recipe #(
                         end
                     end
                 end
-                RESPONSE: if (response_ready) state <= IDLE;
+                RESPONSE: if (response_ready)begin bridge_response<=0;state <= IDLE;end
                 default: state <= IDLE;
             endcase
         end

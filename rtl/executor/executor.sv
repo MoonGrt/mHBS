@@ -57,7 +57,8 @@ module executor #(
     assign descriptors[5]=descriptor_data[127:64];
     assign descriptors[6]=descriptor_data[63:0];
     assign descriptors[7]=descriptor_data[63:0];
-    typedef enum logic [5:0] {
+    localparam bit P4_OPT=PIPELINE==4 && UNROLL==1;
+    typedef enum logic [6:0] {
         IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
         TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
         CHAIN_OUTPUT0=10,
@@ -70,7 +71,8 @@ module executor #(
         // Keep retired enum positions stable for historical cycle observers.
         PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
         LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM,
-        PIPE_VERIFY_INPUT
+        PIPE_VERIFY_INPUT, LT_PIPE_INIT,LT_PIPE_ISSUE,LT_PIPE_WAIT,LT_PIPE_ADVANCE,
+        FORS_PICK,FORS_AUTH0,FORS_BEGIN,FORS_LEFT,FORS_RIGHT,FORS_ISSUE,FORS_WAIT,FORS_LEVEL,FORS_AUTH1,FORS_PUSH
     } state_t;
     state_t state, hash_return, output_return;
     task automatic enter_state(input state_t next_state);
@@ -98,6 +100,8 @@ module executor #(
     logic [7:0] transform_index;
     logic [7:0] lt_count,lt_cursor;
     logic [3:0] lt_level;
+    logic fors_level,fors_pair_cursor;
+    wire fors_target_group=target>=leaf_cursor && target<leaf_cursor+4;
     wire sign_only=stateful && !verifying && standalone_chain && macro_flags[2];
     logic [4:0] layer;
     logic [5:0] group_index;
@@ -127,16 +131,35 @@ module executor #(
     localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
     localparam integer COUNT_BITS=$clog2(PIPELINE+1);
     logic pipe_cache_valid,pipe_batch_used;
+    logic pipe_rolling;
+    logic [PIPE_BATCH-1:0] pipe_active;
+    logic [7:0] pipe_next_chain,pipe_completed;
+    logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
+    logic [TAG_BITS-1:0] roll_slot;
+    wire [PIPE_BATCH-1:0] roll_free=~pipe_active | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0);
+    always_comb begin
+        roll_slot=0;
+        for(integer j=PIPE_BATCH-1;j>=0;j--)if(roll_free[j])roll_slot=TAG_BITS'(j);
+    end
+    wire [TAG_BITS-1:0] issue_slot=pipe_rolling ? roll_slot : pipe_issue_slot;
     logic [TAG_BITS-1:0] pipe_issue_slot;
     logic [COUNT_BITS-1:0] pipe_pair;
     logic [PIPE_BATCH-1:0] pipe_done_mask,pipe_expected_mask;
     wire [255:0] pipe_read_result,pipe_read_capture;
     logic [7:0] pipe_seed_domain,pipe_step_domain;
-    wire pipe_direct=!stateful && PIPELINE>1 && operation==1 && indexing!=1;
-    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT);
+    // Stateful endpoint batches use the same single write port as SLH WOTS.
+    // Sign-only and verification batches retain their CHAIN_STORE path.
+    wire pipe_direct=PIPELINE>1 && indexing!=1
+        && (stateful ? (!verifying && !sign_only) : operation==1);
+    wire fors_pipe=P4_OPT && (state==FORS_LEFT || state==FORS_RIGHT || state==FORS_ISSUE || state==FORS_WAIT);
+    wire fors_read=P4_OPT && (state==FORS_PICK || state==FORS_AUTH0 || state==FORS_AUTH1 || state==FORS_LEFT || state==FORS_RIGHT || state==FORS_PUSH);
+    wire [TAG_BITS-1:0] fors_read_slot=state==FORS_PICK ? TAG_BITS'(target[1:0]) : state==FORS_AUTH0 ? TAG_BITS'(target[1:0]^2'd1)
+        : state==FORS_AUTH1 ? TAG_BITS'(!target[1]) : state==FORS_PUSH ? TAG_BITS'(0)
+        : TAG_BITS'((fors_level ? 2'd0 : {fors_pair_cursor,1'b0})+(state==FORS_RIGHT));
+    wire lt_pipe=P4_OPT && (state==LT_PIPE_ISSUE || state==LT_PIPE_WAIT);
+    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe);
     wire pipe_ready,pipe_valid,pipe_selected;
     wire [TAG_BITS-1:0] pipe_tag;
-    wire [255:0] pipe_value;
     wire [31:0] pipe_hashes,pipe_permutations;
     wire [255:0] selected_capture=pipe_batch_used ? pipe_read_capture : lane_capture;
     logic [255:0] node_value;
@@ -152,7 +175,7 @@ module executor #(
             EMIT: hash_recipe_id=emit_base+emit_cursor;
             CHAIN_SETUP: hash_recipe_id=chain_descriptor[59:52];
             VERIFY_CHAIN_RUN: hash_recipe_id=chain_descriptor[48:44];
-            REDUCE_SETUP,LT_SETUP: hash_recipe_id=chain_descriptor[43:36];
+            REDUCE_SETUP,LT_SETUP,LT_PIPE_INIT: hash_recipe_id=chain_descriptor[43:36];
             SF_LEAF: hash_recipe_id=chain_descriptor[35:28];
             PARENT_SETUP: hash_recipe_id=parent_id;
             default: begin end
@@ -178,7 +201,7 @@ module executor #(
     wire lane_ready,lane_valid,lane_error;
     wire [V-1:0] lane_value;
     wire [255:0] lane_capture;
-    wire [INDEX_BITS-1:0] lane_list0, lane_list1;
+    wire [INDEX_BITS-1:0] lane_list0, lane_list1,lane_list_next;
     wire [31:0] lane_hashes, lane_permutations;
     logic [31:0] hash_base, permutation_base;
     logic [V-1:0] result;
@@ -197,39 +220,46 @@ module executor #(
     assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
 
     logic endpoint_write;
-    logic [INDEX_BITS-1:0] endpoint_address,endpoint_read0,endpoint_read1;
+    logic [INDEX_BITS-1:0] endpoint_address,endpoint_read0_raw,endpoint_read1_raw;
+    wire [INDEX_BITS-1:0] endpoint_read0,endpoint_read1;
     logic [255:0] endpoint_data;
     wire [255:0] endpoint_value0,endpoint_value1;
     // All list producers are mutually exclusive. A single write port serves
     // WOTS completions, FORS roots and in-place L-tree reduction.
     wire root_write=state==ROUTE && macro_route!=0 && route_descriptor[53];
-    value #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS)) endpoints (
+    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS)) endpoints (
         .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
         .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
     );
-    wire [INDEX_BITS-1:0] batch_chain_index=chain_cursor+INDEX_BITS'(pipe_issue_slot);
+    wire [INDEX_BITS-1:0] batch_chain_index=pipe_rolling ? pipe_next_chain : chain_cursor+INDEX_BITS'(pipe_issue_slot);
     wire [13:0] batch_leaf_index=leaf_cursor+14'(pipe_issue_slot);
-    assign pipe_selected=(state==PIPE_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid)) && pipe_expected_mask[pipe_issue_slot];
+    assign pipe_selected=(state==PIPE_ISSUE || state==LT_PIPE_ISSUE || state==FORS_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid))
+        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
         recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
             .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe),
             .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
             .clk,.rst(execution_rst),.node_bytes,
             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
-            .batch_request_tag(pipe_issue_slot),
-            .batch_steps(stateful && verifying ? {1'b0,chain_max}-digit(batch_chain_index)
+            .batch_request_tag(fors_pipe ? TAG_BITS'(fors_pair_cursor) : issue_slot),
+            .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-digit(batch_chain_index)
                 : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? digit(batch_chain_index) : chain_descriptor[19:15]),
             .batch_family(stateful ? (xmss ? 2'd1 : 2'd2) : 2'd0),
-            .batch_no_seed(stateful && verifying),.batch_start(stateful && verifying ? 4'(digit(batch_chain_index)) : 4'd0),
-            .batch_initial_value(verify_data),
+            .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(digit(batch_chain_index)) : 4'd0),
+            .batch_initial_value(fors_pipe ? task_left0 : lt_pipe ? endpoint_value0 : verify_data),
+            .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(fors_pipe ? node_value : endpoint_value1),
             .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
-            .batch_capture_enable(!verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
-            .batch_leaf(indexing==1 ? scalar_leaf : leaf_cursor[9:0]),
-            .batch_a(indexing==1 ? 8'd0 : batch_chain_index),
-            .batch_b(indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
+            .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
+            .batch_leaf(lt_pipe ? leaf_cursor[9:0] : indexing==1 ? scalar_leaf : leaf_cursor[9:0]),
+            .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
+            .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(leaf_cursor)>>(fors_level ? 2 : 1))+32'(fors_pair_cursor) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
             .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
-            .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode),.batch_response_tag(pipe_tag),
-            .batch_response_digest(pipe_value),.batch_response_capture(),
-            .batch_read_tag(TAG_BITS'(pipe_pair)),.batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+            .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT)),.batch_response_tag(pipe_tag),
+            .batch_response_digest(),.batch_response_capture(),
+            // Direct writeback and deferred consumption never overlap.
+            // Select their tag before reading the context RAM, removing a
+            // second 256-bit digest/key read port and its output selectors.
+            .batch_read_tag(fors_read ? fors_read_slot : (lt_pipe || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
+            .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
             .batch_hashes(pipe_hashes),.batch_permutations(pipe_permutations),
             .request_valid(state==HASH_ISSUE),
             .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
@@ -241,7 +271,7 @@ module executor #(
             .identifier(job_identifier),.message_buffer,.message_length,
             .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
             .request_a(task_a),.request_b(task_b),.request_left(verify_chain_source ? result[W-1:0] : task_left0),.request_right(parent_right),
-            .list_index0(lane_list0),.list_index1(lane_list1),
+            .list_index0(lane_list0),.list_index1(lane_list1),.list_next_index0(lane_list_next),
             .list_data0(endpoint_value0),
             .list_data1(endpoint_value1),
             .response_valid(lane_valid),.response_ready(state==HASH_WAIT),
@@ -394,10 +424,13 @@ module executor #(
 
     always_comb begin
         endpoint_write=0;endpoint_address=chain_cursor;endpoint_data=result[W-1:0];
-        endpoint_read0=lane_list0;endpoint_read1=lane_list1;
-        if(pipe_direct && pipe_mode)begin
+        endpoint_read0_raw=lane_list0;endpoint_read1_raw=lane_list1;
+        if(lt_pipe)begin
+            endpoint_write=pipe_valid && state==LT_PIPE_WAIT;
+            endpoint_address=(lt_cursor>>1)+INDEX_BITS'(pipe_tag);endpoint_data=pipe_read_result;
+        end else if(pipe_direct && pipe_mode)begin
             endpoint_write=pipe_valid;
-            endpoint_address=chain_cursor+INDEX_BITS'(pipe_tag);endpoint_data=pipe_value;
+            endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);endpoint_data=pipe_read_result;
         end else if(state==CHAIN_STORE && indexing!=1)begin
             endpoint_write=1;
         end else if(state==LT_STORE || state==LT_COPY)begin
@@ -407,18 +440,41 @@ module executor #(
             endpoint_write=1;endpoint_address=INDEX_BITS'(group_index);endpoint_data=route_value[W-1:0];
         end
 
-        if(state==LT_SETUP || state==LT_COPY)begin
-            endpoint_read0=lt_cursor;endpoint_read1=lt_cursor+1'b1;
-        end else if(state==LT_FINISH)begin endpoint_read0=0;endpoint_read1=1;end
+        if(state==LT_PIPE_ISSUE)begin
+            endpoint_read0_raw=lt_cursor+(INDEX_BITS'(pipe_issue_slot)<<1);endpoint_read1_raw=endpoint_read0_raw+1'b1;
+        end else if(state==LT_SETUP || state==LT_COPY)begin
+            endpoint_read0_raw=lt_cursor;endpoint_read1_raw=lt_cursor+1'b1;
+        end else if(state==LT_FINISH)begin endpoint_read0_raw=0;endpoint_read1_raw=1;end
     end
+
+    generate if(P4_OPT)begin: read_addresses
+        logic [INDEX_BITS-1:0] address;
+        always_ff @(posedge clk)begin
+            if(rst)address<=0;
+            else if(state==REDUCE_SETUP || state==TREE_INIT)address<=0;
+            else if(state==HASH_ISSUE || state==HASH_WAIT)address<=lane_list_next;
+            else if(state==LT_PIPE_INIT)address<={lt_cursor[INDEX_BITS-1:1],1'b0};
+            else if(state==LT_PIPE_ISSUE && pipe_ready)address<=lt_cursor+((INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
+            else if(state==LT_PIPE_ADVANCE)begin
+                if(lt_cursor+2*PIPELINE<lt_count)address<=lt_cursor+2*PIPELINE;
+                else if(lt_count[0])address<=lt_count-1'b1;
+                else address<=0;
+            end else if(state==LT_NEXT)address<=0;
+        end
+        assign endpoint_read0=address;assign endpoint_read1=address+1'b1;
+    end else begin
+        assign endpoint_read0=endpoint_read0_raw;assign endpoint_read1=endpoint_read1_raw;
+    end endgenerate
 
     // Validity is owned by the tree controller; data arrays have no reset.
     // Isolating these writes permits distributed RAM inference.
-    always_ff @(posedge clk) begin
-        if(state==PUSH_NODE && node_level<tree_height) begin
-            if(node_index==((target>>node_level)^1)) auth_path[node_level]<=node_value;
-            if(!node_index[0]) stack[node_level]<=node_value;
-        end
+    wire auth_write=(state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
+        || state==FORS_AUTH0 || state==FORS_AUTH1;
+    wire [3:0] auth_write_level=state==FORS_AUTH0 ? 4'd0 : state==FORS_AUTH1 ? 4'd1 : node_level;
+    wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? pipe_read_result : node_value;
+    always_ff @(posedge clk)begin
+        if(auth_write)auth_path[auth_write_level]<=auth_write_data;
+        if(state==PUSH_NODE && node_level<tree_height && !node_index[0])stack[node_level]<=node_value;
     end
 
     reg [255:0] emit_source;
@@ -448,8 +504,9 @@ module executor #(
             task_chain<=0; task_capture<=0;
             hash_base<=0; permutation_base<=0; layer<=0;
             task_recipe<=0; task_step<=0; message_received<=0;
-            lt_count<=0;lt_cursor<=0;lt_level<=0;
+            lt_count<=0;lt_cursor<=0;lt_level<=0;fors_level<=0;fors_pair_cursor<=0;
             pipe_cache_valid<=0;pipe_batch_used<=0;pipe_pair<=0;pipe_issue_slot<=0;
+            pipe_rolling<=0;pipe_active<=0;pipe_next_chain<=0;pipe_completed<=0;
             pipe_done_mask<=0;pipe_expected_mask<=0;
 
                 task_steps<=0; task_capture_after<=0;
@@ -457,11 +514,18 @@ module executor #(
         end else begin
             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
             if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
+            if(P4_OPT && pipe_rolling && pipe_mode)begin
+                if(pipe_valid)begin pipe_active[pipe_tag]<=0;pipe_completed<=pipe_completed+1'b1;end
+                if(pipe_selected && pipe_ready)begin
+                    pipe_active[issue_slot]<=1;pipe_chain_index[issue_slot]<=pipe_next_chain;
+                    pipe_next_chain<=pipe_next_chain+1'b1;
+                end
+            end
             if(PIPELINE>1 && pipe_mode)begin
-                if(pipe_valid)begin
+                if(pipe_valid && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT))begin
                     pipe_done_mask[pipe_tag]<=1;
-                    if(pipe_direct && chain_cursor==0 && pipe_tag==0 && standalone_chain)
-                        node_value<=pipe_value;
+                    if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
+                        node_value<=pipe_read_result;
                 end
             end
             case(state)
@@ -544,6 +608,10 @@ module executor #(
                     end else enter_state(CHAIN_SETUP);
                 end
                 CHAIN_SETUP: begin
+                    if(P4_OPT && !pipe_cache_valid)begin
+                        pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
+                        pipe_active<=0;pipe_next_chain<=chain_cursor;pipe_completed<=0;
+                    end
                     if(stateful && PIPELINE>1)begin
                         if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
                         else begin
@@ -586,7 +654,12 @@ module executor #(
                     end
                 end
                 PIPE_ISSUE: begin
-                    if(!pipe_expected_mask[pipe_issue_slot] || pipe_ready)begin
+                    if(pipe_rolling)begin
+                        if(pipe_valid && pipe_completed+1>=endpoint_count)begin
+                            pipe_rolling<=0;pipe_batch_used<=1;pipe_cache_valid<=0;
+                            chain_cursor<=endpoint_count-1'b1;enter_state(CHAIN_NEXT);
+                        end
+                    end else if(!pipe_expected_mask[pipe_issue_slot] || pipe_ready)begin
                         if(pipe_issue_slot+1>=PIPELINE ||
                            (pipe_direct && (pipe_expected_mask>>(pipe_issue_slot+1))==0))enter_state(PIPE_WAIT);
                         else pipe_issue_slot<=pipe_issue_slot+1'b1;
@@ -597,14 +670,48 @@ module executor #(
                         enter_state(PIPE_WAIT);
                     else pipe_issue_slot<=pipe_issue_slot+1'b1;
                 end
-                PIPE_WAIT: if((pipe_done_mask & pipe_expected_mask)==pipe_expected_mask)begin
+                PIPE_WAIT: if(pipe_direct && !(macro_flags[0] && leaf_cursor==target)
+                    && ((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0))
+                        & pipe_expected_mask)==pipe_expected_mask)begin
+                    // The final response writes the endpoint on this edge.
+                    // Captures retain the registered completion path so a
+                    // one-slot tail never reads capture RAM before its write.
+                    pipe_cache_valid<=0;pipe_batch_used<=1;pipe_pair<=0;
+                    advance_direct_batch();
+                end else if((pipe_done_mask & pipe_expected_mask)==pipe_expected_mask)begin
                     if(pipe_direct)begin
                         pipe_cache_valid<=0;pipe_batch_used<=1;pipe_pair<=0;
                         if(macro_flags[0] && leaf_cursor==target)begin
                             start_output(pipe_read_capture,node_bytes,PIPE_CAPTURE_NEXT);
                             pipe_pair<=1;
                         end else advance_direct_batch();
-                    end else enter_state(PIPE_LOAD);
+                    end else if(P4_OPT && indexing==1 && pipe_expected_mask=={PIPE_BATCH{1'b1}} && !verifying)begin pipe_cache_valid<=0;pipe_batch_used<=1;enter_state(FORS_PICK);end
+                    else enter_state(PIPE_LOAD);
+                end
+                FORS_PICK:begin
+                    if(fors_target_group && macro_flags[0])start_output(pipe_read_capture,node_bytes,FORS_AUTH0);
+                    else if(fors_target_group)enter_state(FORS_AUTH0);
+                    else enter_state(FORS_BEGIN);
+                end
+                FORS_AUTH0:enter_state(FORS_BEGIN);
+                FORS_BEGIN:begin
+                    fors_level<=0;fors_pair_cursor<=0;pipe_done_mask<=0;pipe_expected_mask<=PIPE_BATCH'(3);
+                    pipe_seed_domain<=3;pipe_step_domain<=3;enter_state(FORS_LEFT);
+                end
+                FORS_LEFT:begin task_left0<=pipe_read_result;enter_state(FORS_RIGHT);end
+                FORS_RIGHT:begin node_value<=pipe_read_result;enter_state(FORS_ISSUE);end
+                FORS_ISSUE:if(pipe_ready)begin
+                    if(!fors_level && !fors_pair_cursor)begin fors_pair_cursor<=1;enter_state(FORS_LEFT);end
+                    else enter_state(FORS_WAIT);
+                end
+                FORS_WAIT:if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)
+                    enter_state(fors_level ? FORS_PUSH : (fors_target_group ? FORS_AUTH1 : FORS_LEVEL));
+                FORS_AUTH1:enter_state(FORS_LEVEL);
+                FORS_LEVEL:begin fors_level<=1;fors_pair_cursor<=0;pipe_done_mask<=0;pipe_expected_mask<=PIPE_BATCH'(1);enter_state(FORS_LEFT);end
+                FORS_PUSH:begin
+                    node_value<=pipe_read_result;node_level<=2;node_index<=leaf_cursor>>2;
+                    leaf_cursor<=leaf_cursor+3;pipe_cache_valid<=0;pipe_batch_used<=0;
+                    enter_state(PUSH_NODE);
                 end
                 PIPE_LOAD: begin
                     pipe_batch_used<=1;
@@ -640,13 +747,36 @@ module executor #(
                     start_hash(descriptors[4],stateful ? SF_REDUCED : LEAF_SETUP);
                 end
                 LT_SETUP: begin
-                    if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
+                    if(P4_OPT)enter_state(LT_PIPE_INIT);
+                    else if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
                     else begin
                         task_chain<=0;task_capture<=0;task_steps<=0;
                         task_leaf<=leaf_cursor;task_a<=lt_level;task_b<=lt_cursor>>1;
                         task_left0<=endpoint_value0;node_value<=endpoint_value1;
                         start_hash(descriptors[4],LT_STORE);
                     end
+                end
+                LT_PIPE_INIT:begin
+                    pipe_rolling<=0;
+                    if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
+                    else begin
+                        pipe_issue_slot<=0;pipe_done_mask<=0;
+                        pipe_seed_domain<=descriptors[4][55:48];pipe_step_domain<=descriptors[4][55:48];
+                        for(integer q=0;q<PIPE_BATCH;q++)pipe_expected_mask[q]<=32'(lt_cursor)+2*q+1<lt_count;
+                        enter_state(LT_PIPE_ISSUE);
+                    end
+                end
+                LT_PIPE_ISSUE:if(pipe_ready)begin
+                    if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)enter_state(LT_PIPE_WAIT);
+                    else pipe_issue_slot<=pipe_issue_slot+1'b1;
+                end
+                LT_PIPE_WAIT:if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)
+                    enter_state(LT_PIPE_ADVANCE);
+                LT_PIPE_ADVANCE:begin
+                    if(lt_cursor+2*PIPELINE<lt_count)begin lt_cursor<=lt_cursor+2*PIPELINE;enter_state(LT_PIPE_INIT);end
+                    else if(lt_count[0])begin lt_cursor<=lt_count-1'b1;enter_state(LT_COPY);end
+                    else if(lt_count<=2)enter_state(LT_FINISH);
+                    else begin lt_count<=(lt_count+1)>>1;lt_cursor<=0;lt_level<=lt_level+1'b1;enter_state(LT_PIPE_INIT);end
                 end
                 LT_STORE,LT_COPY:enter_state(LT_NEXT);
                 LT_NEXT:begin

@@ -1,0 +1,450 @@
+%Warning-WIDTHEXPAND: rtl/hash/pipeline.sv:88:66: Operator LT expects 32 bits on the LHS, but LHS's VARREF 'request_tag' generates 4 bits.
+                                                : ... In instance top.core.lane.chain_pipeline.engine
+   88 |  assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && !busy[request_tag];
+      |                                                                  ^
+                      ... For warning description see https://verilator.org/warn/WIDTHEXPAND?v=5.008
+                      ... Use "/* verilator lint_off WIDTHEXPAND */" and lint_on around source to disable this message.
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:91:55: Operator ADD expects 32 or 13 bits on the LHS, but LHS's VARREF 'node_bytes' generates 6 bits.
+                                              : ... In instance top.core.lane
+   91 |                 ADDRESS_SEED: decode_length=node_bytes+32+node_bytes;
+      |                                                       ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:91:58: Operator ADD expects 32 or 13 bits on the RHS, but RHS's VARREF 'node_bytes' generates 6 bits.
+                                              : ... In instance top.core.lane
+   91 |                 ADDRESS_SEED: decode_length=node_bytes+32+node_bytes;
+      |                                                          ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:92:69: Operator ADD expects 32 or 13 bits on the LHS, but LHS's VARREF 'node_bytes' generates 6 bits.
+                                              : ... In instance top.core.lane
+   92 |                 ADDRESS_VALUE,ADDRESS_LIST: decode_length=node_bytes+32+nodes;
+      |                                                                     ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:93:56: Operator ADD expects 32 or 13 bits on the RHS, but RHS's VARREF 'message_length' generates 7 bits.
+                                              : ... In instance top.core.lane
+   93 |                 MESSAGE_PRF: decode_length=2*node_bytes+message_length;
+      |                                                        ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:94:59: Operator ADD expects 32 or 13 bits on the RHS, but RHS's VARREF 'message_length' generates 7 bits.
+                                              : ... In instance top.core.lane
+   94 |                 MESSAGE_DIGEST: decode_length=3*node_bytes+message_length;
+      |                                                           ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:96:48: Operator ADD expects 32 or 13 bits on the RHS, but RHS's VARREF 'message_length' generates 7 bits.
+                                              : ... In instance top.core.lane
+   96 |                 ROOT_MESSAGE: decode_length=128+message_length;
+      |                                                ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:100:49: Operator ADD expects 32 or 13 bits on the RHS, but RHS's VARREF 'message_length' generates 7 bits.
+                                               : ... In instance top.core.lane
+  100 |                 PREFIX_MESSAGE: decode_length=54+message_length;
+      |                                                 ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:120:19: Operator ASSIGNW expects 32 bits on the Assign RHS, but Assign RHS's VARREF 'request_a' generates 8 bits.
+                                               : ... In instance top.core.lane
+  120 |     wire [31:0] a = request_a;
+      |                   ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:130:21: Operator LT expects 32 or 8 bits on the LHS, but LHS's VARREF 'compound' generates 2 bits.
+                                               : ... In instance top.core.lane
+  130 |         && compound < arity+1 ? 13'd96
+      |                     ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:154:76: Operator LT expects 32 or 8 bits on the LHS, but LHS's VARREF 'compound' generates 2 bits.
+                                               : ... In instance top.core.lane
+  154 |         && !(RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1)
+      |                                                                            ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:156:71: Operator ADD expects 32 or 8 bits on the LHS, but LHS's VARREF 'stream_node_bytes' generates 6 bits.
+                                               : ... In instance top.core.lane
+  156 |     wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
+      |                                                                       ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:164:40: Operator GTE expects 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  164 |     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
+      |                                        ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:164:66: Operator SUB expects 32 or 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  164 |     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
+      |                                                                  ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:168:54: Operator ADD expects 7 bits on the RHS, but RHS's VARREF 'stream_advance' generates 5 bits.
+                                               : ... In instance top.core.lane
+  168 |     wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
+      |                                                      ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:207:84: Operator SUB expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  207 |                     else if(index<2*node_words) begin source=2;selected_index=index-node_words;end
+      |                                                                                    ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:206:29: Operator LT expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  206 |                     if(index<node_words) source=1;
+      |                             ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:212:84: Operator SUB expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  212 |                     else if(index<2*node_words) begin source=3;selected_index=index-node_words;end
+      |                                                                                    ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:211:29: Operator LT expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  211 |                     if(index<node_words) source=2;
+      |                             ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:232:84: Operator SUB expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  232 |                     else if(index<node_words+4) begin source=6;selected_index=index-node_words;end
+      |                                                                                    ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:233:61: Operator SUB expects 32 or 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  233 |                     else begin source=7;selected_index=index-node_words-4;end
+      |                                                             ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:232:45: Operator ADD expects 32 or 6 bits on the LHS, but LHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  232 |                     else if(index<node_words+4) begin source=6;selected_index=index-node_words;end
+      |                                             ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:231:29: Operator LT expects 6 bits on the RHS, but RHS's VARREF 'node_words' generates 3 bits.
+                                               : ... In instance top.core.lane
+  231 |                     if(index<node_words) source=3;
+      |                             ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:291:78: Operator GTE expects 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  291 |         end else if((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position>=prefix_bytes)
+      |                                                                              ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:298:70: Operator FUNCREF 'be32' expects 32 bits on the Function Argument, but Function Argument's VARREF 'request_layer' generates 5 bits.
+                                               : ... In instance top.core.lane
+  298 |             be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
+      |                                                                      ^~~~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:299:27: Operator FUNCREF 'be32' expects 32 bits on the Function Argument, but Function Argument's VARREF 'compound' generates 2 bits.
+                                               : ... In instance top.core.lane
+  299 |         masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
+      |                           ^~~~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:299:69: Operator FUNCREF 'be32' expects 32 bits on the Function Argument, but Function Argument's VARREF 'domain' generates 8 bits.
+                                               : ... In instance top.core.lane
+  299 |         masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
+      |                                                                     ^~~~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:325:28: Operator LT expects 32 or 8 bits on the LHS, but LHS's VARREF 'compound' generates 2 bits.
+                                               : ... In instance top.core.lane
+  325 |                 if(compound<arity+1) begin
+      |                            ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:419:32: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'position' generates 13 bits.
+                                               : ... In instance top.core.lane
+  419 |             absolute = position+i;
+      |                                ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:422:30: Operator EQ expects 32 bits on the RHS, but RHS's VARREF 'input_length' generates 13 bits.
+                                               : ... In instance top.core.lane
+  422 |                 if (absolute == input_length) stream_data[i*8 +: 8] = 8'h1f;
+      |                              ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:495:34: Operator ADD expects 32 bits on the LHS, but LHS's ARRAYSEL generates 5 bits.
+                                               : ... In instance top.core.lane
+  495 |         && stage_base[PIPELINE-1]+ROUNDS<24;
+      |                                  ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:548:52: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'round_index' generates 5 bits.
+                                               : ... In instance top.core.lane
+  548 |     assign round_complete=PIPELINE==1 ? round_index+UNROLL>=24 : !batch_mode && finished;
+      |                                                    ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:609:72: Operator EQ expects 32 or 5 bits on the LHS, but LHS's VARREF 'append_index' generates 4 bits.
+                                               : ... In instance top.core.lane
+  609 |         wire select_stream=word_index<17 && take_stream && append_index==word_index/2;
+      |                                                                        ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:725:52: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'round_index' generates 5 bits.
+                                               : ... In instance top.core.lane
+  725 |                         round_index <= round_index + UNROLL;
+      |                                                    ^
+%Warning-WIDTHTRUNC: rtl/hash/recipe.sv:725:37: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's ADD generates 32 bits.
+                                              : ... In instance top.core.lane
+  725 |                         round_index <= round_index + UNROLL;
+      |                                     ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:756:80: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'request_steps' generates 5 bits.
+                                               : ... In instance top.core.lane
+  756 |                         hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
+      |                                                                                ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:757:111: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'request_steps' generates 5 bits.
+                                                : ... In instance top.core.lane
+  757 |                         if (fixed_block) permutation_count <= permutation_count+(compact_chain ? request_steps+1 : 1);
+      |                                                                                                               ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:772:59: Operator ADD expects 13 bits on the RHS, but RHS's VARREF 'stream_advance' generates 5 bits.
+                                               : ... In instance top.core.lane
+  772 |                                 list_remainder <= position+stream_advance-prefix_bytes;
+      |                                                           ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:772:74: Operator SUB expects 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  772 |                                 list_remainder <= position+stream_advance-prefix_bytes;
+      |                                                                          ^
+%Warning-WIDTHTRUNC: rtl/hash/recipe.sv:772:48: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's SUB generates 13 bits.
+                                              : ... In instance top.core.lane
+  772 |                                 list_remainder <= position+stream_advance-prefix_bytes;
+      |                                                ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:771:40: Operator ADD expects 13 bits on the RHS, but RHS's VARREF 'stream_advance' generates 5 bits.
+                                               : ... In instance top.core.lane
+  771 |                             if(position+stream_advance >= prefix_bytes)
+      |                                        ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:771:56: Operator GTE expects 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  771 |                             if(position+stream_advance >= prefix_bytes)
+      |                                                        ^~
+%Warning-WIDTHTRUNC: rtl/hash/recipe.sv:774:44: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's SUB generates 7 bits.
+                                              : ... In instance top.core.lane
+  774 |                             list_remainder <= next_remainder-stream_node_bytes;
+      |                                            ^~
+%Warning-WIDTHTRUNC: rtl/hash/recipe.sv:776:49: Operator ASSIGNDLY expects 6 bits on the Assign RHS, but Assign RHS's VARREF 'next_remainder' generates 7 bits.
+                                              : ... In instance top.core.lane
+  776 |                         end else list_remainder <= next_remainder;
+      |                                                 ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:773:52: Operator GTE expects 7 bits on the RHS, but RHS's VARREF 'stream_node_bytes' generates 6 bits.
+                                               : ... In instance top.core.lane
+  773 |                         end else if(next_remainder >= stream_node_bytes) begin
+      |                                                    ^~
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:770:37: Operator LT expects 13 bits on the RHS, but RHS's VARREF 'prefix_bytes' generates 8 bits.
+                                               : ... In instance top.core.lane
+  770 |                         if(position < prefix_bytes) begin
+      |                                     ^
+%Warning-WIDTHEXPAND: rtl/hash/recipe.sv:788:96: Operator LT expects 32 or 8 bits on the LHS, but LHS's VARREF 'compound' generates 2 bits.
+                                               : ... In instance top.core.lane
+  788 |                     end else if (RECIPE_MASK[MASKED_VALUE] && shapes[MASKED_VALUE] && compound < arity+1) begin
+      |                                                                                                ^
+%Warning-WIDTHEXPAND: rtl/executor/sequencer.sv:45:65: Operator SUB expects 6 bits on the LHS, but LHS's VARREF 'pc' generates 4 bits.
+                                                     : ... In instance top.core.sequencer
+   45 |         loop_bias[sp-1]<=loop_bias[sp-1]+loop_delta[sp-1];pc<=pc-back_count;
+      |                                                                 ^
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:45:61: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's SUB generates 6 bits.
+                                                    : ... In instance top.core.sequencer
+   45 |         loop_bias[sp-1]<=loop_bias[sp-1]+loop_delta[sp-1];pc<=pc-back_count;
+      |                                                             ^~
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:48:15: Bit extraction of array[1:0] requires 1 bit index, not 2 bits.
+                                                    : ... In instance top.core.sequencer
+   48 |        loop_pc[sp]<=pc;loop_remaining[sp]<=token[56:51];loop_bias[sp]<=token[50:40];
+      |               ^
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:48:38: Bit extraction of array[1:0] requires 1 bit index, not 2 bits.
+                                                    : ... In instance top.core.sequencer
+   48 |        loop_pc[sp]<=pc;loop_remaining[sp]<=token[56:51];loop_bias[sp]<=token[50:40];
+      |                                      ^
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:48:66: Bit extraction of array[1:0] requires 1 bit index, not 2 bits.
+                                                    : ... In instance top.core.sequencer
+   48 |        loop_pc[sp]<=pc;loop_remaining[sp]<=token[56:51];loop_bias[sp]<=token[50:40];
+      |                                                                  ^
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:49:18: Bit extraction of array[1:0] requires 1 bit index, not 2 bits.
+                                                    : ... In instance top.core.sequencer
+   49 |        loop_delta[sp]<=token[50:40];sp<=sp+1'b1;pc<=pc-back_count;
+      |                  ^
+%Warning-WIDTHEXPAND: rtl/executor/sequencer.sv:49:55: Operator SUB expects 6 bits on the LHS, but LHS's VARREF 'pc' generates 4 bits.
+                                                     : ... In instance top.core.sequencer
+   49 |        loop_delta[sp]<=token[50:40];sp<=sp+1'b1;pc<=pc-back_count;
+      |                                                       ^
+%Warning-WIDTHTRUNC: rtl/executor/sequencer.sv:49:51: Operator ASSIGNDLY expects 4 bits on the Assign RHS, but Assign RHS's SUB generates 6 bits.
+                                                    : ... In instance top.core.sequencer
+   49 |        loop_delta[sp]<=token[50:40];sp<=sp+1'b1;pc<=pc-back_count;
+      |                                                   ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:153:38: Operator ASSIGN expects 5 bits on the Assign RHS, but Assign RHS's REPLICATE generates 8 bits.
+                                                    : ... In instance top.core
+  153 |             TREE_INIT: hash_recipe_id={1'b0,saved_descriptor[58:52]};
+      |                                      ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:154:43: Operator ADD expects 8 bits on the RHS, but RHS's VARREF 'emit_cursor' generates 4 bits.
+                                                     : ... In instance top.core
+  154 |             EMIT: hash_recipe_id=emit_base+emit_cursor;
+      |                                           ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:154:33: Operator ASSIGN expects 5 bits on the Assign RHS, but Assign RHS's ADD generates 8 bits.
+                                                    : ... In instance top.core
+  154 |             EMIT: hash_recipe_id=emit_base+emit_cursor;
+      |                                 ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:155:40: Operator ASSIGN expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  155 |             CHAIN_SETUP: hash_recipe_id=chain_descriptor[59:52];
+      |                                        ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:157:50: Operator ASSIGN expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  157 |             REDUCE_SETUP,LT_SETUP: hash_recipe_id=chain_descriptor[43:36];
+      |                                                  ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:158:36: Operator ASSIGN expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  158 |             SF_LEAF: hash_recipe_id=chain_descriptor[35:28];
+      |                                    ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:285:55: Operator ADD expects 8 bits on the RHS, but RHS's REPLICATE generates 4 bits.
+                                                     : ... In instance top.core
+  285 |                 digit={3'd0,value[2][{index[6:2],3'b0}+{1'b0,(index[1:0]^2'd3),1'b0} +:2]};
+      |                                                       ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:313:46: Operator ADD expects 10 bits on the LHS, but LHS's REPLICATE generates 8 bits.
+                                                     : ... In instance top.core
+  313 |                 6:offset=({group_number,2'b0}+{group_number,1'b0});
+      |                                              ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:313:46: Operator ADD expects 10 bits on the RHS, but RHS's REPLICATE generates 7 bits.
+                                                     : ... In instance top.core
+  313 |                 6:offset=({group_number,2'b0}+{group_number,1'b0});
+      |                                              ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:314:25: Operator ASSIGN expects 10 bits on the Assign RHS, but Assign RHS's REPLICATE generates 9 bits.
+                                                     : ... In instance top.core
+  314 |                 8:offset={group_number,3'b0};
+      |                         ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:315:46: Operator ADD expects 10 bits on the RHS, but RHS's VARREF 'group_number' generates 6 bits.
+                                                     : ... In instance top.core
+  315 |                 9:offset=({group_number,3'b0}+group_number);
+      |                                              ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:316:47: Operator ADD expects 10 bits on the RHS, but RHS's REPLICATE generates 8 bits.
+                                                     : ... In instance top.core
+  316 |                 12:offset=({group_number,3'b0}+{group_number,2'b0});
+      |                                               ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:317:52: Operator SUB expects 10 bits on the RHS, but RHS's REPLICATE generates 7 bits.
+                                                     : ... In instance top.core
+  317 |                 default:offset=({group_number,4'b0}-{group_number,1'b0});
+      |                                                    ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:319:20: Operator ASSIGN expects 14 bits on the Assign RHS, but Assign RHS's SHIFTR generates 320 bits.
+                                                    : ... In instance top.core
+  319 |             segment=fors_bitstream >> offset;
+      |                    ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:378:43: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'chain_cursor' generates 8 bits.
+                                                     : ... In instance top.core
+  378 |                 chain_cursor<=chain_cursor+PIPELINE;
+      |                                           ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:378:29: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's ADD generates 32 bits.
+                                                    : ... In instance top.core
+  378 |                 chain_cursor<=chain_cursor+PIPELINE;
+      |                             ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:377:28: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'chain_cursor' generates 8 bits.
+                                                     : ... In instance top.core
+  377 |             if(chain_cursor+PIPELINE<endpoint_count)begin
+      |                            ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:440:27: Operator ASSIGN expects 256 bits on the Assign RHS, but Assign RHS's FUNCREF 'be32' generates 32 bits.
+                                                     : ... In instance top.core
+  440 |             7: emit_source=be32(emit_descriptor[31:0]);
+      |                           ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:482:26: Logical operator IF expects 1 bit on the If, but If's VARREF 'job_operation' generates 2 bits.
+                                                    : ... In instance top.core
+  482 |                     else if(job_operation) begin
+      |                          ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:505:57: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  505 |                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
+      |                                                         ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:505:82: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  505 |                         macro_op<=cmd[47:44]; macro_desc<=cmd[43:36]; macro_route<=cmd[35:28];
+      |                                                                                  ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:528:50: Operator COND expects 32 or 14 bits on the Conditional True, but Conditional True's SEL generates 10 bits.
+                                                     : ... In instance top.core
+  528 |                            leaf_cursor<=stateful ? job_index[9:0] : 0; target<=stateful ? job_index[9:0] : 0; chain_cursor<=0;
+      |                                                  ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:528:89: Operator COND expects 32 or 14 bits on the Conditional True, but Conditional True's SEL generates 10 bits.
+                                                     : ... In instance top.core
+  528 |                            leaf_cursor<=stateful ? job_index[9:0] : 0; target<=stateful ? job_index[9:0] : 0; chain_cursor<=0;
+      |                                                                                         ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:541:29: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  541 |                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+      |                             ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:541:59: Operator ASSIGNDLY expects 5 bits on the Assign RHS, but Assign RHS's SEL generates 8 bits.
+                                                    : ... In instance top.core
+  541 |                     chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+      |                                                           ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:543:85: Operator COND expects 14 bits on the Conditional False, but Conditional False's VARREF 'scalar_leaf' generates 10 bits.
+                                                     : ... In instance top.core
+  543 |                     target<=stateful ? {4'd0,job_index[9:0]} : descriptor[37:36]==1 ? fors_target(group_index)
+      |                                                                                     ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:545:44: Operator COND expects 32 or 14 bits on the Conditional True, but Conditional True's VARREF 'scalar_leaf' generates 10 bits.
+                                                     : ... In instance top.core
+  545 |                     leaf_cursor<=verifying ? scalar_leaf : 0;
+      |                                            ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:549:56: Operator ASSIGNDLY expects 14 bits on the Assign RHS, but Assign RHS's SEL generates 10 bits.
+                                                     : ... In instance top.core
+  549 |                         node_value<=value[2];node_index<=job_index[9:0];enter_state(PUSH_NODE);
+      |                                                        ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:568:63: Operator SHIFTL expects 32 bits on the LHS, but LHS's VARREF 'group_index' generates 6 bits.
+                                                     : ... In instance top.core
+  568 |                             task_b<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor);
+      |                                                               ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:568:72: Operator ADD expects 32 bits on the RHS, but RHS's VARREF 'target' generates 14 bits.
+                                                     : ... In instance top.core
+  568 |                             task_b<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor);
+      |                                                                        ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:568:49: Operator COND expects 32 bits on the Conditional False, but Conditional False's FUNCREF 'digit' generates 5 bits.
+                                                     : ... In instance top.core
+  568 |                             task_b<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor);
+      |                                                 ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:585:48: Operator COND expects 14 bits on the Conditional True, but Conditional True's VARREF 'scalar_leaf' generates 10 bits.
+                                                     : ... In instance top.core
+  585 |                         task_leaf<=indexing==1 ? scalar_leaf : leaf_cursor;
+      |                                                ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:585:34: Operator ASSIGNDLY expects 10 bits on the Assign RHS, but Assign RHS's COND generates 14 bits.
+                                                    : ... In instance top.core
+  585 |                         task_leaf<=indexing==1 ? scalar_leaf : leaf_cursor;
+      |                                  ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:587:59: Operator SHIFTL expects 32 bits on the LHS, but LHS's VARREF 'group_index' generates 6 bits.
+                                                     : ... In instance top.core
+  587 |                         task_b<=indexing==1 ? (group_index<<FORS_A)+leaf_cursor : 0;
+      |                                                           ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:587:68: Operator ADD expects 32 bits on the RHS, but RHS's VARREF 'leaf_cursor' generates 14 bits.
+                                                     : ... In instance top.core
+  587 |                         task_b<=indexing==1 ? (group_index<<FORS_A)+leaf_cursor : 0;
+      |                                                                    ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:596:43: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'pipe_issue_slot' generates 4 bits.
+                                                     : ... In instance top.core
+  596 |                         if(pipe_issue_slot+1>=PIPELINE ||
+      |                                           ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:602:39: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'pipe_issue_slot' generates 4 bits.
+                                                     : ... In instance top.core
+  602 |                     if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)
+      |                                       ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:625:48: Operator ADD expects 32 bits on the LHS, but LHS's VARREF 'pipe_pair' generates 4 bits.
+                                                     : ... In instance top.core
+  625 |                     pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(pipe_pair+1))!=0);
+      |                                                ^
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:653:30: Operator ASSIGNDLY expects 10 bits on the Assign RHS, but Assign RHS's VARREF 'leaf_cursor' generates 14 bits.
+                                                    : ... In instance top.core
+  653 |                     task_leaf<=leaf_cursor; task_a<=0; task_b<=0;
+      |                              ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:660:34: Operator ASSIGNDLY expects 10 bits on the Assign RHS, but Assign RHS's VARREF 'leaf_cursor' generates 14 bits.
+                                                    : ... In instance top.core
+  660 |                         task_leaf<=leaf_cursor;task_a<=lt_level;task_b<=lt_cursor>>1;
+      |                                  ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:660:54: Operator ASSIGNDLY expects 8 bits on the Assign RHS, but Assign RHS's VARREF 'lt_level' generates 4 bits.
+                                                     : ... In instance top.core
+  660 |                         task_leaf<=leaf_cursor;task_a<=lt_level;task_b<=lt_cursor>>1;
+      |                                                      ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:660:82: Operator SHIFTR expects 32 bits on the LHS, but LHS's VARREF 'lt_cursor' generates 8 bits.
+                                                     : ... In instance top.core
+  660 |                         task_leaf<=leaf_cursor;task_a<=lt_level;task_b<=lt_cursor>>1;
+      |                                                                                  ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:679:30: Operator ASSIGNDLY expects 10 bits on the Assign RHS, but Assign RHS's VARREF 'leaf_cursor' generates 14 bits.
+                                                    : ... In instance top.core
+  679 |                     task_leaf<=leaf_cursor;task_a<=0;task_b<=32'd1024+leaf_cursor;
+      |                              ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:679:70: Operator ADD expects 32 bits on the RHS, but RHS's VARREF 'leaf_cursor' generates 14 bits.
+                                                     : ... In instance top.core
+  679 |                     task_leaf<=leaf_cursor;task_a<=0;task_b<=32'd1024+leaf_cursor;
+      |                                                                      ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:711:58: Operator COND expects 8 bits on the Conditional True, but Conditional True's VARREF 'node_level' generates 4 bits.
+                                                     : ... In instance top.core
+  711 |                         task_a<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
+      |                                                          ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:711:83: Operator ADD expects 8 bits on the LHS, but LHS's VARREF 'node_level' generates 4 bits.
+                                                     : ... In instance top.core
+  711 |                         task_a<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
+      |                                                                                   ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:712:60: Operator SHIFTL expects 32 bits on the LHS, but LHS's VARREF 'group_index' generates 6 bits.
+                                                     : ... In instance top.core
+  712 |                         task_b<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+      |                                                            ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:712:98: Operator SHIFTR expects 32 bits on the LHS, but LHS's VARREF 'node_index' generates 14 bits.
+                                                     : ... In instance top.core
+  712 |                         task_b<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+      |                                                                                                  ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:713:88: Operator SHIFTR expects 32 bits on the LHS, but LHS's VARREF 'node_index' generates 14 bits.
+                                                     : ... In instance top.core
+  713 |                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+      |                                                                                        ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:713:106: Operator SHIFTR expects 32 bits on the LHS, but LHS's VARREF 'node_index' generates 14 bits.
+                                                      : ... In instance top.core
+  713 |                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+      |                                                                                                          ^~
+%Warning-WIDTHTRUNC: rtl/executor/executor.sv:756:36: Operator ASSIGNDLY expects 10 bits on the Assign RHS, but Assign RHS's AND generates 64 bits.
+                                                    : ... In instance top.core
+  756 |                         scalar_leaf<=scalar_tree & ((1<<descriptor[43:40])-1);
+      |                                    ^~
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:759:43: Operator ADD expects 12 bits on the RHS, but RHS's VARREF 'chain_max' generates 4 bits.
+                                                     : ... In instance top.core
+  759 |                         checksum<=checksum+chain_max-digit(transform_index);
+      |                                           ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:759:53: Operator SUB expects 12 bits on the RHS, but RHS's FUNCREF 'digit' generates 5 bits.
+                                                     : ... In instance top.core
+  759 |                         checksum<=checksum+chain_max-digit(transform_index);
+      |                                                     ^
+%Warning-WIDTHEXPAND: rtl/executor/executor.sv:793:37: Operator LT expects 32 bits on the LHS, but LHS's VARREF 'pipe_pair' generates 4 bits.
+                                                     : ... In instance top.core
+  793 |                         if(pipe_pair<PIPELINE && (pipe_expected_mask>>pipe_pair)!=0)begin
+      |                                     ^
+%Warning-WIDTHTRUNC: rtl/top/top.sv:69:32: Logical operator COND expects 1 bit on the Conditional Test, but Conditional Test's VARREF 'OPERATION' generates 2 bits.
+                                         : ... In instance top
+   69 |     wire [3:0] entry=OPERATION ? image_header[44:41] : image_header[39:36];
+      |                                ^
+%Warning-WIDTHTRUNC: rtl/top/top.sv:70:58: Logical operator COND expects 1 bit on the Conditional Test, but Conditional Test's VARREF 'OPERATION' generates 2 bits.
+                                         : ... In instance top
+   70 |     wire message_length_valid=OPERATION<=2 && (OPERATION ? (message_length>=7'd1 && message_length<=7'd87)
+      |                                                          ^
+%Warning-WIDTHTRUNC: rtl/top/top.sv:117:24: Logical operator LOGNOT expects 1 bit on the LHS, but LHS's VARREF 'OPERATION' generates 2 bits.
+                                          : ... In instance top
+  117 |                     if(!OPERATION) keygen_done<=1;
+      |                        ^

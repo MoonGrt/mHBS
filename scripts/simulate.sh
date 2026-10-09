@@ -15,9 +15,10 @@ case "${1:-}" in
     *) profile=${1:-slh_128f}; operation=${2:-sign}; p=${3:-1}; u=${4:-2}; shift "$(( $# >= 4 ? 4 : $# ))" ;;
 esac
 stats=${PROFILE_ENABLE:-1}
+lut6=${KECCAK_LUT6:-0}
 vectors_root=${VECTORS_DIR:-tb/vectors}
-if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $stats =~ ^[01]$ ]]; then
-    echo 'P/U must be integers; PROFILE_ENABLE must be 0 or 1.' >&2; exit 2
+if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $stats =~ ^[01]$ || ! $lut6 =~ ^[01]$ ]]; then
+    echo 'P/U must be integers; PROFILE_ENABLE and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
 fi
 p=$((10#$p)); u=$((10#$u))
 if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
@@ -27,13 +28,15 @@ verilator_bin=${VERILATOR:-verilator}
 command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
 mapfile -t sources < sources.txt
 work="build/sim/P${p}U${u}_stats${stats}"
+defines=()
+if [[ $lut6 == 1 ]]; then defines+=(+define+MHBS_XILINX_LUT6); work+=_lut6; fi
 mkdir -p "$work"
-identity=$( { sha256sum "${sources[@]}" tb/tb.sv; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
 if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
     echo "Compile P${p}U${u} stats=$stats; log: $work/compile.log"
     if ! "$verilator_bin" --binary --timing -O3 -j 2 -Wno-fatal --top-module tb \
         "-GPIPELINE=$p" "-GUNROLL=$u" "-GPROFILE_ENABLE=$stats" \
-        --Mdir "$work/obj" "${sources[@]}" tb/tb.sv >"$work/compile.log" 2>&1; then
+        --Mdir "$work/obj" "${defines[@]}" "${sources[@]}" tb/tb.sv >"$work/compile.log" 2>&1; then
         tail -n 40 "$work/compile.log" >&2; exit 1
     fi
     printf '%s\n' "$identity" > "$work/source.sha256"

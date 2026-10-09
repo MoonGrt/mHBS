@@ -25,12 +25,30 @@ module tb;
  integer hashes[0:1],perms[0:1];integer computed,elapsed,hcount,pcount;
  reg [31:0] rng=32'h51c0ffee;string vector;
  integer batch_live=0,batch_max_live=0,batch_requests=0,batch_returns=0;
+ logic [PIPELINE-1:0] batch_tags=0;
+ logic [3:0] fors_positions=0;
+ integer ltree_odd=0,rolling_reuse=0;
  always @(posedge clk)begin
-  if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;end
+  if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;fors_positions=0;ltree_odd=0;rolling_reuse=0;end
   else begin
-   if(dut.core.pipe_selected&&dut.core.pipe_ready)begin batch_live++;batch_requests++;end
+   if(PIPELINE==4 && UNROLL==1)begin
+    if(dut.core.state==58 && dut.core.fors_target_group)fors_positions[dut.core.target[1:0]]=1;
+    if(dut.core.state==46 && dut.core.lt_count[0])ltree_odd++;
+    if(dut.core.pipe_rolling && dut.core.pipe_selected && dut.core.pipe_ready && dut.core.pipe_valid
+      && dut.core.lane.batch_request_tag==dut.core.pipe_tag)rolling_reuse++;
+    if(dut.core.state==55 && dut.core.endpoint_write)$fatal(1,"L-tree writes before batch inputs accepted");
+   end
+   // Retire before allocation: a slot may be reused on the same edge.
+   if(dut.core.pipe_valid&&dut.core.lane.batch_response_ready)begin
+    if(!batch_tags[dut.core.pipe_tag])$fatal(1,"unallocated batch return");
+    batch_tags[dut.core.pipe_tag]=0;batch_live--;batch_returns++;
+   end
+   if(dut.core.pipe_selected&&dut.core.pipe_ready)begin
+    if(batch_tags[dut.core.lane.batch_request_tag])$fatal(1,"live tag overwritten");
+    batch_tags[dut.core.lane.batch_request_tag]=1;batch_live++;batch_requests++;
+   end
    if(batch_live>batch_max_live)batch_max_live=batch_live;
-   if(dut.core.pipe_mode&&dut.core.pipe_valid)begin batch_live--;batch_returns++;end
+   if(batch_live>PIPELINE)$fatal(1,"too many live batch contexts");
    if(batch_live<0)$fatal(1,"duplicate batch return");
   end
  end
@@ -125,6 +143,7 @@ module tb;
     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);
     $display("BATCH_OBSERVED requests=%0d returns=%0d max_live=%0d",batch_requests,batch_returns,batch_max_live);
+    if(PIPELINE==4 && UNROLL==1)$display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
     if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
     if(job_operation==2)begin
      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);

@@ -11,8 +11,8 @@ module keccak (
     wire [63:0] a [0:24];
     wire [63:0] c [0:4];
     wire [63:0] d [0:4];
-    wire [63:0] theta [0:24];
-    wire [63:0] b [0:24];
+    wire [63:0] rotated_a [0:24];
+    wire [63:0] rotated_d [0:24];
     wire [63:0] rc;
     genvar x, y;
 
@@ -83,11 +83,29 @@ module keccak (
                 localparam integer I = x + 5*y;
                 localparam integer DEST = y + 5*((2*x + 3*y) % 5);
                 assign a[I] = state_in[64*I +: 64];
-                assign theta[I] = a[I] ^ d[x];
-                assign b[DEST] = rotl64(theta[I], rho_offset(I));
-                assign state_out[64*I +: 64] = b[I]
-                    ^ ((~b[((x+1)%5)+5*y]) & b[((x+2)%5)+5*y])
-                    ^ (I == 0 ? rc : 64'd0);
+                localparam integer NEXT = ((x+1)%5)+5*y;
+                localparam integer NEXT2 = ((x+2)%5)+5*y;
+                wire [63:0] chi;
+                assign rotated_a[DEST] = rotl64(a[I], rho_offset(I));
+                assign rotated_d[DEST] = rotl64(d[x], rho_offset(I));
+`ifdef MHBS_XILINX_LUT6
+                // Theta's three XORs and Chi have exactly six inputs per bit.
+                // Bind that whole function to one LUT6 instead of retaining
+                // the 1,600-bit Theta intermediate as separately mapped XORs.
+                for (genvar bit_index=0; bit_index<64; bit_index=bit_index+1) begin : fused
+                    LUT6 #(.INIT(64'h6666966996696666)) theta_chi (
+                        .I0(rotated_a[I][bit_index]), .I1(rotated_d[I][bit_index]),
+                        .I2(rotated_a[NEXT][bit_index]), .I3(rotated_d[NEXT][bit_index]),
+                        .I4(rotated_a[NEXT2][bit_index]), .I5(rotated_d[NEXT2][bit_index]),
+                        .O(chi[bit_index])
+                    );
+                end
+`else
+                assign chi = (rotated_a[I] ^ rotated_d[I])
+                    ^ ((~(rotated_a[NEXT] ^ rotated_d[NEXT]))
+                        & (rotated_a[NEXT2] ^ rotated_d[NEXT2]));
+`endif
+                assign state_out[64*I +:64] = chi ^ (I == 0 ? rc : 64'd0);
             end
         end
         for (x=0; x<5; x=x+1) begin : columns
@@ -96,5 +114,17 @@ module keccak (
         end
     endgenerate
 endmodule
+
+`ifdef MHBS_XILINX_LUT6
+`ifdef VERILATOR
+// Model the actual INIT table in portable simulation. Vivado resolves LUT6
+// from its device library; no vendor simulation installation is required.
+module LUT6 #(parameter [63:0] INIT=64'd0) (
+    input wire I0,I1,I2,I3,I4,I5, output wire O
+);
+    assign O=INIT[{I5,I4,I3,I2,I1,I0}];
+endmodule
+`endif
+`endif
 
 `default_nettype wire

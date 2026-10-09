@@ -1,0 +1,337 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Tue Oct 13 12:49:46 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source scripts/implement_p4.tcl
+# set source_root [file normalize [lindex $argv 0]]
+# set out [file normalize [lindex $argv 1]]
+# file mkdir $out
+# set_param general.maxThreads 4
+# set part xc7a200tffg1156-3
+# create_project -in_memory -part $part
+# set f [open [file join $source_root sources.txt] r]
+# set sources [split [string trim [read $f]] \n]
+# close $f
+# foreach source $sources {read_verilog -sv [file join $source_root $source]}
+# set source_files {}
+# foreach source $sources {lappend source_files [file join $source_root $source]}
+# set fingerprint [exec sha256sum {*}$source_files]
+# set fingerprint_file [file join $out source.sha256]
+# if {[file exists $fingerprint_file]} {
+#     set handle [open $fingerprint_file r]
+#     set previous [string trim [read $handle]]
+#     close $handle
+#     if {$previous ne $fingerprint} {error "Source changed: use a new implementation directory"}
+# } else {
+#     set handle [open $fingerprint_file w]
+#     puts $handle $fingerprint
+#     close $handle
+# }
+# set f [open [file join $out synth_clock.xdc] w]
+# puts $f {create_clock -name clk -period 6.666667 [get_ports clk]}
+# close $f
+# read_xdc [file join $out synth_clock.xdc]
+# if {![file exists [file join $out synth.dcp]]} {
+# synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 \
+#     -generic PIPELINE=4 -generic UNROLL=1 -generic PROFILE_ENABLE=0
+# report_utilization -file [file join $out synth_utilization.rpt]
+# report_utilization -hierarchical -file [file join $out synth_hierarchical.rpt]
+# report_timing_summary -file [file join $out synth_timing.rpt]
+# foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
+#     if {[string match FD* [get_property REF_NAME $cell]] &&
+#         [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {
+#         error "Statistics register remains: $cell"
+#     }
+# }
+# write_checkpoint -force [file join $out synth.dcp]
+# close_design
+# }
+# proc attempt {out period} {
+#     open_checkpoint [file join $out synth.dcp]
+#     create_clock -name clk -period $period [get_ports clk]
+#     opt_design
+#     place_design
+#     phys_opt_design
+#     route_design
+#     set tag [format %.6f $period]
+#     set folder [file join $out route_$tag]
+#     file mkdir $folder
+#     report_utilization -file [file join $folder utilization.rpt]
+#     report_utilization -hierarchical -file [file join $folder hierarchical.rpt]
+#     report_timing_summary -file [file join $folder timing.rpt]
+#     report_route_status -file [file join $folder route_status.rpt]
+#     set wns [get_property SLACK [get_timing_paths -delay_type max -max_paths 1]]
+#     set whs [get_property SLACK [get_timing_paths -delay_type min -max_paths 1]]
+#     set f [open [file join $folder result.txt] w]
+#     puts $f "period_ns=$period\nwns_ns=$wns\nwhs_ns=$whs"
+#     close $f
+#     write_checkpoint -force [file join $folder routed.dcp]
+#     close_design
+#     return [expr {$wns>=0 && $whs>=0}]
+# }
+# set start 6.666667
+# set first [file join $out route_6.666667 routed.dcp]
+# if {[file exists [file join $out closed routed.dcp]]} {
+#     set routed [file join $out closed routed.dcp]
+# } else {
+# if {![file exists $first]} {attempt $out $start}
+# open_checkpoint $first
+# set wns [get_property SLACK [get_timing_paths -delay_type max -max_paths 1]]
+# set whs [get_property SLACK [get_timing_paths -delay_type min -max_paths 1]]
+# close_design
+# set routed $first
+# if {$wns<0 || $whs<0} {
+#     set tick [expr {int(ceil(-$wns/0.1))+1}]
+#     for {set n 0} {$n<4} {incr n} {
+#         set period [expr {$start+$tick*0.1}]
+#         set closed [attempt $out $period]
+#         set routed [file join $out route_[format %.6f $period] routed.dcp]
+#         if {$closed} {break}
+#         open_checkpoint $routed
+#         set wns [get_property SLACK [get_timing_paths -delay_type max -max_paths 1]]
+#         close_design
+#         set tick [expr {$tick+max(1,int(ceil(-$wns/0.1))+1)}]
+#     }
+#     if {!$closed} {error "No closed implementation after measured-delay relaxation"}
+# }
+# }
+# open_checkpoint $routed
+Command: open_checkpoint /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p4_joint_20261013/current/implementation/closed/routed.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.03 . Memory (MB): peak = 1608.367 ; gain = 2.969 ; free physical = 4711 ; free virtual = 94243
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+Netlist sorting complete. Time (s): cpu = 00:00:00.12 ; elapsed = 00:00:00.12 . Memory (MB): peak = 1865.055 ; gain = 0.000 ; free physical = 4473 ; free virtual = 94006
+INFO: [Netlist 29-17] Analyzing 1474 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.05 ; elapsed = 00:00:00.05 . Memory (MB): peak = 1976.953 ; gain = 6.367 ; free physical = 4263 ; free virtual = 93796
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+INFO: [Designutils 20-5722] Start Reading Physical Databases.
+Reading placement.
+Read Netlist Cache: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2622.148 ; gain = 0.000 ; free physical = 3677 ; free virtual = 93209
+Reading placer database...
+Read Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2622.148 ; gain = 0.000 ; free physical = 3677 ; free virtual = 93209
+Read PlaceDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2622.148 ; gain = 0.000 ; free physical = 3677 ; free virtual = 93209
+Read placeStorage: Time (s): cpu = 00:00:00.65 ; elapsed = 00:00:00.67 . Memory (MB): peak = 2644.148 ; gain = 22.000 ; free physical = 3675 ; free virtual = 93207
+Read PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2644.148 ; gain = 0.000 ; free physical = 3675 ; free virtual = 93207
+Reading routing.
+Read RouteStorage: Time (s): cpu = 00:00:00.59 ; elapsed = 00:00:00.21 . Memory (MB): peak = 2667.367 ; gain = 23.219 ; free physical = 3652 ; free virtual = 93184
+Read Physdb Files: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.93 . Memory (MB): peak = 2667.367 ; gain = 45.219 ; free physical = 3652 ; free virtual = 93184
+Restored from archive | CPU: 1.320000 secs | Memory: 42.591690 MB |
+Finished XDEF File Restore: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.96 . Memory (MB): peak = 2667.367 ; gain = 51.156 ; free physical = 3652 ; free virtual = 93184
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2678.367 ; gain = 0.000 ; free physical = 3643 ; free virtual = 93175
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 839 instances were transformed.
+  RAM16X1D => RAM32X1D (RAMD32(x2)): 2 instances
+  RAM16X1S => RAM32X1S (RAMS32): 256 instances
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 407 instances
+  RAM32X1D => RAM32X1D (RAMD32(x2)): 2 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:08 ; elapsed = 00:00:08 . Memory (MB): peak = 2686.402 ; gain = 1081.004 ; free physical = 3650 ; free virtual = 93182
+# set f [open [file join $out sta_sweep.csv] w]
+# puts $f "requested_period_ns,period_ns,wns_ns,whs_ns"
+# for {set tick 0} {$tick<=200} {incr tick} {
+#     set period [expr {$start+$tick*0.1}]
+#     create_clock -name clk -period $period [get_ports clk]
+#     set wns [get_property SLACK [get_timing_paths -delay_type max -max_paths 1]]
+#     set whs [get_property SLACK [get_timing_paths -delay_type min -max_paths 1]]
+#     set actual_period [get_property PERIOD [get_clocks clk]]
+#     puts $f "$period,$actual_period,$wns,$whs"
+#     if {$wns>=0 && $whs>=0} {break}
+# }
+WARNING: [Vivado 12-2489] -period contains time 6.666667 which will be rounded to 6.667 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 6.766667 which will be rounded to 6.767 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 6.866667 which will be rounded to 6.867 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 6.966667 which will be rounded to 6.967 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.066667 which will be rounded to 7.067 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.166667 which will be rounded to 7.167 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.266667 which will be rounded to 7.267 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.366667 which will be rounded to 7.367 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.466667 which will be rounded to 7.467 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.566667 which will be rounded to 7.567 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.666667 which will be rounded to 7.667 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.766667 which will be rounded to 7.767 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.866667 which will be rounded to 7.867 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 7.966667 which will be rounded to 7.967 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.066667 which will be rounded to 8.067 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.166667 which will be rounded to 8.167 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.266667 which will be rounded to 8.267 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.366667 which will be rounded to 8.367 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.466667 which will be rounded to 8.467 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.566667 which will be rounded to 8.567 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.666667 which will be rounded to 8.667 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.766667 which will be rounded to 8.767 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.866667 which will be rounded to 8.867 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 8.966667 which will be rounded to 8.967 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.066667 which will be rounded to 9.067 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.166667 which will be rounded to 9.167 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.266667 which will be rounded to 9.267 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.366667 which will be rounded to 9.367 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.466667 which will be rounded to 9.467 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.566667 which will be rounded to 9.567 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.666667 which will be rounded to 9.667 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.766667 which will be rounded to 9.767 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.866667 which will be rounded to 9.867 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 9.966667 which will be rounded to 9.967 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+WARNING: [Vivado 12-2489] -period contains time 10.066667 which will be rounded to 10.067 to ensure it is an integer multiple of 1 picosecond
+WARNING: [Constraints 18-619] A clock with name 'clk' already exists, overwriting the previous clock with the same name.
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+# close $f
+# if {$tick>200} {error "STA sweep failed"}
+# set folder [file join $out closed]
+# file mkdir $folder
+# report_utilization -file [file join $folder utilization.rpt]
+# report_utilization -hierarchical -file [file join $folder hierarchical.rpt]
+# report_timing_summary -file [file join $folder timing.rpt]
+# report_route_status -file [file join $folder route_status.rpt]
+# report_drc -file [file join $folder drc.rpt]
+Command: report_drc -file /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p4_joint_20261013/current/implementation/closed/drc.rpt
+INFO: [IP_Flow 19-234] Refreshing IP repositories
+INFO: [IP_Flow 19-1704] No user IP repositories specified
+INFO: [IP_Flow 19-2313] Loaded Vivado IP repository '/opt/Xilinx/2025.2/data/ip'.
+INFO: [DRC 23-27] Running DRC with 4 threads
+WARNING: [DRC 23-814] Not all possible (connectivity based) DRCs may have been run because this design is seen as Out of Context.
+INFO: [Vivado_Tcl 2-168] The results of DRC are in file /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p4_joint_20261013/current/implementation/closed/drc.rpt.
+report_drc completed successfully
+# report_clock_interaction -file [file join $folder clocks.rpt]
+# set handle [open [file join $folder result.txt] w]
+# puts $handle "period_ns=$actual_period\nrequested_period_ns=$period\nwns_ns=$wns\nwhs_ns=$whs\nphysical_checkpoint=$routed"
+# close $handle
+# write_checkpoint -force [file join $folder routed.dcp]
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Wrote PlaceDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16836 ; free virtual = 106653
+Wrote PulsedLatchDB: Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16836 ; free virtual = 106653
+Writing XDEF routing.
+Writing XDEF routing logical nets.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.18 ; elapsed = 00:00:00.04 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16827 ; free virtual = 106649
+Writing XDEF routing special nets.
+Wrote RouteStorage: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.23 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16795 ; free virtual = 106633
+Wrote PlaceStorage: Time (s): cpu = 00:00:01 ; elapsed = 00:00:00.87 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16829 ; free virtual = 106697
+Wrote Netlist Cache: Time (s): cpu = 00:00:00.03 ; elapsed = 00:00:00.03 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16828 ; free virtual = 106700
+Wrote Device Cache: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16828 ; free virtual = 106700
+Write Physdb Complete: Time (s): cpu = 00:00:03 ; elapsed = 00:00:01 . Memory (MB): peak = 2945.891 ; gain = 0.000 ; free physical = 16827 ; free virtual = 106700
+INFO: [Common 17-1381] The checkpoint '/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p4_joint_20261013/current/implementation/closed/routed.dcp' has been generated.
+# set handle [open [file join $out closed_period.txt] w]
+# puts $handle $actual_period
+# close $handle
+# puts "P4_IMPLEMENT_PASS period_ns=$actual_period"
+P4_IMPLEMENT_PASS period_ns=10.067
+# exit
+INFO: [Common 17-206] Exiting Vivado at Tue Oct 13 12:51:36 2026...

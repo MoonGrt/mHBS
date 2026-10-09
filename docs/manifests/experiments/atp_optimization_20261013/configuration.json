@@ -1,0 +1,17 @@
+{
+  "part": "xc7a200tffg1156-3",
+  "clock_ns": 6.666667,
+  "threads": 4,
+  "top": "common",
+  "profile_enable": 0,
+  "candidate_keccak_lut6": 0,
+  "u1_assumed_mhz": 150,
+  "routed": false,
+  "commands": [
+    "KECCAK_LUT6=0 bash <snapshot>/scripts/synthesize.sh 4 1",
+    "KECCAK_LUT6=0 bash <snapshot>/scripts/synthesize.sh 12 1",
+    "VECTORS_DIR=<project>/tb/vectors bash <snapshot>/scripts/simulate.sh slh_128f sign 12 1",
+    "python3 scripts/report_atp.py"
+  ],
+  "note": "Frozen candidate scripts predate the default-mode change; use explicit KECCAK_LUT6=0. Stored synthesis reports are in synth/; reruns write build/synth/. Generic and LUT6 logic are independently checked. Baseline and current RTL checksums are in the generated report JSON."
+}
