@@ -16,7 +16,7 @@ module pipeline #(
  input wire [127:0] identifier,
  input wire [255:0] secret_seed,public_seed,
  input wire [4:0] request_layer,input wire [63:0] request_tree,
- input wire [9:0] request_leaf,input wire [7:0] request_a,input wire [31:0] request_b,
+ input wire [19:0] request_leaf,input wire [7:0] request_a,input wire [31:0] request_b,
  input wire [7:0] seed_domain,step_domain,
  input wire [TAG_BITS-1:0] read_tag,
  output wire [255:0] read_digest,read_capture,
@@ -25,11 +25,11 @@ module pipeline #(
  output wire perm_valid,input wire perm_ready,output wire [1599:0] perm_state,
  output wire [TAG_BITS-1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
  input wire [TAG_BITS-1:0] perm_result_tag,
- output logic [31:0] hash_count,permutation_count
+ output logic [63:0] hash_count,permutation_count
 );
  function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
- wire [255:0] seed_address={be32(request_b),be32({24'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
- wire [255:0] step_address={be32(request_b),be32({24'd0,request_a}),be32({22'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+ wire [255:0] seed_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+ wire [255:0] step_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
  wire [255:0] address[0:PIPELINE-1];
  logic [4:0] steps[0:PIPELINE-1],iteration[0:PIPELINE-1],capture_after[0:PIPELINE-1];
  logic [PIPELINE-1:0] busy,complete,capture_enable,preserve_counter;
@@ -250,7 +250,7 @@ module pipeline #(
   logic [63:0] tree;
   logic [7:0] domain;
   logic [1:0] kind;
-  logic [9:0] leaves[0:PIPELINE-1];
+  logic [19:0] leaves[0:PIPELINE-1];
   logic [7:0] chains[0:PIPELINE-1];
   logic [31:0] indices[0:PIPELINE-1];
   always_ff @(posedge clk)if(!rst && accept)begin
@@ -258,7 +258,7 @@ module pipeline #(
    leaves[request_tag]<=request_leaf;chains[request_tag]<=request_a;indices[request_tag]<=request_b;
   end
   for(genvar j=0;j<PIPELINE;j++)begin
-   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({22'd0,leaves[j]}),be32({24'd0,domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({12'd0,leaves[j]}),be32({24'd0,domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
    assign family[j]=request_family;
    assign fixed_shape[j]=shared_shape;assign paired[j]=shared_pair;
   end

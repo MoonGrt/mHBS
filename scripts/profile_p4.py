@@ -46,7 +46,7 @@ def main():
     command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','-GPROFILE_ENABLE=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
     with (out/'compile.log').open('w') as log:subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
     rows=[];results={}
-    for profile,op in (('slh_128f','sign'),('xmss_omega4','keygen'),('lms_omega4','keygen')):
+    for profile,op in (('slh_128f','sign'),('xmss_h10','keygen'),('lms_h10','keygen')):
         key=f'{profile}_{op}'
         with (out/f'{key}.log').open('w') as log:subprocess.run([str(out/'obj/Vtb'),f'+VECTOR={ROOT}/tb/vectors/{profile}/{op}'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
         text=(out/f'{key}.log').read_text();results[key]={}

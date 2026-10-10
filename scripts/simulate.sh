@@ -32,7 +32,9 @@ defines=()
 if [[ $lut6 == 1 ]]; then defines+=(+define+MHBS_XILINX_LUT6); work+=_lut6; fi
 mkdir -p "$work"
 identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
-if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
+exec 9>"$work/compile.lock"
+flock 9
+    if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
     echo "Compile P${p}U${u} stats=$stats; log: $work/compile.log"
     if ! "$verilator_bin" --binary --timing -O3 -j 2 -Wno-fatal --top-module tb \
         "-GPIPELINE=$p" "-GUNROLL=$u" "-GPROFILE_ENABLE=$stats" \
@@ -41,19 +43,27 @@ if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.
     fi
     printf '%s\n' "$identity" > "$work/source.sha256"
 fi
+flock -u 9
+
 run_case() {
     local name=$1 op=$2
     shift 2
-    local vector="$vectors_root/$name/$op" log="$work/${name}_${op}.log"
+    name=$(python3 -c 'from model.profiles import get_profile; import sys; print(get_profile(sys.argv[1]).name)' "$name")
+    local vector="$vectors_root/$name/$op" canonical="$work/${name}_${op}.log"
+    local log
+    log=$(mktemp "$work/${name}_${op}.XXXXXX.log")
     [[ -d $vector ]] || { echo "Unknown vector: $name/$op" >&2; return 2; }
     if ! "$work/obj/Vtb" "+VECTOR=$vector" "$@" >"$log" 2>&1; then
+        cp "$log" "$canonical"
         tail -n 30 "$log" >&2; return 1
     fi
     if ! grep -E 'STATEFUL_PASS |STATEFUL_FAULT_PASS|INDEX_REJECT_PASS' "$log"; then
         echo "Missing pass marker: $log" >&2; return 1
     fi
+    cp "$log" "$canonical"
+    rm "$log"
 }
-profiles=(slh_128f slh_192f slh_256f slh_128s slh_192s slh_256s xmss_omega2 xmss_omega4 lms_omega2 lms_omega4)
+profiles=(slh_128f slh_192f slh_256f slh_128s slh_192s slh_256s xmss_h10 xmss_h16 xmss_h20 lms_h10 lms_h15 lms_h20)
 if [[ $mode == smoke ]]; then
     for name in "${profiles[@]}"; do run_case "$name" verify "$@"; done
     run_case slh_128f keygen "$@"

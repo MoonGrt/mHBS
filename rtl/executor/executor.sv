@@ -25,18 +25,22 @@ module executor #(
     output wire out_valid, output wire [255:0] out_data,
     output wire [5:0] out_bytes,
     output wire busy, output logic done, error, output logic [15:0] error_code,
-    output wire [31:0] hash_count, permutation_count,
-    output logic [31:0] cycles
+    output wire [63:0] hash_count, permutation_count,
+    output logic [63:0] cycles
 );
     localparam integer N=32, W=256, V=392, INDEX_BITS=8, MAX_MESSAGE_BYTES=87;
     localparam integer DIGEST_BYTES=49;
     // Six supported profiles need at most ceil(35*9/8)=40 FORS bytes.
     // Tree/leaf indices still consume the full V-bit transient Hmsg result.
     localparam integer FORS_DIGEST_BITS=320;
-    wire stateful=profile_descriptor[3];
-    wire xmss=stateful && !profile_descriptor[1];
-    wire omega2=stateful && !profile_descriptor[0];
-    wire [3:0] chain_max=omega2 ? 4'd3 : 4'd15;
+    wire stateful=profile_descriptor>=64'h18 && profile_descriptor<=64'h1d;
+    wire xmss=stateful && profile_descriptor<64'h1b;
+    wire valid_profile=stateful || profile_descriptor==0 || profile_descriptor==1
+        || profile_descriptor==2 || profile_descriptor==4 || profile_descriptor==5 || profile_descriptor==6;
+    wire [4:0] stateful_height=(profile_descriptor==64'h18 || profile_descriptor==64'h1b) ? 5'd10
+        : profile_descriptor==64'h19 ? 5'd16 : profile_descriptor==64'h1c ? 5'd15 : 5'd20;
+    wire omega2=1'b0;
+    wire [3:0] chain_max=4'd15;
     wire [1:0] profile_code=profile_descriptor[1:0];
     wire small_signature=!stateful && profile_descriptor[2];
     wire [5:0] node_bytes=stateful ? 6'd32 : profile_code==0 ? 6'd16
@@ -95,7 +99,7 @@ module executor #(
     logic [W-1:0] value [0:3];
     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
     logic [63:0] scalar_tree;
-    logic [9:0] scalar_leaf;
+    logic [19:0] scalar_leaf;
     logic [11:0] checksum;
     logic [7:0] transform_index;
     logic [7:0] lt_count,lt_cursor;
@@ -123,9 +127,9 @@ module executor #(
     logic [4:0] chain_id, parent_id;
     wire [63:0] chain_descriptor = saved_chain_descriptor;
     logic standalone_chain;
-    logic [3:0] tree_height, node_level, auth_level;
+    logic [4:0] tree_height, node_level, auth_level;
     logic [1:0] indexing;
-    logic [13:0] target, leaf_cursor, node_index;
+    logic [20:0] target, leaf_cursor, node_index;
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
     localparam integer PIPE_BATCH=PIPELINE;
     localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1;
@@ -160,11 +164,11 @@ module executor #(
     wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe);
     wire pipe_ready,pipe_valid,pipe_selected;
     wire [TAG_BITS-1:0] pipe_tag;
-    wire [31:0] pipe_hashes,pipe_permutations;
+    wire [63:0] pipe_hashes,pipe_permutations;
     wire [255:0] selected_capture=pipe_batch_used ? pipe_read_capture : lane_capture;
     logic [255:0] node_value;
-    (* ram_style="distributed" *) logic [255:0] stack [0:15];
-    (* ram_style="distributed" *) logic [255:0] auth_path [0:15];
+    (* ram_style="distributed" *) logic [255:0] stack [0:19];
+    (* ram_style="distributed" *) logic [255:0] auth_path [0:19];
 
     logic [4:0] hash_recipe_id;
     assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[48:44] : macro_route,hash_recipe_id[4:0]};
@@ -185,7 +189,7 @@ module executor #(
     logic task_chain;
     logic task_capture;
     logic [4:0] task_steps, task_capture_after;
-    logic [9:0] task_leaf;
+    logic [19:0] task_leaf;
     logic [INDEX_BITS-1:0] task_a;
     logic [31:0] task_b;
     logic [255:0] task_left0;
@@ -202,8 +206,8 @@ module executor #(
     wire [V-1:0] lane_value;
     wire [255:0] lane_capture;
     wire [INDEX_BITS-1:0] lane_list0, lane_list1,lane_list_next;
-    wire [31:0] lane_hashes, lane_permutations;
-    logic [31:0] hash_base, permutation_base;
+    wire [63:0] lane_hashes, lane_permutations;
+    logic [63:0] hash_base, permutation_base;
     logic [V-1:0] result;
     // ROUTE consumes these registers before it can update any source. Keep
     // the original staging cycle, but remember only the source selection.
@@ -214,8 +218,8 @@ module executor #(
                         : route_source==ROUTE_SAVED ? value[3] : emit_value)};
     // The sponge retains capture through response and output stalls. No new
     // request is issued before CHAIN_OUTPUT0 has consumed the capture.
-    wire [31:0] total_hashes = lane_hashes+pipe_hashes;
-    wire [31:0] total_permutations = lane_permutations+pipe_permutations;
+    wire [63:0] total_hashes = lane_hashes+pipe_hashes;
+    wire [63:0] total_permutations = lane_permutations+pipe_permutations;
     assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
     assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
 
@@ -232,7 +236,7 @@ module executor #(
         .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
     );
     wire [INDEX_BITS-1:0] batch_chain_index=pipe_rolling ? pipe_next_chain : chain_cursor+INDEX_BITS'(pipe_issue_slot);
-    wire [13:0] batch_leaf_index=leaf_cursor+14'(pipe_issue_slot);
+    wire [20:0] batch_leaf_index=leaf_cursor+21'(pipe_issue_slot);
     assign pipe_selected=(state==PIPE_ISSUE || state==LT_PIPE_ISSUE || state==FORS_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid))
         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
         recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
@@ -249,7 +253,7 @@ module executor #(
             .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(fors_pipe ? node_value : endpoint_value1),
             .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
             .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
-            .batch_leaf(lt_pipe ? leaf_cursor[9:0] : indexing==1 ? scalar_leaf : leaf_cursor[9:0]),
+            .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
             .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
             .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(leaf_cursor)>>(fors_level ? 2 : 1))+32'(fors_pair_cursor) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
             .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
@@ -470,7 +474,7 @@ module executor #(
     // Isolating these writes permits distributed RAM inference.
     wire auth_write=(state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
         || state==FORS_AUTH0 || state==FORS_AUTH1;
-    wire [3:0] auth_write_level=state==FORS_AUTH0 ? 4'd0 : state==FORS_AUTH1 ? 4'd1 : node_level;
+    wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
     wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? pipe_read_result : node_value;
     always_ff @(posedge clk)begin
         if(auth_write)auth_path[auth_write_level]<=auth_write_data;
@@ -533,10 +537,11 @@ module executor #(
                     error<=0; error_code<=0; cycles<=0; operation<=job_operation;
                     verify_pass<=0;
                     message_length<=job_message_length; message_received<=0;
-                    scalar_tree<=0; scalar_leaf<=stateful ? job_index[9:0] : 0; layer<=0; group_index<=0;
+                    scalar_tree<=0; scalar_leaf<=stateful ? job_index[19:0] : 0; layer<=0; group_index<=0;
                     if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
                     value[3]<=job_public_root;
-                    if(stateful && job_index>=1024)fail(16'h3008);
+                    if(!valid_profile)fail(16'h3009);
+                    else if(stateful && job_index>=(32'd1<<stateful_height))fail(16'h3008);
                     else if(job_operation) begin
                         enter_state(MESSAGE);
                     end else begin
@@ -583,7 +588,7 @@ module executor #(
                        end
                     2: begin
                            chain_id<=macro_desc; standalone_chain<=1; indexing<=0;
-                           leaf_cursor<=stateful ? job_index[9:0] : 0; target<=stateful ? job_index[9:0] : 0; chain_cursor<=0;
+                           leaf_cursor<=stateful ? job_index[19:0] : 0; target<=stateful ? job_index[19:0] : 0; chain_cursor<=0;
                            endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor; enter_state(CHAIN_SETUP);
                        end
                     3: enter_state(TREE_INIT);
@@ -596,15 +601,15 @@ module executor #(
                     pipe_cache_valid<=0;pipe_batch_used<=0;
                     saved_chain_descriptor<=descriptors[6];
 
-                    chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<=descriptor[43:40];
+                    chain_id<=descriptor[59:52]; parent_id<=descriptor[51:44]; tree_height<={descriptor[39],descriptor[43:40]};
                     indexing<=descriptor[33:32]; standalone_chain<=0;
-                    target<=stateful ? {4'd0,job_index[9:0]} : descriptor[37:36]==1 ? fors_target(group_index)
+                    target<=stateful ? {1'b0,job_index[19:0]} : descriptor[37:36]==1 ? fors_target(group_index)
                         : scalar_leaf;
                     leaf_cursor<=verifying ? scalar_leaf : 0;
                     chain_cursor<=0; node_level<=0; auth_level<=0;
                     endpoint_count<=descriptors[6][27:20];
                     if(stateful && verifying)begin
-                        node_value<=value[2];node_index<=job_index[9:0];enter_state(PUSH_NODE);
+                        node_value<=value[2];node_index<=job_index[19:0];enter_state(PUSH_NODE);
                     end else enter_state(CHAIN_SETUP);
                 end
                 CHAIN_SETUP: begin
@@ -792,7 +797,7 @@ module executor #(
                 SF_REDUCED:enter_state(SF_LEAF);
                 SF_LEAF:begin
                     task_chain<=0;task_capture<=0;task_steps<=0;
-                    task_leaf<=leaf_cursor;task_a<=0;task_b<=32'd1024+leaf_cursor;
+                    task_leaf<=leaf_cursor;task_a<=0;task_b<=(32'd1<<stateful_height)+32'(leaf_cursor);
                     task_left0<=result[W-1:0];start_hash(descriptors[0],SF_LEAF_DONE);
                 end
                 SF_LEAF_DONE:begin

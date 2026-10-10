@@ -21,29 +21,30 @@ def main():
     message = bytes((17+3*k) & 255 for k in range(87))
     nodes = [bytes((13*j+k) & 255 for k in range(32)) for j in range(136)]
     adr = b''.join(map(be, (3, 0, 0x01234567, 0x89abcdef, 0x83, 513, 67, 0x12345678)))
-    def masked(compound):
-        return bytes(12)+b''.join(map(be, (0x83, 513, 67, 0x12345678, compound)))
-    def frame(n, shape, arity, length):
+    def masked(compound, leaf=513):
+        return bytes(12)+b''.join(map(be, (0x83, leaf, 67, 0x12345678, compound)))
+    def frame(n, shape, arity, length, leaf=513):
+        adr = b''.join(map(be, (3, 0, 0x01234567, 0x89abcdef, 0x83, leaf, 67, 0x12345678)))
         fixed, hashes = shape not in (3, 4, 6, 11, 12, 13), 1
         if shape == 1: data = pub[:n]+adr+sk[:n]
         elif shape == 2: data = pub[:n]+adr+left[:n]+(right[:n] if arity == 2 else b'')
         elif shape == 3: data = prf[:n]+rand[:n]+message[:length]
         elif shape == 4: data = rand[:n]+pub[:n]+root[:n]+message[:length]
-        elif shape == 5: data = be(3, 32)+prf+be(513, 32)
-        elif shape == 6: data = be(2, 32)+rand+root+be(513, 32)+message[:length]
-        elif shape == 7: data = be(4, 32)+sk+pub+masked(0)
+        elif shape == 5: data = be(3, 32)+prf+be(leaf, 32)
+        elif shape == 6: data = be(2, 32)+rand+root+be(leaf, 32)+message[:length]
+        elif shape == 7: data = be(4, 32)+sk+pub+masked(0, leaf)
         elif shape == 8:
-            key, m0 = h(be(3, 32)+pub+masked(0)), h(be(3, 32)+pub+masked(1))
+            key, m0 = h(be(3, 32)+pub+masked(0, leaf)), h(be(3, 32)+pub+masked(1, leaf))
             data = be(arity-1, 32)+key+bytes(a ^ b for a, b in zip(left, m0))
             if arity == 2:
-                m1 = h(be(3, 32)+pub+masked(2))
+                m1 = h(be(3, 32)+pub+masked(2, leaf))
                 data += bytes(a ^ b for a, b in zip(right, m1))
             hashes = arity+2
-        elif shape == 9: data = ident+be(513)+be(67, 2)+b'\xff'+sk
-        elif shape == 10: data = ident+be(513)+be(67, 2)+b'\x78'+left
-        elif shape == 11: data = ident+be(513)+b'\x81\x81'+rand+message[:length]
+        elif shape == 9: data = ident+be(leaf)+be(67, 2)+b'\xff'+sk
+        elif shape == 10: data = ident+be(leaf)+be(67, 2)+b'\x78'+left
+        elif shape == 11: data = ident+be(leaf)+b'\x81\x81'+rand+message[:length]
         elif shape == 12: data = pub[:n]+adr+b''.join(v[:n] for v in nodes[:arity])
-        elif shape == 13: data = ident+be(513)+b'\x80\x80'+b''.join(nodes[:arity])
+        elif shape == 13: data = ident+be(leaf)+b'\x80\x80'+b''.join(nodes[:arity])
         elif shape == 14: data = ident+be(0x12345678)+b'\x82\x82'+left
         elif shape == 15: data = ident+be(0x12345678)+b'\x83\x83'+left+right
         else: raise ValueError(shape)
@@ -66,11 +67,15 @@ def main():
     for shape in (6, 11):
         cases.extend((32, shape, 1, length) for length in range(1, 88))
     cases.extend((32, 13, arity, 1) for arity in (1, 2, 3, 4, 5, 7, 8, 9, 17, 33, 51, 67, 101, 133))
+    cases=[(*c,513) for c in cases]
+    for leaf in (1023,1024,32767,32768,65535,65536,1048575):
+        cases.extend((32,shape,arity,1,leaf) for shape in (1,2,5,6,7,8,9,10,11,13,14,15)
+                     for arity in ((1,2) if shape in (2,8) else (2,) if shape==15 else (67,) if shape==13 else (1,)))
     values = []
-    for n, shape, arity, length in cases:
-        result, hashes, perms = frame(n, shape, arity, length)
-        value = int.from_bytes(result, 'little') | n << 392 | length << 398 | shape << 405 | arity << 409 | hashes << 417 | perms << 421
-        values.append(f'{value:0108x}\n')
+    for n, shape, arity, length, leaf in cases:
+        result, hashes, perms = frame(n, shape, arity, length, leaf)
+        value = int.from_bytes(result, 'little') | n << 392 | length << 398 | shape << 405 | arity << 409 | hashes << 417 | perms << 421 | leaf << 432
+        values.append(f'{value:0113x}\n')
     vector = work / 'recipes.mem'
     vector.write_text(''.join(values))
     obj = work / 'obj'

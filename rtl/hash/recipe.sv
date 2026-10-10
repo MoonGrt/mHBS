@@ -15,7 +15,7 @@ module recipe #(
     input wire batch_mode,batch_request_valid,output wire batch_request_ready,
     input wire [TAG_BITS-1:0] batch_request_tag,
     input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
-    input wire [9:0] batch_leaf,input wire [7:0] batch_a,input wire [31:0] batch_b,
+    input wire [19:0] batch_leaf,input wire [7:0] batch_a,input wire [31:0] batch_b,
     input wire [1:0] batch_family,input wire batch_no_seed,
     input wire [3:0] batch_start,input wire [255:0] batch_initial_value,
     input wire [3:0] batch_fixed_shape,input wire batch_pair,input wire [255:0] batch_right,
@@ -25,7 +25,7 @@ module recipe #(
     output wire [255:0] batch_response_digest,batch_response_capture,
     input wire [TAG_BITS-1:0] batch_read_tag,
     output wire [255:0] batch_read_digest,batch_read_capture,
-    output wire [31:0] batch_hashes,batch_permutations,
+    output wire [63:0] batch_hashes,batch_permutations,
     input wire [5:0] node_bytes,
     input wire request_valid, output wire request_ready,
     input wire [63:0] request_recipe, request_step_recipe,
@@ -38,7 +38,7 @@ module recipe #(
     input wire [6:0] message_length,
     input wire [4:0] request_layer,
     input wire [63:0] request_tree,
-    input wire [9:0] request_leaf,
+    input wire [19:0] request_leaf,
     input wire [INDEX_BITS-1:0] request_a,
     input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
@@ -48,7 +48,7 @@ module recipe #(
     output wire [DIGEST_BYTES*8-1:0] response_value,
     output wire [N*8-1:0] response_capture,
     output logic error,
-    output logic [31:0] hash_count, permutation_count
+    output logic [63:0] hash_count, permutation_count
 );
     localparam [3:0] ADDRESS_SEED=1, ADDRESS_VALUE=2, MESSAGE_PRF=3,
         MESSAGE_DIGEST=4, INDEX_PRF=5, ROOT_MESSAGE=6, MASKED_SEED=7,
@@ -128,7 +128,7 @@ module recipe #(
             ? request_b : {27'd0, iteration}) : request_b;
     wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
     wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
-    wire [31:0] leaf = {22'd0, request_leaf};
+    wire [31:0] leaf = {12'd0, request_leaf};
     wire [12:0] input_length = LEGACY_MASKED && shapes[MASKED_VALUE]
         && compound < arity+1 ? 13'd96
         : request_chain && !seed_phase ? step_length : seed_length;

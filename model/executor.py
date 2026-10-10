@@ -103,7 +103,7 @@ def tree(chain_id: int, parent: int, height: int, target: int = 0,
          indexing: int = 0, cache: bool = False, lookup: bool = False,
          full_cache: bool = False) -> int:
     return record(Kind.TREE, chain=(chain_id, 52, 8), parent=(parent, 44, 8),
-                  height=(height, 40, 4), target=(target, 36, 2),
+                  height=(height & 15, 40, 4), height_high=(height >> 4, 39, 1), target=(target, 36, 2),
                   indexing=(indexing, 32, 2), cache=(int(cache), 31, 1),
                   lookup=(int(lookup), 30, 1), full_cache=(int(full_cache), 29, 1))
 
@@ -142,7 +142,7 @@ class Image:
     def omega(self): return field(self.descriptors[1], 44, 4)
 
     @property
-    def hp(self): return field(self.descriptors[1], 40, 4)
+    def hp(self): return self.h if self.stateful else field(self.descriptors[1], 40, 4)
 
     @property
     def a(self): return field(self.descriptors[1], 36, 4)
@@ -200,7 +200,7 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
     records = [0] * 128
     records[1] = record(Kind.PROFILE, stateful=(int(p.stateful), 59, 1),
         family=({"slh":1,"xmss":2,"lms":3}[name], 56, 3), n=(n,48,8),
-        omega=(p.omega,44,4), height=(p.hp,40,4), fors_a=(p.a,36,4),
+        omega=(p.omega,44,4), height=(p.hp & 15,40,4), fors_a=(p.a,36,4),
         message_limit=(87,24,8), fors_k=(p.k,18,6), layers=(p.d,13,5),
         digest_bytes=(p.m,7,6), total_height=(p.h,0,7))
     records[40] = route(0, emit=True)
@@ -210,7 +210,7 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
     records[44] = route(3)
     records[45] = route(0)
     records[48] = record(Kind.TRANSFORM, operation=(1, 56, 4), source=(2, 48, 2))
-    records[49] = record(Kind.TRANSFORM, operation=(2, 56, 4), shift=(p.hp, 40, 4))
+    records[49] = record(Kind.TRANSFORM, operation=(2, 56, 4), shift=(0 if p.stateful else p.hp, 40, 4))
 
     def emit(desc: int, base: int, parts: list[tuple]) -> None:
         records[desc] = record(Kind.EMIT, base=(base, 52, 8), count=(len(parts), 48, 4))
@@ -268,19 +268,17 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
             records[i] = recipe(*args)
         records[16] = chain(4, 5, p.chains, (1 << p.omega)-1, reduce=6, mode=2) if masked \
             else chain(3, 4, p.chains, (1 << p.omega)-1, reduce=5, leaf=6, mode=1)
-        records[20] = tree(16, 7, 10, target=2, indexing=0 if masked else 2,
+        records[20] = tree(16, 7, p.h, target=2, indexing=0 if masked else 2,
                            cache=True, full_cache=full_cache)
-        records[21] = tree(16, 7, 10, target=2, indexing=0 if masked else 2, lookup=True)
-        parts = [(Source.INDEX, 4), (Source.SECRET, n), (Source.PRF, n),
-                 (Source.ROOT, n), (Source.PUBLIC, n), (Source.ROOT, n), (Source.PUBLIC, n)] \
-            if masked else [(Source.INDEX, 4), (Source.IDENTIFIER, 16), (Source.SECRET, n),
-                            (Source.ROOT, n), (Source.CONSTANT, 4, 0x80000006),
-                            (Source.CONSTANT, 4, (0x80000002 if p.omega==2 else 0x80000003)), (Source.IDENTIFIER, 16), (Source.ROOT, n)]
+        records[21] = tree(16, 7, p.h, target=2, indexing=0 if masked else 2, lookup=True)
+        parts = [(Source.CONSTANT, 4, p.typecode), (Source.ROOT, n), (Source.PUBLIC, n)] \
+            if masked else [(Source.CONSTANT, 4, p.typecode), (Source.CONSTANT, 4, 0x0b),
+                            (Source.IDENTIFIER, 16), (Source.ROOT, n)]
         emit(50, 64, parts)
-        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, (0x80000002 if p.omega==2 else 0x80000003))])
+        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, 0x0b)])
              + [(Source.RANDOM, n)])
         if not masked:
-            emit(52, 84, [(Source.CONSTANT, 4, 0x80000006)])
+            emit(52, 84, [(Source.CONSTANT, 4, p.typecode)])
         kg = [single(Macro.TREE, 20, 44, first=True), single(Macro.EMIT, 50), Token(TOKEN_HALT)]
         sg = [single(Macro.HASH, 2, 45 if masked else 42, first=True)]
         if masked:
@@ -310,9 +308,9 @@ def validate(image: Image) -> None:
     if d[1] >> 60 != Kind.PROFILE or image.n not in (16, 24, 32):
         raise ValueError("unsupported node size")
     family = field(d[1],56,3)
-    if family not in (1,2,3) or image.stateful != (family != 1) or image.omega not in (2,4):
+    if family not in (1,2,3) or image.stateful != (family != 1) or image.omega != 4:
         raise ValueError("invalid profile identity/Winternitz width")
-    if image.stateful and (image.n != 32 or image.h != 10 or image.hp != 10):
+    if image.stateful and (image.n != 32 or image.h not in ((10,16,20) if family==2 else (10,15,20)) or image.hp != image.h):
         raise ValueError("unsupported stateful profile")
     if not image.stateful and (image.omega != 4 or (image.n,image.h,image.hp,image.k,image.a,image.m) not in
             ((16,66,3,33,6,34),(24,66,3,33,8,42),(32,68,4,35,9,49),
@@ -343,7 +341,7 @@ def validate(image: Image) -> None:
         elif kind == Kind.TREE:
             ref(field(w, 52, 8), Kind.CHAIN)
             ref(field(w, 44, 8), Kind.HASH)
-            if not 1 <= field(w, 40, 4) <= (10 if image.stateful else 14):
+            if not 1 <= (field(w, 40, 4) | (field(w,39,1)<<4)) <= (20 if image.stateful else 14):
                 raise ValueError("tree height")
             if field(w, 36, 2) > 2 or field(w, 32, 2) > 2:
                 raise ValueError("tree addressing mode")
@@ -397,7 +395,7 @@ class Machine:
         validate(image)
         if any(len(v) != image.n for v in (job.secret, job.prf, job.public, job.random)):
             raise ValueError("job node width")
-        if len(job.identifier) != 16 or not 0 <= job.q <= 1024:
+        if len(job.identifier) != 16 or not (0 <= job.q < (1 << image.h) if image.stateful else job.q == 0):
             raise ValueError("job identifier/index")
         self.image, self.job, self.n, self.observe = image, job, image.n, observe
         self.values = [bytes(image.m) for _ in range(4)]
@@ -490,7 +488,7 @@ class Machine:
 
     def tree(self, did: int, flags: int, coord: int) -> bytes:
         d = self.image.descriptors[did]
-        cid, parent, height = field(d, 52, 8), field(d, 44, 8), field(d, 40, 4)
+        cid, parent, height = field(d, 52, 8), field(d, 44, 8), (field(d, 40, 4) | (field(d,39,1)<<4))
         target_mode, indexing = field(d, 36, 2), field(d, 32, 2)
         layer, group = coord >> 19, (coord >> 13) & 63
         target = self.active_q if target_mode == 2 else self.scalar_leaf
@@ -538,7 +536,7 @@ class Machine:
             raise ValueError("message length")
         if sign and self.image.stateful:
             if not self.recompute_auth and not self.cache_valid: raise ValueError("keygen required")
-            if self.q >= 1024: raise ValueError("index exhausted")
+            if self.q >= (1 << self.image.h): raise ValueError("index exhausted")
             if not self.recompute_auth and not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
                 raise ValueError("authentication cache belongs to another index")
             if self.index_policy == "guarded" and not commit:

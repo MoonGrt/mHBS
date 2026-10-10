@@ -14,8 +14,8 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
  input wire [63:0] message_data,input wire message_valid,output wire message_ready,
  output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
  output wire [1:0] result_kind,output logic busy,done,keygen_done,error,
- output logic [15:0] error_code,output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
- output wire [31:0] hash_count,permutation_count
+ output logic [15:0] error_code,output logic [63:0] boot_cycles,keygen_cycles,sign_cycles,
+ output wire [63:0] hash_count,permutation_count
 );
     typedef enum logic [2:0] {HEADER,PROFILE,RELEASE,REQUEST,RUN,HALTED} phase_t;
     phase_t phase;
@@ -24,7 +24,7 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
     wire [9:0] core_descriptor_addresses;
     wire core_message_ready,core_job_ready,core_done,core_error;
     wire [15:0] core_error_code;
-    wire [31:0] core_cycles;
+    wire [63:0] core_cycles;
     wire [3:0] entry=job_operation ? image_header[44:41] : image_header[39:36];
     wire message_length_valid=job_operation<=2 && (job_operation ? (message_length>=7'd1 && message_length<=7'd87)
                                         : (message_length==7'd0));

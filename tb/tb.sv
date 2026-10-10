@@ -7,7 +7,7 @@ module tb;
  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
  wire [63:0] program_data=pm[program_address],template_data=tm[template_address];
  wire [127:0] descriptor_data={dm[descriptor_addresses[9:5]],dm[descriptor_addresses[4:0]]};
- reg [255:0] cfg[0:8],nodes_mem[0:1557];reg [31:0] meta[0:4];
+ reg [255:0] cfg[0:8],nodes_mem[0:1557];reg [63:0] meta[0:4];
  reg [7:0] msg[0:86],expected[0:65535];
  wire [255:0] job_secret_seed=cfg[0],job_secret_prf=cfg[1],job_public_seed=cfg[2],job_randomizer=cfg[3],job_public_root=cfg[4];
  wire [127:0] job_identifier=cfg[5][127:0];wire [31:0] job_index=cfg[6][31:0];wire [1:0] job_operation=cfg[7][1:0];
@@ -16,13 +16,16 @@ module tb;
  logic verify_valid=0;logic [255:0] verify_data=0;wire verify_ready,verify_pass;
  wire out_valid;wire [255:0] out_data;wire [5:0] out_bytes;wire [1:0] result_kind;
  wire busy,done,keygen_done,error;wire [15:0] error_code;
- wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+ wire [63:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
  common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
  logic read_enable=0;logic [10:0] read_address=0;
  wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
  signature cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
- integer cycles=0,compute=0,cursor=0,sent=0,accepted=0,stall=0,replays=1,interrupt_run=0,invalid=0,tamper=0,override_q=-1,fault=0,cut=0;
- integer hashes[0:1],perms[0:1];integer computed,elapsed,hcount,pcount;
+ longint unsigned cycles=0,compute=0;
+ integer cursor=0,sent=0,accepted=0,stall=0,replays=1,interrupt_run=0,invalid=0,tamper=0,fault=0,cut=0,invalid_profile=-1;
+ longint unsigned hashes[0:1],perms[0:1];longint unsigned computed,elapsed,hcount,pcount;
+ logic override_q_valid=0;logic [31:0] override_q=0;
+ longint unsigned timeout_cycles=64'd100000000000;
  reg [31:0] rng=32'h51c0ffee;string vector;
  integer batch_live=0,batch_max_live=0,batch_requests=0,batch_returns=0;
  logic [PIPELINE-1:0] batch_tags=0;
@@ -69,7 +72,7 @@ module tb;
   if(rst)begin cycles=0;cursor=0;sent=0;accepted=0;end
   else begin
    cycles++;
-   if(cycles>400000000)$fatal(1,"timeout state=%0d",dut.core.state);
+   if(cycles>timeout_cycles)$fatal(1,"timeout state=%0d",dut.core.state);
    if(error&&!invalid&&!fault)$fatal(1,"error %h state=%0d",error_code,dut.core.state);
    if(message_valid&&message_ready)sent+=8;
    if(verify_valid&&verify_ready)accepted++;
@@ -107,11 +110,14 @@ module tb;
   if($value$plusargs("INTERRUPT=%d",interrupt_run))begin end
   if($value$plusargs("INVALID=%d",invalid))begin end
   if($value$plusargs("TAMPER=%d",tamper))begin end
-  if($value$plusargs("Q=%d",override_q))begin end
+  if($value$plusargs("Q=%d",override_q))begin override_q_valid=1;end
+  if($value$plusargs("PROFILE=%d",invalid_profile))begin invalid=1;end
+  if($value$plusargs("TIMEOUT=%d",timeout_cycles))begin end
   $readmemh({vector,"/program.mem"},pm);$readmemh({vector,"/template.mem"},tm);$readmemh({vector,"/descriptor.mem"},dm);
   $readmemh({vector,"/job.mem"},cfg);$readmemh({vector,"/meta.mem"},meta);$readmemh({vector,"/message.mem"},msg);
   $readmemh({vector,"/expected.mem"},expected);$readmemh({vector,"/nodes.mem"},nodes_mem);
-  if(override_q>=0)cfg[6]=override_q;
+  if(override_q_valid)cfg[6]={224'd0,override_q};
+  if(invalid_profile>=0)dm[1]=64'(invalid_profile);
   case(tamper)
    1:msg[0]^=1;
    2:nodes_mem[1]^=1;
@@ -138,7 +144,7 @@ module tb;
    end
    while(!done&&!error)tick();
    computed=compute;elapsed=cycles;hcount=hashes[0]+hashes[1];pcount=perms[0]+perms[1];
-   if(invalid)begin if(!error||error_code!=16'h3008)$fatal(1,"index rejection");end
+   if(invalid)begin if(!error||error_code!=(invalid_profile>=0 ? 16'h3009 : 16'h3008))$fatal(1,"index rejection");end
    else begin
     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);

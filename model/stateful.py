@@ -1,12 +1,13 @@
-"""Layout-3 experimental SHAKE256 XMSS/LMS; external index, cold authentication.
+"""Layout-3 standard SHAKE256 XMSS/LMS; external index, cold authentication.
 
-The legacy model remains the cached-execution oracle. New images preserve its
-byte recipes and encodings but recompute the authentication tree during Sign.
+The legacy model remains the cached-execution oracle. Standard images use RFC 8391/SP 800-208 and RFC 8554/9858
+recipes and encodings and recompute the authentication tree during Sign.
 """
 from dataclasses import replace
 from model.executor import compile_image, field, Kind, Macro, Image, validate
 
-PROFILE_CODES={8:'xmss_omega2',9:'xmss_omega4',10:'lms_omega2',11:'lms_omega4'}
+PROFILE_CODES={0x18:'xmss_h10',0x19:'xmss_h16',0x1a:'xmss_h20',
+               0x1b:'lms_h10',0x1c:'lms_h15',0x1d:'lms_h20'}
 REFS={Kind.CHAIN:(52,44,36,28),Kind.TREE:(52,44),Kind.EMIT:(52,)}
 
 def cold_image(name):

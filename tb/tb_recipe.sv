@@ -14,7 +14,7 @@ module tb_recipe;
  wire [7:0] list_index0,list_index1,list_next_index0;
  logic [255:0] nodes[0:135];
  wire [391:0] response_value;
- wire [31:0] hashes,permutations,batch_hashes,batch_permutations;
+ wire [63:0] hashes,permutations,batch_hashes,batch_permutations;
  recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(
   .clk,.rst,.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
   .batch_request_tag(2'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
@@ -26,7 +26,7 @@ module tb_recipe;
   .node_bytes,.request_valid,.request_ready,.request_recipe,.request_step_recipe(64'd0),
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed,.secret_prf,.public_seed,.root,.randomizer,.identifier,.message_buffer,.message_length,
-  .request_layer(5'd3),.request_tree(64'h0123456789abcdef),.request_leaf(10'd513),
+  .request_layer(5'd3),.request_tree(64'h0123456789abcdef),.request_leaf(leaf),
   .request_a(8'd67),.request_b(32'h12345678),.request_left(left),.request_right(right),
   .list_index0,.list_index1,.list_next_index0,
   .list_data0(list_index0<136 ? nodes[list_index0] : 256'd0),
@@ -34,7 +34,8 @@ module tb_recipe;
   .response_valid,.response_ready,.response_value,.response_capture(),.error,
   .hash_count(hashes),.permutation_count(permutations)
  );
- logic [431:0] vectors[0:2047];
+ logic [451:0] vectors[0:2047];
+ logic [19:0] leaf;
  string vector_file;integer count,timeout;
  task automatic tick;@(posedge clk);#1;endtask
  initial begin
@@ -49,6 +50,7 @@ module tb_recipe;
   $readmemh(vector_file,vectors);
   for(integer c=0;c<count;c++)begin
    rst=1;request_valid=0;response_ready=0;tick();tick();rst=0;
+   leaf=vectors[c][451:432];
    node_bytes=vectors[c][397:392];message_length=vectors[c][404:398];
    request_recipe={4'd0,vectors[c][408:405],8'h83,vectors[c][416:409],10'd0,6'd63,24'd0};
    tick();request_valid=1;tick();request_valid=0;

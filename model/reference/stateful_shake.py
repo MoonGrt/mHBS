@@ -1,7 +1,6 @@
-"""Independent direct verifier for the repository's experimental SHAKE256 variants.
+"""Independent direct verifier for the standard SHAKE256 parameter sets.
 
-No microcode, recipe descriptors or Machine calls. These are NOT registered RFC
-parameter encodings. The caller owns durable, non-repeating signing indices.
+No microcode, recipe descriptors or Machine calls. Uses registered SP 800-208 and RFC 9858 parameter encodings. The caller owns durable, non-repeating signing indices.
 """
 from hashlib import shake_256
 
@@ -20,28 +19,60 @@ def masked(public,domain,leaf,level,index,left,right=None):
     return H(be(1,32)+key+xor(left,m0)+xor(right,m1))
 
 def parse_signature(name,sig):
-    if name not in ('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'):raise ValueError('profile')
-    bits=2 if name.endswith('2') else 4;count=133 if bits==2 else 67;xmss=name.startswith('xmss')
-    if len(sig)!=(4 if xmss else 12)+32*(1+count+10):raise ValueError('signature length')
+    from model.profiles import get_profile
+    profile=get_profile(name)
+    if not profile.stateful:raise ValueError('profile')
+    bits=4;count=67;xmss=profile.family=='xmss'
+    height=profile.h
+    if len(sig)!=(4 if xmss else 12)+32*(1+count+height):raise ValueError('signature length')
     q=int.from_bytes(sig[:4],'big')
-    if q>=1024:raise ValueError('signature index')
+    if q>=(1<<height):raise ValueError('signature index')
     offset=4
     if not xmss:
-        if sig[4:8]!=be(0x80000002 if bits==2 else 0x80000003):raise ValueError('OTS type')
+        if sig[4:8]!=be(0x0b):raise ValueError('OTS type')
         offset=8
     random=sig[offset:offset+32];offset+=32
     chains=[sig[offset+32*i:offset+32*(i+1)] for i in range(count)];offset+=32*count
     if not xmss:
-        if sig[offset:offset+4]!=be(0x80000006):raise ValueError('tree type')
+        if sig[offset:offset+4]!=be(profile.typecode):raise ValueError('tree type')
         offset+=4
-    auth=[sig[offset+32*i:offset+32*(i+1)] for i in range(10)]
+    auth=[sig[offset+32*i:offset+32*(i+1)] for i in range(height)]
     return q,random,chains,auth
+
+def parse_public_key(name, public_key):
+    """Validate standard type headers before passing root/seed/I to hardware."""
+    from model.profiles import get_profile
+    profile=get_profile(name)
+    if not profile.stateful or len(public_key)!=profile.keygen_bytes:
+        raise ValueError('public key length/profile')
+    if public_key[:4]!=be(profile.typecode):raise ValueError('public key type')
+    if profile.family=='xmss':
+        return public_key[4:36],public_key[36:68],bytes(16)
+    if public_key[4:8]!=be(0x0b):raise ValueError('public key OTS type')
+    return public_key[24:56],bytes(32),public_key[8:24]
+
+def verify_serialized(name,message,signature,public_key,observe=None):
+    try:
+        root,seed,identifier=parse_public_key(name,public_key)
+        parse_signature(name,signature)
+    except ValueError:
+        return False
+    return verify(name,message,signature,seed,root,identifier,observe)
+
+def hardware_verify_input(name,signature,public_key):
+    """Checked adapter for the existing Job metadata and node-wise Verify bus."""
+    root,seed,identifier=parse_public_key(name,public_key)
+    q,random,chains,auth=parse_signature(name,signature)
+    return dict(q=q,public_root=root,public_seed=seed,identifier=identifier,
+                nodes=(random,*chains,*auth))
 
 def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),observe=None):
     if len(public_seed)!=32 or len(public_root)!=32 or len(identifier)!=16 or not 1<=len(message)<=87:return False
     try:q,r,chains,auth=parse_signature(name,signature)
     except ValueError:return False
-    bits=2 if name.endswith('2') else 4;maximum=(1<<bits)-1
+    from model.profiles import get_profile
+    profile=get_profile(name);height=profile.h
+    bits=4;maximum=15
     xmss=name.startswith('xmss')
     # Optional observer counts primitive SHAKE invocations independently of RTL.
     hashes=0;perms=0
@@ -68,9 +99,9 @@ def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),o
         value=endpoints[0]
     else:
         value=h(identifier+be(q)+b'\x80\x80'+b''.join(endpoints))
-        value=h(identifier+be(1024+q)+b'\x82\x82'+value)
+        value=h(identifier+be((1<<height)+q)+b'\x82\x82'+value)
     for level,sibling in enumerate(auth):
         left,right=(sibling,value) if (q>>level)&1 else (value,sibling)
-        value=mask(2,0,level,q>>(level+1),left,right) if xmss else h(identifier+be((1024+q)>>(level+1))+b'\x83\x83'+left+right)
+        value=mask(2,0,level,q>>(level+1),left,right) if xmss else h(identifier+be(((1<<height)+q)>>(level+1))+b'\x83\x83'+left+right)
     if observe is not None:observe.update(hashes=hashes,permutations=perms)
     return value==public_root

@@ -40,7 +40,11 @@ class Profile:
 
     @property
     def keygen_bytes(self):
-        return 6*self.n if self.family == "slh" else 196 if self.family == "xmss" else 140
+        return 6*self.n if self.family == "slh" else 68 if self.family == "xmss" else 56
+
+    @property
+    def typecode(self):
+        return {10: 0x10, 16: 0x11, 20: 0x12}[self.h] if self.family == "xmss" else {10: 0x10, 15: 0x11, 20: 0x12}[self.h]
 
     @property
     def lanes(self):
@@ -54,15 +58,19 @@ PROFILES = {p.name: p for p in (
     Profile("slh_128s", "slh", 16, 4, 63, 9, 7, 14, 12, 30, 0),
     Profile("slh_192s", "slh", 24, 4, 63, 9, 7, 17, 14, 39, 0),
     Profile("slh_256s", "slh", 32, 4, 64, 8, 8, 22, 14, 47, 0),
-    Profile("xmss_omega2", "xmss", 32, 2, 10, 10, 1, 0, 0, 32, 811.158),
-    Profile("xmss_omega4", "xmss", 32, 4, 10, 10, 1, 0, 0, 32, 1506.437),
-    Profile("lms_omega2", "lms", 32, 2, 10, 10, 1, 0, 0, 32, 347.639),
-    Profile("lms_omega4", "lms", 32, 4, 10, 10, 1, 0, 0, 32, 579.399),
+    Profile("xmss_h10", "xmss", 32, 4, 10, 10, 1, 0, 0, 32, 0),
+    Profile("xmss_h16", "xmss", 32, 4, 16, 16, 1, 0, 0, 32, 0),
+    Profile("xmss_h20", "xmss", 32, 4, 20, 20, 1, 0, 0, 32, 0),
+    Profile("lms_h10", "lms", 32, 4, 10, 10, 1, 0, 0, 32, 0),
+    Profile("lms_h15", "lms", 32, 4, 15, 15, 1, 0, 0, 32, 0),
+    Profile("lms_h20", "lms", 32, 4, 20, 20, 1, 0, 0, 32, 0),
 )}
-ALIASES = {"slh": "slh_128f", "xmss": "xmss_omega4", "lms": "lms_omega4"}
+ALIASES = {"slh": "slh_128f", "xmss": "xmss_h10", "lms": "lms_h10"}
 
 
 def get_profile(name):
+    if "_omega" in name:
+        raise ValueError("omega profiles retired; use xmss_h10/h16/h20 or lms_h10/h15/h20")
     try:
         return PROFILES[ALIASES.get(name, name)]
     except KeyError:

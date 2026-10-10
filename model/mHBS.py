@@ -182,7 +182,7 @@ class ExternalImage:
         sg = (h >> 41) & 31
         if kg >= 16 or sg >= 16:
             raise ValueError('entry exceeds program capacity')
-        if self.descriptors[1] in (8, 9, 10, 11):
+        if self.descriptors[1] in (0x18,0x19,0x1a,0x1b,0x1c,0x1d):
             from model.stateful import decode
             return decode(self)
         desc = list(self.descriptors)
@@ -223,6 +223,7 @@ def _convert_embedded(image):
 def compile_image(name):
     """Build the external-input 16/16/32-word image for any supported profile."""
     from model.stateful import PROFILE_CODES, encode
+    name=get_profile(name).name
     if name in PROFILE_CODES.values():
         return encode(name)
     n = compile_logical_image(name).n
@@ -241,7 +242,7 @@ class ExternalMachine:
         logical = image.decode()
         if not logical.stateful and (job.q or any(job.identifier)):
             raise ValueError('SLH-only job')
-        if logical.stateful and not 0 <= job.q < 1024:
+        if logical.stateful and not 0 <= job.q < (1 << logical.h):
             raise ValueError('index exhausted')
         if len(root) != logical.n:
             raise ValueError('root size')

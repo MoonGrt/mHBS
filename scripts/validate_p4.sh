@@ -12,11 +12,10 @@ run_case() {
     cp "build/sim/P4U1_stats${stats}/${profile}_${operation}.log" "$out/$label.log"
     rg 'PASS|P4_COVERAGE' "$out/$label.log"
 }
-bash scripts/simulate.sh --all 4 1 > "$out/all30.log" 2>&1
-[[ $(rg -c 'STATEFUL_PASS ' "$out/all30.log") == 30 ]] || { echo 'Missing all30 cases.' >&2; exit 1; }
+python3 -m scripts.validate_standard --output "$out/full36" > "$out/all36.log" 2>&1
 python3 scripts/check_recipes.py > "$out/recipes.log" 2>&1
 python3 scripts/check_pipeline.py > "$out/pipeline.log" 2>&1
-for profile in slh_128f xmss_omega4 lms_omega4; do
+for profile in slh_128f xmss_h10 lms_h10; do
     run_case "${profile}_stalls" "$profile" sign +STALL=1 +REPLAYS=2 +INTERRUPT=1
     run_case "${profile}_cut" "$profile" verify +CUT=5 +STALL=1
     for tamper in 1 2 3 4 5; do
@@ -30,15 +29,15 @@ for profile in slh_128f xmss_omega4 lms_omega4; do
         run_case "${profile}_invalidq" "$profile" verify +Q=1024 +INVALID=1
     fi
 done
-for profile in xmss_omega2 lms_omega2; do run_case "${profile}_tail" "$profile" sign; done
+for profile in xmss_h10 lms_h10; do run_case "${profile}_tail" "$profile" sign; done
 rg -q 'fors_positions=f' "$out/slh_128f_stalls.log"
-rg -q 'ltree_odd=[1-9][0-9]*' "$out/xmss_omega2_tail.log"
-rg -q 'rolling_reuse=[1-9][0-9]*' "$out/xmss_omega2_tail.log"
+rg -q 'ltree_odd=[1-9][0-9]*' "$out/xmss_h10_tail.log"
+rg -q 'rolling_reuse=[1-9][0-9]*' "$out/xmss_h10_tail.log"
 for config in '1 2' '4 2' '12 1'; do
     read -r p u <<< "$config"
     bash scripts/simulate.sh --smoke "$p" "$u" > "$out/compat_P${p}U${u}.log" 2>&1
 done
-for item in 'xmss_omega4 1 1' 'lms_omega4 1 87' 'xmss_omega4 1023 3' 'lms_omega4 1023 3'; do
+for item in 'xmss_h10 1 1' 'lms_h10 1 87' 'xmss_h10 1023 3' 'lms_h10 1023 3'; do
     read -r profile q length <<< "$item"
     vectors="$out/${profile}_q${q}"
     python3 -m model.vectors --profile "$profile" --q "$q" --message-length "$length" --output "$vectors" > "$out/${profile}_q${q}_generation.log" 2>&1

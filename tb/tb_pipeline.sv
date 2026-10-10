@@ -13,11 +13,11 @@ module tb_pipeline;
  logic [255:0] initial_value=0,secret_seed,public_seed;
  logic [127:0] identifier;
  wire [255:0] digest,capture;
- wire [31:0] hashes,permutations;
+ wire [63:0] hashes,permutations;
  recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(
   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
   .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(1'b1),
-  .batch_leaf(10'd513),.batch_a(a),.batch_b(32'd0),.batch_family(family),.batch_no_seed(no_seed),
+  .batch_leaf(leaf),.batch_a(a),.batch_b(32'd0),.batch_family(family),.batch_no_seed(no_seed),
   .batch_start(4'd0),.batch_initial_value(initial_value),.batch_fixed_shape(4'd0),.batch_pair(1'b0),.batch_right(256'd0),
   .batch_seed_domain(8'h83),.batch_step_domain(8'h83),.batch_response_valid(response_valid),.batch_response_ready(ready_response),
   .batch_response_tag(response_tag),.batch_response_digest(),.batch_response_capture(),.batch_read_tag(response_tag),
@@ -32,6 +32,7 @@ module tb_pipeline;
  );
  logic [778:0] vectors[0:7];
  integer slot_row[0:3];integer expected_hashes,cycles=0,same_edge=0,non_order=0,retired=0;
+ logic [19:0] leaf=20'd513;
  string vector_file;integer family_arg;
  task automatic tick;
   @(posedge clk);#1;cycles++;if(cycles>10000)$fatal(1,"timeout");
@@ -45,6 +46,7 @@ module tb_pipeline;
  endtask
  initial begin
   if(!$value$plusargs("VECTOR=%s",vector_file) || !$value$plusargs("FAMILY=%d",family_arg) || !$value$plusargs("HASHES=%d",expected_hashes))$fatal(1,"arguments");
+  if($value$plusargs("LEAF=%d",leaf))begin end
   family=2'(family_arg);$readmemh(vector_file,vectors);
   for(integer k=0;k<32;k++)begin secret_seed[k*8+:8]=8'(k+1);public_seed[k*8+:8]=8'(k+65);end
   for(integer k=0;k<16;k++)identifier[k*8+:8]=8'(k+225);
