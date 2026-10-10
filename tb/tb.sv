@@ -1,7 +1,12 @@
 `timescale 1ns/1ps
 // Runtime Job/ROM common-core harness, including the production signature store.
 module tb;
- parameter integer UNROLL=1,PIPELINE=1,PROFILE_ENABLE=1;
+ parameter integer UNROLL=1,PIPELINE=1;
+`ifdef SYNTHESIS
+ localparam bit DEBUG_STATS=0;
+`else
+ localparam bit DEBUG_STATS=1;
+`endif
  logic clk=0,rst=1;always #5 clk=~clk;
  reg [63:0] pm[0:15],tm[0:15],dm[0:31];
  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
@@ -17,7 +22,7 @@ module tb;
  wire out_valid;wire [255:0] out_data;wire [5:0] out_bytes;wire [1:0] result_kind;
  wire busy,done,keygen_done,error;wire [15:0] error_code;
  wire [63:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
- common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
+ common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
  logic read_enable=0;logic [10:0] read_address=0;
  wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
  signature cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
@@ -34,8 +39,8 @@ module tb;
  always @(posedge clk)begin
   if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;fors_positions=0;ltree_odd=0;rolling_reuse=0;end
   else begin
-   if(PIPELINE==4 && UNROLL==1)begin
-    if(dut.core.state==58 && dut.core.fors_target_group)fors_positions[dut.core.target[1:0]]=1;
+   begin
+    if(dut.core.state==58 && dut.core.fors_target_wave)fors_positions[dut.core.target[1:0]]=1;
     if(dut.core.state==46 && dut.core.lt_count[0])ltree_odd++;
     if(dut.core.pipe_rolling && dut.core.pipe_selected && dut.core.pipe_ready && dut.core.pipe_valid
       && dut.core.lane.batch_request_tag==dut.core.pipe_tag)rolling_reuse++;
@@ -149,7 +154,7 @@ module tb;
     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);
     $display("BATCH_OBSERVED requests=%0d returns=%0d max_live=%0d",batch_requests,batch_returns,batch_max_live);
-    if(PIPELINE==4 && UNROLL==1)$display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
+     $display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
     if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
     if(job_operation==2)begin
      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);
@@ -157,7 +162,7 @@ module tb;
     if(!tamper)begin
      if(hcount!=meta[1]||pcount!=meta[2])$fatal(1,"counts %0d/%0d expected %0d/%0d",hcount,pcount,meta[1],meta[2]);
     end
-    if(PROFILE_ENABLE)begin
+    if(DEBUG_STATS)begin
      if(hash_count!=hcount||permutation_count!=pcount)$fatal(1,"statistics mismatch");
     end else if(hash_count||permutation_count||sign_cycles||keygen_cycles||boot_cycles)$fatal(1,"statistics not disabled");
     if(job_operation==1)begin

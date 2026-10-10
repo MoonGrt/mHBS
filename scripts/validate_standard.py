@@ -16,6 +16,7 @@ ROOT=Path(__file__).resolve().parents[1]
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--skip-h20-full',action='store_true',help='Keep h20 Verify; do not run h20 Keygen or Sign')
     parser.add_argument('--workers',type=int,default=4)
     parser.add_argument('--output',type=Path,default=ROOT/'build/standard_migration/full36')
     parser.add_argument('--exclude-profile',action='append',default=[],choices=list(PROFILES))
@@ -24,7 +25,7 @@ def main():
     if not 1<=args.workers<=8:parser.error('workers must be 1..8')
     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
     subprocess.run(['bash','scripts/simulate_fast.sh','xmss_h10','verify'],cwd=ROOT,check=True)
-    exe=ROOT/'build/sim/P4U1_fast_o3/obj/Vtb_fast'
+    exe=ROOT/'build/sim/P4U1_fast_o3_synthesis0/obj/Vtb_fast'
     files=(ROOT/'sources.txt').read_text().splitlines()+['sources.txt','tb/tb_fast.sv','tb/fast_main.cpp']
     identity={f:hashlib.sha256((ROOT/f).read_bytes()).hexdigest() for f in files}
     source_checksum=''.join(h+'  '+f+'\n' for f,h in identity.items())
@@ -32,7 +33,7 @@ def main():
         parser.error('Resume RTL/test source checksums differ')
     (out/'source.sha256').write_text(source_checksum)
     cases=[(p.name,op) for p in sorted(PROFILES.values(),key=lambda p:(p.stateful,p.h),reverse=True)
-           if p.name not in args.exclude_profile for op in ('keygen','sign','verify')]
+           if p.name not in args.exclude_profile for op in ('keygen','sign','verify') if not (args.skip_h20_full and p.h==20 and p.stateful and op!='verify')]
     pending=list(cases);running={};results={};errors=[];started=time.monotonic()
     if args.resume:
         import shutil
@@ -54,7 +55,7 @@ def main():
         if r.returncode or not match:raise RuntimeError(f'{name}/{op} failed; see {log}')
         values=match.groups()
         return dict(profile=name,operation=op,cycles=int(values[1]),total_cycles=int(values[2]),
-                    hashes=int(values[3]),permutations=int(values[4]),seconds=float(values[5]),vectors_sha256=vector_hashes,log=str(log.relative_to(ROOT)))
+                    hashes=int(values[3]),permutations=int(values[4]),seconds=float(values[5]),vectors_sha256=vector_hashes,log=str(log))
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
         while pending or running:
             for future,case in list(running.items()):

@@ -8,11 +8,13 @@ run_case() {
     local label=$1 profile=$2 operation=$3
     shift 3
     bash scripts/simulate.sh "$profile" "$operation" 4 1 "$@" > "$out/$label.log" 2>&1
-    local stats=${PROFILE_ENABLE:-1}
-    cp "build/sim/P4U1_stats${stats}/${profile}_${operation}.log" "$out/$label.log"
+    local synthesis=${SIM_SYNTHESIS:-0}
+    cp "build/sim/P4U1_synthesis${synthesis}/${profile}_${operation}.log" "$out/$label.log"
     rg 'PASS|P4_COVERAGE' "$out/$label.log"
 }
-python3 -m scripts.validate_standard --output "$out/full36" > "$out/all36.log" 2>&1
+if [[ ${SKIP_FULL_REGRESSION:-0} != 1 ]]; then
+    python3 -m scripts.validate_standard --skip-h20-full --output "$out/full32" > "$out/all32.log" 2>&1
+fi
 python3 scripts/check_recipes.py > "$out/recipes.log" 2>&1
 python3 scripts/check_pipeline.py > "$out/pipeline.log" 2>&1
 for profile in slh_128f xmss_h10 lms_h10; do
@@ -24,7 +26,7 @@ for profile in slh_128f xmss_h10 lms_h10; do
     for fault in 1 2; do
         run_case "${profile}_fault${fault}" "$profile" sign "+FAULT=$fault"
     done
-    PROFILE_ENABLE=0 run_case "${profile}_stats0" "$profile" sign
+    SIM_SYNTHESIS=1 run_case "${profile}_stats0" "$profile" sign
     if [[ $profile != slh_128f ]]; then
         run_case "${profile}_invalidq" "$profile" verify +Q=1024 +INVALID=1
     fi

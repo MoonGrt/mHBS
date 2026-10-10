@@ -6,8 +6,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then echo 'P/U must be integers.'
 p=$((10#$p)); u=$((10#$u))
 destination=${3:-build/benchmarks/P${p}U${u}}
 mkdir -p "$destination"
-stats=${PROFILE_ENABLE:-1}; lut6=${KECCAK_LUT6:-0}
-work="build/sim/P${p}U${u}_stats${stats}"
+synthesis=${SIM_SYNTHESIS:-0}; lut6=${KECCAK_LUT6:-0}
+work="build/sim/P${p}U${u}_synthesis${synthesis}"
 if [[ $lut6 == 1 ]]; then work+=_lut6; fi
 for target in 'slh_128f sign' 'xmss_h10 keygen' 'lms_h10 keygen'; do
     read -r profile operation <<< "$target"

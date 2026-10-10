@@ -28,13 +28,13 @@ int main(int argc,char **argv) {
     auto number=[](const std::string &s){return std::stoull(s,nullptr,16);};
     const uint64_t output_size=number(meta[0]),expected_hashes=number(meta[1]),expected_perms=number(meta[2]);
     const unsigned op=number(cfg[7]),message_size=op?number(cfg[8]):0,verify_nodes=number(meta[3]);
-    Vtb_fast dut{&context};uint64_t ticks=0,hashes=0,perms=0,cursor=0;
+    Vtb_fast dut{&context};uint64_t ticks=0,hashes=0,perms=0,cursor=0,observed_cycles=0;
     unsigned sent=0,accepted=0;
     auto tick=[&](bool observe) {
         dut.clk=0;dut.eval();
         if(observe) {
-            if(dut.execution_reset){hashes=0;perms=0;}
-            else {hashes+=dut.hash_event+dut.batch_event;perms+=dut.permutation_event+dut.batch_event;}
+            if(dut.execution_reset){hashes=0;perms=0;observed_cycles=0;}
+            else {observed_cycles+=dut.execution_active;hashes+=dut.hash_event+dut.batch_event;perms+=dut.permutation_event+dut.batch_event;}
             if(dut.message_valid&&dut.message_ready)sent+=8;
             if(dut.verify_valid&&dut.verify_ready)accepted++;
             if(dut.out_valid)for(unsigned i=0;i<dut.out_bytes;i++) {
@@ -61,10 +61,11 @@ int main(int argc,char **argv) {
     }
     if(dut.error)throw std::runtime_error("RTL error "+std::to_string(dut.error_code));
     if(cursor!=output_size || hashes!=expected_hashes || perms!=expected_perms
-       || dut.hash_count!=hashes || dut.permutation_count!=perms)
+       || (dut.debug_stats && (dut.hash_count!=hashes || dut.permutation_count!=perms))
+       || (!dut.debug_stats && !dut.statistics_zero))
         throw std::runtime_error("Length or statistics mismatch: "+std::to_string(cursor)+" "+std::to_string(hashes)+" "+std::to_string(perms));
     if(op==2&&(!dut.verify_pass || accepted!=verify_nodes))throw std::runtime_error("Verify mismatch");
-    const uint64_t cycles=dut.execution_cycles,total=ticks-5;
+    const uint64_t cycles=dut.debug_stats ? dut.execution_cycles : observed_cycles,total=ticks-5;
     if(op==1) {
         if(!dut.signature_complete||dut.signature_error||dut.signature_length!=output_size)
             throw std::runtime_error("Signature metadata mismatch");
@@ -80,7 +81,8 @@ int main(int argc,char **argv) {
         }
         if(cursor!=output_size)throw std::runtime_error("Signature cache length mismatch");
     }
-    std::cout<<"STATEFUL_PASS P4U1 op="<<op<<" cycles="<<cycles<<" total="<<total
+    std::cout<<"STATEFUL_PASS P"<<dut.configuration_pipeline<<"U"<<dut.configuration_unroll
+             <<" op="<<op<<" cycles="<<cycles<<" total="<<total
              <<" hashes="<<hashes<<" permutations="<<perms<<" tamper=0"
              <<" seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<std::endl;
     dut.final();return 0;

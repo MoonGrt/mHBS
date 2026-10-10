@@ -20,7 +20,7 @@ set job [split [string trim [read $handle]] \n]
 close $handle
 set command [list synth_design -top top -part $part -mode out_of_context \
     -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=4 -generic UNROLL=1 \
-    -generic PROFILE_ENABLE=0 -generic SIGNATURE_STORE_ENABLE=1 -generic OPERATION=1]
+    -generic SIGNATURE_STORE_ENABLE=1 -generic OPERATION=1]
 foreach name {PROGRAM TEMPLATE DESCRIPTOR} file {program template descriptor} {
     lappend command -generic "${name}_INIT_FILE=\"$folder/$file.mem\""
 }
@@ -29,7 +29,7 @@ foreach name {SECRET_SEED SECRET_PRF PUBLIC_SEED RANDOMIZER PUBLIC_ROOT IDENTIFI
     lappend command -generic "$name=${width}'h$value"
 }
 set handle [open [file join $out settings.txt] w]
-puts $handle "top=top\nprofile=$profile\noperation=Sign\nPIPELINE=4\nUNROLL=1\nPROFILE_ENABLE=0\nSIGNATURE_STORE_ENABLE=1\npart=$part\nvivado=[version -short]\nmode=out_of_context\ncommand=$command"
+puts $handle "top=top\nprofile=$profile\noperation=Sign\nPIPELINE=4\nUNROLL=1\nSYNTHESIS=1\nSIGNATURE_STORE_ENABLE=1\npart=$part\nvivado=[version -short]\nmode=out_of_context\ncommand=$command"
 close $handle
 {*}$command
 report_utilization -file [file join $out top_utilization.rpt]
@@ -40,5 +40,5 @@ set bad [get_cells -hier -filter {IS_PRIMITIVE == 1 && REF_NAME =~ FD*}]
 foreach cell $bad {
     if {[regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {error "Statistics register remains: $cell"}
 }
-puts "MHBS_TOP_SYNTH_PASS profile=$profile P4U1 PROFILE_ENABLE=0 SIGNATURE_STORE_ENABLE=1"
+puts "MHBS_TOP_SYNTH_PASS profile=$profile P4U1 SYNTHESIS=1 SIGNATURE_STORE_ENABLE=1"
 exit

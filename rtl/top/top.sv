@@ -3,12 +3,6 @@
 module top #(
     parameter integer UNROLL=2,PIPELINE=1,
     parameter bit SIGNATURE_STORE_ENABLE=1,
-    // Statistics are observable in simulation, absent from production hardware.
-`ifdef SYNTHESIS
-    parameter bit PROFILE_ENABLE=0,
-`else
-    parameter bit PROFILE_ENABLE=1,
-`endif
     parameter [255:0] SECRET_SEED=256'h00000000000000000000000000000000d1d06dcbb9181a55aabce64467d6b81d,
     parameter [255:0] SECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7,
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
@@ -74,7 +68,7 @@ module top #(
                                                : core_descriptor_addresses;
     assign result_kind=OPERATION;
     assign message_ready=(phase==RUN) && core_message_ready;
-    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
+    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) core (
         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
         .program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
@@ -89,15 +83,26 @@ module top #(
         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
         .hash_count,.permutation_count,.cycles(core_cycles)
     );
+`ifdef SYNTHESIS
+    assign boot_cycles=64'd0;assign keygen_cycles=64'd0;assign sign_cycles=64'd0;
+`endif
     always_ff @(posedge clk) begin
         if(rst) begin
             phase<=HEADER;core_released<=0;
             busy<=1;done<=0;keygen_done<=0;error<=0;error_code<=0;
+
+`ifndef SYNTHESIS
             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
+`endif
+
             image_header<=0;profile_descriptor<=0;
         end else begin
             keygen_done<=0;
-            if(PROFILE_ENABLE && !core_released) boot_cycles<=boot_cycles+1;
+
+`ifndef SYNTHESIS
+            if(!core_released) boot_cycles<=boot_cycles+1;
+`endif
+
             if(core_released && core_error) begin
                 error<=1;error_code<=core_error_code;busy<=0;phase<=HALTED;
             end else case(phase)
@@ -110,10 +115,12 @@ module top #(
                     end else if(core_job_ready) phase<=RUN;
                 end
                 RUN:if(core_done) begin
-                    if(PROFILE_ENABLE) begin
+`ifndef SYNTHESIS
+                    begin
                         if(OPERATION==1) sign_cycles<=core_cycles;
                         else if(OPERATION==0) keygen_cycles<=core_cycles;
                     end
+`endif
                     if(!OPERATION) keygen_done<=1;
                     done<=1;busy<=0;phase<=HALTED;
                 end

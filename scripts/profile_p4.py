@@ -33,6 +33,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--output', type=Path, default=ROOT/'build/p4_profile')
+    parser.add_argument('--stateful-operation',choices=('sign','keygen'),default='keygen')
     args = parser.parse_args();source=args.source.resolve();out=args.output.resolve();out.mkdir(parents=True, exist_ok=True)
     harness=(source/'tb/tb.sv').read_text();(out/'tb.sv').write_text(harness.rsplit('endmodule', 1)[0]+INSTRUMENT+'\nendmodule\n')
     enum=re.search(r'typedef enum logic \[\d+:0\] \{(.*?)\} state_t;', (source/'rtl/executor/executor.sv').read_text(), re.S)[1]
@@ -43,10 +44,10 @@ def main():
         names[value]=name;value+=1
     (out/'state_names.json').write_text(json.dumps(names, indent=2)+'\n')
     sources=[str(source/p) for p in (source/'sources.txt').read_text().splitlines()]
-    command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','-GPROFILE_ENABLE=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
+    command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
     with (out/'compile.log').open('w') as log:subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
     rows=[];results={}
-    for profile,op in (('slh_128f','sign'),('xmss_h10','keygen'),('lms_h10','keygen')):
+    for profile,op in (('slh_128f','sign'),('xmss_h10',args.stateful_operation),('lms_h10',args.stateful_operation)):
         key=f'{profile}_{op}'
         with (out/f'{key}.log').open('w') as log:subprocess.run([str(out/'obj/Vtb'),f'+VECTOR={ROOT}/tb/vectors/{profile}/{op}'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
         text=(out/f'{key}.log').read_text();results[key]={}

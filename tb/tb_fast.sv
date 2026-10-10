@@ -1,17 +1,18 @@
 `timescale 1ns/1ps
 // Direct C++ clock driver for full-tree regression. Same production common/cache.
-module tb_fast(
+module tb_fast #(parameter integer PIPELINE=4,UNROLL=1)(
  input wire clk,rst,
  input wire message_valid,input wire [63:0] message_data,output wire message_ready,
  input wire verify_valid,input wire [255:0] verify_data,output wire verify_ready,
  output wire verify_pass,done,error,output wire [15:0] error_code,
  output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
  output wire [63:0] execution_cycles,hash_count,permutation_count,
- output wire hash_event,permutation_event,batch_event,execution_reset,
+ output wire hash_event,permutation_event,batch_event,execution_reset,execution_active,debug_stats,statistics_zero,
  input wire signature_read_enable,input wire [10:0] signature_read_address,
  output wire signature_read_valid,output wire [255:0] signature_read_data,
  output wire [5:0] signature_read_bytes,output wire signature_complete,signature_error,
- output wire [10:0] signature_nodes,output wire [15:0] signature_length
+ output wire [10:0] signature_nodes,output wire [15:0] signature_length,
+ output wire [31:0] configuration_pipeline,configuration_unroll
 );
  reg [63:0] pm[0:15],tm[0:15],dm[0:31];reg [255:0] cfg[0:8];
  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
@@ -22,8 +23,17 @@ module tb_fast(
  wire [1:0] job_operation=cfg[7][1:0];wire [6:0] message_length=job_operation==0 ? 0 : cfg[8][6:0];
  wire [63:0] boot_cycles,keygen_cycles,sign_cycles;wire busy,keygen_done;
  wire [1:0] result_kind;wire [5:0] cache_node_bytes;
- common #(.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(.*);
+ assign configuration_pipeline=PIPELINE;
+ assign configuration_unroll=UNROLL;
+ common #(.PIPELINE(PIPELINE),.UNROLL(UNROLL)) dut(.*);
  assign execution_cycles=job_operation==0 ? keygen_cycles : job_operation==1 ? sign_cycles : dut.core.cycles;
+`ifdef SYNTHESIS
+ assign debug_stats=0;
+`else
+ assign debug_stats=1;
+`endif
+ assign statistics_zero=!(boot_cycles|keygen_cycles|sign_cycles|hash_count|permutation_count|dut.core.cycles);
+ assign execution_active=dut.core.state!=0 && dut.core.state!=32;
  assign execution_reset=dut.core.execution_rst;
  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;
  assign permutation_event=dut.core.lane.permutation_complete;

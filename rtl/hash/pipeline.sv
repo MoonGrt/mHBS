@@ -3,7 +3,7 @@
 // Per-context SLH/XMSS/LMS chain metadata and completion slots. No Keccak duplication:
 // permutations use the same pipeline as the recipe/sponge path.
 module pipeline #(
- parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0, UNIFIED_FIXED=0,
+ parameter integer PIPELINE=2,
  localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
 )(
  input wire clk,rst,input wire [5:0] node_bytes,
@@ -27,6 +27,9 @@ module pipeline #(
  input wire [TAG_BITS-1:0] perm_result_tag,
  output logic [63:0] hash_count,permutation_count
 );
+`ifdef SYNTHESIS
+ assign hash_count=64'd0;assign permutation_count=64'd0;
+`endif
  function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
  wire [255:0] seed_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
  wire [255:0] step_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
@@ -45,8 +48,9 @@ module pipeline #(
  assign read_digest=initial_pending[read_tag] ? key_value[read_tag] : digest[read_tag];
  assign read_capture=captured_valid[read_tag] ? (capture_initial[read_tag] ? key_value[read_tag] : captured[read_tag]) : 256'd0;
  wire [TAG_BITS-1:0] t=perm_result_tag;
- wire node_done=phase[t]==SEED || phase[t]==STEP || phase[t]==FINAL || phase[t]==SINGLE;
- wire again=perm_done && (!node_done || iteration[t]<steps[t]);
+ logic [PIPELINE-1:0] node_phase,more_steps;
+ wire node_done=node_phase[t];
+ wire again=perm_done && (!node_done || more_steps[t]);
  wire capture_now=perm_done && node_done && capture_enable[t] && iteration[t]==capture_after[t];
  wire [2:0] next_phase=phase[t]==KEY ? MASK : phase[t]==MASK ? (paired[t] ? MASK1 : FINAL)
      : phase[t]==MASK1 ? FINAL : family[t]==1 ? KEY : STEP;
@@ -56,62 +60,10 @@ module pipeline #(
   next_address=address[t];
   if(!preserve_counter[t])next_address[224 +:32]=be32({27'd0,next_step});
  end
- function automatic [1599:0] block_for(input [255:0] adr,input [255:0] val,right,input bit pair);
-  reg [1599:0] block_data;
-  begin
-   block_data=0;
-   case(node_bytes)
-    16:begin block_data[511:0]={val[127:0],adr,public_seed[127:0]};
-        if(pair)begin block_data[639:512]=right[127:0];block_data[640 +:8]=8'h1f;end
-        else block_data[512 +:8]=8'h1f;end
-    24:begin block_data[639:0]={val[191:0],adr,public_seed[191:0]};
-        if(pair)begin block_data[831:640]=right[191:0];block_data[832 +:8]=8'h1f;end
-        else block_data[640 +:8]=8'h1f;end
-    default:begin block_data[767:0]={val,adr,public_seed};
-        if(pair)begin block_data[1023:768]=right;block_data[1024 +:8]=8'h1f;end
-        else block_data[768 +:8]=8'h1f;end
-   endcase
-   block_data[1087]=1;block_for=block_data;
-  end
- endfunction
- function automatic [1599:0] stateful_block(input [1:0] kind,input [2:0] subphase,
-     input [255:0] adr,val,key,right,input [3:0] step,shape,input bit pair);
-  reg [1599:0] data;
-  reg [255:0] masked_address;
-  begin
-   data=0;
-   masked_address={be32(subphase==MASK ? 32'd1 : subphase==MASK1 ? 32'd2 : 32'd0),
-       shape!=0 ? adr[255:224] : be32({28'd0,step}),adr[223:192],adr[191:160],adr[159:128],96'd0};
-   if(shape==5)begin
-    data[255:248]=8'd3;data[511:256]=val;
-    data[767:512]={adr[191:160],224'd0};data[775:768]=8'h1f;
-   end else if(shape==14 || shape==15)begin
-    data[127:0]=identifier;data[159:128]=adr[255:224];
-    data[175:160]=shape==14 ? 16'h8282 : 16'h8383;data[431:176]=val;
-    if(pair)begin data[687:432]=right;data[695:688]=8'h1f;end
-    else data[439:432]=8'h1f;
-   end else if(kind==2)begin
-    data[127:0]=identifier;data[159:128]=adr[191:160];
-    data[167:160]=0;data[175:168]=adr[223:216];data[183:176]=(subphase==SEED || shape==9) ? 8'hff : shape==10 ? adr[255:248] : {4'd0,step};
-    data[439:184]=val;data[447:440]=8'h1f;
-   end else if(subphase==SEED || shape==7)begin
-    // XMSS seed domain: 32-byte 4 || SK.seed || PK.seed || ADRS || 0.
-    data[255:248]=8'd4;data[511:256]=secret_seed;data[767:512]=public_seed;
-    data[1023:768]=masked_address;data[1031:1024]=8'h1f;
-   end else if(subphase==KEY || subphase==MASK || subphase==MASK1)begin
-    data[255:248]=8'd3;data[511:256]=public_seed;data[767:512]=masked_address;data[775:768]=8'h1f;
-   end else begin
-    data[255:248]=pair ? 8'd1 : 8'd0;data[511:256]=key;data[767:512]=val;
-    if(pair)begin data[1023:768]=right;data[1031:1024]=8'h1f;end
-    else data[775:768]=8'h1f;
-   end
-   data[1087]=1;stateful_block=data;
-  end
- endfunction
- assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && (!busy[request_tag] || (UNIFIED_FIXED && response_valid && response_ready && response_tag==request_tag));
+ assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && (!busy[request_tag] || (response_valid && response_ready && response_tag==request_tag));
  wire accept=request_valid && request_ready;
- wire [3:0] requested_shape=UNIFIED_FIXED ? request_fixed_shape : 4'd0;
- wire requested_pair=UNIFIED_FIXED && request_pair;
+ wire [3:0] requested_shape=request_fixed_shape;
+ wire requested_pair=request_pair;
  wire zero_request=request_no_seed && request_steps==0 && requested_shape==0;
  assign perm_valid=again || (accept && !zero_request);
  // Select operands before the common width and padding formatter.
@@ -128,7 +80,7 @@ module pipeline #(
      : requested_shape==1 || requested_shape==9 ? secret_seed : request_no_seed ? request_initial_value : secret_seed;
  wire [255:0] block_right=again ? captured[t]^perm_digest[255:0] : request_right;
  wire [1599:0] unified_state;
- generate if(UNIFIED_FIXED)begin: formatter
+ generate begin: formatter
   logic [255:0] f0,f1,f2,f3,masked_address;
   logic [183:0] prefix;
   logic [7:0] domain;
@@ -177,9 +129,8 @@ module pipeline #(
    data[1087]=1;
   end
   assign unified_state=data;
- end else begin assign unified_state=0;end endgenerate
- assign perm_state=UNIFIED_FIXED ? unified_state : block_family==0 ? block_for(block_address,block_value,block_right,block_pair)
-     : stateful_block(block_family,block_phase,block_address,block_value,key_value[t],block_right,block_step,block_shape,block_pair);
+ end endgenerate
+ assign perm_state=unified_state;
  assign perm_tag=again ? t : request_tag;
  logic response_held;
  logic [TAG_BITS-1:0] held_tag;
@@ -214,7 +165,11 @@ module pipeline #(
   end
  end
  always_ff @(posedge clk)begin
-  if(rst)begin initial_pending<=0;capture_initial<=0;captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;hash_count<=0;permutation_count<=0;end
+  if(rst)begin node_phase<=0;more_steps<=0;initial_pending<=0;capture_initial<=0;captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;
+`ifndef SYNTHESIS
+hash_count<=0;permutation_count<=0;
+`endif
+end
   else begin
    if(response_valid && !response_ready && !response_held)begin response_held<=1;held_tag<=response_tag;end
    if(response_valid && response_ready)response_held<=0;
@@ -222,6 +177,8 @@ module pipeline #(
    if(accept)begin
     busy[request_tag]<=1;steps[request_tag]<=request_steps+{1'b0,request_start};iteration[request_tag]<=request_no_seed ? {1'b0,request_start}+1'b1 : 5'd0;
     phase[request_tag]<=first_phase;
+    node_phase[request_tag]<=first_phase==SEED || first_phase==STEP || first_phase==SINGLE;
+    more_steps[request_tag]<=request_no_seed ? request_steps>1 : request_steps!=0;
     if(busy==0)begin shared_shape<=requested_shape;shared_pair<=requested_pair;end
     initial_pending[request_tag]<=request_no_seed;
     if(zero_request)complete[request_tag]<=1;
@@ -234,18 +191,24 @@ module pipeline #(
     end
    end
    if(perm_done)begin
-    if(PROFILE_ENABLE)begin hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;end
+
+`ifndef SYNTHESIS
+hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;
+`endif
+
     if(capture_now)begin capture_initial[t]<=0;captured_valid[t]<=1;end
     if(capture_transfer)capture_initial[t]<=0;
     if(digest_write)initial_pending[t]<=0;
     if(again)begin
      phase[t]<=next_phase;
+     node_phase[t]<=next_phase==SEED || next_phase==STEP || next_phase==FINAL || next_phase==SINGLE;
+     if(node_done)more_steps[t]<=iteration[t]+1'b1<steps[t];
      if(node_done)iteration[t]<=iteration[t]+1'b1;
     end else complete[t]<=1;
    end
   end
  end
- generate if(UNIFIED_FIXED)begin: shared_coordinates
+ generate begin: shared_coordinates
   logic [4:0] layer;
   logic [63:0] tree;
   logic [7:0] domain;
@@ -257,16 +220,18 @@ module pipeline #(
    if(busy==0)begin layer<=request_layer;tree<=request_tree;domain<=step_domain;kind<=request_family;end
    leaves[request_tag]<=request_leaf;chains[request_tag]<=request_a;indices[request_tag]<=request_b;
   end
+`ifndef SYNTHESIS
+  always @(posedge clk)if(!rst && accept && |busy)begin
+   if(request_layer!=layer || request_tree!=tree || request_family!=kind
+       || step_domain!=domain || requested_shape!=shared_shape || requested_pair!=shared_pair)
+    $fatal(1,"shared coordinates changed before contexts drained");
+  end
+`endif
   for(genvar j=0;j<PIPELINE;j++)begin
-   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({12'd0,leaves[j]}),be32({24'd0,domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
-   assign family[j]=request_family;
+   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({12'd0,leaves[j]}),be32({24'd0,domain}),be32(tree[31:0]),be32(tree[63:32]),32'd0,be32({27'd0,layer})};
+   assign family[j]=kind;
    assign fixed_shape[j]=shared_shape;assign paired[j]=shared_pair;
   end
- end else begin: legacy_coordinates
-  logic [255:0] saved_address[0:PIPELINE-1];
-  logic [1:0] saved_family[0:PIPELINE-1];
-  always_ff @(posedge clk)if(!rst && accept)begin saved_address[request_tag]<=step_address;saved_family[request_tag]<=request_family;end
-  for(genvar j=0;j<PIPELINE;j++)begin assign address[j]=saved_address[j];assign family[j]=saved_family[j];assign fixed_shape[j]=0;assign paired[j]=0;end
  end endgenerate
 endmodule
 `default_nettype wire

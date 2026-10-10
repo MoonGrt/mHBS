@@ -1,7 +1,7 @@
 // Exported execution region of top; external runtime Job/ROM ports.
 `timescale 1ns/1ps
 `default_nettype none
-module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENABLE=1)(
+module common #(parameter integer UNROLL=2,PIPELINE=1)(
  input wire clk,rst,
  output wire [3:0] program_address,output wire [3:0] template_address,
  input wire [63:0] program_data,template_data,
@@ -33,7 +33,7 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
                                                : core_descriptor_addresses;
     assign result_kind=job_operation;
     assign message_ready=(phase==RUN) && core_message_ready;
-    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
+    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) core (
         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
         .program_address,.program_data,.template_address,.template_data,
         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
@@ -48,15 +48,26 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
         .hash_count,.permutation_count,.cycles(core_cycles)
     );
+`ifdef SYNTHESIS
+    assign boot_cycles=64'd0;assign keygen_cycles=64'd0;assign sign_cycles=64'd0;
+`endif
     always_ff @(posedge clk) begin
         if(rst) begin
             phase<=HEADER;core_released<=0;
             busy<=1;done<=0;keygen_done<=0;error<=0;error_code<=0;
+
+`ifndef SYNTHESIS
             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
+`endif
+
             image_header<=0;profile_descriptor<=0;
         end else begin
             keygen_done<=0;
-            if(PROFILE_ENABLE && !core_released) boot_cycles<=boot_cycles+1;
+
+`ifndef SYNTHESIS
+            if(!core_released) boot_cycles<=boot_cycles+1;
+`endif
+
             if(core_released && core_error) begin
                 error<=1;error_code<=core_error_code;busy<=0;phase<=HALTED;
             end else case(phase)
@@ -69,10 +80,12 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
                     end else if(core_job_ready) phase<=RUN;
                 end
                 RUN:if(core_done) begin
-                    if(PROFILE_ENABLE) begin
+`ifndef SYNTHESIS
+                    begin
                         if(job_operation==1) sign_cycles<=core_cycles;
                         else if(job_operation==0) keygen_cycles<=core_cycles;
                     end
+`endif
                     if(!job_operation) keygen_done<=1;
                     done<=1;busy<=0;phase<=HALTED;
                 end

@@ -6,38 +6,40 @@ usage() {
     echo 'Usage: scripts/simulate.sh [profile] [keygen|sign|verify] [P] [U] [+OPTION=VALUE ...]'
     echo '       scripts/simulate.sh --smoke [P] [U]'
     echo '       scripts/simulate.sh --all [P] [U]'
-    echo 'Defaults: slh_128f sign P1U2; PROFILE_ENABLE=1; VECTORS_DIR=tb/vectors; compile threads=2.'
+    echo 'Defaults: slh_128f sign P1U2; SIM_SYNTHESIS=0; VECTORS_DIR=tb/vectors; compile threads=2.'
 }
+if [[ ${PROFILE_ENABLE+x} ]]; then echo "PROFILE_ENABLE removed; use SIM_SYNTHESIS=1 for the SYNTHESIS macro view." >&2; exit 2; fi
 mode=single
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
     --smoke|--all) mode=${1#--}; shift; profile=; operation=; p=${1:-1}; u=${2:-2}; shift "$(( $# >= 2 ? 2 : $# ))" ;;
     *) profile=${1:-slh_128f}; operation=${2:-sign}; p=${3:-1}; u=${4:-2}; shift "$(( $# >= 4 ? 4 : $# ))" ;;
 esac
-stats=${PROFILE_ENABLE:-1}
+synthesis=${SIM_SYNTHESIS:-0}
 lut6=${KECCAK_LUT6:-0}
 vectors_root=${VECTORS_DIR:-tb/vectors}
-if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $stats =~ ^[01]$ || ! $lut6 =~ ^[01]$ ]]; then
-    echo 'P/U must be integers; PROFILE_ENABLE and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
+if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $synthesis =~ ^[01]$ || ! $lut6 =~ ^[01]$ ]]; then
+    echo 'P/U must be integers; SIM_SYNTHESIS and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
 fi
 p=$((10#$p)); u=$((10#$u))
-if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
-    echo 'Require 1<=P<=12, U>0 and P*U dividing 24.' >&2; exit 2
+if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
+    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
 fi
 verilator_bin=${VERILATOR:-verilator}
 command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
 mapfile -t sources < sources.txt
-work="build/sim/P${p}U${u}_stats${stats}"
+work="build/sim/P${p}U${u}_synthesis${synthesis}"
 defines=()
+if [[ $synthesis == 1 ]]; then defines+=(-DSYNTHESIS); fi
 if [[ $lut6 == 1 ]]; then defines+=(+define+MHBS_XILINX_LUT6); work+=_lut6; fi
 mkdir -p "$work"
-identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
 exec 9>"$work/compile.lock"
 flock 9
     if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
-    echo "Compile P${p}U${u} stats=$stats; log: $work/compile.log"
+    echo "Compile P${p}U${u} SYNTHESIS=$synthesis; log: $work/compile.log"
     if ! "$verilator_bin" --binary --timing -O3 -j 2 -Wno-fatal --top-module tb \
-        "-GPIPELINE=$p" "-GUNROLL=$u" "-GPROFILE_ENABLE=$stats" \
+        "-GPIPELINE=$p" "-GUNROLL=$u" \
         --Mdir "$work/obj" "${defines[@]}" "${sources[@]}" tb/tb.sv >"$work/compile.log" 2>&1; then
         tail -n 40 "$work/compile.log" >&2; exit 1
     fi

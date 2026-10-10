@@ -54,7 +54,7 @@ VECTORS_DIR=build/custom_vectors ./scripts/simulate.sh lms_h10 verify 4 1
 ./scripts/simulate.sh xmss_h10 verify 4 1
 ./scripts/simulate.sh --smoke 4 1
 ./scripts/simulate.sh --all 4 1
-PROFILE_ENABLE=0 ./scripts/simulate.sh slh_128f sign 4 1
+SIM_SYNTHESIS=1 bash scripts/simulate.sh slh_128f sign 4 1
 ```
 
 `--smoke` 执行十二参数 Verify，加上 128f Keygen/Sign，共 14 项；`--all` 执行全部 36 项。XMSS/LMS 的 Keygen/Sign 计算完整树，运行较久。运行时读取所选向量，不必为每种算法重新编译；P/U、统计配置或源码变化时重新编译。
@@ -65,7 +65,7 @@ PROFILE_ENABLE=0 ./scripts/simulate.sh slh_128f sign 4 1
 ./scripts/simulate.sh lms_h10 verify 4 1 +STALL=1 +REPLAYS=2 +INTERRUPT=1
 ```
 
-`P` 范围为 1～12，`U>0`，要求 `P×U` 整除 24。常用 U1 的 P1/2/3/4/6/8/12，U2 的 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。
+`P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。P24U1 的新矩阵验收结果以后台报告为准。
 
 2026-10-13 优化：XMSS/LMS 的完整端点批次直接写入单端口端点存储；无需输出捕获的批次在最后一个响应到达时推进。直接写回与批后读取共用上下文读端口。Verify、仅签名链及单槽捕获尾批保留原消费顺序。
 
@@ -119,7 +119,7 @@ Vivado 2025.2，器件 `xc7a200tffg1156-3`，4 线程，约束 6.666667 ns。综
 | `out_valid`、`out_data[255:0]`、`out_bytes[5:0]` | 每有效拍输出低位 4/16/24/32 字节，低字节在先，无输出背压 |
 | `done`、`error/error_code` | 操作完成/执行错误；Verify 根不匹配不属于执行错误 |
 | `verify_pass` | Verify 完成且 error=0 时判断签名是否通过 |
-| `PROFILE_ENABLE` | 仿真开启统计；综合入口设为 0，统计端口置零 |
+| `SYNTHESIS` 宏 | 定义时直接裁剪统计寄存器，64位统计端口置零；仿真默认不定义 |
 
 Verify 使用节点接口，由外部拆分签名并校验总长度。SLH 顺序为 R、各 FORS 树的秘密节点和认证路径、各层 WOTS 签名与认证路径。XMSS/LMS 顺序为 R、67 个链节点、h 个认证节点，路径从叶到根；q 和 LMS 类型字段不作为节点输入。公钥根由调用方提供。
 
@@ -146,7 +146,7 @@ XMSS/LMS 的 `KEY_INDEX`／`job_index` 为 q（0～2^h−1），LMS 的 `IDENTIF
 
 `xmss`、`lms` 默认对应各自 h10。旧 `*_omega*` 名称会报告迁移错误，历史报告与向量保留用于复核，不能作为新标准任务的性能基线。内部 ROM 配置码为0x18～0x1D，标准 XMSS/LMS 算法类型码为0x10/0x11/0x12，LM-OTS 类型码为0x0B。
 
-Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位，PROFILE_ENABLE=0时裁剪统计硬件。外部随机输入和q持久化管理仍由调用方负责。
+Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位，定义SYNTHESIS宏时直接裁剪统计硬件。外部随机输入和q持久化管理仍由调用方负责。
 
 ```bash
 python3 scripts/build_stateful_reference.py
@@ -158,3 +158,10 @@ vivado -mode batch -nolog -nojournal -source scripts/synth_top.tcl -tclargs xmss
 直接C++驱动入口用于大树完整实测，仍实例化生产common和签名缓存，并检查每个输出字节、缓存读回、实际Hash/置换事件及64位硬件统计。停顿、异常和兼容检查使用原SystemVerilog测试台。
 
 迁移验收、六个top与通用核面积及实测周期见 [SHAKE256标准迁移报告](docs/report/Stateful_SHAKE256_Standard_Migration_20261013.md)。报告在全部36项和边界检查完成前保持“执行中”，大树周期不外推。
+
+
+通用 P/U 重构移除了 P4U1 专用执行分支，固定哈希统一使用上下文引擎，P1 复用迭代 Keccak。树栈和认证路径分别复用端点 RAM 的 68～87、88～107 槽；112～135 槽保存 FORS 批次结果。签名缓存与 XMSS 同时存活的 key/digest/captured 银行保持独立。
+
+综合时间异常时跳过该点的当前分析，让综合继续在后台运行，不终止进程；通过其他已完成配置给出总体结论。后台矩阵及 `synthesize.sh` 默认20分钟后标记分析暂缓，尚未完成的面积与ATP留空，完成后补入报告。矩阵可用 `--synth-defer-seconds`、单点脚本可用 `SYNTH_DEFER_SECONDS` 调整分析等待阈值。
+
+本轮冻结矩阵与后台验收见 [PU_Generic_Sharing_20261013.md](docs/report/PU_Generic_Sharing_20261013.md)，P3U2 的当前分析暂缓，综合继续后台运行。XMSS/LMS h20 完整 Keygen、Sign 继续停止。

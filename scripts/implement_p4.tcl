@@ -5,7 +5,7 @@ set out [file normalize [lindex $argv 1]]
 file mkdir $out
 set_param general.maxThreads 4
 set part xc7a200tffg1156-3
-set settings "part=$part\nvivado=[version -short]\nPIPELINE=4\nUNROLL=1\nPROFILE_ENABLE=0\nKECCAK_LUT6=0\nmaxThreads=4\ninitial_period_ns=6.666667"
+set settings "part=$part\nvivado=[version -short]\nPIPELINE=4\nUNROLL=1\nSYNTHESIS=1\nKECCAK_LUT6=0\nmaxThreads=4\ninitial_period_ns=6.666667"
 set settings_file [file join $out settings.txt]
 if {[file exists $settings_file]} {
     set handle [open $settings_file r]
@@ -42,7 +42,7 @@ close $f
 read_xdc [file join $out synth_clock.xdc]
 if {![file exists [file join $out synth.dcp]]} {
 synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 \
-    -generic PIPELINE=4 -generic UNROLL=1 -generic PROFILE_ENABLE=0
+    -generic PIPELINE=4 -generic UNROLL=1
 report_utilization -file [file join $out synth_utilization.rpt]
 report_utilization -hierarchical -file [file join $out synth_hierarchical.rpt]
 report_timing_summary -file [file join $out synth_timing.rpt]

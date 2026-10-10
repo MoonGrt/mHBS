@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 // Independent byte-serialization vectors, including rate and node boundaries.
-module tb_recipe;
+module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1);
  logic clk=0;always #5 clk=~clk;
  logic rst=1,request_valid=0,response_ready=0;
  wire request_ready,response_valid,error;
@@ -15,7 +15,7 @@ module tb_recipe;
  logic [255:0] nodes[0:135];
  wire [391:0] response_value;
  wire [63:0] hashes,permutations,batch_hashes,batch_permutations;
- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(
+ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL)) dut(
   .clk,.rst,.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
   .batch_request_tag(2'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
   .batch_leaf(10'd0),.batch_a(8'd0),.batch_b(32'd0),.batch_family(2'd0),.batch_no_seed(1'b0),
