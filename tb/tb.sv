@@ -23,6 +23,15 @@ module tb;
  wire busy,done,keygen_done,error;wire [15:0] error_code;
  wire [63:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
  common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
+`ifdef SYNTHESIS
+ // Harness-only placeholders; these ports do not exist on the synthesized RTL.
+ assign error_code=0;
+ assign boot_cycles=0;
+ assign keygen_cycles=0;
+ assign sign_cycles=0;
+ assign hash_count=0;
+ assign permutation_count=0;
+`endif
  logic read_enable=0;logic [10:0] read_address=0;
  wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
  signature cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
@@ -136,9 +145,12 @@ module tb;
    if(fault)begin
     if(fault==2)begin while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();end
     else begin while(dut.core.state!=23)tick();end
-    force dut.core.lane.error=1;
-       while(!error)tick();
-    if(error_code!=16'h3007)$fatal(1,"fault code");
+    if(fault==3)force dut.core.state=type(dut.core.state)'(7'd127);
+    else force dut.core.lane.error=1;
+    while(!error)tick();
+`ifndef SYNTHESIS
+    if(error_code!=(fault==3 ? 16'h3006 : 16'h3007))$fatal(1,"fault code %h",error_code);
+`endif
     repeat(40)begin tick();if(out_valid||busy||done||verify_ready||verify_pass)$fatal(1,"fault halt");end
     $display("STATEFUL_FAULT_PASS");$finish;tick();
    end
@@ -149,7 +161,12 @@ module tb;
    end
    while(!done&&!error)tick();
    computed=compute;elapsed=cycles;hcount=hashes[0]+hashes[1];pcount=perms[0]+perms[1];
-   if(invalid)begin if(!error||error_code!=(invalid_profile>=0 ? 16'h3009 : 16'h3008))$fatal(1,"index rejection");end
+   if(invalid)begin
+    if(!error)$fatal(1,"index rejection");
+`ifndef SYNTHESIS
+    if(error_code!=(invalid_profile>=0 ? 16'h3009 : 16'h3008))$fatal(1,"index rejection code");
+`endif
+   end
    else begin
     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);

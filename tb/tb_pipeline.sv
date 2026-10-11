@@ -21,15 +21,30 @@ module tb_pipeline;
   .batch_start(4'd0),.batch_initial_value(initial_value),.batch_fixed_shape(4'd0),.batch_pair(1'b0),.batch_right(256'd0),
   .batch_seed_domain(8'h83),.batch_step_domain(8'h83),.batch_response_valid(response_valid),.batch_response_ready(ready_response),
   .batch_response_tag(response_tag),.batch_response_digest(),.batch_response_capture(),.batch_read_tag(response_tag),
-  .batch_read_digest(digest),.batch_read_capture(capture),.batch_hashes(hashes),.batch_permutations(permutations),
+  .batch_read_digest(digest),.batch_read_capture(capture),
+`ifndef SYNTHESIS
+  .batch_hashes(hashes),.batch_permutations(permutations),
+`endif
   .node_bytes(6'd32),.request_valid(1'b0),.request_ready(),.request_recipe(64'd0),.request_step_recipe(64'd0),
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed,.secret_prf(256'd0),.public_seed,.root(256'd0),.randomizer(256'd0),.identifier,
   .message_buffer(696'd0),.message_length(7'd0),.request_layer(5'd3),.request_tree(64'h0123456789abcdef),
   .request_leaf(10'd0),.request_a(8'd0),.request_b(32'd0),.request_left(256'd0),.request_right(256'd0),
   .list_index0(),.list_index1(),.list_next_index0(),.list_data0(256'd0),.list_data1(256'd0),
-  .response_valid(),.response_ready(1'b0),.response_value(),.response_capture(),.error(),.hash_count(),.permutation_count()
+  .response_valid(),.response_ready(1'b0),.response_value(),.response_capture(),.error()
+`ifndef SYNTHESIS
+  ,.hash_count(),.permutation_count()
+`endif
  );
+`ifdef SYNTHESIS
+ longint unsigned observed_permutations=0;
+ assign hashes=observed_permutations;
+ assign permutations=observed_permutations;
+ always @(posedge clk)begin
+  if(rst)observed_permutations=0;
+  else if(dut.batch_perm_done)observed_permutations++;
+ end
+`endif
  logic [778:0] vectors[0:7];
  integer slot_row[0:3];integer expected_hashes,cycles=0,same_edge=0,non_order=0,retired=0;
  logic [19:0] leaf=20'd513;

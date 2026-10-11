@@ -22,7 +22,10 @@ module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1);
   .batch_start(4'd0),.batch_initial_value(256'd0),.batch_fixed_shape(4'd0),.batch_pair(1'b0),.batch_right(256'd0),
   .batch_seed_domain(8'd0),.batch_step_domain(8'd0),.batch_response_valid(),.batch_response_ready(1'b0),
   .batch_response_tag(),.batch_response_digest(),.batch_response_capture(),.batch_read_tag(2'd0),
-  .batch_read_digest(),.batch_read_capture(),.batch_hashes,.batch_permutations,
+  .batch_read_digest(),.batch_read_capture(),
+`ifndef SYNTHESIS
+  .batch_hashes,.batch_permutations,
+`endif
   .node_bytes,.request_valid,.request_ready,.request_recipe,.request_step_recipe(64'd0),
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed,.secret_prf,.public_seed,.root,.randomizer,.identifier,.message_buffer,.message_length,
@@ -31,9 +34,29 @@ module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1);
   .list_index0,.list_index1,.list_next_index0,
   .list_data0(list_index0<136 ? nodes[list_index0] : 256'd0),
   .list_data1(list_index1<136 ? nodes[list_index1] : 256'd0),
-  .response_valid,.response_ready,.response_value,.response_capture(),.error,
-  .hash_count(hashes),.permutation_count(permutations)
+  .response_valid,.response_ready,.response_value,.response_capture(),.error
+`ifndef SYNTHESIS
+  ,.hash_count(hashes),.permutation_count(permutations)
+`endif
  );
+`ifdef SYNTHESIS
+ // Count functional permutation completions independently of removed ports.
+ longint unsigned observed_hashes=0,observed_permutations=0;
+ assign hashes=observed_hashes;
+ assign permutations=observed_permutations;
+ assign batch_hashes=0;
+ assign batch_permutations=0;
+ always @(posedge clk)begin
+  if(rst)begin observed_hashes=0;observed_permutations=0;end
+  else begin
+   if(dut.permutation_complete)begin
+    observed_permutations++;
+    if(dut.running_last)observed_hashes++;
+   end
+   if(dut.batch_perm_done)begin observed_hashes++;observed_permutations++;end
+  end
+ end
+`endif
  logic [451:0] vectors[0:2047];
  logic [19:0] leaf;
  string vector_file;integer count,timeout;

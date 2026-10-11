@@ -22,18 +22,14 @@ set command [list synth_design -top $top -part $part -mode out_of_context \
     -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=$p \
     -generic UNROLL=$u]
 set handle [open [file join $out settings.txt] w]
-puts $handle "top=$top\nprofile=$profile\noperation=runtime\nPIPELINE=$p\nUNROLL=$u\nSYNTHESIS=1\nSIGNATURE_STORE_ENABLE=0\npart=$part\nvivado=[version -short]\nthreads=$threads\nmode=out_of_context\nkeccak=generic\nclock_period_ns=6.666667\ncommand=$command"
+puts $handle "top=$top\nprofile=$profile\noperation=runtime\nPIPELINE=$p\nUNROLL=$u\nSYNTHESIS=1\nMHBS_SIGNATURE_STORE=undefined (common has no signature storage)\npart=$part\nvivado=[version -short]\nthreads=$threads\nmode=out_of_context\nkeccak=generic\nclock_period_ns=6.666667\ncommand=$command"
 close $handle
 {*}$command
 report_utilization -file [file join $out utilization.rpt]
 report_utilization -hierarchical -file [file join $out hierarchical.rpt]
 report_timing_summary -file [file join $out timing.rpt]
 write_checkpoint -force [file join $out synthesized.dcp]
-foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
-    if {[string match FD* [get_property REF_NAME $cell]] && \
-        [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {
-        error "Statistics register remains: $cell"
-    }
-}
+source [file join $root scripts audit_debug.tcl]
+mhbs_audit_debug [file join $out debug_audit.json]
 puts "MHBS_MATRIX_SYNTH_PASS P${p}U${u} profile=$profile top=$top threads=$threads SYNTHESIS=1"
 exit

@@ -14,8 +14,10 @@ module tb_statistics;
   .request_layer(5'd0),.request_tree(64'd0),.request_leaf(20'd0),.request_a(8'd0),.request_b(32'd0),
   .seed_domain(8'd0),.step_domain(8'd0),.read_tag(1'b0),.read_digest(),.read_capture(),
   .response_valid,.response_ready(1'b1),.response_tag(),.response_digest(),.response_capture(),
-  .perm_valid,.perm_ready(1'b1),.perm_state(),.perm_tag(),.perm_done,.perm_digest(1600'd0),.perm_result_tag(1'b0),
-  .hash_count,.permutation_count
+  .perm_valid,.perm_ready(1'b1),.perm_state(),.perm_tag(),.perm_done,.perm_digest(1600'd0),.perm_result_tag(1'b0)
+`ifndef SYNTHESIS
+  ,.hash_count,.permutation_count
+`endif
  );
  initial begin
   repeat(3)@(negedge clk);rst=0;
@@ -27,7 +29,7 @@ module tb_statistics;
   @(negedge clk);request_valid=0;perm_done=1;
   @(posedge clk);#1;
 `ifdef SYNTHESIS
-  if(hash_count!=0 || permutation_count!=0)$fatal(1,"synthesis statistics not zero");
+  if(!response_valid)$fatal(1,"functional completion lost when diagnostics absent");
 `else
   if(hash_count!=64'h100000000 || permutation_count!=64'h100000000)$fatal(1,"64-bit carry lost");
 `endif

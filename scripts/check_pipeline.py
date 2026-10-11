@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Check tag recycling and retained captures against independent SHAKE chains."""
 from hashlib import shake_256
+import argparse
 import os
 from pathlib import Path
 import subprocess
@@ -8,13 +9,17 @@ import subprocess
 ROOT = Path(__file__).resolve().parents[1]
 
 def main():
-    work = ROOT / 'build/pipeline_check'
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--synthesis',action='store_true',help='Verify the RTL view with diagnostic ports removed')
+    args=parser.parse_args()
+    work = ROOT / ('build/pipeline_check_synthesis' if args.synthesis else 'build/pipeline_check')
     work.mkdir(parents=True, exist_ok=True)
     sk, pub, ident = bytes(range(1, 33)), bytes(range(65, 97)), bytes(range(225, 241))
     def be(x, n=4): return x.to_bytes(n, 'big')
     def h(v): return shake_256(v).digest(32)
     obj = work / 'obj'
     command = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_pipeline', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_pipeline.sv']
+    if args.synthesis: command.append('-DSYNTHESIS')
     with (work/'compile.log').open('w') as log:
         subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
     for family,leaf in ((f,q) for f in range(3) for q in (513,1024,65536,1048575)):

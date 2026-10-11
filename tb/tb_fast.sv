@@ -26,13 +26,23 @@ module tb_fast #(parameter integer PIPELINE=4,UNROLL=1)(
  assign configuration_pipeline=PIPELINE;
  assign configuration_unroll=UNROLL;
  common #(.PIPELINE(PIPELINE),.UNROLL(UNROLL)) dut(.*);
- assign execution_cycles=job_operation==0 ? keygen_cycles : job_operation==1 ? sign_cycles : dut.core.cycles;
+ // The C++ wrapper keeps a stable interface; production diagnostics are absent
+ // in the synthesis view. Functional events still measure cycles and work.
 `ifdef SYNTHESIS
+ assign error_code=0;
+ assign boot_cycles=0;
+ assign keygen_cycles=0;
+ assign sign_cycles=0;
+ assign execution_cycles=0;
+ assign hash_count=0;
+ assign permutation_count=0;
  assign debug_stats=0;
+ assign statistics_zero=1;
 `else
+ assign execution_cycles=job_operation==0 ? keygen_cycles : job_operation==1 ? sign_cycles : dut.core.cycles;
  assign debug_stats=1;
-`endif
  assign statistics_zero=!(boot_cycles|keygen_cycles|sign_cycles|hash_count|permutation_count|dut.core.cycles);
+`endif
  assign execution_active=dut.core.state!=0 && dut.core.state!=32;
  assign execution_reset=dut.core.execution_rst;
  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;

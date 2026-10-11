@@ -1,6 +1,6 @@
 # 通用 P/U 执行、统计宏与资源复用（2026-10-13）
 
-更新时间：2026-10-13T21:35:01+08:00。验收：后台验证中。
+更新时间：2026-10-14T07:12:16+08:00。验收：后台验证中。
 
 删除 P4U1 独占分支，所有合法 P/U 使用统一固定引擎、滚动链、并行 L-tree、128位流式生产和 FORS 四叶微组。P1 复用原迭代 Keccak 状态。统计直接用 SYNTHESIS 宏裁剪，统计端口保持64位并在综合时置零。
 
@@ -16,8 +16,6 @@
 | xmss_h10 | P4U1 | 1406294.883875 | P24U1 | 746238.732360 | -46.94% |
 | lms_h10 | P24U1 | 344979.115635 | P24U1 | 309247.967535 | -10.36% |
 
-当前分析排除异常耗时配置：P3U2。综合继续后台运行，不等待该配置；完成后补入面积和ATP。
-
 矩阵未全部完成时，上表候选排名为暂定值；最终验收要求其余已测配置通过、三个已测配置中的最佳ATP均不回退且至少一个降低；异常配置继续后台运行，其结果未完成时不参与面积与ATP排名。
 
 | 检查 | 状态 | 日志 |
@@ -26,12 +24,25 @@
 | standard_models | passed | [standard_models.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/standard_models.log) |
 | compatibility | passed | [compatibility.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/compatibility.log) |
 | extended | passed | [extended.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/extended.log) |
-| route/baseline/P12U1 | running | [route_baseline_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P12U1.log) |
+| route/baseline/P12U1 | passed | [route_baseline_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P12U1.log) |
+| route/baseline/P24U1 | failed | [route_baseline_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P24U1.log) |
+| route/baseline/P4U1 | passed | [route_baseline_P4U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P4U1.log) |
+| route/candidate/P12U1 | passed | [route_candidate_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P12U1.log) |
+| route/candidate/P24U1 | running | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
 
 完整回归为十个非h20配置的三操作加两个h20 Verify，共32项；h20完整Keygen、Sign继续停止。其他合法P/U逐项执行三算法Verify和459项独立配方。扩展回归覆盖乱序标签、捕获、停顿、复位、异常、截断、篡改、消息和填充边界及q边界。
 
 综合采用xc7a200tffg1156-3、同工具、OOC、通用Keccak、6.666667ns约束和默认时序驱动优化，最多12个Vivado、每个2线程。旧/新胜出配置从冻结综合检查点布线；先6.666667ns，未闭合时按测得违例放宽，固定布线以0.1ns精度扫描setup和hold。未新增false-path或multicycle。OOC时钟模型结论不扩展到板级top。
 
+| 来源/P/U | 布线等效Slice | 闭合周期 ns | STA MHz | WNS/WHS ns |
+|---|---:|---:|---:|---|
+| baseline/P12U1 | 16245.125 | 11.867 | 84.267 | 0.068/0.116 |
+| baseline/P4U1 | 9678.875 | 12.467 | 80.212 | 0.019/0.108 |
+| candidate/P12U1 | 15888.750 | 12.567 | 79.573 | 0.062/0.138 |
+
+| 算法 | 基线布线ATP Slice·ms | 候选布线ATP Slice·ms | 变化 |
+|---|---:|---:|---:|
+| slh_128f | 65930.103340 | 57508.285733 | -12.77% |
 
 P4U1逐步对照：
 

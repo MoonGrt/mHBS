@@ -46,12 +46,8 @@ synth_design -top common -part $part -mode out_of_context -flatten_hierarchy reb
 report_utilization -file [file join $out synth_utilization.rpt]
 report_utilization -hierarchical -file [file join $out synth_hierarchical.rpt]
 report_timing_summary -file [file join $out synth_timing.rpt]
-foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
-    if {[string match FD* [get_property REF_NAME $cell]] &&
-        [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {
-        error "Statistics register remains: $cell"
-    }
-}
+source [file join $source_root scripts audit_debug.tcl]
+mhbs_audit_debug [file join $out debug_audit.json]
 write_checkpoint -force [file join $out synth.dcp]
 close_design
 }

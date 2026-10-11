@@ -18,8 +18,9 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pipeline',type=int,default=4)
     parser.add_argument('--unroll',type=int,default=1)
+    parser.add_argument('--synthesis',action='store_true',help='Verify the RTL view with diagnostic ports removed')
     args=parser.parse_args()
-    work = ROOT / f'build/recipe_check/P{args.pipeline}U{args.unroll}'
+    work = ROOT / (f'build/recipe_check/P{args.pipeline}U{args.unroll}' + ('_synthesis' if args.synthesis else ''))
     work.mkdir(parents=True, exist_ok=True)
     sk, prf, pub, root, rand, left, right = [bytes(range(k, k+32)) for k in (1, 33, 65, 97, 129, 161, 193)]
     ident = bytes(range(225, 241))
@@ -85,6 +86,7 @@ def main():
     vector.write_text(''.join(values))
     obj = work / 'obj'
     cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
+    if args.synthesis: cmd.append('-DSYNTHESIS')
     with (work / 'compile.log').open('w') as log:
         subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
     result = subprocess.run([str(obj / 'Vtb_recipe'), f'+VECTOR={vector}', f'+COUNT={len(cases)}'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

@@ -27,13 +27,7 @@ synth_design -top common -part $part -mode out_of_context \
 report_utilization -file [file join $out core_utilization.rpt]
 report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
 report_timing_summary -file [file join $out core_timing.rpt]
-set bad {}
-foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
-    if {[string match FD* [get_property REF_NAME $cell]] &&
-        [regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {
-        lappend bad $cell
-    }
-}
-if {[llength $bad]} {error "Statistics registers remain: $bad"}
+source [file join $package_root scripts audit_debug.tcl]
+mhbs_audit_debug [file join $out debug_audit.json]
 puts "MHBS_SYNTH_PASS P${p}U${u} SYNTHESIS=1"
 exit

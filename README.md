@@ -117,15 +117,15 @@ Vivado 2025.2，器件 `xc7a200tffg1156-3`，4 线程，约束 6.666667 ns。综
 | `message_valid/ready`、`message_data[63:0]` | 上升沿 valid/ready 同为 1 时接收；等待时保持数据；低字节在先，尾拍多余字节忽略 |
 | `verify_valid/ready`、`verify_data[255:0]` | 同样握手，每拍一个低位 n 字节节点；不足节点时等待 |
 | `out_valid`、`out_data[255:0]`、`out_bytes[5:0]` | 每有效拍输出低位 4/16/24/32 字节，低字节在先，无输出背压 |
-| `done`、`error/error_code` | 操作完成/执行错误；Verify 根不匹配不属于执行错误 |
+| `done`、`error`（仿真另有 `error_code`） | 操作完成/执行错误；Verify 根不匹配不属于执行错误 |
 | `verify_pass` | Verify 完成且 error=0 时判断签名是否通过 |
-| `SYNTHESIS` 宏 | 定义时直接裁剪统计寄存器，64位统计端口置零；仿真默认不定义 |
+| `SYNTHESIS` 宏 | 定义时裁剪诊断端口与寄存器，包括 `error_code` 和64位统计；仿真默认不定义 |
 
 Verify 使用节点接口，由外部拆分签名并校验总长度。SLH 顺序为 R、各 FORS 树的秘密节点和认证路径、各层 WOTS 签名与认证路径。XMSS/LMS 顺序为 R、67 个链节点、h 个认证节点，路径从叶到根；q 和 LMS 类型字段不作为节点输入。公钥根由调用方提供。
 
 XMSS/LMS 的 `KEY_INDEX`／`job_index` 为 q（0～2^h−1），LMS 的 `IDENTIFIER`／`job_identifier` 为 16 字节 I。q 由外部持久化管理，每次签名只能使用一次；复位不恢复可用索引。
 
-生产顶层 `SIGNATURE_STORE_ENABLE=1` 时保存完整 Sign 输出。`signature_valid=1` 后按节点索引发起 `signature_read_enable/address`，下一同步读响应使用 `signature_read_valid/data/bytes`；将各项低位有效字节拼接即可恢复签名。
+编译时定义 `MHBS_SIGNATURE_STORE` 宏，生产顶层保存完整 Sign 输出；未定义时不实例化签名缓存，其读回接口返回零。该宏独立于 `SYNTHESIS`。`signature_valid=1` 后按节点索引发起 `signature_read_enable/address`，下一同步读响应使用 `signature_read_valid/data/bytes`；将各项低位有效字节拼接即可恢复签名。
 
 ## 向量格式
 
@@ -146,7 +146,7 @@ XMSS/LMS 的 `KEY_INDEX`／`job_index` 为 q（0～2^h−1），LMS 的 `IDENTIF
 
 `xmss`、`lms` 默认对应各自 h10。旧 `*_omega*` 名称会报告迁移错误，历史报告与向量保留用于复核，不能作为新标准任务的性能基线。内部 ROM 配置码为0x18～0x1D，标准 XMSS/LMS 算法类型码为0x10/0x11/0x12，LM-OTS 类型码为0x0B。
 
-Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位，定义SYNTHESIS宏时直接裁剪统计硬件。外部随机输入和q持久化管理仍由调用方负责。
+Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。仿真中的 cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位；定义 `SYNTHESIS` 时诊断端口与寄存器一起消失，功能性错误中止仍有效。外部随机输入和q持久化管理仍由调用方负责。
 
 ```bash
 python3 scripts/build_stateful_reference.py
