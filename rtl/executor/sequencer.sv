@@ -3,10 +3,10 @@
 // slh64_v4.2: offline-validated image, one outstanding macro.
 // verilog_format: off
 module sequencer (
- input wire clk,rst,start,input wire [3:0] entry,output wire ready,output logic done,
- output wire [3:0] program_address,input wire [63:0] program_data,
- output wire [3:0] template_address,input wire [63:0] template_data,
- output wire command_valid,input wire command_ready,command_done,output wire [47:0] command
+ input wire clk, rst, start, input wire [3:0] entry, output wire ready, output logic done,
+ output wire [3:0] program_address, input wire [63:0] program_data,
+ output wire [3:0] template_address, input wire [63:0] template_data,
+ output wire command_valid, input wire command_ready, command_done, output wire [47:0] command
 );
 // verilog_format: on
     typedef enum logic [2:0] {

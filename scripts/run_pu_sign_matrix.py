@@ -46,6 +46,7 @@ def atomic_write(path, text):
 
 
 def launch(args):
+    configs = args.configs or CONFIGS
     stamp = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
     run = ROOT / 'build/pu_sign_matrix' / stamp
     snapshot = run / 'source'
@@ -86,7 +87,7 @@ def launch(args):
                     started_at=now(), source_root=str(snapshot), report=str(report),
                     base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'],
                                                         cwd=ROOT, text=True).strip(),
-                    configs=CONFIGS, profiles=PROFILES, operations=['sign'], part=PART,
+                    configs=configs, profiles=PROFILES, operations=['sign'], part=PART,
                     area_top='common', area_scope='One shared common core per P/U',
                     vivado_workers=args.vivado_workers, vivado_threads=2,
                     simulation_workers=args.sim_workers, versions=versions,
@@ -112,7 +113,8 @@ def launch(args):
              status=str(run / 'status.json'), report=str(report)), indent=2) + '\n')
     print(json.dumps(dict(pid=child.pid, root=str(run), log=str(log),
                           status=str(run / 'status.json'), report=str(report),
-                          simulation_cases=42, common_syntheses=14, area_top='common',
+                          simulation_cases=len(configs) * len(PROFILES),
+                          common_syntheses=len(configs), area_top='common',
                           vivado_workers=args.vivado_workers, vivado_threads=2), indent=2))
 
 
@@ -157,6 +159,7 @@ class Runner:
     def __init__(self, run):
         self.run = run
         self.meta = json.loads((run / 'SOURCE.json').read_text())
+        self.configs = self.meta['configs']
         self.source = Path(self.meta['source_root'])
         self.report = Path(self.meta['report'])
         self.lock = threading.Lock()
@@ -169,7 +172,7 @@ class Runner:
                           synthesis_mode='OOC, generic Keccak, no DSP', routed_sta=False,
                           clock_period_ns=6.666667, tasks={}, results=[])
         self.state.update(area_top='common', area_scope='One shared common core per P/U')
-        for p, u in CONFIGS:
+        for p, u in self.configs:
             config = f'P{p}U{u}'
             for profile in PROFILES:
                 self.state['tasks'][f'sim/{config}/{profile}'] = dict(status='pending')
@@ -186,7 +189,7 @@ class Runner:
     def publish(self):
         rows = []
         tasks = self.state['tasks']
-        for p, u in CONFIGS:
+        for p, u in self.configs:
             config = f'P{p}U{u}'
             common = tasks[f'synth/{config}/common']
             for profile in PROFILES:
@@ -250,7 +253,7 @@ class Runner:
             if v is None:
                 return '—'
             return f'{v:,.3f}'.rstrip('0').rstrip('.') if isinstance(v, float) else f'{v:,}'
-        for p, u in CONFIGS:
+        for p, u in self.configs:
             config = f'P{p}U{u}'
             task = tasks[f'synth/{config}/common']
             area = task.get('area', {})
@@ -288,6 +291,7 @@ class Runner:
         renderer = cls.__new__(cls)
         renderer.run = run
         renderer.meta = json.loads((run / 'SOURCE.json').read_text())
+        renderer.configs = renderer.meta['configs']
         renderer.state = json.loads((run / 'status.json').read_text())
         renderer.source = Path(renderer.meta['source_root'])
         renderer.report = prefix or Path(renderer.meta['report'])
@@ -381,7 +385,7 @@ class Runner:
         with ThreadPoolExecutor(max_workers=self.meta['vivado_workers']) as synth_pool, \
                 ThreadPoolExecutor(max_workers=self.meta['simulation_workers']) as sim_pool:
             futures = []
-            for p, u in CONFIGS:
+            for p, u in self.configs:
                 futures.append(sim_pool.submit(self.simulate, p, u))
                 futures.append(synth_pool.submit(self.synthesize, p, u, 'common'))
             for future in as_completed(futures):
@@ -407,10 +411,26 @@ def main():
     parser.add_argument('--watch', action='store_true', help='Refresh an existing report as measurements finish')
     parser.add_argument('--vivado-workers', type=int, default=12)
     parser.add_argument('--sim-workers', type=int, default=2)
+    parser.add_argument('--configs', nargs='+', metavar='PxUy',
+                        help='Restrict measurement to these P/U points; default is the 14-point matrix')
     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
                         dest='synth_skip_seconds', type=int, default=1200,
                         help='After 20 minutes defer analysis; synthesis keeps running')
     args = parser.parse_args()
+    if args.configs:
+        if not args.launch:
+            parser.error('--configs requires --launch; existing runs use their frozen configuration list')
+        configs = []
+        for name in args.configs:
+            match = re.fullmatch(r'P([0-9]+)U([0-9]+)', name, re.I)
+            if not match:
+                parser.error(f'Invalid configuration: {name}')
+            p, u = map(int, match.groups())
+            if p < 1 or u < 1 or p * u > 24 or 24 % (p * u):
+                parser.error(f'Invalid configuration: {name}')
+            if (p, u) not in configs:
+                configs.append((p, u))
+        args.configs = configs
     if sum([args.launch, bool(args.run_root), bool(args.render_root)]) != 1:
         parser.error('Choose --launch, --run-root or --render-root')
     if (args.watch or args.report_prefix) and not args.render_root:

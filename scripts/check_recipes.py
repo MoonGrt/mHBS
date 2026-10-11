@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Compare P4 scalar fixed/stream recipes with independent hashlib byte frames."""
+"""Compare scalar fixed/stream recipes with independent hashlib byte frames."""
 from hashlib import shake_256
 import os
 import argparse
+import json
 from pathlib import Path
 import subprocess
 
@@ -18,9 +19,14 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--pipeline',type=int,default=4)
     parser.add_argument('--unroll',type=int,default=1)
+    parser.add_argument('--recipe-mask',type=lambda value:int(value,0),default=0xffff,
+                        help='Compile-time recipe mask; e.g. 0x101e tests SLH without LMS list support')
     parser.add_argument('--synthesis',action='store_true',help='Verify the RTL view with diagnostic ports removed')
     args=parser.parse_args()
-    work = ROOT / (f'build/recipe_check/P{args.pipeline}U{args.unroll}' + ('_synthesis' if args.synthesis else ''))
+    if not 0 < args.recipe_mask <= 0xffff:
+        parser.error('--recipe-mask must be between 1 and 0xffff')
+    mask_suffix = '' if args.recipe_mask == 0xffff else f'_mask{args.recipe_mask:04x}'
+    work = ROOT / (f'build/recipe_check/P{args.pipeline}U{args.unroll}' + mask_suffix + ('_synthesis' if args.synthesis else ''))
     work.mkdir(parents=True, exist_ok=True)
     sk, prf, pub, root, rand, left, right = [bytes(range(k, k+32)) for k in (1, 33, 65, 97, 129, 161, 193)]
     ident = bytes(range(225, 241))
@@ -56,7 +62,7 @@ def main():
         else: raise ValueError(shape)
         result = h(data, 32)+bytes(17) if fixed else h(data, 49)
         perms = hashes if fixed else len(data)//136+1
-        return result, hashes, perms
+        return result, hashes, perms, len(data)
     cases = []
     for n in (16, 24, 32):
         for shape in (1, 2):
@@ -77,15 +83,25 @@ def main():
     for leaf in (1023,1024,32767,32768,65535,65536,1048575):
         cases.extend((32,shape,arity,1,leaf) for shape in (1,2,5,6,7,8,9,10,11,13,14,15)
                      for arity in ((1,2) if shape in (2,8) else (2,) if shape==15 else (67,) if shape==13 else (1,)))
+    cases = [case for case in cases if args.recipe_mask & (1 << case[1])]
+    if not cases:
+        parser.error('--recipe-mask enables no tested recipe')
     values = []
+    coverage = {'cases':len(cases),'pipeline':args.pipeline,'unroll':args.unroll,
+                'recipe_mask':f'0x{args.recipe_mask:04x}','synthesis':args.synthesis,
+                'frame_lengths':{},'shapes':{},'rate_boundary_cases':{}}
     for n, shape, arity, length, leaf in cases:
-        result, hashes, perms = frame(n, shape, arity, length, leaf)
+        result, hashes, perms, frame_length = frame(n, shape, arity, length, leaf)
+        for key,value in (('frame_lengths',frame_length),('shapes',shape)):
+            coverage[key][value] = coverage[key].get(value,0)+1
+        if frame_length in (135,136,137):
+            coverage['rate_boundary_cases'][frame_length] = coverage['rate_boundary_cases'].get(frame_length,0)+1
         value = int.from_bytes(result, 'little') | n << 392 | length << 398 | shape << 405 | arity << 409 | hashes << 417 | perms << 421 | leaf << 432
         values.append(f'{value:0113x}\n')
     vector = work / 'recipes.mem'
     vector.write_text(''.join(values))
     obj = work / 'obj'
-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
+    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
     if args.synthesis: cmd.append('-DSYNTHESIS')
     with (work / 'compile.log').open('w') as log:
         subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
@@ -93,6 +109,8 @@ def main():
     (work / 'run.log').write_text(result.stdout)
     print(result.stdout, end='')
     result.check_returncode()
+    coverage['passed'] = True
+    (work / 'coverage.json').write_text(json.dumps(coverage,indent=2)+'\n')
 
 if __name__ == '__main__':
     main()

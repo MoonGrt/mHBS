@@ -1,6 +1,6 @@
 # 通用 P/U 执行、统计宏与资源复用（2026-10-13）
 
-更新时间：2026-10-14T07:12:16+08:00。验收：后台验证中。
+更新时间：2026-10-14T10:38:30+08:00。验收：未通过。
 
 删除 P4U1 独占分支，所有合法 P/U 使用统一固定引擎、滚动链、并行 L-tree、128位流式生产和 FORS 四叶微组。P1 复用原迭代 Keccak 状态。统计直接用 SYNTHESIS 宏裁剪，统计端口保持64位并在综合时置零。
 
@@ -28,7 +28,7 @@
 | route/baseline/P24U1 | failed | [route_baseline_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P24U1.log) |
 | route/baseline/P4U1 | passed | [route_baseline_P4U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P4U1.log) |
 | route/candidate/P12U1 | passed | [route_candidate_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P12U1.log) |
-| route/candidate/P24U1 | running | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
+| route/candidate/P24U1 | failed | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
 
 完整回归为十个非h20配置的三操作加两个h20 Verify，共32项；h20完整Keygen、Sign继续停止。其他合法P/U逐项执行三算法Verify和459项独立配方。扩展回归覆盖乱序标签、捕获、停顿、复位、异常、截断、篡改、消息和填充边界及q边界。
 
@@ -56,3 +56,7 @@ P4U1逐步对照：
 工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。
 
 [逐步CSV](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/steps.csv)、[周期分解](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/profile/profile.json)、[证据清单](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/EVIDENCE.json)。
+
+待解决：route/baseline/P24U1
+
+待解决：route/candidate/P24U1

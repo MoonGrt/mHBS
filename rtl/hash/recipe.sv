@@ -19,13 +19,13 @@ module recipe #(
     input wire clk, rst,
     input wire batch_mode,batch_request_valid,output wire batch_request_ready,
     input wire [TAG_BITS-1:0] batch_request_tag,
-    input wire [4:0] batch_steps,batch_capture_after,input wire batch_capture_enable,
-    input wire [19:0] batch_leaf,input wire [7:0] batch_a,input wire [31:0] batch_b,
-    input wire [1:0] batch_family,input wire batch_no_seed,
-    input wire [3:0] batch_start,input wire [255:0] batch_initial_value,
-    input wire [3:0] batch_fixed_shape,input wire batch_pair,input wire [255:0] batch_right,
-    input wire [7:0] batch_seed_domain,batch_step_domain,
-    output wire batch_response_valid,input wire batch_response_ready,
+    input wire [4:0] batch_steps, batch_capture_after, input wire batch_capture_enable,
+    input wire [19:0] batch_leaf, input wire [7:0] batch_a, input wire [31:0] batch_b,
+    input wire [1:0] batch_family, input wire batch_no_seed,
+    input wire [3:0] batch_start, input wire [255:0] batch_initial_value,
+    input wire [3:0] batch_fixed_shape, input wire batch_pair, input wire [255:0] batch_right,
+    input wire [7:0] batch_seed_domain, batch_step_domain,
+    output wire batch_response_valid, input wire batch_response_ready,
     output wire [TAG_BITS-1:0] batch_response_tag,
     output wire [255:0] batch_response_digest,batch_response_capture,
     input wire [TAG_BITS-1:0] batch_read_tag,
@@ -64,12 +64,10 @@ module recipe #(
         STREAM,
         WAIT_HASH,
         RESPONSE,
-        FIXED_ISSUE,
         FIXED_WAIT
     } state_t;
     state_t state;
     localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
-    logic [4:0] rate_block;
     logic [3:0] beat;
     wire [63:0] recipe = request_recipe;
     logic [15:0] seed_shapes;
@@ -88,19 +86,12 @@ module recipe #(
             if (!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length = 0;
             else
                 case (desc[59:56])
-                    ADDRESS_SEED: decode_length = node_bytes + 32 + node_bytes;
-                    ADDRESS_VALUE, ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
+                    ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
                     MESSAGE_PRF: decode_length = 2 * node_bytes + message_length;
                     MESSAGE_DIGEST: decode_length = 3 * node_bytes + message_length;
-                    INDEX_PRF: decode_length = 96;
                     ROOT_MESSAGE: decode_length = 128 + message_length;
-                    MASKED_SEED: decode_length = 128;
-                    MASKED_VALUE: decode_length = 13'd64 + {desc[47:40], 5'd0};
-                    PREFIX_SEED, PREFIX_VALUE: decode_length = 55;
                     PREFIX_MESSAGE: decode_length = 54 + message_length;
                     PREFIX_LIST: decode_length = 13'd22 + {desc[47:40], 5'd0};
-                    PREFIX_LEAF: decode_length = 54;
-                    PREFIX_PARENT: decode_length = 86;
                     default: decode_length = 0;
                 endcase
         end
@@ -128,8 +119,6 @@ module recipe #(
         32'd0,
         be32({27'd0, request_layer})
     };
-    wire [12:0] rate_offset = ({8'd0, rate_block} << 7) + ({8'd0, rate_block} << 3);
-    wire stream_last = rate_offset + 13'd136 > input_length;
     wire hash_ready, block_ready, finish_valid;
     wire [DIGEST_BYTES*8-1:0] digest;
     wire completed = finish_valid;
@@ -141,8 +130,7 @@ module recipe #(
     logic [127:0] staged_data;
     wire stream_accept = !staged_valid || block_ready;
     // Emit sixteen bytes per cycle, then eight bytes at the end of the rate.
-    // Keeping a cursor avoids a rate_block*136 + beat*16 adder chain
-    // ahead of the source selector and each padding-byte comparator.
+    // One cursor supplies source selection, padding and the final-block test.
     logic [12:0] position;
     logic [INDEX_BITS-1:0] list_cursor;
     logic [5:0] list_remainder;
@@ -153,8 +141,8 @@ module recipe #(
         state == STREAM && stream_accept && position >= prefix_bytes &&
         next_remainder >= stream_node_bytes ? list_cursor + 1'b1 : list_cursor;
     assign list_index1 = list_index0 + 1'b1;
-    assign request_ready = state == IDLE;
-    assign response_valid = state == RESPONSE;
+    assign request_ready = state == IDLE && (!scalar_fixed || (!batch_mode && engine_ready));
+    assign response_valid = state == RESPONSE || (state == FIXED_WAIT && engine_valid);
 
     function automatic [31:0] be32(input [31:0] value);
         be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
@@ -163,14 +151,16 @@ module recipe #(
     // directly instead of shifting a maximum-size concatenated message frame.
     wire [2:0] node_words = stream_node_words;
     wire [703:0] padded_message = {8'd0, message_buffer};
-    function automatic [63:0] node_word(input [255:0] data, input [5:0] index);
+    // Source-range decoding already bounds live node reads to four words.
+    // ADDRESS_LIST uses this selector only across its prefix; later beats
+    // come from list_window. Do not repeat a six-bit bounds check per node.
+    function automatic [63:0] node_word(input [255:0] data, input [1:0] index);
         begin
             case (index)
                 0: node_word = data[63:0];
                 1: node_word = data[127:64];
                 2: node_word = data[191:128];
-                3: node_word = data[255:192];
-                default: node_word = 0;
+                default: node_word = data[255:192];
             endcase
         end
     endfunction
@@ -182,10 +172,10 @@ module recipe #(
     // Select a source and a small word address BEFORE the wide data mux.
     // All recipes share the same message/seed selectors instead of each
     // recipe instantiating its own variable 64-bit extraction network.
-    function automatic [63:0] source_word(input [5:0] index, input bit lms_only);
+    function automatic [12:0] decode_source(input [5:0] index, input bit lms_only);
         reg [2:0] source;
         reg [5:0] selected_index;
-        reg [63:0] literal;
+        reg [3:0] literal;
         begin
             source = 0;
             selected_index = index;
@@ -218,7 +208,7 @@ module recipe #(
                 end
                 shapes[ROOT_MESSAGE]:
                 if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
-                    if (index == 3) literal = 64'h0200000000000000;
+                    if (index == 3) literal = 4'd1;
                     else if (index < 4) literal = 0;
                     else if (index < 8) begin
                         source = 2;
@@ -226,7 +216,7 @@ module recipe #(
                     end else if (index < 12) begin
                         source = 4;
                         selected_index = index - 8;
-                    end else if (index == 15) literal = {be32(leaf), 32'd0};
+                    end else if (index == 15) literal = 4'd2;
                     else if (index >= 16) begin
                         source = 5;
                         selected_index = index - 16;
@@ -258,24 +248,56 @@ module recipe #(
                 shapes[PREFIX_LIST]:
                 if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
                     case (index)
-                        0: literal = identifier[63:0];
-                        1: literal = identifier[127:64];
-                        2: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
-                        3: literal = list_data0[79:16];
+                        0: literal = 4'd3;
+                        1: literal = 4'd4;
+                        2: literal = 4'd5;
+                        3: literal = 4'd6;
                         default: literal = 0;
                     endcase
                 end
                 default: begin
                 end
             endcase
-            case (source)
-                1: source_word = node_word(secret_prf, selected_index);
-                2: source_word = node_word(randomizer, selected_index);
-                3: source_word = node_word(public_seed, selected_index);
-                4: source_word = node_word(root, selected_index);
+            decode_source = {literal, source, selected_index};
+        end
+    endfunction
+    // Compute the next beat's small selectors while producing the current
+    // beat. START supplies the first selector; backpressure holds both the
+    // selector and its position. No node data register or extra cycle is added.
+    logic [12:0] source_control[0:2];
+    wire [12:0] following_position = position + 13'(stream_advance);
+    for (genvar word_slot = 0; word_slot < 3; word_slot++) begin : source_selectors
+        always_ff @(posedge clk)
+            if (!rst) begin
+                if (state == START && hash_ready)
+                    source_control[word_slot] <= decode_source(6'(word_slot), word_slot == 2);
+                else if (state == STREAM && stream_accept)
+                    source_control[word_slot] <= decode_source(
+                        following_position[8:3] + 6'(word_slot), word_slot == 2);
+            end
+    end
+    function automatic [63:0] source_word(input [12:0] control);
+        reg [63:0] literal;
+        reg [5:0] selected_index;
+        begin
+            selected_index = control[5:0];
+            case (control[12:9])
+                1: literal = 64'h0200000000000000;
+                2: literal = {be32(leaf), 32'd0};
+                3: literal = identifier[63:0];
+                4: literal = identifier[127:64];
+                5: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
+                6: literal = list_data0[79:16];
+                default: literal = 0;
+            endcase
+            case (control[8:6])
+                1: source_word = node_word(secret_prf, selected_index[1:0]);
+                2: source_word = node_word(randomizer, selected_index[1:0]);
+                3: source_word = node_word(public_seed, selected_index[1:0]);
+                4: source_word = node_word(root, selected_index[1:0]);
                 5: source_word = message_word(selected_index);
-                6: source_word = node_word(address, selected_index);
-                7: source_word = node_word(list_data0, selected_index);
+                6: source_word = node_word(address, selected_index[1:0]);
+                7: source_word = node_word(list_data0, selected_index[1:0]);
                 default: source_word = literal;
             endcase
         end
@@ -300,18 +322,15 @@ module recipe #(
         endcase
     end
     // A fixed two-node window supports both aligned SLH and the LMS prefix.
-    wire [127:0] list_window = RECIPE_MASK[PREFIX_LIST] ? (
-        list_remainder[1] ? list_word_window[143:16] : list_word_window[127:0]) : {64'd0, node_word(
-        list_data0, {4'd0, list_remainder[4:3]}
-    )};
-    wire [5:0] stream_word_index = position[8:3];
+    wire [127:0] list_window = (RECIPE_MASK[PREFIX_LIST] && list_remainder[1]) ?
+        list_word_window[143:16] : list_word_window[127:0];
     logic [127:0] stream_payload;
     logic [191:0] source_window;
     always_comb begin
         source_window = {
-            source_word(stream_word_index + 6'd2, 1'b1),
-            source_word(stream_word_index + 6'd1, 1'b0),
-            source_word(stream_word_index, 1'b0)
+            source_word(source_control[2]),
+            source_word(source_control[1]),
+            source_word(source_control[0])
         };
         stream_payload = source_window[127:0];
         if (shapes[PREFIX_MESSAGE]) begin
@@ -322,16 +341,25 @@ module recipe #(
             stream_payload = list_window;
     end
 
-    integer i, absolute;
+    // One remaining-length subtractor serves every byte of the beat. A
+    // byte-local position adder otherwise replicates a wide carry chain.
+    wire [12:0] remaining_bytes = input_length - position;
+    wire padding_reached = position > input_length;
+    wire partial_beat = remaining_bytes < 16;
+    // Only the last eight-byte beat consumes this flag. Exactly eight bytes
+    // remaining requires another rate block for SHAKE's delimiter.
+    wire stream_last = padding_reached || remaining_bytes < 8;
     always_comb begin
         stream_data = stream_payload;
-        for (i = 0; i < 16; i = i + 1) begin
-            absolute = position + i;
-            if (beat * 16 + i < 136) begin
-                if (absolute >= input_length) stream_data[i*8+:8] = 0;
-                if (absolute == input_length) stream_data[i*8+:8] = 8'h1f;
-                if (stream_last && beat * 16 + i == 135) stream_data[i*8+7] = 1'b1;
-            end else stream_data[i*8+:8] = 0;
+        for (integer i = 0; i < 16; i++) begin
+            if (padding_reached || (partial_beat && remaining_bytes[3:0] <= 4'(i)))
+                stream_data[i*8+:8] = 0;
+            if (!padding_reached && partial_beat && remaining_bytes[3:0] == 4'(i))
+                stream_data[i*8+:8] = 8'h1f;
+            if (beat == 8) begin
+                if (i >= 8) stream_data[i*8+:8] = 0;
+                else if (i == 7 && stream_last) stream_data[i*8+7] = 1'b1;
+            end
         end
     end
 
@@ -339,7 +367,10 @@ module recipe #(
     wire [1599:0] batch_perm_state, batch_perm_digest;
     wire [TAG_BITS-1:0] batch_perm_tag, batch_perm_result_tag;
     logic bridge_response;
-    wire scalar_bridge = bridge_response;
+    // A fixed request can enter the context engine on the outer handshake.
+    // The response remains in its context until the caller consumes it.
+    wire scalar_bridge = bridge_response ||
+        (!batch_mode && state == IDLE && request_valid && scalar_fixed);
     wire engine_mode = batch_mode || scalar_bridge;
     wire engine_ready, engine_valid;
     wire [255:0] engine_digest, engine_capture;
@@ -365,7 +396,7 @@ module recipe #(
                 .hash_count(batch_hashes),.permutation_count(batch_permutations),
 `endif
                 .clk,.rst,.node_bytes,
-                .request_valid(scalar_bridge ? state==FIXED_ISSUE : batch_request_valid),.request_ready(engine_ready),
+                .request_valid(scalar_bridge ? state==IDLE && request_valid : batch_request_valid),.request_ready(engine_ready),
                 .request_tag(scalar_bridge ? TAG_BITS'(0) : batch_request_tag),
                 .request_steps(scalar_bridge ? (request_chain ? request_steps : 5'd0) : batch_steps),
                 .request_capture_after(scalar_bridge ? (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) : batch_capture_after),
@@ -382,7 +413,7 @@ module recipe #(
                 .request_a(scalar_bridge ? 8'(request_a) : batch_a),.request_b(scalar_bridge ? request_b : batch_b),
                 .seed_domain(scalar_bridge ? request_recipe[55:48] : batch_seed_domain),
                 .step_domain(scalar_bridge ? (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) : batch_step_domain),
-                .response_valid(engine_valid),.response_ready(scalar_bridge ? state==FIXED_WAIT : batch_response_ready),
+                .response_valid(engine_valid),.response_ready(scalar_bridge ? state==FIXED_WAIT && response_ready : batch_response_ready),
                 .response_tag(batch_response_tag),.response_digest(),.response_capture(),
                 .read_tag(scalar_bridge ? TAG_BITS'(0) : batch_read_tag),.read_digest(engine_digest),.read_capture(engine_capture),
                 .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
@@ -615,25 +646,26 @@ module recipe #(
             bridge_response <= 0;
             state <= IDLE;
             error <= 0;
-            rate_block <= 0;
             beat <= 0;
         end else begin
             if (STREAM_ENABLE && staged_valid && block_ready) staged_valid <= 0;
             case (state)
                 IDLE:
-                if (request_valid) begin
+                if (request_valid && request_ready) begin
                     staged_valid <= 0;
                     position <= 0;
                     list_cursor <= 0;
                     list_remainder <= 0;
                     error <= 0;
-                    rate_block <= 0;
                     beat <= 0;
                     bridge_response <= scalar_fixed;
-                    state <= scalar_fixed ? FIXED_ISSUE : START;
+                    state <= scalar_fixed ? FIXED_WAIT : START;
                 end
-                FIXED_ISSUE: if (engine_ready) state <= FIXED_WAIT;
-                FIXED_WAIT: if (engine_valid) state <= RESPONSE;
+                FIXED_WAIT:
+                if (engine_valid && response_ready) begin
+                    bridge_response <= 0;
+                    state <= IDLE;
+                end
                 START:
                 if (hash_ready) begin
                     state <= STREAM;
@@ -657,7 +689,6 @@ module recipe #(
                     if (beat == 8) begin
                         beat <= 0;
                         if (stream_last) state <= WAIT_HASH;
-                        else rate_block <= rate_block + 1'b1;
                     end else beat <= beat + 1'b1;
                 end
                 WAIT_HASH: if (completed) state <= RESPONSE;

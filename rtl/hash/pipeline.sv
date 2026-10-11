@@ -8,27 +8,27 @@ module pipeline #(
  localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
 )(
 `ifndef SYNTHESIS
-    output logic [63:0] hash_count,permutation_count,
+    output logic [63:0] hash_count, permutation_count,
 `endif
- input wire clk,rst,input wire [5:0] node_bytes,
- input wire request_valid,output wire request_ready,input wire [TAG_BITS-1:0] request_tag,
- input wire [4:0] request_steps,request_capture_after,input wire request_capture,
- input wire [1:0] request_family,input wire request_no_seed,
- input wire [3:0] request_start,input wire [255:0] request_initial_value,
- input wire [3:0] request_fixed_shape,input wire request_pair,
- input wire [255:0] request_right,
- input wire [127:0] identifier,
- input wire [255:0] secret_seed,public_seed,
- input wire [4:0] request_layer,input wire [63:0] request_tree,
- input wire [19:0] request_leaf,input wire [7:0] request_a,input wire [31:0] request_b,
- input wire [7:0] seed_domain,step_domain,
- input wire [TAG_BITS-1:0] read_tag,
- output wire [255:0] read_digest,read_capture,
- output wire response_valid,input wire response_ready,output logic [TAG_BITS-1:0] response_tag,
- output wire [255:0] response_digest,response_capture,
- output wire perm_valid,input wire perm_ready,output wire [1599:0] perm_state,
- output wire [TAG_BITS-1:0] perm_tag,input wire perm_done,input wire [1599:0] perm_digest,
- input wire [TAG_BITS-1:0] perm_result_tag
+    input wire clk, rst, input wire [5:0] node_bytes,
+    input wire request_valid, output wire request_ready, input wire [TAG_BITS-1:0] request_tag,
+    input wire [4:0] request_steps, request_capture_after, input wire request_capture,
+    input wire [1:0] request_family, input wire request_no_seed,
+    input wire [3:0] request_start, input wire [255:0] request_initial_value,
+    input wire [3:0] request_fixed_shape, input wire request_pair,
+    input wire [255:0] request_right,
+    input wire [127:0] identifier,
+    input wire [255:0] secret_seed, public_seed,
+    input wire [4:0] request_layer, input wire [63:0] request_tree,
+    input wire [19:0] request_leaf, input wire [7:0] request_a, input wire [31:0] request_b,
+    input wire [7:0] seed_domain,step_domain,
+    input wire [TAG_BITS-1:0] read_tag,
+    output wire [255:0] read_digest, read_capture,
+    output wire response_valid, input wire response_ready, output logic [TAG_BITS-1:0] response_tag,
+    output wire [255:0] response_digest, response_capture,
+    output wire perm_valid,input wire perm_ready, output wire [1599:0] perm_state,
+    output wire [TAG_BITS-1:0] perm_tag, input wire perm_done, input wire [1599:0] perm_digest,
+    input wire [TAG_BITS-1:0] perm_result_tag
 );
 // verilog_format: on
     function automatic [31:0] be32(input [31:0] v);
@@ -57,17 +57,22 @@ module pipeline #(
     wire [255:0] address[0:PIPELINE-1];
     logic [4:0] steps[0:PIPELINE-1], iteration[0:PIPELINE-1], capture_after[0:PIPELINE-1];
     logic [PIPELINE-1:0] busy, complete, capture_enable;
-    // Isolation variant: retain the original counter policy in each context.
-    logic [PIPELINE-1:0] preserve_counter;
-    logic [255:0] digest[0:PIPELINE-1], captured[0:PIPELINE-1];
-    localparam [2:0] SEED = 0, STEP = 1, KEY = 2, MASK = 3, FINAL = 4, MASK1 = 5, SINGLE = 6;
+    // The address domain and fixed shape are shared until every slot drains,
+    // so their address-counter policy is shared by the same batch.
+    logic preserve_counter;
+    (* ram_style="distributed" *) logic [255:0] digest[0:PIPELINE-1];
+    (* ram_style="distributed" *) logic [255:0] captured[0:PIPELINE-1];
+    // One-hot phase bits feed the returned tag's formatting controls directly.
+    // They avoid decoding an encoded RAM output and then decoding next_phase.
+    localparam [6:0] SEED = 7'b0000001, STEP = 7'b0000010, KEY = 7'b0000100,
+        MASK = 7'b0001000, FINAL = 7'b0010000, MASK1 = 7'b0100000, SINGLE = 7'b1000000;
     wire [1:0] family[0:PIPELINE-1];
     wire [3:0] fixed_shape[0:PIPELINE-1];
     wire [PIPELINE-1:0] paired;
     logic [3:0] shared_shape;
     logic shared_pair;
-    logic [2:0] phase[0:PIPELINE-1];
-    logic [255:0] key_value[0:PIPELINE-1];
+    logic [6:0] phase[0:PIPELINE-1];
+    (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
     logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
     assign read_digest = initial_pending[read_tag] ? key_value[read_tag] : digest[read_tag];
     assign read_capture = captured_valid[read_tag] ?
@@ -78,13 +83,13 @@ module pipeline #(
     wire again = perm_done && (!node_done || more_steps[t]);
     wire capture_now = perm_done && node_done && capture_enable[t] &&
         iteration[t] == capture_after[t];
-    wire [2:0] next_phase = phase[t] == KEY ? MASK : phase[t] == MASK ?
-        (paired[t] ? MASK1 : FINAL) : phase[t] == MASK1 ? FINAL : family[t] == 1 ? KEY : STEP;
+    wire [6:0] next_phase = phase[t][2] ? MASK : phase[t][3] ?
+        (paired[t] ? MASK1 : FINAL) : phase[t][5] ? FINAL : family[t] == 1 ? KEY : STEP;
     wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
     logic [255:0] next_address;
     always_comb begin
         next_address = address[t];
-        if (!preserve_counter[t]) next_address[224+:32] = be32({27'd0, next_step});
+        if (!preserve_counter) next_address[224+:32] = be32({27'd0, next_step});
     end
     assign request_ready = !rst && !again && perm_ready && request_tag < PIPELINE &&
         (!busy[request_tag] || (response_valid && response_ready && response_tag == request_tag));
@@ -97,31 +102,30 @@ module pipeline #(
     wire [255:0]
         block_address = again ? next_address : request_no_seed ? step_address : seed_address;
     wire [1:0] block_family = again ? family[t] : request_family;
-    wire [2:0] first_phase = requested_shape == 8 ? KEY : requested_shape == 7 ? SEED :
+    wire [6:0] first_phase = requested_shape == 8 ? KEY : requested_shape == 7 ? SEED :
         requested_shape != 0 ? SINGLE : !request_no_seed ? SEED : request_family == 1 ? KEY : STEP;
-    wire [2:0] block_phase = again ? next_phase : first_phase;
+    wire [6:0] block_phase = again ? next_phase : first_phase;
     wire [3:0] block_step = again ? next_step[3:0] : request_start;
     wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
     wire block_pair = again ? paired[t] : requested_pair;
-    wire [255:0] block_value = again ? (phase[t] == MASK1 ? digest[t] : phase[t] == MASK ?
+    wire [255:0] block_value = again ? (phase[t][5] ? digest[t] : phase[t][3] ?
                                         digest[t] ^ perm_digest[255:0] : perm_digest[255:0]) :
         requested_shape == 1 || requested_shape == 9 ? secret_seed :
         request_no_seed ? request_initial_value : secret_seed;
     wire [255:0] block_right = again ? captured[t] ^ perm_digest[255:0] : request_right;
     wire [1599:0] unified_state;
-    generate
-        begin : formatter
+    generate begin : formatter
             logic [255:0] f0, f1, f2, f3, masked_address;
             logic [183:0] prefix;
             logic [7:0] domain;
             logic [1:0] layout;
             logic two;
             logic [1599:0] data;
-            wire seed = block_phase == SEED || block_shape == 7;
-            wire prf = block_phase == KEY || block_phase == MASK || block_phase == MASK1;
+            wire seed = block_phase[0] || block_shape == 7;
+            wire prf = block_phase[2] || block_phase[3] || block_phase[5];
             always_comb begin
                 masked_address = {
-                    be32(block_phase == MASK ? 32'd1 : block_phase == MASK1 ? 32'd2 : 32'd0),
+                    be32(block_phase[3] ? 32'd1 : block_phase[5] ? 32'd2 : 32'd0),
                     block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
                     block_address[223:192],
                     block_address[191:160],
@@ -241,12 +245,12 @@ module pipeline #(
         (capture_initial[response_tag] ? key_value[response_tag] : captured[response_tag]) : 256'd0;
     // A KEY return always feeds MASK immediately, so feedback priority excludes
     // accepting an initial value on the same edge. Each bank has one write port.
-    wire key_return = perm_done && phase[t] == KEY;
+    wire key_return = perm_done && phase[t][2];
     wire initial_transfer = key_return && initial_pending[t];
     wire key_write = key_return || (accept && request_no_seed);
     wire [TAG_BITS-1:0] key_write_tag = key_return ? t : request_tag;
     wire [255:0] key_write_data = key_return ? perm_digest[255:0] : request_initial_value;
-    wire mask_left = perm_done && paired[t] && phase[t] == MASK;
+    wire mask_left = perm_done && paired[t] && phase[t][3];
     wire digest_write = perm_done && (node_done || initial_transfer || mask_left);
     wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
         mask_left ? digest[t] ^ perm_digest[255:0] : perm_digest[255:0];
@@ -291,14 +295,14 @@ module pipeline #(
                 steps[request_tag] <= request_steps + {1'b0, request_start};
                 iteration[request_tag] <= request_no_seed ? {1'b0, request_start} + 1'b1 : 5'd0;
                 phase[request_tag] <= first_phase;
-                node_phase[request_tag] <= first_phase == SEED || first_phase == STEP ||
-                    first_phase == SINGLE;
+                node_phase[request_tag] <= first_phase[0] || first_phase[1] ||
+                    first_phase[6];
                 more_steps[request_tag] <= request_no_seed ? request_steps > 1 : request_steps != 0;
                 if (busy == 0) begin
                     shared_shape <= requested_shape;
                     shared_pair <= requested_pair;
+                    preserve_counter <= step_domain == 3 || requested_shape != 0;
                 end
-                preserve_counter[request_tag] <= step_domain == 3 || requested_shape != 0;
                 initial_pending[request_tag] <= request_no_seed;
                 if (zero_request) complete[request_tag] <= 1;
                 capture_after[request_tag]   <= request_capture_after;
@@ -320,8 +324,8 @@ module pipeline #(
                 if (digest_write) initial_pending[t] <= 0;
                 if (again) begin
                     phase[t] <= next_phase;
-                    node_phase[t] <= next_phase == SEED || next_phase == STEP ||
-                        next_phase == FINAL || next_phase == SINGLE;
+                    node_phase[t] <= next_phase[0] || next_phase[1] ||
+                        next_phase[4] || next_phase[6];
                     if (node_done) more_steps[t] <= iteration[t] + 1'b1 < steps[t];
                     if (node_done) iteration[t] <= iteration[t] + 1'b1;
                 end else complete[t] <= 1;

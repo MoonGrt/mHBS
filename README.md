@@ -65,7 +65,7 @@ SIM_SYNTHESIS=1 bash scripts/simulate.sh slh_128f sign 4 1
 ./scripts/simulate.sh lms_h10 verify 4 1 +STALL=1 +REPLAYS=2 +INTERRUPT=1
 ```
 
-`P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。P24U1 的新矩阵验收结果以后台报告为准。
+`P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 同样使用统一固定请求引擎，通过单级迭代置换执行；P>1 可交错执行 P 个独立链上下文。每级组合展开 U 轮，完成总计 24 轮才返回置换结果。整个核只有一个 recipe 前端，流水级不复制配方格式化器。
 
 2026-10-13 优化：XMSS/LMS 的完整端点批次直接写入单端口端点存储；无需输出捕获的批次在最后一个响应到达时推进。直接写回与批后读取共用上下文读端口。Verify、仅签名链及单槽捕获尾批保留原消费顺序。
 
@@ -76,6 +76,14 @@ python3 scripts/report_atp.py          # 从归档证据重建 Markdown / CSV / 
 ```
 
 实测比较和剩余瓶颈见 [ATP 优化报告](docs/report/ATP_Optimization_20261013.md)。基线与候选源码、面积/时序报告及测试日志随文档归档。
+
+2026-10-14 聚焦 P12U1、P4U1、P1U1 的 SLH-DSA 128f、XMSS h10、LMS h10 Sign，见 [三点优化报告](docs/report/ATP_Focus_P12_P4_P1_20261014.md)。结果包含同一候选的 common 面积、九项实测周期、150MHz 假定 ATP、单点回退及逐阶段取舍。可用以下命令冻结源码并只测这三个配置：
+
+```bash
+python3 scripts/run_pu_sign_matrix.py --launch --configs P12U1 P4U1 P1U1 --vivado-workers 3 --sim-workers 3
+```
+
+后续配方冗余清理与 L-tree/LMS 控制空拍优化见 [配方冗余与 ATP 对照](docs/report/Recipe_Redundancy_ATP_20261014.md)，包含同源码面积、周期、失败候选及精简 mask 回归。`python3 scripts/check_recipes.py --recipe-mask 0x101e` 可独立检查关闭 LMS 列表配方后的 SLH 128 位列表窗口。
 
 P4U1 的统一固定块执行、滚动链补发、并行 L-tree、128 位流式生产及 FORS 四叶归约见 [P4U1 联合优化报告](docs/report/P4U1_Redundancy_Performance_ATP_20261013.md)。以下入口检查独立字节配方、标签回收与完整回归，并导出逐状态周期分解：
 
@@ -95,7 +103,7 @@ python3 scripts/profile_p4.py --output build/p4_profile
 ./scripts/synthesize.sh 4 1      # P4U1
 ```
 
-Vivado 2025.2，器件 `xc7a200tffg1156-3`，4 线程，约束 6.666667 ns。综合顶层为 `common`，统计显式关闭；检查周期及 Hash/置换计数寄存器已裁剪。终端仅显示阶段结果，完整日志和分层面积、总面积、综合时序报告默认位于 `build/synth/PxUy_generic/`。本入口只综合、不布局布线；综合约束不是实测频率。
+Vivado 2025.2，器件 `xc7a200tffg1156-3`，2 线程，约束 6.666667 ns。综合顶层为 `common`，通过 `SYNTHESIS` 宏裁剪统计；检查周期及 Hash/置换计数寄存器已裁剪。终端仅显示阶段结果，完整日志和分层面积、总面积、综合时序报告默认位于 `build/synth/PxUy_generic/`。本入口只综合、不布局布线；综合约束不是实测频率。
 
 综合默认使用通用 Keccak 表达式，报告位于 `build/synth/PxUy_generic/`。`KECCAK_LUT6=1 ./scripts/synthesize.sh 12 1` 可比较 Xilinx 专用映射：定义 `MHBS_XILINX_LUT6`，将旋转后的三个 Theta XOR 与 Chi 合并为一个六输入 LUT，INIT 为 `64'h6666966996696666`，报告位于 `build/synth/PxUy/`。本轮两个配置的通用映射均优于显式 LUT6 映射，因此通用映射为默认。未定义该宏时，RTL 可继续由其他工具读取。
 
