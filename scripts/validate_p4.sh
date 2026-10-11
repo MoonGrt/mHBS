@@ -17,6 +17,8 @@ if [[ ${SKIP_FULL_REGRESSION:-0} != 1 ]]; then
 fi
 python3 scripts/check_recipes.py > "$out/recipes.log" 2>&1
 python3 scripts/check_pipeline.py > "$out/pipeline.log" 2>&1
+python3 scripts/check_statistics.py > "$out/statistics.log" 2>&1
+python3 scripts/check_statistics.py --synthesis > "$out/statistics_synthesis.log" 2>&1
 for profile in slh_128f xmss_h10 lms_h10; do
     run_case "${profile}_stalls" "$profile" sign +STALL=1 +REPLAYS=2 +INTERRUPT=1
     run_case "${profile}_cut" "$profile" verify +CUT=5 +STALL=1

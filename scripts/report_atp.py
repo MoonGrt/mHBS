@@ -54,7 +54,7 @@ def main():
     parser.add_argument("--candidate", default="shared_read")
     parser.add_argument("--mapping", choices=("generic", "lut6"), default="generic")
     parser.add_argument("--config", nargs="+", default=["P4U1", "P12U1"])
-    parser.add_argument("--output", type=Path, default=ROOT / "docs/report/ATP_Optimization_20261013")
+    parser.add_argument("--output", type=Path, default=ROOT / "docs/manifests/experiments/atp_optimization_20261013/reports/ATP_Optimization_20261013")
     args = parser.parse_args()
     experiment = args.experiment.resolve()
     rows, resources, evidence = [], {}, {}

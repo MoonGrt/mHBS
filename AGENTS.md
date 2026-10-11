@@ -10,3 +10,9 @@
 - 模块端口声明及例化保留原有紧凑分组布局；美化模块内部逻辑时，不将端口或连接自动展开为一项一行。现有格式保护注释应保留。
 
 - 当前每轮面积、周期和 ATP 优化聚焦 P12U1、P4U1、P1U1，以及 SLH-DSA 128f、XMSS h10、LMS h10 的 Sign；面积均用同配置的 common。优化保持通用，按实测结果取舍，记录失败候选，不恢复 P/U 特化。
+
+- 实验报告按测试/候选放入 `docs/manifests/experiments/<实验>/reports/`；每次测试同时归档该次冻结 RTL 压缩包及其综合的 `hierarchical.rpt`、`timing.rpt`、源码校验与日志。历史缺项显式记录，后台任务完成后补齐，不使用当前源码替代历史快照。
+
+- 实验归档省略 `sim` 和 `validation` 的明细日志，保留验证结果摘要、综合报告和冻结 RTL；运行目录中的原始日志保持可用。
+
+- 实验归档不保存或自动生成 `README.md`；总索引为 `docs/manifests/experiments/INDEX.md`。

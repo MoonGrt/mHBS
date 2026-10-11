@@ -29,7 +29,7 @@ def run(path):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--experiment',type=Path,default=ROOT/'docs/manifests/experiments/p4_joint_20261013')
-    parser.add_argument('--output',type=Path,default=ROOT/'docs/report/P4U1_Redundancy_Performance_ATP_20261013')
+    parser.add_argument('--output',type=Path,default=ROOT/'docs/manifests/experiments/p4_joint_20261013/reports/P4U1_Redundancy_Performance_ATP_20261013')
     args=parser.parse_args();exp=args.experiment.resolve();out=args.output.resolve()
     spec=json.loads((exp/'index.json').read_text());variants={};rows=[]
     for variant in ('original','current','candidate'):

@@ -16,6 +16,10 @@ import threading
 import time
 from zoneinfo import ZoneInfo
 import csv
+try:
+    from .experiment_archive import archive_run, canonical_report, report_prefix
+except ImportError:
+    from experiment_archive import archive_run, canonical_report, report_prefix
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = [(p, 1) for p in (1, 2, 3, 4, 6, 8, 12, 24)] + [
@@ -51,7 +55,7 @@ def launch(args):
     run = ROOT / 'build/pu_sign_matrix' / stamp
     snapshot = run / 'source'
     snapshot.mkdir(parents=True)
-    report = ROOT / 'docs/report' / f'PU_Sign_Matrix_{stamp}'
+    report = report_prefix(f'PU_Sign_Matrix_{stamp}')
     source_files = set((ROOT / 'sources.txt').read_text().splitlines())
     source_files.update(['sources.txt', 'scripts/clock.xdc',
                          'scripts/simulate_fast.sh', 'scripts/run_pu_sign_matrix.py',
@@ -85,6 +89,7 @@ def launch(args):
         versions[name] = subprocess.check_output(command, text=True, timeout=30).strip()
     metadata = dict(schema='mhbs.pu_sign_matrix.source.v1', run_id=stamp,
                     started_at=now(), source_root=str(snapshot), report=str(report),
+                    archive_root=str(ROOT / 'docs/manifests/experiments'),
                     base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'],
                                                         cwd=ROOT, text=True).strip(),
                     configs=configs, profiles=PROFILES, operations=['sign'], part=PART,
@@ -92,8 +97,10 @@ def launch(args):
                     vivado_workers=args.vivado_workers, vivado_threads=2,
                     simulation_workers=args.sim_workers, versions=versions,
                     synthesis_skip_seconds=args.synth_skip_seconds,
+                    synthesis_capacity_runs=[str(p.resolve()) for p in args.synth_capacity_run],
                     vivado=vivado, verilator=verilator, sha256=checksums)
     atomic_write(run / 'SOURCE.json', json.dumps(metadata, indent=2) + '\n')
+    archive_run(run)
     atomic_write(run / 'source.sha256', ''.join(f'{h}  {p}\n' for p, h in checksums.items()))
     diff = subprocess.check_output(['git', 'diff', '--binary'], cwd=ROOT, text=True)
     atomic_write(run / 'working_tree.patch', diff)
@@ -161,8 +168,10 @@ class Runner:
         self.meta = json.loads((run / 'SOURCE.json').read_text())
         self.configs = self.meta['configs']
         self.source = Path(self.meta['source_root'])
-        self.report = Path(self.meta['report'])
+        self.report = canonical_report(self.meta['report'])
         self.lock = threading.Lock()
+        self.capacity_lock = threading.Lock()
+        self.active_syntheses = 0
         self.started = time.monotonic()
         self.state = dict(schema='mhbs.pu_sign_matrix.results.v1', run_id=self.meta['run_id'],
                           started_at=now(), updated_at=now(), pid=os.getpid(), complete=False,
@@ -284,6 +293,7 @@ class Runner:
         if self.state.get('stopped_by_user'):
             lines.extend(['用户要求停止后，所有本轮后台子任务均已终止。此前top综合只作为原始归档，不参与本矩阵面积；完成的仿真和common综合结果保留，缺项不补用历史面积。', ''])
         atomic_write(self.report.with_suffix('.md'), '\n'.join(lines))
+        archive_run(self.run)
 
     @classmethod
     def render_existing(cls, run, prefix=None):
@@ -294,12 +304,39 @@ class Runner:
         renderer.configs = renderer.meta['configs']
         renderer.state = json.loads((run / 'status.json').read_text())
         renderer.source = Path(renderer.meta['source_root'])
-        renderer.report = prefix or Path(renderer.meta['report'])
+        renderer.report = canonical_report(prefix or renderer.meta['report'])
         renderer.report_only = True
         renderer.publish()
         return renderer.state
 
+    def reserve_synthesis(self):
+        """Reserve future capacity of older, independently running matrices.
+
+        Older runners need not understand this option: their pending tasks
+        reserve up to their full worker pool, so they can launch safely too.
+        """
+        while True:
+            with self.capacity_lock:
+                reserved = 0
+                for path in self.meta.get('synthesis_capacity_runs', []):
+                    state = json.loads((Path(path) / 'status.json').read_text())
+                    remaining = sum(t['status'] in ('pending', 'running')
+                                    for k, t in state['tasks'].items() if k.startswith('synth/'))
+                    reserved += min(state['vivado_workers'], remaining)
+                if reserved + self.active_syntheses < 12:
+                    self.active_syntheses += 1
+                    return
+            time.sleep(2)
+
     def synthesize(self, p, u, profile):
+        self.reserve_synthesis()
+        try:
+            self.synthesize_reserved(p, u, profile)
+        finally:
+            with self.capacity_lock:
+                self.active_syntheses -= 1
+
+    def synthesize_reserved(self, p, u, profile):
         key = f'synth/P{p}U{u}/{profile}'
         output = self.run / 'synth' / f'P{p}U{u}' / profile
         output.mkdir(parents=True, exist_ok=True)
@@ -411,6 +448,8 @@ def main():
     parser.add_argument('--watch', action='store_true', help='Refresh an existing report as measurements finish')
     parser.add_argument('--vivado-workers', type=int, default=12)
     parser.add_argument('--sim-workers', type=int, default=2)
+    parser.add_argument('--synth-capacity-run', action='append', type=Path, default=[],
+                        help='Reserve this existing matrix worker pool within the total limit of 12')
     parser.add_argument('--configs', nargs='+', metavar='PxUy',
                         help='Restrict measurement to these P/U points; default is the 14-point matrix')
     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
@@ -431,6 +470,14 @@ def main():
             if (p, u) not in configs:
                 configs.append((p, u))
         args.configs = configs
+    if args.synth_capacity_run:
+        if not args.launch:
+            parser.error('--synth-capacity-run requires --launch')
+        if len(set(p.resolve() for p in args.synth_capacity_run)) != len(args.synth_capacity_run):
+            parser.error('Duplicate capacity run')
+        for path in args.synth_capacity_run:
+            if not (path / 'status.json').is_file():
+                parser.error(f'Missing capacity-run status: {path}')
     if sum([args.launch, bool(args.run_root), bool(args.render_root)]) != 1:
         parser.error('Choose --launch, --run-root or --render-root')
     if (args.watch or args.report_prefix) and not args.render_root:

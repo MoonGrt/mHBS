@@ -6,6 +6,7 @@ import hashlib
 import io
 import json
 from pathlib import Path
+from experiment_archive import archive_run, canonical_report
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = ('P12U1', 'P4U1', 'P1U1')
@@ -14,6 +15,7 @@ PROFILES = ('slh_128f', 'xmss_h10', 'lms_h10')
 
 def read_run(stamp):
     run = ROOT / 'build/pu_sign_matrix' / stamp
+    archive_run(run)
     state = json.loads((run / 'status.json').read_text())
     state['root'] = str(run)
     return state
@@ -34,6 +36,7 @@ def main():
     parser.add_argument('--experiment', action='append', default=[], metavar='LABEL=RUN_ID')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    args.output = canonical_report(args.output)
     baseline, candidate = map(read_run, (args.baseline, args.candidate))
     old = {(r['configuration'], r['profile']): r for r in baseline['results']}
     new = {(r['configuration'], r['profile']): r for r in candidate['results']}

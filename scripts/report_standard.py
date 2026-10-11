@@ -13,7 +13,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from model.profiles import PROFILES
 
 ROOT=Path(__file__).resolve().parents[1]
-REPORT=ROOT/'docs/report/Stateful_SHAKE256_Standard_Migration_20261013'
+REPORT=ROOT/'docs/manifests/experiments/stateful_standard_20261013/reports/Stateful_SHAKE256_Standard_Migration_20261013'
 ARCHIVE=ROOT/'docs/manifests/experiments/stateful_standard_20261013'
 
 def utilization(path):
@@ -87,7 +87,7 @@ def main():
         writer=csv.DictWriter(f,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)
     state_label='用户已停止两组h=20全树运行，完整36项验收未完成' if status.get('stopped_by_user') else ('全部完成' if complete else '执行中，尚未满足全部验收项')
     lines=['# SHAKE256 XMSS/LMS 六参数标准迁移（2026-10-13）','',
-        f'验收状态：{state_label}。完整 RTL 三操作通过 {len(results)}/36 项。未完成实测周期留空。运行时间预测独立记录于 [h=20预测报告](Stateful_h20_Runtime_Forecast_20261013.md)，不作为实测验收结果。','',
+        f'验收状态：{state_label}。完整 RTL 三操作通过 {len(results)}/36 项。未完成实测周期留空。运行时间预测独立记录于 [h=20预测报告](../h20_stopped/Stateful_h20_Runtime_Forecast_20261013.md)，不作为实测验收结果。','',
         '## 参数与接口','',
         '六组状态参数按 h 命名，固定32字节 SHAKE256输出、67条链。XMSS采用基数16；LMS采用RFC位数4。标准依据为 [SP 800-208](https://nvlpubs.nist.gov/nistpubs/SpecialPublications/NIST.SP.800-208.pdf)、[RFC 8391](https://www.rfc-editor.org/rfc/rfc8391.html) 和 [RFC 8554/9858](https://www.rfc-editor.org/rfc/rfc9858.html)。','',
         '| 参数 | h | 标准类型码 | 公钥字节 | 签名字节 |','|---|---:|---:|---:|---:|']

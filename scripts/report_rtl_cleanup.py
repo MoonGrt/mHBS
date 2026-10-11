@@ -26,7 +26,7 @@ def collect(base):
     validation = Path(selection['validation_root']) if selection else base / 'validation'
     unchanged = all(hashlib.sha256((frozen / f).read_bytes()).hexdigest() == h
                     for f, h in source['files'].items())
-    old = json.loads((ROOT / 'docs/report/PU_Sign_Matrix_20261013_203826.json').read_text())
+    old = json.loads((ROOT / 'docs/manifests/experiments/pu_sign_matrix_20261013_203826/reports/PU_Sign_Matrix_20261013_203826.json').read_text())
     areas = []
     tasks_file = Path(selection['tasks_file']) if selection else base / 'synthesis_tasks.json'
     tasks = json.loads(tasks_file.read_text())
@@ -141,7 +141,7 @@ def collect(base):
 
 
 def write_report(data, base):
-    report = ROOT / 'docs/report' / NAME
+    report = ROOT / 'docs/manifests/experiments/rtl_debug_sharing_20261013/reports' / NAME
     report.with_suffix('.json').write_text(json.dumps(data, indent=2) + '\n')
     fields = ['kind', 'name', 'synthesis', 'lut', 'ff', 'bram36', 'equivalent_slice',
               'cycles', 'hashes', 'permutations', 'frequency_mhz', 'fpga_ms',

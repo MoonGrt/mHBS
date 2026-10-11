@@ -1,0 +1,180 @@
+diff --git a/docs/report/PU_Generic_Sharing_20261013.json b/docs/report/PU_Generic_Sharing_20261013.json
+index 446b602..7e615b7 100644
+--- a/docs/report/PU_Generic_Sharing_20261013.json
++++ b/docs/report/PU_Generic_Sharing_20261013.json
+@@ -1,7 +1,7 @@
+ {
+   "schema": "mhbs.pu_generic.audit.v1",
+   "started_at": "2026-10-13T20:47:06+08:00",
+-  "complete": false,
++  "complete": true,
+   "tasks": {
+     "full32": {
+       "status": "passed",
+@@ -70,17 +70,19 @@
+       "returncode": 0
+     },
+     "route/candidate/P24U1": {
+-      "status": "running",
++      "status": "failed",
+       "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log",
+       "started_at": "2026-10-14T07:12:16+08:00",
+-      "pid": 554955
++      "pid": 554955,
++      "finished_at": "2026-10-14T10:38:30+08:00",
++      "returncode": 1
+     }
+   },
+   "baseline": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/report/PU_Sign_Matrix_20261013_183754_ATP.json",
+   "matrix": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261013_203826",
+   "source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261013_203826/source",
+   "h20_full_stopped": true,
+-  "updated_at": "2026-10-14T07:12:16+08:00",
++  "updated_at": "2026-10-14T10:38:30+08:00",
+   "matrix_counts": {
+     "pending": 0,
+     "running": 1,
+@@ -230,5 +232,12 @@
+       "wns_ns": 0.062,
+       "whs_ns": 0.138
+     }
+-  }
++  },
++  "errors": [
++    "route/baseline/P24U1",
++    "route/candidate/P24U1"
++  ],
++  "source_unchanged": true,
++  "finished_at": "2026-10-14T10:38:30+08:00",
++  "accepted": false
+ }
+diff --git a/docs/report/PU_Generic_Sharing_20261013.md b/docs/report/PU_Generic_Sharing_20261013.md
+index 83783a4..cc3b20b 100644
+--- a/docs/report/PU_Generic_Sharing_20261013.md
++++ b/docs/report/PU_Generic_Sharing_20261013.md
+@@ -1,6 +1,6 @@
+ # 通用 P/U 执行、统计宏与资源复用（2026-10-13）
+ 
+-更新时间：2026-10-14T07:12:16+08:00。验收：后台验证中。
++更新时间：2026-10-14T10:38:30+08:00。验收：未通过。
+ 
+ 删除 P4U1 独占分支，所有合法 P/U 使用统一固定引擎、滚动链、并行 L-tree、128位流式生产和 FORS 四叶微组。P1 复用原迭代 Keccak 状态。统计直接用 SYNTHESIS 宏裁剪，统计端口保持64位并在综合时置零。
+ 
+@@ -28,7 +28,7 @@
+ | route/baseline/P24U1 | failed | [route_baseline_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P24U1.log) |
+ | route/baseline/P4U1 | passed | [route_baseline_P4U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P4U1.log) |
+ | route/candidate/P12U1 | passed | [route_candidate_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P12U1.log) |
+-| route/candidate/P24U1 | running | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
++| route/candidate/P24U1 | failed | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
+ 
+ 完整回归为十个非h20配置的三操作加两个h20 Verify，共32项；h20完整Keygen、Sign继续停止。其他合法P/U逐项执行三算法Verify和459项独立配方。扩展回归覆盖乱序标签、捕获、停顿、复位、异常、截断、篡改、消息和填充边界及q边界。
+ 
+@@ -56,3 +56,7 @@ P4U1逐步对照：
+ 工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。
+ 
+ [逐步CSV](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/steps.csv)、[周期分解](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/profile/profile.json)、[证据清单](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/EVIDENCE.json)。
++
++待解决：route/baseline/P24U1
++
++待解决：route/candidate/P24U1
+diff --git a/scripts/run_pu_sign_matrix.py b/scripts/run_pu_sign_matrix.py
+index 9f11bd7..a48b026 100644
+--- a/scripts/run_pu_sign_matrix.py
++++ b/scripts/run_pu_sign_matrix.py
+@@ -46,6 +46,7 @@ def atomic_write(path, text):
+ 
+ 
+ def launch(args):
++    configs = args.configs or CONFIGS
+     stamp = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
+     run = ROOT / 'build/pu_sign_matrix' / stamp
+     snapshot = run / 'source'
+@@ -86,7 +87,7 @@ def launch(args):
+                     started_at=now(), source_root=str(snapshot), report=str(report),
+                     base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'],
+                                                         cwd=ROOT, text=True).strip(),
+-                    configs=CONFIGS, profiles=PROFILES, operations=['sign'], part=PART,
++                    configs=configs, profiles=PROFILES, operations=['sign'], part=PART,
+                     area_top='common', area_scope='One shared common core per P/U',
+                     vivado_workers=args.vivado_workers, vivado_threads=2,
+                     simulation_workers=args.sim_workers, versions=versions,
+@@ -112,7 +113,8 @@ def launch(args):
+              status=str(run / 'status.json'), report=str(report)), indent=2) + '\n')
+     print(json.dumps(dict(pid=child.pid, root=str(run), log=str(log),
+                           status=str(run / 'status.json'), report=str(report),
+-                          simulation_cases=42, common_syntheses=14, area_top='common',
++                          simulation_cases=len(configs) * len(PROFILES),
++                          common_syntheses=len(configs), area_top='common',
+                           vivado_workers=args.vivado_workers, vivado_threads=2), indent=2))
+ 
+ 
+@@ -157,6 +159,7 @@ class Runner:
+     def __init__(self, run):
+         self.run = run
+         self.meta = json.loads((run / 'SOURCE.json').read_text())
++        self.configs = self.meta['configs']
+         self.source = Path(self.meta['source_root'])
+         self.report = Path(self.meta['report'])
+         self.lock = threading.Lock()
+@@ -169,7 +172,7 @@ class Runner:
+                           synthesis_mode='OOC, generic Keccak, no DSP', routed_sta=False,
+                           clock_period_ns=6.666667, tasks={}, results=[])
+         self.state.update(area_top='common', area_scope='One shared common core per P/U')
+-        for p, u in CONFIGS:
++        for p, u in self.configs:
+             config = f'P{p}U{u}'
+             for profile in PROFILES:
+                 self.state['tasks'][f'sim/{config}/{profile}'] = dict(status='pending')
+@@ -186,7 +189,7 @@ class Runner:
+     def publish(self):
+         rows = []
+         tasks = self.state['tasks']
+-        for p, u in CONFIGS:
++        for p, u in self.configs:
+             config = f'P{p}U{u}'
+             common = tasks[f'synth/{config}/common']
+             for profile in PROFILES:
+@@ -288,6 +291,7 @@ class Runner:
+         renderer = cls.__new__(cls)
+         renderer.run = run
+         renderer.meta = json.loads((run / 'SOURCE.json').read_text())
++        renderer.configs = renderer.meta['configs']
+         renderer.state = json.loads((run / 'status.json').read_text())
+         renderer.source = Path(renderer.meta['source_root'])
+         renderer.report = prefix or Path(renderer.meta['report'])
+@@ -381,7 +385,7 @@ class Runner:
+         with ThreadPoolExecutor(max_workers=self.meta['vivado_workers']) as synth_pool, \
+                 ThreadPoolExecutor(max_workers=self.meta['simulation_workers']) as sim_pool:
+             futures = []
+-            for p, u in CONFIGS:
++            for p, u in self.configs:
+                 futures.append(sim_pool.submit(self.simulate, p, u))
+                 futures.append(synth_pool.submit(self.synthesize, p, u, 'common'))
+             for future in as_completed(futures):
+@@ -407,10 +411,26 @@ def main():
+     parser.add_argument('--watch', action='store_true', help='Refresh an existing report as measurements finish')
+     parser.add_argument('--vivado-workers', type=int, default=12)
+     parser.add_argument('--sim-workers', type=int, default=2)
++    parser.add_argument('--configs', nargs='+', metavar='PxUy',
++                        help='Restrict measurement to these P/U points; default is the 14-point matrix')
+     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
+                         dest='synth_skip_seconds', type=int, default=1200,
+                         help='After 20 minutes defer analysis; synthesis keeps running')
+     args = parser.parse_args()
++    if args.configs:
++        if not args.launch:
++            parser.error('--configs requires --launch; existing runs use their frozen configuration list')
++        configs = []
++        for name in args.configs:
++            match = re.fullmatch(r'P([0-9]+)U([0-9]+)', name, re.I)
++            if not match:
++                parser.error(f'Invalid configuration: {name}')
++            p, u = map(int, match.groups())
++            if p < 1 or u < 1 or p * u > 24 or 24 % (p * u):
++                parser.error(f'Invalid configuration: {name}')
++            if (p, u) not in configs:
++                configs.append((p, u))
++        args.configs = configs
+     if sum([args.launch, bool(args.run_root), bool(args.render_root)]) != 1:
+         parser.error('Choose --launch, --run-root or --render-root')
+     if (args.watch or args.report_prefix) and not args.render_root:

@@ -42,7 +42,7 @@ class Audit:
         self.args=args;self.run=args.output.resolve();self.matrix=args.matrix.resolve();self.source=Path(json.loads((self.matrix/'SOURCE.json').read_text())['source_root'])
         self.baseline=json.loads(args.baseline.read_text());self.baseline_best=best(self.baseline)
         self.state=dict(schema='mhbs.pu_generic.audit.v1',started_at=now(),complete=False,tasks={},baseline=str(args.baseline.resolve()),matrix=str(self.matrix),source=str(self.source),h20_full_stopped=True)
-        self.prefix=ROOT/'docs/report/PU_Generic_Sharing_20261013'
+        self.prefix=ROOT/'docs/manifests/experiments/pu_generic_sharing_20261013/reports/PU_Generic_Sharing_20261013'
         self.run.mkdir(parents=True,exist_ok=True)
         prior=self.run/'status.json'
         if prior.exists():
@@ -189,7 +189,7 @@ class Audit:
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--launch',action='store_true');p.add_argument('--compatibility',action='store_true');p.add_argument('--matrix',type=Path,required=True);p.add_argument('--output',type=Path,required=True)
-    p.add_argument('--baseline',type=Path,default=ROOT/'docs/report/PU_Sign_Matrix_20261013_183754_ATP.json');p.add_argument('--baseline-root',type=Path,default=ROOT/'build/pu_sign_matrix/20261013_183754');p.add_argument('--route-script',type=Path,default=ROOT/'scripts/route_common_checkpoint.tcl');a=p.parse_args()
+    p.add_argument('--baseline',type=Path,default=ROOT/'docs/manifests/experiments/pu_sign_matrix_20261013_183754/reports/PU_Sign_Matrix_20261013_183754_ATP.json');p.add_argument('--baseline-root',type=Path,default=ROOT/'build/pu_sign_matrix/20261013_183754');p.add_argument('--route-script',type=Path,default=ROOT/'scripts/route_common_checkpoint.tcl');a=p.parse_args()
     if a.compatibility:
         source=Path(json.loads((a.matrix/'SOURCE.json').read_text())['source_root']);compatibility(source,a.output);return 0
     if a.launch:

@@ -1,0 +1,2108 @@
+diff --git a/README.md b/README.md
+index 5a30cce..502dc0c 100644
+--- a/README.md
++++ b/README.md
+@@ -54,7 +54,7 @@ VECTORS_DIR=build/custom_vectors ./scripts/simulate.sh lms_h10 verify 4 1
+ ./scripts/simulate.sh xmss_h10 verify 4 1
+ ./scripts/simulate.sh --smoke 4 1
+ ./scripts/simulate.sh --all 4 1
+-PROFILE_ENABLE=0 ./scripts/simulate.sh slh_128f sign 4 1
++SIM_SYNTHESIS=1 bash scripts/simulate.sh slh_128f sign 4 1
+ ```
+ 
+ `--smoke` 执行十二参数 Verify，加上 128f Keygen/Sign，共 14 项；`--all` 执行全部 36 项。XMSS/LMS 的 Keygen/Sign 计算完整树，运行较久。运行时读取所选向量，不必为每种算法重新编译；P/U、统计配置或源码变化时重新编译。
+@@ -65,7 +65,7 @@ PROFILE_ENABLE=0 ./scripts/simulate.sh slh_128f sign 4 1
+ ./scripts/simulate.sh lms_h10 verify 4 1 +STALL=1 +REPLAYS=2 +INTERRUPT=1
+ ```
+ 
+-`P` 范围为 1～12，`U>0`，要求 `P×U` 整除 24。常用 U1 的 P1/2/3/4/6/8/12，U2 的 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。
++`P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。P24U1 的新矩阵验收结果以后台报告为准。
+ 
+ 2026-10-13 优化：XMSS/LMS 的完整端点批次直接写入单端口端点存储；无需输出捕获的批次在最后一个响应到达时推进。直接写回与批后读取共用上下文读端口。Verify、仅签名链及单槽捕获尾批保留原消费顺序。
+ 
+@@ -119,7 +119,7 @@ Vivado 2025.2，器件 `xc7a200tffg1156-3`，4 线程，约束 6.666667 ns。综
+ | `out_valid`、`out_data[255:0]`、`out_bytes[5:0]` | 每有效拍输出低位 4/16/24/32 字节，低字节在先，无输出背压 |
+ | `done`、`error/error_code` | 操作完成/执行错误；Verify 根不匹配不属于执行错误 |
+ | `verify_pass` | Verify 完成且 error=0 时判断签名是否通过 |
+-| `PROFILE_ENABLE` | 仿真开启统计；综合入口设为 0，统计端口置零 |
++| `SYNTHESIS` 宏 | 定义时直接裁剪统计寄存器，64位统计端口置零；仿真默认不定义 |
+ 
+ Verify 使用节点接口，由外部拆分签名并校验总长度。SLH 顺序为 R、各 FORS 树的秘密节点和认证路径、各层 WOTS 签名与认证路径。XMSS/LMS 顺序为 R、67 个链节点、h 个认证节点，路径从叶到根；q 和 LMS 类型字段不作为节点输入。公钥根由调用方提供。
+ 
+@@ -146,7 +146,7 @@ XMSS/LMS 的 `KEY_INDEX`／`job_index` 为 q（0～2^h−1），LMS 的 `IDENTIF
+ 
+ `xmss`、`lms` 默认对应各自 h10。旧 `*_omega*` 名称会报告迁移错误，历史报告与向量保留用于复核，不能作为新标准任务的性能基线。内部 ROM 配置码为0x18～0x1D，标准 XMSS/LMS 算法类型码为0x10/0x11/0x12，LM-OTS 类型码为0x0B。
+ 
+-Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位，PROFILE_ENABLE=0时裁剪统计硬件。外部随机输入和q持久化管理仍由调用方负责。
++Keygen只输出标准公钥：XMSS为68字节（OID、root、public_seed），LMS为56字节（两个类型码、I、root）。Sign输出标准签名；Verify节点接口由软件先校验完整签名的长度、类型和q，再拆分输入。cycles、启动/Keygen/Sign周期和Hash/置换统计端口均为64位，定义SYNTHESIS宏时直接裁剪统计硬件。外部随机输入和q持久化管理仍由调用方负责。
+ 
+ ```bash
+ python3 scripts/build_stateful_reference.py
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 3870e01..ef542d6 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -1,9 +1,8 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+-// Single-lane ABI 4 macro executor for SLH and experimental XMSS/LMS.
++// Single-lane ABI 4 macro executor for SLH and standard SHAKE256 XMSS/LMS.
+ module executor #(
+-    parameter integer UNROLL=2, PIPELINE=1,
+-    parameter bit PROFILE_ENABLE=0
++    parameter integer UNROLL=2, PIPELINE=1
+ ) (
+     input wire [63:0] image_header, profile_descriptor,
+     output wire [3:0] program_address,
+@@ -33,18 +32,19 @@ module executor #(
+     // Six supported profiles need at most ceil(35*9/8)=40 FORS bytes.
+     // Tree/leaf indices still consume the full V-bit transient Hmsg result.
+     localparam integer FORS_DIGEST_BITS=320;
+-    wire stateful=profile_descriptor>=64'h18 && profile_descriptor<=64'h1d;
+-    wire xmss=stateful && profile_descriptor<64'h1b;
+-    wire valid_profile=stateful || profile_descriptor==0 || profile_descriptor==1
+-        || profile_descriptor==2 || profile_descriptor==4 || profile_descriptor==5 || profile_descriptor==6;
+-    wire [4:0] stateful_height=(profile_descriptor==64'h18 || profile_descriptor==64'h1b) ? 5'd10
+-        : profile_descriptor==64'h19 ? 5'd16 : profile_descriptor==64'h1c ? 5'd15 : 5'd20;
++    wire [4:0] config_code=profile_descriptor[4:0];
++    wire decoded_stateful=config_code>=5'h18 && config_code<=5'h1d;
++    wire decoded_xmss=decoded_stateful && config_code<5'h1b;
++    wire valid_profile=profile_descriptor[63:5]==0 && (decoded_stateful
++        || config_code==0 || config_code==1 || config_code==2 || config_code==4 || config_code==5 || config_code==6);
++    wire [4:0] decoded_height=(config_code==5'h18 || config_code==5'h1b) ? 5'd10
++        : config_code==5'h19 ? 5'd16 : config_code==5'h1c ? 5'd15 : 5'd20;
++    logic stateful,xmss,small_signature;
++    logic [4:0] stateful_height;
++    logic [1:0] profile_code;
++    logic [5:0] node_bytes;
+     wire omega2=1'b0;
+     wire [3:0] chain_max=4'd15;
+-    wire [1:0] profile_code=profile_descriptor[1:0];
+-    wire small_signature=!stateful && profile_descriptor[2];
+-    wire [5:0] node_bytes=stateful ? 6'd32 : profile_code==0 ? 6'd16
+-        : profile_code==1 ? 6'd24 : 6'd32;
+     wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
+         : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
+     wire [3:0] HP=small_signature ? (profile_code[1] ? 4'd8 : 4'd9)
+@@ -61,7 +61,6 @@ module executor #(
+     assign descriptors[5]=descriptor_data[127:64];
+     assign descriptors[6]=descriptor_data[63:0];
+     assign descriptors[7]=descriptor_data[63:0];
+-    localparam bit P4_OPT=PIPELINE==4 && UNROLL==1;
+     typedef enum logic [6:0] {
+         IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
+         TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
+@@ -76,7 +75,8 @@ module executor #(
+         PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
+         LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM,
+         PIPE_VERIFY_INPUT, LT_PIPE_INIT,LT_PIPE_ISSUE,LT_PIPE_WAIT,LT_PIPE_ADVANCE,
+-        FORS_PICK,FORS_AUTH0,FORS_BEGIN,FORS_LEFT,FORS_RIGHT,FORS_ISSUE,FORS_WAIT,FORS_LEVEL,FORS_AUTH1,FORS_PUSH
++        FORS_PICK,FORS_AUTH0,FORS_BEGIN,FORS_LEFT,FORS_RIGHT,FORS_ISSUE,FORS_WAIT,FORS_LEVEL,FORS_AUTH1,FORS_PUSH,
++        FORS_LEAF_NEXT,FORS_ROOT_NEXT,PUSH_STACK
+     } state_t;
+     state_t state, hash_return, output_return;
+     task automatic enter_state(input state_t next_state);
+@@ -104,8 +104,15 @@ module executor #(
+     logic [7:0] transform_index;
+     logic [7:0] lt_count,lt_cursor;
+     logic [3:0] lt_level;
+-    logic fors_level,fors_pair_cursor;
+-    wire fors_target_group=target>=leaf_cursor && target<leaf_cursor+4;
++    localparam integer FORS_BATCH=4*((PIPELINE+3)/4);
++    localparam integer FORS_SCRATCH=112;
++    logic fors_level,fors_roots_pending;
++    logic [4:0] fors_total,fors_offset,fors_root_cursor;
++    logic [20:0] fors_base;
++    wire fors_target_group=target>=fors_base && target<fors_base+21'(fors_total);
++    wire fors_target_wave=fors_target_group && target>=fors_base+21'(fors_offset)
++        && target<fors_base+21'(fors_offset)+21'(PIPELINE);
++    wire [4:0] fors_outputs=fors_total>>(fors_level ? 2 : 1);
+     wire sign_only=stateful && !verifying && standalone_chain && macro_flags[2];
+     logic [4:0] layer;
+     logic [5:0] group_index;
+@@ -153,22 +160,18 @@ module executor #(
+     logic [7:0] pipe_seed_domain,pipe_step_domain;
+     // Stateful endpoint batches use the same single write port as SLH WOTS.
+     // Sign-only and verification batches retain their CHAIN_STORE path.
+-    wire pipe_direct=PIPELINE>1 && indexing!=1
++    wire pipe_direct=indexing!=1
+         && (stateful ? (!verifying && !sign_only) : operation==1);
+-    wire fors_pipe=P4_OPT && (state==FORS_LEFT || state==FORS_RIGHT || state==FORS_ISSUE || state==FORS_WAIT);
+-    wire fors_read=P4_OPT && (state==FORS_PICK || state==FORS_AUTH0 || state==FORS_AUTH1 || state==FORS_LEFT || state==FORS_RIGHT || state==FORS_PUSH);
+-    wire [TAG_BITS-1:0] fors_read_slot=state==FORS_PICK ? TAG_BITS'(target[1:0]) : state==FORS_AUTH0 ? TAG_BITS'(target[1:0]^2'd1)
+-        : state==FORS_AUTH1 ? TAG_BITS'(!target[1]) : state==FORS_PUSH ? TAG_BITS'(0)
+-        : TAG_BITS'((fors_level ? 2'd0 : {fors_pair_cursor,1'b0})+(state==FORS_RIGHT));
+-    wire lt_pipe=P4_OPT && (state==LT_PIPE_ISSUE || state==LT_PIPE_WAIT);
+-    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe);
++    wire fors_pipe=state==FORS_LEFT || state==FORS_ISSUE || state==FORS_WAIT;
++    wire fors_leaves=indexing==1 && !verifying && (state==PIPE_ISSUE || state==PIPE_WAIT);
++    wire lt_pipe=state==LT_PIPE_ISSUE || state==LT_PIPE_WAIT;
++    wire pipe_mode=state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe;
+     wire pipe_ready,pipe_valid,pipe_selected;
+     wire [TAG_BITS-1:0] pipe_tag;
+     wire [63:0] pipe_hashes,pipe_permutations;
+     wire [255:0] selected_capture=pipe_batch_used ? pipe_read_capture : lane_capture;
+     logic [255:0] node_value;
+-    (* ram_style="distributed" *) logic [255:0] stack [0:19];
+-    (* ram_style="distributed" *) logic [255:0] auth_path [0:19];
++    localparam integer STACK_BASE=68,AUTH_BASE=88;
+ 
+     logic [4:0] hash_recipe_id;
+     assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[48:44] : macro_route,hash_recipe_id[4:0]};
+@@ -207,7 +210,11 @@ module executor #(
+     wire [255:0] lane_capture;
+     wire [INDEX_BITS-1:0] lane_list0, lane_list1,lane_list_next;
+     wire [63:0] lane_hashes, lane_permutations;
++
++`ifndef SYNTHESIS
+     logic [63:0] hash_base, permutation_base;
++`endif
++
+     logic [V-1:0] result;
+     // ROUTE consumes these registers before it can update any source. Keep
+     // the original staging cycle, but remember only the source selection.
+@@ -220,11 +227,15 @@ module executor #(
+     // request is issued before CHAIN_OUTPUT0 has consumed the capture.
+     wire [63:0] total_hashes = lane_hashes+pipe_hashes;
+     wire [63:0] total_permutations = lane_permutations+pipe_permutations;
+-    assign hash_count = PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+-    assign permutation_count = PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
++`ifdef SYNTHESIS
++    assign hash_count=64'd0;assign permutation_count=64'd0;assign cycles=64'd0;
++`else
++    assign hash_count=total_hashes-hash_base;
++    assign permutation_count=total_permutations-permutation_base;
++`endif
+ 
+     logic endpoint_write;
+-    logic [INDEX_BITS-1:0] endpoint_address,endpoint_read0_raw,endpoint_read1_raw;
++    logic [INDEX_BITS-1:0] endpoint_address;
+     wire [INDEX_BITS-1:0] endpoint_read0,endpoint_read1;
+     logic [255:0] endpoint_data;
+     wire [255:0] endpoint_value0,endpoint_value1;
+@@ -236,33 +247,32 @@ module executor #(
+         .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
+     );
+     wire [INDEX_BITS-1:0] batch_chain_index=pipe_rolling ? pipe_next_chain : chain_cursor+INDEX_BITS'(pipe_issue_slot);
+-    wire [20:0] batch_leaf_index=leaf_cursor+21'(pipe_issue_slot);
++    wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=(state==PIPE_ISSUE || state==LT_PIPE_ISSUE || state==FORS_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid))
+         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
+         recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+-            .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe),
+-            .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
++            .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe)) lane (
+             .clk,.rst(execution_rst),.node_bytes,
+             .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
+-            .batch_request_tag(fors_pipe ? TAG_BITS'(fors_pair_cursor) : issue_slot),
++            .batch_request_tag(issue_slot),
+             .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-digit(batch_chain_index)
+                 : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? digit(batch_chain_index) : chain_descriptor[19:15]),
+             .batch_family(stateful ? (xmss ? 2'd1 : 2'd2) : 2'd0),
+             .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(digit(batch_chain_index)) : 4'd0),
+-            .batch_initial_value(fors_pipe ? task_left0 : lt_pipe ? endpoint_value0 : verify_data),
+-            .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(fors_pipe ? node_value : endpoint_value1),
++            .batch_initial_value(fors_pipe || lt_pipe ? endpoint_value0 : verify_data),
++            .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(endpoint_value1),
+             .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
+             .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
+             .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
+             .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
+-            .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(leaf_cursor)>>(fors_level ? 2 : 1))+32'(fors_pair_cursor) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
++            .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(fors_base)>>(fors_level ? 2 : 1))+32'(fors_offset)+32'(pipe_issue_slot) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
+             .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
+             .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT)),.batch_response_tag(pipe_tag),
+             .batch_response_digest(),.batch_response_capture(),
+             // Direct writeback and deferred consumption never overlap.
+             // Select their tag before reading the context RAM, removing a
+             // second 256-bit digest/key read port and its output selectors.
+-            .batch_read_tag(fors_read ? fors_read_slot : (lt_pipe || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
++            .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
+             .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+             .batch_hashes(pipe_hashes),.batch_permutations(pipe_permutations),
+             .request_valid(state==HASH_ISSUE),
+@@ -282,7 +292,7 @@ module executor #(
+             .response_value(lane_value),.response_capture(lane_capture),.error(lane_error),
+             .hash_count(lane_hashes),.permutation_count(lane_permutations)
+         );
+-    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>12 ||
++    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>24 ||
+         UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported P/U configuration");
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+@@ -428,8 +438,14 @@ module executor #(
+ 
+     always_comb begin
+         endpoint_write=0;endpoint_address=chain_cursor;endpoint_data=result[W-1:0];
+-        endpoint_read0_raw=lane_list0;endpoint_read1_raw=lane_list1;
+-        if(lt_pipe)begin
++        if(auth_write)begin
++            endpoint_write=1;endpoint_address=INDEX_BITS'(AUTH_BASE)+INDEX_BITS'(auth_write_level);endpoint_data=auth_write_data;
++        end else if(stack_write)begin
++            endpoint_write=1;endpoint_address=INDEX_BITS'(STACK_BASE)+INDEX_BITS'(node_level);endpoint_data=node_value;
++        end else if(fors_leaves || fors_pipe)begin
++            endpoint_write=pipe_valid && (fors_leaves || state==FORS_WAIT);
++            endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);endpoint_data=pipe_read_result;
++        end else if(lt_pipe)begin
+             endpoint_write=pipe_valid && state==LT_PIPE_WAIT;
+             endpoint_address=(lt_cursor>>1)+INDEX_BITS'(pipe_tag);endpoint_data=pipe_read_result;
+         end else if(pipe_direct && pipe_mode)begin
+@@ -444,18 +460,16 @@ module executor #(
+             endpoint_write=1;endpoint_address=INDEX_BITS'(group_index);endpoint_data=route_value[W-1:0];
+         end
+ 
+-        if(state==LT_PIPE_ISSUE)begin
+-            endpoint_read0_raw=lt_cursor+(INDEX_BITS'(pipe_issue_slot)<<1);endpoint_read1_raw=endpoint_read0_raw+1'b1;
+-        end else if(state==LT_SETUP || state==LT_COPY)begin
+-            endpoint_read0_raw=lt_cursor;endpoint_read1_raw=lt_cursor+1'b1;
+-        end else if(state==LT_FINISH)begin endpoint_read0_raw=0;endpoint_read1_raw=1;end
++
+     end
+ 
+-    generate if(P4_OPT)begin: read_addresses
++    generate begin: read_addresses
+         logic [INDEX_BITS-1:0] address;
+         always_ff @(posedge clk)begin
+             if(rst)address<=0;
+             else if(state==REDUCE_SETUP || state==TREE_INIT)address<=0;
++            else if(state==PUSH_NODE)address<=node_level==tree_height ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE)+INDEX_BITS'(node_level);
++            else if(state==AUTH_OUTPUT)address<=INDEX_BITS'(AUTH_BASE)+INDEX_BITS'(auth_level)+1'b1;
+             else if(state==HASH_ISSUE || state==HASH_WAIT)address<=lane_list_next;
+             else if(state==LT_PIPE_INIT)address<={lt_cursor[INDEX_BITS-1:1],1'b0};
+             else if(state==LT_PIPE_ISSUE && pipe_ready)address<=lt_cursor+((INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
+@@ -464,22 +478,33 @@ module executor #(
+                 else if(lt_count[0])address<=lt_count-1'b1;
+                 else address<=0;
+             end else if(state==LT_NEXT)address<=0;
++            else if(state==FORS_LEAF_NEXT)address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((target-fors_base)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++            else if(state==FORS_AUTH0 || state==FORS_BEGIN || state==FORS_AUTH1 || state==FORS_LEVEL)address<=INDEX_BITS'(FORS_SCRATCH);
++            else if(state==FORS_ISSUE && pipe_ready)address<=pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0 ? INDEX_BITS'(FORS_SCRATCH) : INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
++            else if(state==FORS_WAIT)begin
++                if(fors_offset+PIPELINE<fors_outputs)address<=INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(PIPELINE))<<1);
++                else if(fors_level)address<=INDEX_BITS'(FORS_SCRATCH);
++                else address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(((target-fors_base)>>1)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++            end else if(state==FORS_ROOT_NEXT)address<=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_root_cursor)+1'b1;
+         end
+-        assign endpoint_read0=address;assign endpoint_read1=address+1'b1;
+-    end else begin
+-        assign endpoint_read0=endpoint_read0_raw;assign endpoint_read1=endpoint_read1_raw;
++        assign endpoint_read0=address;assign endpoint_read1=address==135 ? 8'd134 : address+1'b1;
+     end endgenerate
+ 
+     // Validity is owned by the tree controller; data arrays have no reset.
+     // Isolating these writes permits distributed RAM inference.
+-    wire auth_write=(state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
+-        || state==FORS_AUTH0 || state==FORS_AUTH1;
++    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
++        || state==FORS_AUTH0 || state==FORS_AUTH1);
+     wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
+-    wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? pipe_read_result : node_value;
+-    always_ff @(posedge clk)begin
+-        if(auth_write)auth_path[auth_write_level]<=auth_write_data;
+-        if(state==PUSH_NODE && node_level<tree_height && !node_index[0])stack[node_level]<=node_value;
++    wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
++    wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_level<tree_height && !node_index[0] && !verifying;
++`ifndef SYNTHESIS
++    always @(posedge clk)if(!execution_rst)begin
++        if(endpoint_write && endpoint_address>=136)$fatal(1,"workspace write out of range");
++        if(endpoint_read0>=136 || endpoint_read1>=136)$fatal(1,"workspace read out of range");
++        if((lt_pipe && state==LT_PIPE_ISSUE) || (fors_pipe && state!=FORS_WAIT))
++            if(endpoint_write)$fatal(1,"reduction write before batch inputs accepted");
+     end
++`endif
+ 
+     reg [255:0] emit_source;
+     always_comb begin
+@@ -498,17 +523,26 @@ module executor #(
+ 
+     always_ff @(posedge clk) begin
+         if (rst) begin
+-            enter_state(IDLE); done<=0; error<=0; error_code<=0; cycles<=0;
++            enter_state(IDLE); done<=0; error<=0; error_code<=0;
++`ifndef SYNTHESIS
++            cycles<=0;
++`endif
++
+             abort_execution<=0;
+             seq_start<=0; seq_complete<=0;
++            stateful<=0;xmss<=0;small_signature<=0;stateful_height<=10;profile_code<=0;node_bytes<=16;
+             operation<=0; scalar_tree<=0; scalar_leaf<=0;
+             verify_pass<=0;
+             verify_return<=IDLE;
+             macro_op<=0; macro_desc<=0; macro_route<=0; macro_flags<=0;
+             task_chain<=0; task_capture<=0;
+-            hash_base<=0; permutation_base<=0; layer<=0;
++
++`ifndef SYNTHESIS
++            hash_base<=0; permutation_base<=0;
++`endif
++            layer<=0;
+             task_recipe<=0; task_step<=0; message_received<=0;
+-            lt_count<=0;lt_cursor<=0;lt_level<=0;fors_level<=0;fors_pair_cursor<=0;
++            lt_count<=0;lt_cursor<=0;lt_level<=0;fors_level<=0;fors_roots_pending<=0;fors_total<=0;fors_offset<=0;fors_root_cursor<=0;fors_base<=0;
+             pipe_cache_valid<=0;pipe_batch_used<=0;pipe_pair<=0;pipe_issue_slot<=0;
+             pipe_rolling<=0;pipe_active<=0;pipe_next_chain<=0;pipe_completed<=0;
+             pipe_done_mask<=0;pipe_expected_mask<=0;
+@@ -517,15 +551,19 @@ module executor #(
+                 task_leaf<=0; task_a<=0; task_b<=0;
+         end else begin
+             done<=0; seq_start<=0; seq_complete<=0; abort_execution<=0;
+-            if(PROFILE_ENABLE && state!=IDLE && state!=FAILED) cycles<=cycles+1;
+-            if(P4_OPT && pipe_rolling && pipe_mode)begin
++
++`ifndef SYNTHESIS
++            if(state!=IDLE && state!=FAILED) cycles<=cycles+1;
++`endif
++
++            if(pipe_rolling && pipe_mode)begin
+                 if(pipe_valid)begin pipe_active[pipe_tag]<=0;pipe_completed<=pipe_completed+1'b1;end
+                 if(pipe_selected && pipe_ready)begin
+                     pipe_active[issue_slot]<=1;pipe_chain_index[issue_slot]<=pipe_next_chain;
+                     pipe_next_chain<=pipe_next_chain+1'b1;
+                 end
+             end
+-            if(PIPELINE>1 && pipe_mode)begin
++            if(pipe_mode)begin
+                 if(pipe_valid && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT))begin
+                     pipe_done_mask[pipe_tag]<=1;
+                     if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
+@@ -534,14 +572,25 @@ module executor #(
+             end
+             case(state)
+                 IDLE: if(job_valid) begin
+-                    error<=0; error_code<=0; cycles<=0; operation<=job_operation;
++                    error<=0; error_code<=0;
++`ifndef SYNTHESIS
++            cycles<=0;
++`endif
++ operation<=job_operation;
++                    stateful<=decoded_stateful;xmss<=decoded_xmss;stateful_height<=decoded_height;
++                    small_signature<=!decoded_stateful && config_code[2];profile_code<=config_code[1:0];
++                    node_bytes<=decoded_stateful ? 6'd32 : config_code[1:0]==0 ? 6'd16 : config_code[1:0]==1 ? 6'd24 : 6'd32;
+                     verify_pass<=0;
+                     message_length<=job_message_length; message_received<=0;
+-                    scalar_tree<=0; scalar_leaf<=stateful ? job_index[19:0] : 0; layer<=0; group_index<=0;
+-                    if(PROFILE_ENABLE) begin hash_base<=total_hashes; permutation_base<=total_permutations; end
++                    scalar_tree<=0; scalar_leaf<=decoded_stateful ? job_index[19:0] : 0; layer<=0; group_index<=0;
++
++`ifndef SYNTHESIS
++                    hash_base<=total_hashes; permutation_base<=total_permutations;
++`endif
++
+                     value[3]<=job_public_root;
+                     if(!valid_profile)fail(16'h3009);
+-                    else if(stateful && job_index>=(32'd1<<stateful_height))fail(16'h3008);
++                    else if(decoded_stateful && job_index>=(32'd1<<decoded_height))fail(16'h3008);
+                     else if(job_operation) begin
+                         enter_state(MESSAGE);
+                     end else begin
+@@ -598,6 +647,7 @@ module executor #(
+                 endcase
+                 end
+                 TREE_INIT: begin
++                    fors_roots_pending<=0;
+                     pipe_cache_valid<=0;pipe_batch_used<=0;
+                     saved_chain_descriptor<=descriptors[6];
+ 
+@@ -613,11 +663,17 @@ module executor #(
+                     end else enter_state(CHAIN_SETUP);
+                 end
+                 CHAIN_SETUP: begin
+-                    if(P4_OPT && !pipe_cache_valid)begin
++                    if(endpoint_count==0 || endpoint_count>67 || (!standalone_chain && (tree_height>20 || (indexing==1 && tree_height<2))))fail(16'h300a);
++                    else begin
++                    if(indexing==1 && !verifying)begin
++                        fors_base<=leaf_cursor;fors_offset<=0;fors_roots_pending<=0;
++                        fors_total<=((21'd1<<tree_height)-leaf_cursor)<FORS_BATCH ? 5'((21'd1<<tree_height)-leaf_cursor) : 5'(FORS_BATCH);
++                    end
++                    if(!pipe_cache_valid)begin
+                         pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
+                         pipe_active<=0;pipe_next_chain<=chain_cursor;pipe_completed<=0;
+                     end
+-                    if(stateful && PIPELINE>1)begin
++                    if(stateful)begin
+                         if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
+                         else begin
+                             pipe_pair<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
+@@ -634,12 +690,12 @@ module executor #(
+                             task_a<=indexing==1 ? 0 : chain_cursor;
+                             task_b<=indexing==1 ? (group_index<<FORS_A)+target : digit(chain_cursor);
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+-                    end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
++                    end else if(!stateful && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
+                         if(pipe_cache_valid)begin pipe_pair<=pipe_pair+1'b1;enter_state(PIPE_LOAD);end
+                         else begin
+                             pipe_pair<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
+                             for(integer q=0;q<PIPE_BATCH;q=q+1)
+-                                pipe_expected_mask[q]<=indexing==1 ? (32'(leaf_cursor)+q < (32'd1<<tree_height))
++                                pipe_expected_mask[q]<=indexing==1 ? (q<FORS_BATCH && 32'(leaf_cursor)+q < (32'd1<<tree_height))
+                                     : (32'(chain_cursor)+q < endpoint_count);
+                             pipe_seed_domain<=descriptors[4][55:48];pipe_step_domain<=descriptors[5][55:48];
+                             enter_state(PIPE_ISSUE);
+@@ -658,6 +714,7 @@ module executor #(
+                     start_hash(descriptors[4],CHAIN_STORE);
+                     end
+                 end
++                    end
+                 PIPE_ISSUE: begin
+                     if(pipe_rolling)begin
+                         if(pipe_valid && pipe_completed+1>=endpoint_count)begin
+@@ -690,34 +747,56 @@ module executor #(
+                             start_output(pipe_read_capture,node_bytes,PIPE_CAPTURE_NEXT);
+                             pipe_pair<=1;
+                         end else advance_direct_batch();
+-                    end else if(P4_OPT && indexing==1 && pipe_expected_mask=={PIPE_BATCH{1'b1}} && !verifying)begin pipe_cache_valid<=0;pipe_batch_used<=1;enter_state(FORS_PICK);end
++                    end else if(indexing==1 && !verifying)begin pipe_cache_valid<=0;pipe_batch_used<=1;enter_state(FORS_PICK);end
+                     else enter_state(PIPE_LOAD);
+                 end
+                 FORS_PICK:begin
+-                    if(fors_target_group && macro_flags[0])start_output(pipe_read_capture,node_bytes,FORS_AUTH0);
+-                    else if(fors_target_group)enter_state(FORS_AUTH0);
++                    if(fors_target_wave && macro_flags[0])start_output(pipe_read_capture,node_bytes,FORS_LEAF_NEXT);
++                    else enter_state(FORS_LEAF_NEXT);
++                end
++                FORS_LEAF_NEXT:begin
++                    if(fors_offset+PIPELINE<fors_total)begin
++                        fors_offset<=fors_offset+5'(PIPELINE);pipe_issue_slot<=0;pipe_done_mask<=0;
++                        for(integer q=0;q<PIPE_BATCH;q++)pipe_expected_mask[q]<=32'(fors_offset)+PIPELINE+q<fors_total;
++                        enter_state(PIPE_ISSUE);
++                    end else if(fors_target_group)enter_state(FORS_AUTH0);
+                     else enter_state(FORS_BEGIN);
+                 end
+                 FORS_AUTH0:enter_state(FORS_BEGIN);
+                 FORS_BEGIN:begin
+-                    fors_level<=0;fors_pair_cursor<=0;pipe_done_mask<=0;pipe_expected_mask<=PIPE_BATCH'(3);
++                    fors_level<=0;fors_offset<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
++                    for(integer q=0;q<PIPE_BATCH;q++)pipe_expected_mask[q]<=q<(fors_total>>1);
+                     pipe_seed_domain<=3;pipe_step_domain<=3;enter_state(FORS_LEFT);
+                 end
+-                FORS_LEFT:begin task_left0<=pipe_read_result;enter_state(FORS_RIGHT);end
+-                FORS_RIGHT:begin node_value<=pipe_read_result;enter_state(FORS_ISSUE);end
++                FORS_LEFT:enter_state(FORS_ISSUE);
+                 FORS_ISSUE:if(pipe_ready)begin
+-                    if(!fors_level && !fors_pair_cursor)begin fors_pair_cursor<=1;enter_state(FORS_LEFT);end
+-                    else enter_state(FORS_WAIT);
++                    if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)enter_state(FORS_WAIT);
++                    else begin pipe_issue_slot<=pipe_issue_slot+1'b1;enter_state(FORS_LEFT);end
++                end
++                FORS_WAIT:if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)begin
++                    if(fors_offset+PIPELINE<fors_outputs)begin
++                        fors_offset<=fors_offset+5'(PIPELINE);pipe_issue_slot<=0;pipe_done_mask<=0;
++                        for(integer q=0;q<PIPE_BATCH;q++)pipe_expected_mask[q]<=32'(fors_offset)+PIPELINE+q<fors_outputs;
++                        enter_state(FORS_LEFT);
++                    end else if(fors_level)begin fors_root_cursor<=0;enter_state(FORS_PUSH);end
++                    else enter_state(fors_target_group ? FORS_AUTH1 : FORS_LEVEL);
+                 end
+-                FORS_WAIT:if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)
+-                    enter_state(fors_level ? FORS_PUSH : (fors_target_group ? FORS_AUTH1 : FORS_LEVEL));
+                 FORS_AUTH1:enter_state(FORS_LEVEL);
+-                FORS_LEVEL:begin fors_level<=1;fors_pair_cursor<=0;pipe_done_mask<=0;pipe_expected_mask<=PIPE_BATCH'(1);enter_state(FORS_LEFT);end
++                FORS_LEVEL:begin
++                    fors_level<=1;fors_offset<=0;pipe_issue_slot<=0;pipe_done_mask<=0;
++                    for(integer q=0;q<PIPE_BATCH;q++)pipe_expected_mask[q]<=q<(fors_total>>2);
++                    enter_state(FORS_LEFT);
++                end
+                 FORS_PUSH:begin
+-                    node_value<=pipe_read_result;node_level<=2;node_index<=leaf_cursor>>2;
+-                    leaf_cursor<=leaf_cursor+3;pipe_cache_valid<=0;pipe_batch_used<=0;
++                    node_value<=endpoint_value0;node_level<=2;node_index<=(fors_base>>2)+21'(fors_root_cursor);
++                    leaf_cursor<=fors_base+(21'(fors_root_cursor)<<2)+3;
++                    fors_roots_pending<=1;pipe_cache_valid<=0;pipe_batch_used<=0;
+                     enter_state(PUSH_NODE);
+                 end
++                FORS_ROOT_NEXT:begin
++                    if(fors_root_cursor+1<(fors_total>>2))begin fors_root_cursor<=fors_root_cursor+1'b1;enter_state(FORS_PUSH);end
++                    else begin fors_roots_pending<=0;leaf_cursor<=fors_base+21'(fors_total);chain_cursor<=0;enter_state(CHAIN_SETUP);end
++                end
+                 PIPE_LOAD: begin
+                     pipe_batch_used<=1;
+                     pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(pipe_pair+1))!=0);
+@@ -751,16 +830,7 @@ module executor #(
+                     task_leaf<=leaf_cursor; task_a<=0; task_b<=0;
+                     start_hash(descriptors[4],stateful ? SF_REDUCED : LEAF_SETUP);
+                 end
+-                LT_SETUP: begin
+-                    if(P4_OPT)enter_state(LT_PIPE_INIT);
+-                    else if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
+-                    else begin
+-                        task_chain<=0;task_capture<=0;task_steps<=0;
+-                        task_leaf<=leaf_cursor;task_a<=lt_level;task_b<=lt_cursor>>1;
+-                        task_left0<=endpoint_value0;node_value<=endpoint_value1;
+-                        start_hash(descriptors[4],LT_STORE);
+-                    end
+-                end
++                LT_SETUP:enter_state(LT_PIPE_INIT);
+                 LT_PIPE_INIT:begin
+                     pipe_rolling<=0;
+                     if(lt_cursor+1>=lt_count)enter_state(LT_COPY);
+@@ -812,7 +882,9 @@ module executor #(
+                 LEAF_SETUP: if(standalone_chain)route_result(ROUTE_HASH);
+                     else begin node_value<=result[W-1:0]; node_level<=0;
+                         node_index<=verifying ? target : leaf_cursor; enter_state(PUSH_NODE); end
+-                PUSH_NODE: begin
++                PUSH_NODE,PUSH_STACK: begin
++                    if(state==PUSH_NODE && auth_write && stack_write)enter_state(PUSH_STACK);
++                    else begin
+                     if(node_level==tree_height) begin
+                         auth_level<=0;
+                         if(!verifying && macro_flags[1]) enter_state(AUTH_OUTPUT);
+@@ -820,9 +892,11 @@ module executor #(
+                     end else if(verifying) read_verify_node(PARENT_SETUP);
+                     else if(node_index[0]) enter_state(PARENT_SETUP);
+                     else begin
+-                        leaf_cursor<=leaf_cursor+1'b1; chain_cursor<=0; enter_state(CHAIN_SETUP);
++                        if(fors_roots_pending)enter_state(FORS_ROOT_NEXT);
++                        else begin leaf_cursor<=leaf_cursor+1'b1;chain_cursor<=0;enter_state(CHAIN_SETUP);end
+                     end
+                 end
++                    end
+                 PARENT_SETUP: begin
+                     if(!verifying && macro_flags[3] && (node_index>>1)==(target>>(node_level+1))) begin
+                         node_value<=0; node_index<=node_index>>1; node_level<=node_level+1'b1; enter_state(PUSH_NODE);
+@@ -832,7 +906,7 @@ module executor #(
+                         task_a<=descriptors[7][59:56]==8 ? node_level : node_level+1'b1;
+                         task_b<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+                             : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+-                        task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : stack[node_level];
++                        task_left0<=verifying ? (node_index[0] ? emit_value : node_value) : endpoint_value0;
+                         start_hash(descriptors[4],PARENT_DONE);
+                     end
+                 end
+@@ -841,7 +915,7 @@ module executor #(
+                 end
+                 AUTH_OUTPUT: begin
+                     if(auth_level<tree_height) begin
+-                        start_output(auth_path[auth_level],node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
++                        start_output(endpoint_value0,node_bytes,AUTH_OUTPUT); auth_level<=auth_level+1'b1;
+                     end else enter_state(TREE_FINISH);
+                 end
+                 TREE_FINISH: begin
+diff --git a/rtl/hash/pipeline.sv b/rtl/hash/pipeline.sv
+index 81ae9e0..2cf4937 100644
+--- a/rtl/hash/pipeline.sv
++++ b/rtl/hash/pipeline.sv
+@@ -3,7 +3,7 @@
+ // Per-context SLH/XMSS/LMS chain metadata and completion slots. No Keccak duplication:
+ // permutations use the same pipeline as the recipe/sponge path.
+ module pipeline #(
+- parameter integer PIPELINE=2, parameter bit PROFILE_ENABLE=0, UNIFIED_FIXED=0,
++ parameter integer PIPELINE=2,
+  localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
+ )(
+  input wire clk,rst,input wire [5:0] node_bytes,
+@@ -27,6 +27,9 @@ module pipeline #(
+  input wire [TAG_BITS-1:0] perm_result_tag,
+  output logic [63:0] hash_count,permutation_count
+ );
++`ifdef SYNTHESIS
++ assign hash_count=64'd0;assign permutation_count=64'd0;
++`endif
+  function automatic [31:0] be32(input [31:0] v);be32={v[7:0],v[15:8],v[23:16],v[31:24]};endfunction
+  wire [255:0] seed_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,seed_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+  wire [255:0] step_address={be32(request_b),be32({24'd0,request_a}),be32({12'd0,request_leaf}),be32({24'd0,step_domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+@@ -45,8 +48,9 @@ module pipeline #(
+  assign read_digest=initial_pending[read_tag] ? key_value[read_tag] : digest[read_tag];
+  assign read_capture=captured_valid[read_tag] ? (capture_initial[read_tag] ? key_value[read_tag] : captured[read_tag]) : 256'd0;
+  wire [TAG_BITS-1:0] t=perm_result_tag;
+- wire node_done=phase[t]==SEED || phase[t]==STEP || phase[t]==FINAL || phase[t]==SINGLE;
+- wire again=perm_done && (!node_done || iteration[t]<steps[t]);
++ logic [PIPELINE-1:0] node_phase,more_steps;
++ wire node_done=node_phase[t];
++ wire again=perm_done && (!node_done || more_steps[t]);
+  wire capture_now=perm_done && node_done && capture_enable[t] && iteration[t]==capture_after[t];
+  wire [2:0] next_phase=phase[t]==KEY ? MASK : phase[t]==MASK ? (paired[t] ? MASK1 : FINAL)
+      : phase[t]==MASK1 ? FINAL : family[t]==1 ? KEY : STEP;
+@@ -56,62 +60,10 @@ module pipeline #(
+   next_address=address[t];
+   if(!preserve_counter[t])next_address[224 +:32]=be32({27'd0,next_step});
+  end
+- function automatic [1599:0] block_for(input [255:0] adr,input [255:0] val,right,input bit pair);
+-  reg [1599:0] block_data;
+-  begin
+-   block_data=0;
+-   case(node_bytes)
+-    16:begin block_data[511:0]={val[127:0],adr,public_seed[127:0]};
+-        if(pair)begin block_data[639:512]=right[127:0];block_data[640 +:8]=8'h1f;end
+-        else block_data[512 +:8]=8'h1f;end
+-    24:begin block_data[639:0]={val[191:0],adr,public_seed[191:0]};
+-        if(pair)begin block_data[831:640]=right[191:0];block_data[832 +:8]=8'h1f;end
+-        else block_data[640 +:8]=8'h1f;end
+-    default:begin block_data[767:0]={val,adr,public_seed};
+-        if(pair)begin block_data[1023:768]=right;block_data[1024 +:8]=8'h1f;end
+-        else block_data[768 +:8]=8'h1f;end
+-   endcase
+-   block_data[1087]=1;block_for=block_data;
+-  end
+- endfunction
+- function automatic [1599:0] stateful_block(input [1:0] kind,input [2:0] subphase,
+-     input [255:0] adr,val,key,right,input [3:0] step,shape,input bit pair);
+-  reg [1599:0] data;
+-  reg [255:0] masked_address;
+-  begin
+-   data=0;
+-   masked_address={be32(subphase==MASK ? 32'd1 : subphase==MASK1 ? 32'd2 : 32'd0),
+-       shape!=0 ? adr[255:224] : be32({28'd0,step}),adr[223:192],adr[191:160],adr[159:128],96'd0};
+-   if(shape==5)begin
+-    data[255:248]=8'd3;data[511:256]=val;
+-    data[767:512]={adr[191:160],224'd0};data[775:768]=8'h1f;
+-   end else if(shape==14 || shape==15)begin
+-    data[127:0]=identifier;data[159:128]=adr[255:224];
+-    data[175:160]=shape==14 ? 16'h8282 : 16'h8383;data[431:176]=val;
+-    if(pair)begin data[687:432]=right;data[695:688]=8'h1f;end
+-    else data[439:432]=8'h1f;
+-   end else if(kind==2)begin
+-    data[127:0]=identifier;data[159:128]=adr[191:160];
+-    data[167:160]=0;data[175:168]=adr[223:216];data[183:176]=(subphase==SEED || shape==9) ? 8'hff : shape==10 ? adr[255:248] : {4'd0,step};
+-    data[439:184]=val;data[447:440]=8'h1f;
+-   end else if(subphase==SEED || shape==7)begin
+-    // XMSS seed domain: 32-byte 4 || SK.seed || PK.seed || ADRS || 0.
+-    data[255:248]=8'd4;data[511:256]=secret_seed;data[767:512]=public_seed;
+-    data[1023:768]=masked_address;data[1031:1024]=8'h1f;
+-   end else if(subphase==KEY || subphase==MASK || subphase==MASK1)begin
+-    data[255:248]=8'd3;data[511:256]=public_seed;data[767:512]=masked_address;data[775:768]=8'h1f;
+-   end else begin
+-    data[255:248]=pair ? 8'd1 : 8'd0;data[511:256]=key;data[767:512]=val;
+-    if(pair)begin data[1023:768]=right;data[1031:1024]=8'h1f;end
+-    else data[775:768]=8'h1f;
+-   end
+-   data[1087]=1;stateful_block=data;
+-  end
+- endfunction
+- assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && (!busy[request_tag] || (UNIFIED_FIXED && response_valid && response_ready && response_tag==request_tag));
++ assign request_ready=!rst && !again && perm_ready && request_tag<PIPELINE && (!busy[request_tag] || (response_valid && response_ready && response_tag==request_tag));
+  wire accept=request_valid && request_ready;
+- wire [3:0] requested_shape=UNIFIED_FIXED ? request_fixed_shape : 4'd0;
+- wire requested_pair=UNIFIED_FIXED && request_pair;
++ wire [3:0] requested_shape=request_fixed_shape;
++ wire requested_pair=request_pair;
+  wire zero_request=request_no_seed && request_steps==0 && requested_shape==0;
+  assign perm_valid=again || (accept && !zero_request);
+  // Select operands before the common width and padding formatter.
+@@ -128,7 +80,7 @@ module pipeline #(
+      : requested_shape==1 || requested_shape==9 ? secret_seed : request_no_seed ? request_initial_value : secret_seed;
+  wire [255:0] block_right=again ? captured[t]^perm_digest[255:0] : request_right;
+  wire [1599:0] unified_state;
+- generate if(UNIFIED_FIXED)begin: formatter
++ generate begin: formatter
+   logic [255:0] f0,f1,f2,f3,masked_address;
+   logic [183:0] prefix;
+   logic [7:0] domain;
+@@ -177,9 +129,8 @@ module pipeline #(
+    data[1087]=1;
+   end
+   assign unified_state=data;
+- end else begin assign unified_state=0;end endgenerate
+- assign perm_state=UNIFIED_FIXED ? unified_state : block_family==0 ? block_for(block_address,block_value,block_right,block_pair)
+-     : stateful_block(block_family,block_phase,block_address,block_value,key_value[t],block_right,block_step,block_shape,block_pair);
++ end endgenerate
++ assign perm_state=unified_state;
+  assign perm_tag=again ? t : request_tag;
+  logic response_held;
+  logic [TAG_BITS-1:0] held_tag;
+@@ -214,7 +165,11 @@ module pipeline #(
+   end
+  end
+  always_ff @(posedge clk)begin
+-  if(rst)begin initial_pending<=0;capture_initial<=0;captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;hash_count<=0;permutation_count<=0;end
++  if(rst)begin node_phase<=0;more_steps<=0;initial_pending<=0;capture_initial<=0;captured_valid<=0;response_held<=0;held_tag<=0;busy<=0;complete<=0;capture_enable<=0;preserve_counter<=0;
++`ifndef SYNTHESIS
++hash_count<=0;permutation_count<=0;
++`endif
++end
+   else begin
+    if(response_valid && !response_ready && !response_held)begin response_held<=1;held_tag<=response_tag;end
+    if(response_valid && response_ready)response_held<=0;
+@@ -222,6 +177,8 @@ module pipeline #(
+    if(accept)begin
+     busy[request_tag]<=1;steps[request_tag]<=request_steps+{1'b0,request_start};iteration[request_tag]<=request_no_seed ? {1'b0,request_start}+1'b1 : 5'd0;
+     phase[request_tag]<=first_phase;
++    node_phase[request_tag]<=first_phase==SEED || first_phase==STEP || first_phase==SINGLE;
++    more_steps[request_tag]<=request_no_seed ? request_steps>1 : request_steps!=0;
+     if(busy==0)begin shared_shape<=requested_shape;shared_pair<=requested_pair;end
+     initial_pending[request_tag]<=request_no_seed;
+     if(zero_request)complete[request_tag]<=1;
+@@ -234,18 +191,24 @@ module pipeline #(
+     end
+    end
+    if(perm_done)begin
+-    if(PROFILE_ENABLE)begin hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;end
++
++`ifndef SYNTHESIS
++hash_count<=hash_count+1'b1;permutation_count<=permutation_count+1'b1;
++`endif
++
+     if(capture_now)begin capture_initial[t]<=0;captured_valid[t]<=1;end
+     if(capture_transfer)capture_initial[t]<=0;
+     if(digest_write)initial_pending[t]<=0;
+     if(again)begin
+      phase[t]<=next_phase;
++     node_phase[t]<=next_phase==SEED || next_phase==STEP || next_phase==FINAL || next_phase==SINGLE;
++     if(node_done)more_steps[t]<=iteration[t]+1'b1<steps[t];
+      if(node_done)iteration[t]<=iteration[t]+1'b1;
+     end else complete[t]<=1;
+    end
+   end
+  end
+- generate if(UNIFIED_FIXED)begin: shared_coordinates
++ generate begin: shared_coordinates
+   logic [4:0] layer;
+   logic [63:0] tree;
+   logic [7:0] domain;
+@@ -257,16 +220,18 @@ module pipeline #(
+    if(busy==0)begin layer<=request_layer;tree<=request_tree;domain<=step_domain;kind<=request_family;end
+    leaves[request_tag]<=request_leaf;chains[request_tag]<=request_a;indices[request_tag]<=request_b;
+   end
++`ifndef SYNTHESIS
++  always @(posedge clk)if(!rst && accept && |busy)begin
++   if(request_layer!=layer || request_tree!=tree || request_family!=kind
++       || step_domain!=domain || requested_shape!=shared_shape || requested_pair!=shared_pair)
++    $fatal(1,"shared coordinates changed before contexts drained");
++  end
++`endif
+   for(genvar j=0;j<PIPELINE;j++)begin
+-   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({12'd0,leaves[j]}),be32({24'd0,domain}),be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+-   assign family[j]=request_family;
++   assign address[j]={be32(indices[j]),be32({24'd0,chains[j]}),be32({12'd0,leaves[j]}),be32({24'd0,domain}),be32(tree[31:0]),be32(tree[63:32]),32'd0,be32({27'd0,layer})};
++   assign family[j]=kind;
+    assign fixed_shape[j]=shared_shape;assign paired[j]=shared_pair;
+   end
+- end else begin: legacy_coordinates
+-  logic [255:0] saved_address[0:PIPELINE-1];
+-  logic [1:0] saved_family[0:PIPELINE-1];
+-  always_ff @(posedge clk)if(!rst && accept)begin saved_address[request_tag]<=step_address;saved_family[request_tag]<=request_family;end
+-  for(genvar j=0;j<PIPELINE;j++)begin assign address[j]=saved_address[j];assign family[j]=saved_family[j];assign fixed_shape[j]=0;assign paired[j]=0;end
+  end endgenerate
+ endmodule
+ `default_nettype wire
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index 5431ce2..45577a8 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -1,14 +1,14 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+-// ABI 4 byte recipes and local chain feedback. Both physical lanes use this
+-// module. The dispatcher keeps all request fields stable through response.
++// ABI 4 byte recipes: one fixed-context engine and one shared streaming path.
++// Requests and their shared coordinates stay stable until results are consumed.
+ module recipe #(
+     parameter integer N = 16,
+     parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
+     parameter integer UNROLL = 2, PIPELINE = 1,
+     parameter integer MAX_MESSAGE_BYTES = 87,
+     parameter [15:0] RECIPE_MASK = 16'hffff,
+-    parameter bit SHARED_STATE=0, PROFILE_ENABLE = 0,
++    parameter bit SHARED_STATE=0,
+     localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
+ ) (
+     input wire clk, rst,
+@@ -50,35 +50,25 @@ module recipe #(
+     output logic error,
+     output logic [63:0] hash_count, permutation_count
+ );
++
++`ifdef SYNTHESIS
++ assign hash_count=64'd0;assign permutation_count=64'd0;
++`endif
+     localparam [3:0] ADDRESS_SEED=1, ADDRESS_VALUE=2, MESSAGE_PRF=3,
+         MESSAGE_DIGEST=4, INDEX_PRF=5, ROOT_MESSAGE=6, MASKED_SEED=7,
+         MASKED_VALUE=8, PREFIX_SEED=9, PREFIX_VALUE=10, PREFIX_MESSAGE=11,
+         ADDRESS_LIST=12, PREFIX_LIST=13, PREFIX_LEAF=14, PREFIX_PARENT=15;
+-    localparam bit UNIFIED_FIXED=PIPELINE==4 && UNROLL==1;
+-    localparam bit LEGACY_MASKED=RECIPE_MASK[MASKED_VALUE] && !UNIFIED_FIXED;
+     typedef enum logic [2:0] {IDLE, START, STREAM, WAIT_HASH, RESPONSE,FIXED_ISSUE,FIXED_WAIT} state_t;
+     state_t state;
+-    wire chain_feedback_valid;
+-    wire [3:0] chain_feedback_counter;
+-    logic seed_phase;
+-    logic [4:0] iteration;
+-    logic [1:0] compound;
+-    // Masked legacy recipes need a value across intermediate hashes. SLH
+-    // chains instead reuse the sponge's retained digest at the next START.
+-    logic [N*8-1:0] legacy_value, temporary_key, mask0, mask1;
+-    wire [N*8-1:0] current_value = LEGACY_MASKED ? legacy_value
+-        : seed_phase ? request_left : digest[N*8-1:0];
+     localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858)!=0;
+     logic [4:0] rate_block;
+     logic [3:0] beat;
+-    logic stream_half;
+-    wire [63:0] recipe = request_chain && !seed_phase
+-        ? request_step_recipe : request_recipe;
++    wire [63:0] recipe=request_recipe;
+     wire [3:0] shape = recipe[59:56];
+-    logic [15:0] seed_shapes,step_shapes;
+-    logic [12:0] seed_length,step_length;
++    logic [15:0] seed_shapes;
++    logic [12:0] seed_length;
+     logic [2:0] stream_node_words;
+-    wire [15:0] shapes=request_chain && !seed_phase ? step_shapes : seed_shapes;
++    wire [15:0] shapes=seed_shapes;
+     // Decode lengths once in the existing request stage. In particular the
+     // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
+     // byte comparator during STREAM. Request fields remain stable until the
+@@ -111,64 +101,38 @@ module recipe #(
+     always_ff @(posedge clk) begin
+         if(!rst && state==IDLE && request_valid) begin
+             seed_shapes<=(16'b1 << request_recipe[59:56]) & RECIPE_MASK;
+-            step_shapes<=(16'b1 << request_step_recipe[59:56]) & RECIPE_MASK;
+             seed_length<=decode_length(request_recipe);
+-            step_length<=decode_length(request_step_recipe);
+             stream_node_words<=node_bytes[5:3];
+         end
+     end
+     wire [7:0] domain = recipe[55:48];
+     wire [7:0] arity = recipe[47:40];
+-    wire compact_chain = !UNIFIED_FIXED && RECIPE_MASK[ADDRESS_SEED] && request_chain && request_recipe[59:56] == ADDRESS_SEED;
+-    wire [31:0] a = request_a;
+-    wire [31:0] b = chain_feedback_valid
+-        ? (request_step_recipe[55:48]==3 ? request_b : {28'd0,chain_feedback_counter})
+-        : request_chain && !seed_phase
+-        ? (request_step_recipe[55:48] == 3 && request_step_recipe[59:56] == ADDRESS_VALUE
+-            ? request_b : {27'd0, iteration}) : request_b;
+-    wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
+-    wire [7:0] address_domain=chain_feedback_valid ? request_step_recipe[55:48] : domain;
+-    wire [31:0] leaf = {12'd0, request_leaf};
+-    wire [12:0] input_length = LEGACY_MASKED && shapes[MASKED_VALUE]
+-        && compound < arity+1 ? 13'd96
+-        : request_chain && !seed_phase ? step_length : seed_length;
++    wire [31:0] a=request_a,b=request_b;
++    wire [31:0] leaf={12'd0,request_leaf};
++    wire [12:0] input_length=seed_length;
+     wire [5:0] stream_node_bytes={stream_node_words,3'b0};
+-    logic [1087:0] fast_block;
+     logic [127:0] stream_data;
+-    logic [255:0] address, masked_address;
+-    wire fixed_block = !UNIFIED_FIXED && ((RECIPE_MASK & 16'h3858)==0 || shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]
+-        || shapes[INDEX_PRF] || shapes[MASKED_SEED] || shapes[MASKED_VALUE]
+-        || shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]
+-        || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT]);
++    wire [255:0] address={be32(b),be32(a),be32(leaf),be32({24'd0,domain}),
++        be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32({27'd0,request_layer})};
+     wire [12:0] rate_offset = ({8'd0,rate_block} << 7)+({8'd0,rate_block} << 3);
+-    wire [12:0] recipe_limit = ({7'd0,recipe[29:24]} << 7)+({7'd0,recipe[29:24]} << 3);
+     wire stream_last = rate_offset+13'd136 > input_length;
+-    wire hash_ready, block_ready, fast_ready, finish_valid;
++    wire hash_ready, block_ready, finish_valid;
+     wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
+-    wire [N*8-1:0] compact_capture;
+-    logic hash_error;
+     wire completed = finish_valid;
+-    wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
+     assign response_value=bridge_response ? {{(DIGEST_BYTES*8-N*8){1'b0}},engine_digest[N*8-1:0]} : digest;
+-    assign response_capture=UNIFIED_FIXED ? engine_capture[N*8-1:0] : compact_capture;
+-    // Capture both chain modes in the sponge's existing register bank, on
+-    // the same final-round edge used by the former lane-local copy.
+-    wire capture_single = request_capture
+-        && !(LEGACY_MASKED && shapes[MASKED_VALUE] && compound < arity+1)
+-        && (seed_phase ? request_capture_after==0 : request_capture_after==iteration+1);
++    assign response_capture=engine_capture[N*8-1:0];
+     wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes+32 : 22;
+     logic staged_valid, staged_last;
+     logic [127:0] staged_data;
+     wire stream_accept = !staged_valid || block_ready;
+-    // P4 emits sixteen bytes per STREAM cycle, then the final eight bytes
+-    // of the 136-byte rate. Other configurations retain eight-byte beats.
++    // Emit sixteen bytes per cycle, then eight bytes at the end of the rate.
+     // Keeping a cursor avoids a rate_block*136 + beat*16 adder chain
+     // ahead of the source selector and each padding-byte comparator.
+     logic [12:0] position;
+     wire [12:0] list_offset = position >= prefix_bytes ? position-prefix_bytes : 0;
+     logic [INDEX_BITS-1:0] list_cursor;
+     logic [5:0] list_remainder;
+-    wire [4:0] stream_advance = UNIFIED_FIXED && beat!=8 ? 5'd16 : 5'd8;
++    wire [4:0] stream_advance = beat!=8 ? 5'd16 : 5'd8;
+     wire [6:0] next_remainder = {1'b0,list_remainder}+stream_advance;
+     assign list_index0 = list_cursor;
+     assign list_next_index0=state==IDLE && request_valid ? INDEX_BITS'(0)
+@@ -278,156 +242,34 @@ module recipe #(
+             default:list_word_window=list_pair[335:192];
+         endcase
+     end
+-    // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
+-    // a node boundary; do not retain the legacy two-node byte window.
++    // A fixed two-node window supports both aligned SLH and the LMS prefix.
+     wire [127:0] list_window=RECIPE_MASK[PREFIX_LIST]
+-        ? (list_remainder[1] ? (UNIFIED_FIXED ? list_word_window[143:16] : {64'd0,list_word_window[79:16]}) : (UNIFIED_FIXED ? list_word_window[127:0] : {64'd0,list_word_window[63:0]}))
++        ? (list_remainder[1] ? list_word_window[143:16] : list_word_window[127:0])
+         : {64'd0,node_word(list_data0,{4'd0,list_remainder[4:3]})};
+     wire [5:0] stream_word_index=position[8:3];
+     logic [127:0] stream_payload;
+     logic [191:0] source_window;
+     always_comb begin
+         source_window={source_word(stream_word_index+6'd2,1'b1),
+-            source_word(stream_word_index+6'd1,!UNIFIED_FIXED),source_word(stream_word_index,1'b0)};
+-        stream_payload=UNIFIED_FIXED ? source_window[127:0] : {64'd0,source_window[63:0]};
++            source_word(stream_word_index+6'd1,1'b0),source_word(stream_word_index,1'b0)};
++        stream_payload=source_window[127:0];
+         if(shapes[PREFIX_MESSAGE]) begin
+-            stream_payload=UNIFIED_FIXED ? source_window[143:16] : {64'd0,source_window[79:16]};
+-            if(position==0)stream_payload=UNIFIED_FIXED ? identifier : {64'd0,identifier[63:0]};
+-            else if(!UNIFIED_FIXED && position==8)stream_payload[63:0]=identifier[127:64];
++            stream_payload=source_window[143:16];
++            if(position==0)stream_payload=identifier;
+             else if(position==16)stream_payload[47:0]={16'h8181,be32(leaf)};
+         end else if((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position>=prefix_bytes)
+             stream_payload=list_window;
+     end
+ 
+-    integer i, absolute;
+-    always @* begin
+-        address = {be32(b),be32(a),be32(leaf),be32({24'd0,address_domain}),
+-            be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,be32(request_layer)};
+-        masked_address = {be32(compound),be32(b),be32(a),be32(leaf),be32(domain),96'd0};
+-    end
+-    // Select shared frame fields before alignment. This avoids replicating
+-    // every seed/value/key/mask selector for all three node lengths.
+-    logic [255:0] frame0,frame1,frame2,frame3;
+-    logic [183:0] frame_prefix;
+-    logic [7:0] frame_domain;
+-    logic frame_two;
+-    logic [2:0] frame_layout;
+-    always @* begin
+-        frame0=0;frame1=0;frame2=0;frame3=0;frame_prefix=0;
+-        frame_domain=0;frame_two=0;frame_layout=7;
+-        (* parallel_case *) case(1'b1)
+-            shapes[ADDRESS_SEED],shapes[ADDRESS_VALUE]: if(RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
+-                frame_layout=0;frame0=public_seed;frame1=address;
+-                frame2=chain_feedback_valid ? finish_digest[N*8-1:0] : shapes[ADDRESS_SEED] ? secret_seed : left_value;
+-                frame_two=!chain_feedback_valid && shapes[ADDRESS_VALUE] && arity==2;
+-                frame3=frame_two ? request_right : 256'd0;
+-            end
+-            shapes[INDEX_PRF]: if(RECIPE_MASK[INDEX_PRF]) begin
+-                frame_layout=1;frame_domain=3;frame1=secret_prf;frame2={be32(leaf),224'd0};
+-            end
+-            shapes[MASKED_SEED]: if(RECIPE_MASK[MASKED_SEED]) begin
+-                frame_layout=2;frame_domain=4;frame1=secret_seed;frame2=public_seed;frame3=masked_address;
+-            end
+-            shapes[MASKED_VALUE]: if(LEGACY_MASKED) begin
+-                if(compound<arity+1) begin
+-                    frame_layout=1;frame_domain=3;frame1=public_seed;frame2=masked_address;
+-                end else begin
+-                    frame_layout=3;frame_domain=arity-1'b1;frame1=temporary_key;
+-                    frame2=left_value^mask0;frame_two=arity==2;
+-                    frame3=frame_two ? request_right^mask1 : 256'd0;
+-                end
+-            end
+-            shapes[PREFIX_SEED],shapes[PREFIX_VALUE]: if(RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
+-                frame_layout=4;
+-                frame_prefix={shapes[PREFIX_SEED] ? 8'hff : b[7:0],8'(request_a),8'd0,be32(leaf),identifier};
+-                frame1=shapes[PREFIX_SEED] ? secret_seed : left_value;
+-            end
+-            shapes[PREFIX_LEAF],shapes[PREFIX_PARENT]: if(RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
+-                frame_layout=5;
+-                frame_prefix={8'd0,shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,be32(request_b),identifier};
+-                frame1=left_value;frame_two=shapes[PREFIX_PARENT];
+-                frame2=frame_two ? request_right : 256'd0;
+-            end
+-            default:begin end
+-        endcase
+-    end
+-    always @* begin
+-        fast_block=0;
+-        if(!UNIFIED_FIXED)case(node_bytes)
+-            16: begin
+-                fast_block[0 +:128]=public_seed[127:0];
+-                fast_block[128 +:256]=address;
+-                fast_block[384 +:128]=chain_feedback_valid ? finish_digest[127:0] : shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+-                if(shapes[ADDRESS_VALUE] && arity==2) begin
+-                    fast_block[512 +:128]=request_right[127:0];
+-                    fast_block[640 +:8]=8'h1f;
+-                end else fast_block[512 +:8]=8'h1f;
+-            end
+-            24: begin
+-                fast_block[0 +:192]=public_seed[191:0];
+-                fast_block[192 +:256]=address;
+-                fast_block[448 +:192]=chain_feedback_valid ? finish_digest[191:0] : shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+-                if(shapes[ADDRESS_VALUE] && arity==2) begin
+-                    fast_block[640 +:192]=request_right[191:0];
+-                    fast_block[832 +:8]=8'h1f;
+-                end else fast_block[640 +:8]=8'h1f;
+-            end
+-            32: case(frame_layout)
+-                0: begin
+-                    fast_block[0 +:256]=frame0[255:0];
+-                    fast_block[256 +:256]=frame1;
+-                    fast_block[512 +:256]=frame2[255:0];
+-                    fast_block[768 +:256]=frame3[255:0];
+-                    if(frame_two) fast_block[1024 +:8]=8'h1f;
+-                    else fast_block[768 +:8]=8'h1f;
+-                end
+-                1: begin
+-                    fast_block[248 +:8]=frame_domain;
+-                    fast_block[256 +:256]=frame1[255:0];
+-                    fast_block[512 +:256]=frame2;
+-                    fast_block[768 +:8]=8'h1f;
+-                end
+-                2: begin
+-                    fast_block[248 +:8]=frame_domain;
+-                    fast_block[256 +:256]=frame1[255:0];
+-                    fast_block[512 +:256]=frame2[255:0];
+-                    fast_block[768 +:256]=frame3;
+-                    fast_block[1024 +:8]=8'h1f;
+-                end
+-                3: begin
+-                    fast_block[248 +:8]=frame_domain;
+-                    fast_block[256 +:256]=frame1[255:0];
+-                    fast_block[512 +:256]=frame2[255:0];
+-                    fast_block[768 +:256]=frame3[255:0];
+-                    if(frame_two) fast_block[1024 +:8]=8'h1f;
+-                    else fast_block[768 +:8]=8'h1f;
+-                end
+-                4: begin
+-                    fast_block[183:0]=frame_prefix;
+-                    fast_block[184 +:256]=frame1[255:0];
+-                    fast_block[440 +:8]=8'h1f;
+-                end
+-                5: begin
+-                    fast_block[175:0]=frame_prefix[175:0];
+-                    fast_block[176 +:256]=frame1[255:0];
+-                    fast_block[432 +:256]=frame2[255:0];
+-                    if(frame_two) fast_block[688 +:8]=8'h1f;
+-                    else fast_block[432 +:8]=8'h1f;
+-                end
+-                default:begin end
+-            endcase
+-            default:begin end
+-        endcase
+-        fast_block[1087]=1'b1;
+-    end
++    integer i,absolute;
+     always_comb begin
+         stream_data = stream_payload;
+         for (i=0; i<16; i=i+1) begin
+             absolute = position+i;
+-            if ((UNIFIED_FIXED || i<8) && beat*16+(UNIFIED_FIXED ? 0 : stream_half*8)+i < 136) begin
++            if (beat*16+i < 136) begin
+                 if (absolute >= input_length) stream_data[i*8 +: 8] = 0;
+                 if (absolute == input_length) stream_data[i*8 +: 8] = 8'h1f;
+-                if (stream_last && beat*16+(UNIFIED_FIXED ? 0 : stream_half*8)+i == 135) stream_data[i*8+7] = 1'b1;
++                if (stream_last && beat*16+i == 135) stream_data[i*8+7] = 1'b1;
+             end else stream_data[i*8 +: 8] = 0;
+         end
+     end
+@@ -436,12 +278,12 @@ module recipe #(
+     wire [1599:0] batch_perm_state,batch_perm_digest;
+     wire [TAG_BITS-1:0] batch_perm_tag,batch_perm_result_tag;
+     logic bridge_response;
+-    wire scalar_bridge=UNIFIED_FIXED && bridge_response;
++    wire scalar_bridge=bridge_response;
+     wire engine_mode=batch_mode || scalar_bridge;
+     wire engine_ready,engine_valid;
+     wire [255:0] engine_digest,engine_capture;
+     wire [3:0] scalar_shape=request_recipe[59:56];
+-    wire scalar_fixed=UNIFIED_FIXED && RECIPE_MASK[scalar_shape]
++    wire scalar_fixed=RECIPE_MASK[scalar_shape]
+         && (scalar_shape==1 || scalar_shape==2 || scalar_shape==5 || scalar_shape==7 || scalar_shape==8
+             || scalar_shape==9 || scalar_shape==10 || scalar_shape==14 || scalar_shape==15);
+     wire scalar_no_seed=!(request_chain && (scalar_shape==1 || scalar_shape==7 || scalar_shape==9))
+@@ -452,8 +294,8 @@ module recipe #(
+     assign batch_response_valid=engine_valid && !scalar_bridge;
+     assign batch_read_digest=engine_digest;
+     assign batch_read_capture=engine_capture;
+-    generate if(PIPELINE>1)begin: chain_pipeline
+-        pipeline #(.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE),.UNIFIED_FIXED(UNIFIED_FIXED)) engine(
++    generate begin: chain_pipeline
++        pipeline #(.PIPELINE(PIPELINE)) engine(
+             .clk,.rst,.node_bytes,
+             .request_valid(scalar_bridge ? state==FIXED_ISSUE : batch_request_valid),.request_ready(engine_ready),
+             .request_tag(scalar_bridge ? TAG_BITS'(0) : batch_request_tag),
+@@ -479,12 +321,6 @@ module recipe #(
+             .perm_done(batch_perm_done),.perm_digest(batch_perm_digest),.perm_result_tag(batch_perm_result_tag),
+             .hash_count(batch_hashes),.permutation_count(batch_permutations));
+         assign batch_response_digest=engine_digest;assign batch_response_capture=engine_capture;
+-    end else begin
+-        assign batch_perm_valid=0;assign batch_perm_state=0;assign batch_perm_tag=0;
+-        assign engine_ready=0;assign engine_valid=0;assign batch_response_tag=0;
+-        assign engine_digest=0;assign engine_capture=0;
+-        assign batch_response_digest=0;assign batch_response_capture=0;
+-        assign batch_hashes=0;assign batch_permutations=0;
+     end endgenerate
+     // Direct Keccak datapath and absorb/chain control.
+     localparam logic [1:0] HASH_IDLE = 2'd0;
+@@ -492,32 +328,25 @@ module recipe #(
+     localparam logic [1:0] HASH_RUN = 2'd2;
+ 
+     logic [1:0] hash_state;
+-    logic saved_chain_enable;
+-    logic saved_chain_prefix;
+-    logic saved_chain_prefix_preserve_counter;
+-    logic [4:0] saved_chain_count;
+-    logic saved_capture_enable;
+-    logic [4:0] saved_capture_after;
+-    logic first_block;
+-    logic running_last;
++    logic first_block,running_last;
+     logic [3:0] append_index;
+-
+     wire [24:0] state_write_enable;
+     wire [1599:0] state_write_data;
+     logic [1599:0] sponge_state;
+-    logic [4:0] chains_remaining;
+-    logic [3:0] chain_counter;
+-    logic [4:0] chain_iteration;
+-    logic [N*8-1:0] captured_value;
+     logic [4:0] round_index;
+     wire [1599:0] advanced_state;
+-    wire round_complete;
+-    wire round_update;
+-    wire [3:0] counter_next = chain_counter + 1'b1;
+-    wire [3:0] transition_counter =
+-        saved_chain_prefix && chain_iteration == 1
+-            ? chain_counter : counter_next;
+-
++    wire round_complete,round_update;
++    logic p1_busy;
++    logic [4:0] p1_round;
++    wire p1_done=p1_busy && p1_round+UNROLL>=24;
++    always_ff @(posedge clk)begin
++        if(rst)begin p1_busy<=0;p1_round<=0;end
++        else if(PIPELINE==1)begin
++            if(batch_perm_valid && batch_perm_ready)begin p1_busy<=1;p1_round<=0;end
++            else if(p1_done)p1_busy<=0;
++            else if(p1_busy)p1_round<=p1_round+5'(UNROLL);
++        end
++    end
+     // One P-stage datapath for both serial and interleaved execution. P1
+     // writes its sole state through the sponge word enables, without launch
+     // or return bubbles. P>1 carries valid/round/tag through the same stages.
+@@ -545,7 +374,7 @@ module recipe #(
+         if(s==0)begin: input_stage
+             assign rounds[0]=PIPELINE==1 ? sponge_state
+                 : recycle ? state_reg[PIPELINE-1] : issue_state;
+-            assign start_round=PIPELINE==1 ? round_index
++            assign start_round=PIPELINE==1 ? (engine_mode ? p1_round : round_index)
+                 : recycle ? stage_base[PIPELINE-1]+5'(ROUNDS) : 5'd0;
+             assign source_tag=recycle ? stage_tag[PIPELINE-1] : issue_tag;
+             assign source_valid=PIPELINE>1 && (recycle || issue_valid);
+@@ -562,7 +391,10 @@ module recipe #(
+         assign stage_result[s]=rounds[UNROLL];
+         for(genvar w=0;w<25;w=w+1)begin: words
+             always_ff @(posedge clk)if(!rst)begin
+-                if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
++                if(PIPELINE==1 && engine_mode)begin
++                    if(batch_perm_valid && batch_perm_ready)state_reg[s][64*w +:64]<=batch_perm_state[64*w +:64];
++                    else if(p1_busy)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
++                end else if((PIPELINE==1 || (SHARED_STATE && s==PIPELINE-1)) && state_write_enable[w])
+                     state_reg[s][64*w +:64]<=state_write_data[64*w +:64];
+                 else if(source_valid)state_reg[s][64*w +:64]<=rounds[UNROLL][64*w +:64];
+             end
+@@ -575,9 +407,9 @@ module recipe #(
+             end
+         end
+     end
+-    assign batch_perm_ready=PIPELINE>1 && engine_mode && ready;
+-    assign batch_perm_done=PIPELINE>1 && engine_mode && finished;
+-    assign batch_perm_digest=PIPELINE>1 ? finished_state : 1600'd0;
++    assign batch_perm_ready=engine_mode && (PIPELINE==1 ? (!p1_busy || p1_done) : ready);
++    assign batch_perm_done=engine_mode && (PIPELINE==1 ? p1_done : finished);
++    assign batch_perm_digest=PIPELINE>1 ? finished_state : stage_result[0];
+     assign batch_perm_result_tag=PIPELINE>1 ? stage_tag[PIPELINE-1] : '0;
+     if(PIPELINE==1 || SHARED_STATE)assign sponge_state=finished_state;
+     assign advanced_state=PIPELINE==1 ? stage_result[0] : finished_state;
+@@ -594,35 +426,23 @@ module recipe #(
+     always @(posedge clk)if(!rst && PIPELINE>1 && SHARED_STATE && |state_write_enable)
+         if(|(stage_valid & ~(finished ? PIPELINE'(1 << (PIPELINE-1)) : {PIPELINE{1'b0}})))$fatal(1,"sponge write while pipeline occupied");
+     // synthesis translate_on
+-    wire permutation_complete=hash_state==HASH_RUN && round_complete;
++    wire permutation_complete=!engine_mode && hash_state==HASH_RUN && round_complete;
+ 
+     assign hash_ready = hash_state == HASH_IDLE;
+     assign block_ready = hash_state == HASH_WAIT_BLOCK;
+-    assign fast_ready = (hash_state == HASH_IDLE && (state == START))
+-        || (hash_state == HASH_WAIT_BLOCK && first_block && append_index == 0);
+-    assign digest = sponge_state[DIGEST_BYTES*8-1:0];
+-    assign finish_valid = hash_state == HASH_RUN
+-        && round_complete
+-        && (!saved_chain_enable || chains_remaining <= 1)
+-        && running_last;
+-    assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+-    assign compact_capture = captured_value;
++    assign digest=sponge_state[DIGEST_BYTES*8-1:0];
++    assign finish_valid=permutation_complete && running_last;
++    assign finish_digest=advanced_state[DIGEST_BYTES*8-1:0];
+ 
+     initial begin
+-        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 12 || ROUNDS > 24 || (24 % ROUNDS) != 0)
++        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 24 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+             $error("recipe lane requires positive U/P and U*P dividing 24");
+     end
+ 
+     // Mutually exclusive word updates expose one data mux instead of a
+     // priority network for whole-state loads mixed with partial absorption.
+-    wire take_fast=(hash_state==HASH_IDLE && (state == START) && (state == START && fixed_block))
+-        || (hash_state==HASH_WAIT_BLOCK && (state == START && fixed_block) && fast_ready);
+-    wire take_stream=hash_state==HASH_WAIT_BLOCK && !take_fast && staged_valid;
++    wire take_stream=hash_state==HASH_WAIT_BLOCK && staged_valid;
+     wire clear_stream=take_stream && first_block && append_index==0;
+-    wire take_feedback=hash_state==HASH_RUN && round_complete
+-        && saved_chain_enable && chains_remaining>1;
+-    assign chain_feedback_valid=take_feedback;
+-    assign chain_feedback_counter=transition_counter;
+     // One selected rate pair is absorbed per stream beat. Share that XOR
+     // before distributing the result to the enabled state words.
+     logic [127:0] previous_rate;
+@@ -643,127 +463,36 @@ module recipe #(
+     genvar word_index;
+     generate for(word_index=0;word_index<25;word_index=word_index+1) begin: state_words
+         wire select_stream=word_index<17 && take_stream && append_index==word_index/2;
+-        wire [63:0] fast_word;
+-        if(word_index<17) assign fast_word=fast_block[word_index*64 +:64];
+-        else assign fast_word=64'd0;
+-        // The register enable suppresses idle cycles. The default data can
+-        // therefore be the permutation result without a 1,600-bit HASH_RUN mask.
+         wire [63:0] round_or_clear=(clear_stream || (SHARED_STATE && PIPELINE>1)) ? 64'd0
+             : advanced_state[word_index*64 +:64];
+         wire [63:0] absorb_word=word_index%2==0 ? absorbed_block[63:0] : absorbed_block[127:64];
+         wire [63:0] next_word;
+-            assign next_word=(take_fast || take_feedback) ? fast_word
+-                : select_stream ? absorb_word : round_or_clear;
++            assign next_word=select_stream ? absorb_word : round_or_clear;
+         assign state_write_data[word_index*64 +:64]=next_word;
+         // A completed permutation already resides in the shared register.
+         // Only absorption, initialization or a new chain block needs a write.
+         assign state_write_enable[word_index]=!rst &&
+-            (((SHARED_STATE && PIPELINE>1) ? take_feedback : round_update) || take_fast || select_stream || clear_stream);
++            ((!(SHARED_STATE && PIPELINE>1) && round_update) || select_stream || clear_stream);
+         if(!SHARED_STATE && PIPELINE>1)begin: private_state
+             always_ff @(posedge clk)
+                 if(state_write_enable[word_index])sponge_state[word_index*64 +:64]<=next_word;
+         end
+     end endgenerate
+ 
+-    always_ff @(posedge clk) begin
+-        if (rst) begin
+-            hash_state <= HASH_IDLE;
+-            saved_chain_enable <= 1'b0;
+-            saved_chain_prefix <= 1'b0;
+-            saved_chain_prefix_preserve_counter <= 1'b0;
+-            saved_chain_count <= '0;
+-            saved_capture_enable <= 1'b0;
+-            saved_capture_after <= '0;
+-            first_block <= 1'b1;
+-            running_last <= 1'b0;
+-            append_index <= 0;
+-            chains_remaining <= '0;
+-            chain_counter <= '0;
+-            chain_iteration <= '0;
+-            round_index <= '0;
+-            hash_error <= 1'b0;
+-        end else begin
+-            hash_error <= 1'b0;
+-            case (hash_state)
+-                HASH_IDLE: if ((state == START)) begin
+-                    saved_chain_enable <= compact_chain;
+-                    saved_chain_prefix <= compact_chain;
+-                    saved_chain_prefix_preserve_counter
+-                        <= (request_step_recipe[55:48] == 3);
+-                    saved_chain_count <= (request_steps+5'd1);
+-                    saved_capture_enable <= (compact_chain ? request_capture : capture_single);
+-                    saved_capture_after <= (compact_chain ? request_capture_after+5'd1 : 5'd1);
+-                    first_block <= 1'b1;
+-                    append_index <= 0;
+-                    if ((state == START && fixed_block)) begin
+-                        running_last <= 1'b1;
+-                        chains_remaining <= compact_chain
+-                            ? (request_steps+5'd1) : 5'd1;
+-                        chain_counter <= 0;
+-                        chain_iteration <= 1;
+-                        round_index <= 0;
+-                        hash_state <= HASH_RUN;
+-                    end else
+-                        hash_state <= HASH_WAIT_BLOCK;
+-                end
+-                HASH_WAIT_BLOCK: if ((state == START && fixed_block) && fast_ready) begin
+-                    // Generic pre-padded one-rate-block path.  The recipe
+-                    // executor builds fixed-format blocks while this lane is
+-                    // idle, avoiding nine serial append cycles per context.
+-                    running_last <= 1'b1;
+-                    chains_remaining <= saved_chain_enable
+-                        ? saved_chain_count : 5'd1;
+-                    chain_counter <= 0;
+-                    chain_iteration <= 1;
+-                    round_index <= 0;
+-                    hash_state <= HASH_RUN;
+-                end else if (staged_valid) begin
+-                    if (append_index == 8) begin
+-                        running_last <= staged_last;
+-                        append_index <= 0;
+-                        if (saved_chain_enable && !staged_last) begin
+-                            hash_error <= 1'b1;
+-                            hash_state <= HASH_IDLE;
+-                        end else begin
+-                            chains_remaining <= saved_chain_enable
+-                                ? saved_chain_count : 5'd1;
+-                            chain_counter <= 0;
+-                            chain_iteration <= 1;
+-                            round_index <= 0;
+-                            hash_state <= HASH_RUN;
+-                        end
+-                    end else begin
+-                        append_index <= append_index + 1'b1;
+-                    end
+-                end
+-                HASH_RUN: begin
+-                    if (round_complete) begin
+-                        if (saved_capture_enable
+-                            && saved_capture_after == chain_iteration)
+-                            captured_value <= advanced_state[N*8-1:0];
+-                        if (saved_chain_enable && chains_remaining > 1) begin
+-                            chains_remaining <= chains_remaining - 1'b1;
+-                            if (!saved_chain_prefix_preserve_counter
+-                                && !(saved_chain_prefix
+-                                     && chain_iteration == 1))
+-                                chain_counter <= chain_counter + 1'b1;
+-                            chain_iteration <= chain_iteration + 1'b1;
+-                            round_index <= 0;
+-                        end else begin
+-                            if (running_last) begin
+-                                hash_state <= HASH_IDLE;
+-                            end else begin
+-                                first_block <= 1'b0;
+-                                hash_state <= HASH_WAIT_BLOCK;
+-                            end
+-                        end
+-                    end else if(PIPELINE==1) begin
+-                        round_index <= round_index + UNROLL;
+-                    end
+-                end
+-                default: hash_state <= HASH_IDLE;
+-            endcase
+-        end
++    always_ff @(posedge clk)begin
++        if(rst)begin hash_state<=HASH_IDLE;first_block<=1;running_last<=0;append_index<=0;round_index<=0;end
++        else case(hash_state)
++            HASH_IDLE:if(state==START)begin first_block<=1;append_index<=0;hash_state<=HASH_WAIT_BLOCK;end
++            HASH_WAIT_BLOCK:if(staged_valid)begin
++                if(append_index==8)begin running_last<=staged_last;append_index<=0;round_index<=0;hash_state<=HASH_RUN;end
++                else append_index<=append_index+1'b1;
++            end
++            HASH_RUN:if(round_complete)begin
++                if(running_last)hash_state<=HASH_IDLE;
++                else begin first_block<=0;hash_state<=HASH_WAIT_BLOCK;end
++            end else if(PIPELINE==1)round_index<=round_index+5'(UNROLL);
++            default:hash_state<=HASH_IDLE;
++        endcase
+     end
+ 
+ 
+@@ -772,40 +501,39 @@ module recipe #(
+             staged_valid<=0; staged_last<=0; staged_data<=0;
+             position<=0;
+             list_cursor<=0; list_remainder<=0;
+-            bridge_response<=0;state <= IDLE; error <= 0; hash_count <= 0; permutation_count <= 0;
+-            seed_phase <= 1; iteration <= 0; compound <= 0; rate_block <= 0; beat <= 0; stream_half<=0;
++            bridge_response<=0;state <= IDLE; error <= 0;
++`ifndef SYNTHESIS
++hash_count <= 0; permutation_count <= 0;
++`endif
++
++            rate_block<=0;beat<=0;
+         end else begin
+             if(STREAM_ENABLE && staged_valid && block_ready) staged_valid<=0;
+-            if (hash_error) begin error <= 1; state <= RESPONSE; end
+-            else case (state)
++            case(state)
+                 IDLE: if (request_valid) begin
+                     staged_valid<=0;
+                     position<=0;
+                     list_cursor<=0; list_remainder<=0;
+-                    error <= 0; seed_phase <= 1; iteration <= 0; compound <= 0;
+-                    legacy_value <= request_left;
+-                    rate_block <= 0; beat <= 0; stream_half<=0;
++                    error<=0;
++                    rate_block<=0;beat<=0;
+                     bridge_response<=scalar_fixed;
+                     state <= scalar_fixed ? FIXED_ISSUE : START;
+                 end
+                 FIXED_ISSUE:if(engine_ready)state<=FIXED_WAIT;
+                 FIXED_WAIT:if(engine_valid)state<=RESPONSE;
+                 START: if (hash_ready) begin
+-                    if (PROFILE_ENABLE) begin
+-                        hash_count <= hash_count+(compact_chain ? request_steps+1 : 1);
+-                        if (fixed_block) permutation_count <= permutation_count+(compact_chain ? request_steps+1 : 1);
++`ifndef SYNTHESIS
++                    begin
++                        hash_count<=hash_count+1'b1;
+                     end
+-                    state <= fixed_block ? WAIT_HASH : STREAM;
++`endif
++                    state<=STREAM;
+                 end
+                 STREAM: if (STREAM_ENABLE && stream_accept) begin
+                     position<=position+13'(stream_advance);
+-                    if(UNIFIED_FIXED)staged_data<=stream_data;
+-                    else if(stream_half) staged_data[127:64]<=stream_data[63:0];
+-                    else staged_data[63:0]<=stream_data[63:0];
+-                    staged_valid<=UNIFIED_FIXED || stream_half || beat==8;
++                    staged_data<=stream_data;staged_valid<=1;
+                     staged_last<=stream_last;
+                     if(beat==8) staged_data[127:64]<=0;
+-                    stream_half<=UNIFIED_FIXED || beat==8 ? 1'b0 : !stream_half;
+                     begin
+                         if(position < prefix_bytes) begin
+                             if(position+stream_advance >= prefix_bytes)
+@@ -817,34 +545,16 @@ module recipe #(
+                     end
+                     if (beat == 8) begin
+                         beat <= 0;
+-                        if (PROFILE_ENABLE) permutation_count <= permutation_count+1;
++
++`ifndef SYNTHESIS
++                        permutation_count <= permutation_count+1;
++`endif
++
+                         if (stream_last) state <= WAIT_HASH;
+                         else rate_block <= rate_block+1'b1;
+-                    end else if(UNIFIED_FIXED || stream_half) beat <= beat+1'b1;
+-                end
+-                WAIT_HASH: if (completed) begin
+-                    if (compact_chain) begin
+-                        state <= RESPONSE;
+-                    end else if (LEGACY_MASKED && shapes[MASKED_VALUE] && compound < arity+1) begin
+-                        case (compound)
+-                            0: temporary_key <= completed_value[N*8-1:0];
+-                            1: mask0 <= completed_value[N*8-1:0];
+-                            default: mask1 <= completed_value[N*8-1:0];
+-                        endcase
+-                        compound <= compound+1'b1;
+-                        state <= START;
+-                    end else begin
+-                        compound <= 0;
+-                        legacy_value <= completed_value[N*8-1:0];
+-                        if (request_chain && (seed_phase ? request_steps != 0 : iteration+1 < request_steps)) begin
+-                            seed_phase <= 0;
+-                            if (!seed_phase) iteration <= iteration+1'b1;
+-                            state <= START;
+-                        end else begin
+-                            state <= RESPONSE;
+-                        end
+-                    end
++                    end else beat<=beat+1'b1;
+                 end
++                WAIT_HASH:if(completed)state<=RESPONSE;
+                 RESPONSE: if (response_ready)begin bridge_response<=0;state <= IDLE;end
+                 default: state <= IDLE;
+             endcase
+diff --git a/rtl/top/common.sv b/rtl/top/common.sv
+index cd63784..167608d 100644
+--- a/rtl/top/common.sv
++++ b/rtl/top/common.sv
+@@ -1,7 +1,7 @@
+ // Exported execution region of top; external runtime Job/ROM ports.
+ `timescale 1ns/1ps
+ `default_nettype none
+-module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENABLE=1)(
++module common #(parameter integer UNROLL=2,PIPELINE=1)(
+  input wire clk,rst,
+  output wire [3:0] program_address,output wire [3:0] template_address,
+  input wire [63:0] program_data,template_data,
+@@ -33,7 +33,7 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
+                                                : core_descriptor_addresses;
+     assign result_kind=job_operation;
+     assign message_ready=(phase==RUN) && core_message_ready;
+-    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
++    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) core (
+         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
+         .program_address,.program_data,.template_address,.template_data,
+         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
+@@ -48,15 +48,26 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
+         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
+         .hash_count,.permutation_count,.cycles(core_cycles)
+     );
++`ifdef SYNTHESIS
++    assign boot_cycles=64'd0;assign keygen_cycles=64'd0;assign sign_cycles=64'd0;
++`endif
+     always_ff @(posedge clk) begin
+         if(rst) begin
+             phase<=HEADER;core_released<=0;
+             busy<=1;done<=0;keygen_done<=0;error<=0;error_code<=0;
++
++`ifndef SYNTHESIS
+             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
++`endif
++
+             image_header<=0;profile_descriptor<=0;
+         end else begin
+             keygen_done<=0;
+-            if(PROFILE_ENABLE && !core_released) boot_cycles<=boot_cycles+1;
++
++`ifndef SYNTHESIS
++            if(!core_released) boot_cycles<=boot_cycles+1;
++`endif
++
+             if(core_released && core_error) begin
+                 error<=1;error_code<=core_error_code;busy<=0;phase<=HALTED;
+             end else case(phase)
+@@ -69,10 +80,12 @@ module common #(parameter integer UNROLL=2,PIPELINE=1,parameter bit PROFILE_ENAB
+                     end else if(core_job_ready) phase<=RUN;
+                 end
+                 RUN:if(core_done) begin
+-                    if(PROFILE_ENABLE) begin
++`ifndef SYNTHESIS
++                    begin
+                         if(job_operation==1) sign_cycles<=core_cycles;
+                         else if(job_operation==0) keygen_cycles<=core_cycles;
+                     end
++`endif
+                     if(!job_operation) keygen_done<=1;
+                     done<=1;busy<=0;phase<=HALTED;
+                 end
+diff --git a/rtl/top/top.sv b/rtl/top/top.sv
+index 4a94058..fdfcabb 100644
+--- a/rtl/top/top.sv
++++ b/rtl/top/top.sv
+@@ -3,12 +3,6 @@
+ module top #(
+     parameter integer UNROLL=2,PIPELINE=1,
+     parameter bit SIGNATURE_STORE_ENABLE=1,
+-    // Statistics are observable in simulation, absent from production hardware.
+-`ifdef SYNTHESIS
+-    parameter bit PROFILE_ENABLE=0,
+-`else
+-    parameter bit PROFILE_ENABLE=1,
+-`endif
+     parameter [255:0] SECRET_SEED=256'h00000000000000000000000000000000d1d06dcbb9181a55aabce64467d6b81d,
+     parameter [255:0] SECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7,
+     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
+@@ -74,7 +68,7 @@ module top #(
+                                                : core_descriptor_addresses;
+     assign result_kind=OPERATION;
+     assign message_ready=(phase==RUN) && core_message_ready;
+-    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
++    executor #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) core (
+         .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
+         .program_address,.program_data,.template_address,.template_data,
+         .descriptor_addresses(core_descriptor_addresses),.descriptor_data,
+@@ -89,15 +83,26 @@ module top #(
+         .busy(),.done(core_done),.error(core_error),.error_code(core_error_code),
+         .hash_count,.permutation_count,.cycles(core_cycles)
+     );
++`ifdef SYNTHESIS
++    assign boot_cycles=64'd0;assign keygen_cycles=64'd0;assign sign_cycles=64'd0;
++`endif
+     always_ff @(posedge clk) begin
+         if(rst) begin
+             phase<=HEADER;core_released<=0;
+             busy<=1;done<=0;keygen_done<=0;error<=0;error_code<=0;
++
++`ifndef SYNTHESIS
+             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
++`endif
++
+             image_header<=0;profile_descriptor<=0;
+         end else begin
+             keygen_done<=0;
+-            if(PROFILE_ENABLE && !core_released) boot_cycles<=boot_cycles+1;
++
++`ifndef SYNTHESIS
++            if(!core_released) boot_cycles<=boot_cycles+1;
++`endif
++
+             if(core_released && core_error) begin
+                 error<=1;error_code<=core_error_code;busy<=0;phase<=HALTED;
+             end else case(phase)
+@@ -110,10 +115,12 @@ module top #(
+                     end else if(core_job_ready) phase<=RUN;
+                 end
+                 RUN:if(core_done) begin
+-                    if(PROFILE_ENABLE) begin
++`ifndef SYNTHESIS
++                    begin
+                         if(OPERATION==1) sign_cycles<=core_cycles;
+                         else if(OPERATION==0) keygen_cycles<=core_cycles;
+                     end
++`endif
+                     if(!OPERATION) keygen_done<=1;
+                     done<=1;busy<=0;phase<=HALTED;
+                 end
+diff --git a/scripts/benchmark_targets.sh b/scripts/benchmark_targets.sh
+index 5788f8f..e56d111 100755
+--- a/scripts/benchmark_targets.sh
++++ b/scripts/benchmark_targets.sh
+@@ -6,8 +6,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then echo 'P/U must be integers.'
+ p=$((10#$p)); u=$((10#$u))
+ destination=${3:-build/benchmarks/P${p}U${u}}
+ mkdir -p "$destination"
+-stats=${PROFILE_ENABLE:-1}; lut6=${KECCAK_LUT6:-0}
+-work="build/sim/P${p}U${u}_stats${stats}"
++synthesis=${SIM_SYNTHESIS:-0}; lut6=${KECCAK_LUT6:-0}
++work="build/sim/P${p}U${u}_synthesis${synthesis}"
+ if [[ $lut6 == 1 ]]; then work+=_lut6; fi
+ for target in 'slh_128f sign' 'xmss_h10 keygen' 'lms_h10 keygen'; do
+     read -r profile operation <<< "$target"
+diff --git a/scripts/check_recipes.py b/scripts/check_recipes.py
+index 1eba31d..cd6c868 100644
+--- a/scripts/check_recipes.py
++++ b/scripts/check_recipes.py
+@@ -2,6 +2,7 @@
+ """Compare P4 scalar fixed/stream recipes with independent hashlib byte frames."""
+ from hashlib import shake_256
+ import os
++import argparse
+ from pathlib import Path
+ import subprocess
+ 
+@@ -14,7 +15,11 @@ def h(data, n=32):
+     return shake_256(data).digest(n)
+ 
+ def main():
+-    work = ROOT / 'build/recipe_check'
++    parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--pipeline',type=int,default=4)
++    parser.add_argument('--unroll',type=int,default=1)
++    args=parser.parse_args()
++    work = ROOT / f'build/recipe_check/P{args.pipeline}U{args.unroll}'
+     work.mkdir(parents=True, exist_ok=True)
+     sk, prf, pub, root, rand, left, right = [bytes(range(k, k+32)) for k in (1, 33, 65, 97, 129, 161, 193)]
+     ident = bytes(range(225, 241))
+@@ -79,7 +84,7 @@ def main():
+     vector = work / 'recipes.mem'
+     vector.write_text(''.join(values))
+     obj = work / 'obj'
+-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
++    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
+     with (work / 'compile.log').open('w') as log:
+         subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
+     result = subprocess.run([str(obj / 'Vtb_recipe'), f'+VECTOR={vector}', f'+COUNT={len(cases)}'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+diff --git a/scripts/implement_p4.tcl b/scripts/implement_p4.tcl
+index 203e9f4..20648a6 100644
+--- a/scripts/implement_p4.tcl
++++ b/scripts/implement_p4.tcl
+@@ -5,7 +5,7 @@ set out [file normalize [lindex $argv 1]]
+ file mkdir $out
+ set_param general.maxThreads 4
+ set part xc7a200tffg1156-3
+-set settings "part=$part\nvivado=[version -short]\nPIPELINE=4\nUNROLL=1\nPROFILE_ENABLE=0\nKECCAK_LUT6=0\nmaxThreads=4\ninitial_period_ns=6.666667"
++set settings "part=$part\nvivado=[version -short]\nPIPELINE=4\nUNROLL=1\nSYNTHESIS=1\nKECCAK_LUT6=0\nmaxThreads=4\ninitial_period_ns=6.666667"
+ set settings_file [file join $out settings.txt]
+ if {[file exists $settings_file]} {
+     set handle [open $settings_file r]
+@@ -42,7 +42,7 @@ close $f
+ read_xdc [file join $out synth_clock.xdc]
+ if {![file exists [file join $out synth.dcp]]} {
+ synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 \
+-    -generic PIPELINE=4 -generic UNROLL=1 -generic PROFILE_ENABLE=0
++    -generic PIPELINE=4 -generic UNROLL=1
+ report_utilization -file [file join $out synth_utilization.rpt]
+ report_utilization -hierarchical -file [file join $out synth_hierarchical.rpt]
+ report_timing_summary -file [file join $out synth_timing.rpt]
+diff --git a/scripts/profile_p4.py b/scripts/profile_p4.py
+index 3cf5615..7c2c717 100644
+--- a/scripts/profile_p4.py
++++ b/scripts/profile_p4.py
+@@ -43,7 +43,7 @@ def main():
+         names[value]=name;value+=1
+     (out/'state_names.json').write_text(json.dumps(names, indent=2)+'\n')
+     sources=[str(source/p) for p in (source/'sources.txt').read_text().splitlines()]
+-    command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','-GPROFILE_ENABLE=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
++    command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
+     with (out/'compile.log').open('w') as log:subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
+     rows=[];results={}
+     for profile,op in (('slh_128f','sign'),('xmss_h10','keygen'),('lms_h10','keygen')):
+diff --git a/scripts/simulate.sh b/scripts/simulate.sh
+index 95d4129..075d8a1 100755
+--- a/scripts/simulate.sh
++++ b/scripts/simulate.sh
+@@ -6,38 +6,40 @@ usage() {
+     echo 'Usage: scripts/simulate.sh [profile] [keygen|sign|verify] [P] [U] [+OPTION=VALUE ...]'
+     echo '       scripts/simulate.sh --smoke [P] [U]'
+     echo '       scripts/simulate.sh --all [P] [U]'
+-    echo 'Defaults: slh_128f sign P1U2; PROFILE_ENABLE=1; VECTORS_DIR=tb/vectors; compile threads=2.'
++    echo 'Defaults: slh_128f sign P1U2; SIM_SYNTHESIS=0; VECTORS_DIR=tb/vectors; compile threads=2.'
+ }
++if [[ ${PROFILE_ENABLE+x} ]]; then echo "PROFILE_ENABLE removed; use SIM_SYNTHESIS=1 for the SYNTHESIS macro view." >&2; exit 2; fi
+ mode=single
+ case "${1:-}" in
+     -h|--help) usage; exit 0 ;;
+     --smoke|--all) mode=${1#--}; shift; profile=; operation=; p=${1:-1}; u=${2:-2}; shift "$(( $# >= 2 ? 2 : $# ))" ;;
+     *) profile=${1:-slh_128f}; operation=${2:-sign}; p=${3:-1}; u=${4:-2}; shift "$(( $# >= 4 ? 4 : $# ))" ;;
+ esac
+-stats=${PROFILE_ENABLE:-1}
++synthesis=${SIM_SYNTHESIS:-0}
+ lut6=${KECCAK_LUT6:-0}
+ vectors_root=${VECTORS_DIR:-tb/vectors}
+-if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $stats =~ ^[01]$ || ! $lut6 =~ ^[01]$ ]]; then
+-    echo 'P/U must be integers; PROFILE_ENABLE and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
++if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $synthesis =~ ^[01]$ || ! $lut6 =~ ^[01]$ ]]; then
++    echo 'P/U must be integers; SIM_SYNTHESIS and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
+ fi
+ p=$((10#$p)); u=$((10#$u))
+-if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
+-    echo 'Require 1<=P<=12, U>0 and P*U dividing 24.' >&2; exit 2
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+ fi
+ verilator_bin=${VERILATOR:-verilator}
+ command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
+ mapfile -t sources < sources.txt
+-work="build/sim/P${p}U${u}_stats${stats}"
++work="build/sim/P${p}U${u}_synthesis${synthesis}"
+ defines=()
++if [[ $synthesis == 1 ]]; then defines+=(-DSYNTHESIS); fi
+ if [[ $lut6 == 1 ]]; then defines+=(+define+MHBS_XILINX_LUT6); work+=_lut6; fi
+ mkdir -p "$work"
+-identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
++identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+ exec 9>"$work/compile.lock"
+ flock 9
+     if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
+-    echo "Compile P${p}U${u} stats=$stats; log: $work/compile.log"
++    echo "Compile P${p}U${u} SYNTHESIS=$synthesis; log: $work/compile.log"
+     if ! "$verilator_bin" --binary --timing -O3 -j 2 -Wno-fatal --top-module tb \
+-        "-GPIPELINE=$p" "-GUNROLL=$u" "-GPROFILE_ENABLE=$stats" \
++        "-GPIPELINE=$p" "-GUNROLL=$u" \
+         --Mdir "$work/obj" "${defines[@]}" "${sources[@]}" tb/tb.sv >"$work/compile.log" 2>&1; then
+         tail -n 40 "$work/compile.log" >&2; exit 1
+     fi
+diff --git a/scripts/simulate_fast.sh b/scripts/simulate_fast.sh
+index 9679263..4917c6f 100644
+--- a/scripts/simulate_fast.sh
++++ b/scripts/simulate_fast.sh
+@@ -1,19 +1,31 @@
+ #!/usr/bin/env bash
+ set -euo pipefail
+ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
++if [[ ${PROFILE_ENABLE+x} ]]; then echo "PROFILE_ENABLE removed; use SIM_SYNTHESIS=1 for the SYNTHESIS macro view." >&2; exit 2; fi
+ profile=$(python3 -c 'from model.profiles import get_profile; import sys; print(get_profile(sys.argv[1]).name)' "${1:-xmss_h10}")
+ operation=${2:-verify}
++p=${3:-4}; u=${4:-1}
++if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then echo 'P/U must be integers.' >&2; exit 2; fi
++p=$((10#$p)); u=$((10#$u))
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
++fi
+ vector="${VECTORS_DIR:-tb/vectors}/$profile/$operation"
+-work=build/sim/P4U1_fast_o3
++synthesis=${SIM_SYNTHESIS:-0}
++[[ $synthesis =~ ^[01]$ ]] || { echo "SIM_SYNTHESIS must be 0 or 1" >&2; exit 2; }
++defines=()
++if [[ $synthesis == 1 ]]; then defines+=(-DSYNTHESIS); fi
++work=build/sim/P${p}U${u}_fast_o3_synthesis${synthesis}
+ mkdir -p "$work"
+ mapfile -t sources < sources.txt
+ verilator_bin=${VERILATOR:-verilator}
+-identity=$( { sha256sum "${sources[@]}" tb/tb_fast.sv tb/fast_main.cpp; printf "%s\n" OPT_FAST=-O3 OPT_SLOW=-O3; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
++identity=$( { sha256sum "${sources[@]}" tb/tb_fast.sv tb/fast_main.cpp; printf "%s\n" OPT_FAST=-O3 OPT_SLOW=-O3 "SYNTHESIS=$synthesis"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+ if [[ ! -x "$work/obj/Vtb_fast" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
+     exec 9>"$work/compile.lock"
+     flock 9
+     if [[ ! -x "$work/obj/Vtb_fast" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
+         "$verilator_bin" --cc --exe --build -O3 -j 2 -Wno-fatal --top-module tb_fast \
++            "-GPIPELINE=$p" "-GUNROLL=$u" "${defines[@]}" \
+             --Mdir "$work/obj" -MAKEFLAGS "OPT_FAST=-O3 OPT_SLOW=-O3" -CFLAGS '-O3 -march=native' "${sources[@]}" tb/tb_fast.sv \
+             "$PWD/tb/fast_main.cpp" > "$work/compile.log" 2>&1
+         printf '%s\n' "$identity" > "$work/source.sha256"
+diff --git a/scripts/synth.tcl b/scripts/synth.tcl
+index 91c4ef4..9b8c524 100644
+--- a/scripts/synth.tcl
++++ b/scripts/synth.tcl
+@@ -5,7 +5,7 @@ set u 2
+ if {[llength $argv] > 0} {set p [lindex $argv 0]}
+ if {[llength $argv] > 1} {set u [lindex $argv 1]}
+ if {![string is integer -strict $p] || ![string is integer -strict $u]} {error "P/U must be integers"}
+-if {$p < 1 || $p > 12 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
++if {$p < 1 || $p > 24 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
+ set part xc7a200tffg1156-3
+ set lut6 0
+ if {[info exists ::env(KECCAK_LUT6)]} {set lut6 $::env(KECCAK_LUT6)}
+@@ -23,7 +23,7 @@ foreach source $sources {read_verilog -sv [file join $package_root $source]}
+ read_xdc [file join $package_root scripts clock.xdc]
+ synth_design -top common -part $part -mode out_of_context \
+     -flatten_hierarchy rebuilt -max_dsp 0 \
+-    -generic PIPELINE=$p -generic UNROLL=$u -generic PROFILE_ENABLE=0
++    -generic PIPELINE=$p -generic UNROLL=$u
+ report_utilization -file [file join $out core_utilization.rpt]
+ report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
+ report_timing_summary -file [file join $out core_timing.rpt]
+@@ -35,5 +35,5 @@ foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
+     }
+ }
+ if {[llength $bad]} {error "Statistics registers remain: $bad"}
+-puts "MHBS_SYNTH_PASS P${p}U${u} PROFILE_ENABLE=0"
++puts "MHBS_SYNTH_PASS P${p}U${u} SYNTHESIS=1"
+ exit
+diff --git a/scripts/synth_top.tcl b/scripts/synth_top.tcl
+index a8f7932..c4ca9e1 100644
+--- a/scripts/synth_top.tcl
++++ b/scripts/synth_top.tcl
+@@ -20,7 +20,7 @@ set job [split [string trim [read $handle]] \n]
+ close $handle
+ set command [list synth_design -top top -part $part -mode out_of_context \
+     -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=4 -generic UNROLL=1 \
+-    -generic PROFILE_ENABLE=0 -generic SIGNATURE_STORE_ENABLE=1 -generic OPERATION=1]
++    -generic SIGNATURE_STORE_ENABLE=1 -generic OPERATION=1]
+ foreach name {PROGRAM TEMPLATE DESCRIPTOR} file {program template descriptor} {
+     lappend command -generic "${name}_INIT_FILE=\"$folder/$file.mem\""
+ }
+@@ -29,7 +29,7 @@ foreach name {SECRET_SEED SECRET_PRF PUBLIC_SEED RANDOMIZER PUBLIC_ROOT IDENTIFI
+     lappend command -generic "$name=${width}'h$value"
+ }
+ set handle [open [file join $out settings.txt] w]
+-puts $handle "top=top\nprofile=$profile\noperation=Sign\nPIPELINE=4\nUNROLL=1\nPROFILE_ENABLE=0\nSIGNATURE_STORE_ENABLE=1\npart=$part\nvivado=[version -short]\nmode=out_of_context\ncommand=$command"
++puts $handle "top=top\nprofile=$profile\noperation=Sign\nPIPELINE=4\nUNROLL=1\nSYNTHESIS=1\nSIGNATURE_STORE_ENABLE=1\npart=$part\nvivado=[version -short]\nmode=out_of_context\ncommand=$command"
+ close $handle
+ {*}$command
+ report_utilization -file [file join $out top_utilization.rpt]
+@@ -40,5 +40,5 @@ set bad [get_cells -hier -filter {IS_PRIMITIVE == 1 && REF_NAME =~ FD*}]
+ foreach cell $bad {
+     if {[regexp {(cycles|hash_count|permutation_count|hash_base|permutation_base)_reg} $cell]} {error "Statistics register remains: $cell"}
+ }
+-puts "MHBS_TOP_SYNTH_PASS profile=$profile P4U1 PROFILE_ENABLE=0 SIGNATURE_STORE_ENABLE=1"
++puts "MHBS_TOP_SYNTH_PASS profile=$profile P4U1 SYNTHESIS=1 SIGNATURE_STORE_ENABLE=1"
+ exit
+diff --git a/scripts/synthesize.sh b/scripts/synthesize.sh
+index b2159f2..04afb38 100755
+--- a/scripts/synthesize.sh
++++ b/scripts/synthesize.sh
+@@ -6,8 +6,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then
+     echo 'Usage: scripts/synthesize.sh [P] [U]' >&2; exit 2
+ fi
+ p=$((10#$p)); u=$((10#$u))
+-if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
+-    echo 'Require 1<=P<=12, U>0 and P*U dividing 24.' >&2; exit 2
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+ fi
+ vivado_bin=${VIVADO:-vivado}
+ command -v "$vivado_bin" >/dev/null || { echo 'Vivado is required.' >&2; exit 2; }
+diff --git a/scripts/validate_p4.sh b/scripts/validate_p4.sh
+index fddc1e1..0737555 100755
+--- a/scripts/validate_p4.sh
++++ b/scripts/validate_p4.sh
+@@ -8,11 +8,13 @@ run_case() {
+     local label=$1 profile=$2 operation=$3
+     shift 3
+     bash scripts/simulate.sh "$profile" "$operation" 4 1 "$@" > "$out/$label.log" 2>&1
+-    local stats=${PROFILE_ENABLE:-1}
+-    cp "build/sim/P4U1_stats${stats}/${profile}_${operation}.log" "$out/$label.log"
++    local synthesis=${SIM_SYNTHESIS:-0}
++    cp "build/sim/P4U1_synthesis${synthesis}/${profile}_${operation}.log" "$out/$label.log"
+     rg 'PASS|P4_COVERAGE' "$out/$label.log"
+ }
+-python3 -m scripts.validate_standard --output "$out/full36" > "$out/all36.log" 2>&1
++if [[ ${SKIP_FULL_REGRESSION:-0} != 1 ]]; then
++    python3 -m scripts.validate_standard --skip-h20-full --output "$out/full32" > "$out/all32.log" 2>&1
++fi
+ python3 scripts/check_recipes.py > "$out/recipes.log" 2>&1
+ python3 scripts/check_pipeline.py > "$out/pipeline.log" 2>&1
+ for profile in slh_128f xmss_h10 lms_h10; do
+@@ -24,7 +26,7 @@ for profile in slh_128f xmss_h10 lms_h10; do
+     for fault in 1 2; do
+         run_case "${profile}_fault${fault}" "$profile" sign "+FAULT=$fault"
+     done
+-    PROFILE_ENABLE=0 run_case "${profile}_stats0" "$profile" sign
++    SIM_SYNTHESIS=1 run_case "${profile}_stats0" "$profile" sign
+     if [[ $profile != slh_128f ]]; then
+         run_case "${profile}_invalidq" "$profile" verify +Q=1024 +INVALID=1
+     fi
+diff --git a/scripts/validate_standard.py b/scripts/validate_standard.py
+index 9e70787..41744b2 100644
+--- a/scripts/validate_standard.py
++++ b/scripts/validate_standard.py
+@@ -16,6 +16,7 @@ ROOT=Path(__file__).resolve().parents[1]
+ 
+ def main():
+     parser=argparse.ArgumentParser(description=__doc__)
++    parser.add_argument('--skip-h20-full',action='store_true',help='Keep h20 Verify; do not run h20 Keygen or Sign')
+     parser.add_argument('--workers',type=int,default=4)
+     parser.add_argument('--output',type=Path,default=ROOT/'build/standard_migration/full36')
+     parser.add_argument('--exclude-profile',action='append',default=[],choices=list(PROFILES))
+@@ -24,7 +25,7 @@ def main():
+     if not 1<=args.workers<=8:parser.error('workers must be 1..8')
+     out=args.output.resolve();out.mkdir(parents=True,exist_ok=True)
+     subprocess.run(['bash','scripts/simulate_fast.sh','xmss_h10','verify'],cwd=ROOT,check=True)
+-    exe=ROOT/'build/sim/P4U1_fast_o3/obj/Vtb_fast'
++    exe=ROOT/'build/sim/P4U1_fast_o3_synthesis0/obj/Vtb_fast'
+     files=(ROOT/'sources.txt').read_text().splitlines()+['sources.txt','tb/tb_fast.sv','tb/fast_main.cpp']
+     identity={f:hashlib.sha256((ROOT/f).read_bytes()).hexdigest() for f in files}
+     source_checksum=''.join(h+'  '+f+'\n' for f,h in identity.items())
+@@ -32,7 +33,7 @@ def main():
+         parser.error('Resume RTL/test source checksums differ')
+     (out/'source.sha256').write_text(source_checksum)
+     cases=[(p.name,op) for p in sorted(PROFILES.values(),key=lambda p:(p.stateful,p.h),reverse=True)
+-           if p.name not in args.exclude_profile for op in ('keygen','sign','verify')]
++           if p.name not in args.exclude_profile for op in ('keygen','sign','verify') if not (args.skip_h20_full and p.h==20 and p.stateful and op!='verify')]
+     pending=list(cases);running={};results={};errors=[];started=time.monotonic()
+     if args.resume:
+         import shutil
+diff --git a/tb/fast_main.cpp b/tb/fast_main.cpp
+index 8c9829d..47ad405 100644
+--- a/tb/fast_main.cpp
++++ b/tb/fast_main.cpp
+@@ -28,13 +28,13 @@ int main(int argc,char **argv) {
+     auto number=[](const std::string &s){return std::stoull(s,nullptr,16);};
+     const uint64_t output_size=number(meta[0]),expected_hashes=number(meta[1]),expected_perms=number(meta[2]);
+     const unsigned op=number(cfg[7]),message_size=op?number(cfg[8]):0,verify_nodes=number(meta[3]);
+-    Vtb_fast dut{&context};uint64_t ticks=0,hashes=0,perms=0,cursor=0;
++    Vtb_fast dut{&context};uint64_t ticks=0,hashes=0,perms=0,cursor=0,observed_cycles=0;
+     unsigned sent=0,accepted=0;
+     auto tick=[&](bool observe) {
+         dut.clk=0;dut.eval();
+         if(observe) {
+-            if(dut.execution_reset){hashes=0;perms=0;}
+-            else {hashes+=dut.hash_event+dut.batch_event;perms+=dut.permutation_event+dut.batch_event;}
++            if(dut.execution_reset){hashes=0;perms=0;observed_cycles=0;}
++            else {observed_cycles+=dut.execution_active;hashes+=dut.hash_event+dut.batch_event;perms+=dut.permutation_event+dut.batch_event;}
+             if(dut.message_valid&&dut.message_ready)sent+=8;
+             if(dut.verify_valid&&dut.verify_ready)accepted++;
+             if(dut.out_valid)for(unsigned i=0;i<dut.out_bytes;i++) {
+@@ -61,10 +61,11 @@ int main(int argc,char **argv) {
+     }
+     if(dut.error)throw std::runtime_error("RTL error "+std::to_string(dut.error_code));
+     if(cursor!=output_size || hashes!=expected_hashes || perms!=expected_perms
+-       || dut.hash_count!=hashes || dut.permutation_count!=perms)
++       || (dut.debug_stats && (dut.hash_count!=hashes || dut.permutation_count!=perms))
++       || (!dut.debug_stats && !dut.statistics_zero))
+         throw std::runtime_error("Length or statistics mismatch: "+std::to_string(cursor)+" "+std::to_string(hashes)+" "+std::to_string(perms));
+     if(op==2&&(!dut.verify_pass || accepted!=verify_nodes))throw std::runtime_error("Verify mismatch");
+-    const uint64_t cycles=dut.execution_cycles,total=ticks-5;
++    const uint64_t cycles=dut.debug_stats ? dut.execution_cycles : observed_cycles,total=ticks-5;
+     if(op==1) {
+         if(!dut.signature_complete||dut.signature_error||dut.signature_length!=output_size)
+             throw std::runtime_error("Signature metadata mismatch");
+@@ -80,7 +81,8 @@ int main(int argc,char **argv) {
+         }
+         if(cursor!=output_size)throw std::runtime_error("Signature cache length mismatch");
+     }
+-    std::cout<<"STATEFUL_PASS P4U1 op="<<op<<" cycles="<<cycles<<" total="<<total
++    std::cout<<"STATEFUL_PASS P"<<dut.configuration_pipeline<<"U"<<dut.configuration_unroll
++             <<" op="<<op<<" cycles="<<cycles<<" total="<<total
+              <<" hashes="<<hashes<<" permutations="<<perms<<" tamper=0"
+              <<" seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<std::endl;
+     dut.final();return 0;
+diff --git a/tb/tb.sv b/tb/tb.sv
+index 37213e7..8ccc5fb 100644
+--- a/tb/tb.sv
++++ b/tb/tb.sv
+@@ -1,7 +1,12 @@
+ `timescale 1ns/1ps
+ // Runtime Job/ROM common-core harness, including the production signature store.
+ module tb;
+- parameter integer UNROLL=1,PIPELINE=1,PROFILE_ENABLE=1;
++ parameter integer UNROLL=1,PIPELINE=1;
++`ifdef SYNTHESIS
++ localparam bit DEBUG_STATS=0;
++`else
++ localparam bit DEBUG_STATS=1;
++`endif
+  logic clk=0,rst=1;always #5 clk=~clk;
+  reg [63:0] pm[0:15],tm[0:15],dm[0:31];
+  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
+@@ -17,7 +22,7 @@ module tb;
+  wire out_valid;wire [255:0] out_data;wire [5:0] out_bytes;wire [1:0] result_kind;
+  wire busy,done,keygen_done,error;wire [15:0] error_code;
+  wire [63:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+- common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
++ common #(.UNROLL(UNROLL),.PIPELINE(PIPELINE)) dut(.*);
+  logic read_enable=0;logic [10:0] read_address=0;
+  wire read_valid,complete,store_error;wire [255:0] read_data;wire [5:0] read_bytes,node_bytes;wire [10:0] nodes;wire [15:0] length;
+  signature cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),.write_data(out_data),.write_bytes(out_bytes),.read_enable,.read_address,.read_valid,.read_data,.read_bytes,.node_bytes,.complete,.error(store_error),.nodes,.length);
+@@ -34,8 +39,8 @@ module tb;
+  always @(posedge clk)begin
+   if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;fors_positions=0;ltree_odd=0;rolling_reuse=0;end
+   else begin
+-   if(PIPELINE==4 && UNROLL==1)begin
+-    if(dut.core.state==58 && dut.core.fors_target_group)fors_positions[dut.core.target[1:0]]=1;
++   begin
++    if(dut.core.state==58 && dut.core.fors_target_wave)fors_positions[dut.core.target[1:0]]=1;
+     if(dut.core.state==46 && dut.core.lt_count[0])ltree_odd++;
+     if(dut.core.pipe_rolling && dut.core.pipe_selected && dut.core.pipe_ready && dut.core.pipe_valid
+       && dut.core.lane.batch_request_tag==dut.core.pipe_tag)rolling_reuse++;
+@@ -149,7 +154,7 @@ module tb;
+     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
+      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);
+     $display("BATCH_OBSERVED requests=%0d returns=%0d max_live=%0d",batch_requests,batch_returns,batch_max_live);
+-    if(PIPELINE==4 && UNROLL==1)$display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
++     $display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
+     if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
+     if(job_operation==2)begin
+      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);
+@@ -157,7 +162,7 @@ module tb;
+     if(!tamper)begin
+      if(hcount!=meta[1]||pcount!=meta[2])$fatal(1,"counts %0d/%0d expected %0d/%0d",hcount,pcount,meta[1],meta[2]);
+     end
+-    if(PROFILE_ENABLE)begin
++    if(DEBUG_STATS)begin
+      if(hash_count!=hcount||permutation_count!=pcount)$fatal(1,"statistics mismatch");
+     end else if(hash_count||permutation_count||sign_cycles||keygen_cycles||boot_cycles)$fatal(1,"statistics not disabled");
+     if(job_operation==1)begin
+diff --git a/tb/tb_fast.sv b/tb/tb_fast.sv
+index 213c10a..2ce811b 100644
+--- a/tb/tb_fast.sv
++++ b/tb/tb_fast.sv
+@@ -1,17 +1,18 @@
+ `timescale 1ns/1ps
+ // Direct C++ clock driver for full-tree regression. Same production common/cache.
+-module tb_fast(
++module tb_fast #(parameter integer PIPELINE=4,UNROLL=1)(
+  input wire clk,rst,
+  input wire message_valid,input wire [63:0] message_data,output wire message_ready,
+  input wire verify_valid,input wire [255:0] verify_data,output wire verify_ready,
+  output wire verify_pass,done,error,output wire [15:0] error_code,
+  output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
+  output wire [63:0] execution_cycles,hash_count,permutation_count,
+- output wire hash_event,permutation_event,batch_event,execution_reset,
++ output wire hash_event,permutation_event,batch_event,execution_reset,execution_active,debug_stats,statistics_zero,
+  input wire signature_read_enable,input wire [10:0] signature_read_address,
+  output wire signature_read_valid,output wire [255:0] signature_read_data,
+  output wire [5:0] signature_read_bytes,output wire signature_complete,signature_error,
+- output wire [10:0] signature_nodes,output wire [15:0] signature_length
++ output wire [10:0] signature_nodes,output wire [15:0] signature_length,
++ output wire [31:0] configuration_pipeline,configuration_unroll
+ );
+  reg [63:0] pm[0:15],tm[0:15],dm[0:31];reg [255:0] cfg[0:8];
+  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
+@@ -22,8 +23,17 @@ module tb_fast(
+  wire [1:0] job_operation=cfg[7][1:0];wire [6:0] message_length=job_operation==0 ? 0 : cfg[8][6:0];
+  wire [63:0] boot_cycles,keygen_cycles,sign_cycles;wire busy,keygen_done;
+  wire [1:0] result_kind;wire [5:0] cache_node_bytes;
+- common #(.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(.*);
++ assign configuration_pipeline=PIPELINE;
++ assign configuration_unroll=UNROLL;
++ common #(.PIPELINE(PIPELINE),.UNROLL(UNROLL)) dut(.*);
+  assign execution_cycles=job_operation==0 ? keygen_cycles : job_operation==1 ? sign_cycles : dut.core.cycles;
++`ifdef SYNTHESIS
++ assign debug_stats=0;
++`else
++ assign debug_stats=1;
++`endif
++ assign statistics_zero=!(boot_cycles|keygen_cycles|sign_cycles|hash_count|permutation_count|dut.core.cycles);
++ assign execution_active=dut.core.state!=0 && dut.core.state!=32;
+  assign execution_reset=dut.core.execution_rst;
+  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;
+  assign permutation_event=dut.core.lane.permutation_complete;
+diff --git a/tb/tb_pipeline.sv b/tb/tb_pipeline.sv
+index c4a3f9c..e716c04 100644
+--- a/tb/tb_pipeline.sv
++++ b/tb/tb_pipeline.sv
+@@ -14,7 +14,7 @@ module tb_pipeline;
+  logic [127:0] identifier;
+  wire [255:0] digest,capture;
+  wire [63:0] hashes,permutations;
+- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(
++ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1)) dut(
+   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
+   .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(1'b1),
+   .batch_leaf(leaf),.batch_a(a),.batch_b(32'd0),.batch_family(family),.batch_no_seed(no_seed),
+diff --git a/tb/tb_recipe.sv b/tb/tb_recipe.sv
+index f90b4d4..822030d 100644
+--- a/tb/tb_recipe.sv
++++ b/tb/tb_recipe.sv
+@@ -1,7 +1,7 @@
+ `timescale 1ns/1ps
+ `default_nettype none
+ // Independent byte-serialization vectors, including rate and node boundaries.
+-module tb_recipe;
++module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1);
+  logic clk=0;always #5 clk=~clk;
+  logic rst=1,request_valid=0,response_ready=0;
+  wire request_ready,response_valid,error;
+@@ -15,7 +15,7 @@ module tb_recipe;
+  logic [255:0] nodes[0:135];
+  wire [391:0] response_value;
+  wire [63:0] hashes,permutations,batch_hashes,batch_permutations;
+- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(
++ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL)) dut(
+   .clk,.rst,.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
+   .batch_request_tag(2'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+   .batch_leaf(10'd0),.batch_a(8'd0),.batch_b(32'd0),.batch_family(2'd0),.batch_no_seed(1'b0),

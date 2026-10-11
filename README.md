@@ -1,6 +1,6 @@
 # mHBS 项目包
 
-固定单 Hash lane，保留 `PIPELINE=P`、`UNROLL=U`。包含当前有效 RTL、统一 Verilator 测试平台、Python 模型和独立 C 参考、向量生成与共同核综合入口。源码版本及文件来源记录于 `SOURCE.json`。
+固定单 Hash lane，保留 `PIPELINE=P`、`UNROLL=U`。包含当前有效 RTL、统一 Verilator 测试平台、Python 模型和独立 C 参考、向量生成与共同核综合入口。根目录 `SOURCE.json` 保留最初导出包的来源；后续实测源码校验分别保存在 `docs/manifests/experiments/` 和对应运行目录中。
 
 支持 SLH-DSA SHAKE 的 `slh_128f/192f/256f/128s/192s/256s`，以及 `xmss_h10/h16/h20`、`lms_h10/h15/h20` 的 Keygen、Sign、Verify。XMSS/LMS 使用标准 SHAKE256/256 配方，节点为32字节，每叶67条链、每链最多15步。XMSS 按 RFC 8391/SP 800-208，LMS 按 RFC 8554/9858；公开配置以树高 h 命名。旧 omega 名称和实验 ROM 码已停用。Sign 包含完整认证路径重算。
 
@@ -17,7 +17,7 @@ scripts/synthesize.sh / synth.tcl
                      Vivado 综合入口
 scripts/clock.xdc     时钟约束
 sources.txt          完整 RTL 源码清单
-SOURCE.json          原始提交、修改说明、SHA-256
+SOURCE.json          最初导出包的原始提交及 SHA-256（历史清单）
 VALIDATION.json      独立重生成、仿真与综合验证结果
 LICENSE              MIT 许可证
 ```
@@ -67,6 +67,8 @@ SIM_SYNTHESIS=1 bash scripts/simulate.sh slh_128f sign 4 1
 
 `P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 同样使用统一固定请求引擎，通过单级迭代置换执行；P>1 可交错执行 P 个独立链上下文。每级组合展开 U 轮，完成总计 24 轮才返回置换结果。整个核只有一个 recipe 前端，流水级不复制配方格式化器。
 
+独立 `pipeline` 模块已删除。P1 使用 `recipe.scalar_execution` 标量路径：单 Keccak 状态、固定块格式化、链反馈和流式吸收，不实例化上下文引擎。P>1 的固定块与上下文调度位于 `recipe.scheduled_execution.fixed_context`，真正的 Keccak 各级状态由 `scheduled_execution.stages` 保存。最新面积和实测周期见 [P1 标量对照](docs/manifests/experiments/p1_scalar_20261014/reports/P1_Scalar_20261014.md)；此前全部 P/U 使用上下文引擎的历史测量见 [Recipe 合并对照](docs/manifests/experiments/recipe_integration_20261014/reports/Recipe_Integration_Matrix_20261014.md)。
+
 2026-10-13 优化：XMSS/LMS 的完整端点批次直接写入单端口端点存储；无需输出捕获的批次在最后一个响应到达时推进。直接写回与批后读取共用上下文读端口。Verify、仅签名链及单槽捕获尾批保留原消费顺序。
 
 ```bash
@@ -75,21 +77,22 @@ python3 scripts/check_keccak.py        # 64 项 LUT 真值表 + 两种映射各 
 python3 scripts/report_atp.py          # 从归档证据重建 Markdown / CSV / JSON
 ```
 
-实测比较和剩余瓶颈见 [ATP 优化报告](docs/report/ATP_Optimization_20261013.md)。基线与候选源码、面积/时序报告及测试日志随文档归档。
+实测比较和剩余瓶颈见 [ATP 优化报告](docs/manifests/experiments/atp_optimization_20261013/reports/ATP_Optimization_20261013.md)。基线与候选源码、面积/时序报告及测试日志随文档归档。
 
-2026-10-14 聚焦 P12U1、P4U1、P1U1 的 SLH-DSA 128f、XMSS h10、LMS h10 Sign，见 [三点优化报告](docs/report/ATP_Focus_P12_P4_P1_20261014.md)。结果包含同一候选的 common 面积、九项实测周期、150MHz 假定 ATP、单点回退及逐阶段取舍。可用以下命令冻结源码并只测这三个配置：
+2026-10-14 聚焦 P12U1、P4U1、P1U1 的 SLH-DSA 128f、XMSS h10、LMS h10 Sign，见 [三点优化报告](docs/manifests/experiments/atp_focus_20261014/reports/ATP_Focus_P12_P4_P1_20261014.md)。结果包含同一候选的 common 面积、九项实测周期、150MHz 假定 ATP、单点回退及逐阶段取舍。可用以下命令冻结源码并只测这三个配置：
 
 ```bash
 python3 scripts/run_pu_sign_matrix.py --launch --configs P12U1 P4U1 P1U1 --vivado-workers 3 --sim-workers 3
 ```
 
-后续配方冗余清理与 L-tree/LMS 控制空拍优化见 [配方冗余与 ATP 对照](docs/report/Recipe_Redundancy_ATP_20261014.md)，包含同源码面积、周期、失败候选及精简 mask 回归。`python3 scripts/check_recipes.py --recipe-mask 0x101e` 可独立检查关闭 LMS 列表配方后的 SLH 128 位列表窗口。
+后续配方冗余清理与 L-tree/LMS 控制空拍优化见 [配方冗余与 ATP 对照](docs/manifests/experiments/recipe_redundancy_20261014/reports/Recipe_Redundancy_ATP_20261014.md)，包含同源码面积、周期、失败候选及精简 mask 回归。`python3 scripts/check_recipes.py --recipe-mask 0x101e` 可独立检查关闭 LMS 列表配方后的 SLH 128 位列表窗口。
 
-P4U1 的统一固定块执行、滚动链补发、并行 L-tree、128 位流式生产及 FORS 四叶归约见 [P4U1 联合优化报告](docs/report/P4U1_Redundancy_Performance_ATP_20261013.md)。以下入口检查独立字节配方、标签回收与完整回归，并导出逐状态周期分解：
+P4U1 的统一固定块执行、滚动链补发、并行 L-tree、128 位流式生产及 FORS 四叶归约见 [P4U1 联合优化报告](docs/manifests/experiments/p4_joint_20261013/reports/P4U1_Redundancy_Performance_ATP_20261013.md)。以下入口检查独立字节配方、标签回收与完整回归，并导出逐状态周期分解：
 
 ```bash
 python3 scripts/check_recipes.py
-python3 scripts/check_pipeline.py
+python3 scripts/check_pipeline.py     # recipe 内部上下文、标签与捕获测试
+python3 scripts/check_statistics.py   # 实际置换事件驱动的 64 位统计进位
 scripts/validate_p4.sh build/p4_validation
 python3 scripts/profile_p4.py --output build/p4_profile
 ```
@@ -115,7 +118,7 @@ Vivado 2025.2，器件 `xc7a200tffg1156-3`，2 线程，约束 6.666667 ns。综
 
 - `rtl/top/top.sv`／`top`：生产顶层，Job 参数在综合/实例化时配置，含 program/template/descriptor ROM 和可选签名缓存。默认 ROM 路径为包内 128f Sign 镜像。
 - `rtl/top/common.sv`／`common`：从生产顶层执行区域导出，Job/ROM 为运行时端口，供统一测试与共同核面积综合使用。
-- 其余文件和模块同名：`keccak`、`recipe`、`pipeline`、`executor`、`sequencer`、`value`、`signature`。`sources.txt`、实例引用、仿真和综合入口已统一使用新名称。
+- 其余文件和模块同名：`keccak`、`recipe`、`executor`、`sequencer`、`value`、`signature`。`sources.txt`、实例引用、仿真和综合入口已统一使用这些名称。
 
 两个入口每次复位执行一项操作，完成/错误状态保持至复位。`rst` 高有效、同步；切换 Job 或镜像后重新复位。生产顶层 `OPERATION=0/1/2` 对应 Keygen/Sign/Verify；共同核使用 `job_operation`。秘密种子、PRF 种子、公种子、R 随机量、公钥根分别通过生产顶层参数或共同核 `job_*` 端口提供，使用节点低 128/192/256 位。
 
@@ -165,11 +168,13 @@ vivado -mode batch -nolog -nojournal -source scripts/synth_top.tcl -tclargs xmss
 
 直接C++驱动入口用于大树完整实测，仍实例化生产common和签名缓存，并检查每个输出字节、缓存读回、实际Hash/置换事件及64位硬件统计。停顿、异常和兼容检查使用原SystemVerilog测试台。
 
-迁移验收、六个top与通用核面积及实测周期见 [SHAKE256标准迁移报告](docs/report/Stateful_SHAKE256_Standard_Migration_20261013.md)。报告在全部36项和边界检查完成前保持“执行中”，大树周期不外推。
+迁移验收、六个top与通用核面积及实测周期见 [SHAKE256标准迁移报告](docs/manifests/experiments/stateful_standard_20261013/reports/Stateful_SHAKE256_Standard_Migration_20261013.md)。报告在全部36项和边界检查完成前保持“执行中”，大树周期不外推。
 
 
 通用 P/U 重构移除了 P4U1 专用执行分支，固定哈希统一使用上下文引擎，P1 复用迭代 Keccak。树栈和认证路径分别复用端点 RAM 的 68～87、88～107 槽；112～135 槽保存 FORS 批次结果。签名缓存与 XMSS 同时存活的 key/digest/captured 银行保持独立。
 
 综合时间异常时跳过该点的当前分析，让综合继续在后台运行，不终止进程；通过其他已完成配置给出总体结论。后台矩阵及 `synthesize.sh` 默认20分钟后标记分析暂缓，尚未完成的面积与ATP留空，完成后补入报告。矩阵可用 `--synth-defer-seconds`、单点脚本可用 `SYNTH_DEFER_SECONDS` 调整分析等待阈值。
 
-本轮冻结矩阵与后台验收见 [PU_Generic_Sharing_20261013.md](docs/report/PU_Generic_Sharing_20261013.md)，P3U2 的当前分析暂缓，综合继续后台运行。XMSS/LMS h20 完整 Keygen、Sign 继续停止。
+本轮冻结矩阵与后台验收见 [PU_Generic_Sharing_20261013.md](docs/manifests/experiments/pu_generic_sharing_20261013/reports/PU_Generic_Sharing_20261013.md)，P3U2 的当前分析暂缓，综合继续后台运行。XMSS/LMS h20 完整 Keygen、Sign 继续停止。
+
+实验报告统一入口：[实验与测试归档](docs/manifests/experiments/INDEX.md)。每次矩阵测试自动保存冻结 `rtl.tar.gz`、`RTL_SOURCE.json`、每个 P/U 的 `hierarchical.rpt` 和 `timing.rpt`、综合日志及验证结果摘要；省略 `sim`/`validation` 明细日志。独立 common/top 综合也先冻结源码并归档；后台结果由 `python3 scripts/experiment_archive.py --sync --watch` 持续补齐。

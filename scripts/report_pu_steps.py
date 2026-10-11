@@ -4,7 +4,7 @@ import argparse,csv,hashlib,json,re,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from scripts.run_pu_sign_matrix import utilization
-p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True);p.add_argument('--matrix',type=Path,required=True);a=p.parse_args();run=a.run.resolve();matrix=json.loads((a.matrix/'status.json').read_text());baseline=json.loads(Path('docs/report/PU_Sign_Matrix_20261013_183754_ATP.json').read_text())
+p=argparse.ArgumentParser(description=__doc__);p.add_argument('--run',type=Path,required=True);p.add_argument('--matrix',type=Path,required=True);a=p.parse_args();run=a.run.resolve();matrix=json.loads((a.matrix/'status.json').read_text());baseline=json.loads(Path('docs/manifests/experiments/pu_sign_matrix_20261013_183754/reports/PU_Sign_Matrix_20261013_183754_ATP.json').read_text())
 profiles=('slh_128f','xmss_h10','lms_h10');steps=[]
 def record(name,area,rows,source,synthesis_seconds=None):
  steps.append(dict(stage=name,configuration='P4U1',area=area,cycles={r['profile']:r['cycles'] for r in rows},source_manifest=str(source),synthesis_seconds=synthesis_seconds))

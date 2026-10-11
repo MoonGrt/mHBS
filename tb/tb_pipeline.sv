@@ -14,7 +14,7 @@ module tb_pipeline;
  logic [127:0] identifier;
  wire [255:0] digest,capture;
  wire [63:0] hashes,permutations;
- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1)) dut(
+ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.SHARED_STATE(1'b1)) dut(
   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
   .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(1'b1),
   .batch_leaf(leaf),.batch_a(a),.batch_b(32'd0),.batch_family(family),.batch_no_seed(no_seed),
@@ -29,7 +29,7 @@ module tb_pipeline;
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed,.secret_prf(256'd0),.public_seed,.root(256'd0),.randomizer(256'd0),.identifier,
   .message_buffer(696'd0),.message_length(7'd0),.request_layer(5'd3),.request_tree(64'h0123456789abcdef),
-  .request_leaf(10'd0),.request_a(8'd0),.request_b(32'd0),.request_left(256'd0),.request_right(256'd0),
+  .request_leaf(20'd0),.request_a(8'd0),.request_b(32'd0),.request_left(256'd0),.request_right(256'd0),
   .list_index0(),.list_index1(),.list_next_index0(),.list_data0(256'd0),.list_data1(256'd0),
   .response_valid(),.response_ready(1'b0),.response_value(),.response_capture(),.error()
 `ifndef SYNTHESIS

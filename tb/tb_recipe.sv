@@ -15,7 +15,7 @@ module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1,parameter [15:0] RECIPE
  logic [255:0] nodes[0:135];
  wire [391:0] response_value;
  wire [63:0] hashes,permutations,batch_hashes,batch_permutations;
- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL),.RECIPE_MASK(RECIPE_MASK)) dut(
+ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL),.SHARED_STATE(1'b1),.RECIPE_MASK(RECIPE_MASK)) dut(
   .clk,.rst,.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
   .batch_request_tag(2'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
   .batch_leaf(10'd0),.batch_a(8'd0),.batch_b(32'd0),.batch_family(2'd0),.batch_no_seed(1'b0),
@@ -65,19 +65,36 @@ module tb_recipe #(parameter integer PIPELINE=4,UNROLL=1,parameter [15:0] RECIPE
  logic [12:0] blocked_position;
  logic [127:0] blocked_data;
  logic [38:0] blocked_sources;
+ wire producer_stream,producer_accept;
+ wire [12:0] producer_position;
+ wire [127:0] producer_data;
+ wire [38:0] producer_sources;
  // Use the STREAM encoding because hierarchical enum literals are unsupported.
  localparam [2:0] STREAM_STATE=3'd2;
+ generate if(PIPELINE==1)begin: scalar_producer
+  assign producer_stream=dut.scalar_execution.state==STREAM_STATE;
+  assign producer_accept=dut.scalar_execution.stream_accept;
+  assign producer_position=dut.scalar_execution.position;
+  assign producer_data=dut.scalar_execution.staged_data;
+  assign producer_sources=0;
+ end else begin: scheduled_producer
+  assign producer_stream=dut.scheduled_execution.state==STREAM_STATE;
+  assign producer_accept=dut.scheduled_execution.stream_accept;
+  assign producer_position=dut.scheduled_execution.position;
+  assign producer_data=dut.scheduled_execution.staged_data;
+  assign producer_sources={dut.scheduled_execution.source_control[2],dut.scheduled_execution.source_control[1],dut.scheduled_execution.source_control[0]};
+ end endgenerate
  // A blocked absorb must retain the exact payload and selector position.
  always @(posedge clk)begin
   if(rst)stream_stalled<=0;
   else begin
-   if(stream_stalled && (dut.position!==blocked_position || dut.staged_data!==blocked_data ||
-      {dut.source_control[2],dut.source_control[1],dut.source_control[0]}!==blocked_sources))
+   if(stream_stalled && (producer_position!==blocked_position || producer_data!==blocked_data ||
+      producer_sources!==blocked_sources))
     $fatal(1,"stream payload or source advanced during backpressure");
-   stream_stalled<=dut.state==STREAM_STATE && !dut.stream_accept;
-   blocked_position<=dut.position;blocked_data<=dut.staged_data;
-   blocked_sources<={dut.source_control[2],dut.source_control[1],dut.source_control[0]};
-   if(dut.state==STREAM_STATE && !dut.stream_accept)stream_stall_cycles++;
+   stream_stalled<=producer_stream && !producer_accept;
+   blocked_position<=producer_position;blocked_data<=producer_data;
+   blocked_sources<=producer_sources;
+   if(producer_stream && !producer_accept)stream_stall_cycles++;
   end
  end
  task automatic tick;@(posedge clk);#1;endtask

@@ -1,0 +1,160 @@
+{
+  "reviewed_at": "2026-10-14T15:53:30.088415+08:00",
+  "candidate": "20261014_155022",
+  "baseline": "20261014_143751",
+  "scope": "Read-only source structure and data-lifetime audit; functional simulation and netlist audit are separate evidence.",
+  "source": {
+    "candidate_path": "build/pu_sign_matrix/20261014_155022/source/rtl/hash/recipe.sv",
+    "candidate_sha256": "f2d4961ac517e29ecca71a73da3289973489d5ab0f7452c50c78351e2c0fc320",
+    "baseline_path": "build/pu_sign_matrix/20261014_143751/source/rtl/hash/recipe.sv",
+    "baseline_sha256": "d81751f9b0f20481f128d47c1ae37a0a17cc326274d5bfda608ca61c66fbddae"
+  },
+  "scheduled_body": {
+    "baseline_raw_tokens": 8615,
+    "candidate_raw_tokens": 8611,
+    "normalization": "Remove comments and formatting; ignore generate/endgenerate region delimiters because candidate nests both original regions inside an outer generate branch.",
+    "baseline_normalized_tokens": 8611,
+    "candidate_normalized_tokens": 8611,
+    "identical": true,
+    "baseline_normalized_sha256": "b8e2e061cbd00af684562bb0e8baa61f3ae1d1ce246db55f4ca464ea48314cdb",
+    "candidate_normalized_sha256": "b8e2e061cbd00af684562bb0e8baa61f3ae1d1ce246db55f4ca464ea48314cdb",
+    "raw_change": "Two generate and two endgenerate delimiters removed; all remaining body tokens equal."
+  },
+  "p1_structure": {
+    "generate_branch": "scalar_execution",
+    "full_keccak_register_banks": [
+      {
+        "name": "sponge_state",
+        "bits": 1600
+      }
+    ],
+    "round_state_connections": "wire [1599:0] rounds[0:UNROLL] is combinational, not a second registered state bank.",
+    "round_module_instances": "UNROLL combinational keccak rounds share the single sponge_state; P1U1 has one round.",
+    "context_arrays_present": false,
+    "batch_outputs_constant_zero": true,
+    "stream_staging_bits": 128,
+    "scalar_node_registers": [
+      "chain_value",
+      "temporary_key",
+      "mask0",
+      "mask1",
+      "captured_value"
+    ],
+    "sponge_initialization": "Fixed block writes all 25 words including zero capacity; first streaming beat clears the unabsorbed state."
+  },
+  "statistics": {
+    "unknown_preprocessor_symbols": [],
+    "all_stat_names_absent_with_SYNTHESIS": true,
+    "stat_names_checked": [
+      "hash_count",
+      "permutation_count",
+      "batch_hashes",
+      "batch_permutations"
+    ],
+    "observation_aliases": "Only unregistered internal functional aliases remain outside the macro; no statistical output or counter."
+  },
+  "lifetime_review": [
+    "XMSS compound 0 writes temporary_key, 1 writes mask0, 2 writes mask1 only for binary hashes; final uses all required values before compound reset.",
+    "Unary MASKED_VALUE never reads mask1; binary retains request_right through all key/mask subhashes.",
+    "chain_value survives intermediate key/mask hashes and changes only at the final hash for each chain step.",
+    "captured_value is written on the final-round edge selected by capture index; intermediate key/mask hashes suppress capture.",
+    "Compact SLH seed/chain feedback reads advanced_state directly, preserving first hash counter and requested capture position.",
+    "Inputs and shared coordinates must remain stable until response consumption as documented by the module contract."
+  ],
+  "interface_note": {
+    "default_N_baseline": 16,
+    "default_N_candidate": 32,
+    "common_uses_explicit_N": 32,
+    "impact": "Common and the recipe test benches explicitly use N=32, so comparison measurements are unchanged. The earlier frozen baseline default N=16 difference is inherited, not part of this scalar change.",
+    "provenance": "Pre-existing working-tree default N change, not introduced by scalar restoration; preserved as instructed by root, whose initial workspace read already showed N=32."
+  },
+  "hierarchical_report": {
+    "path": "build/pu_sign_matrix/20261014_155022/synth/P1U1/common/hierarchical.rpt",
+    "exists": true,
+    "status": "synthesized P1U1 report checked",
+    "sha256": "13b5d486d722279cf5880af6d62d1e5b041140d924bb04c8e2cd743541c85a37",
+    "tool": "Vivado v.2025.2",
+    "device": "xc7a200tffg1156-3",
+    "design": "common",
+    "lut": 18838,
+    "ff": 6660,
+    "equivalent_slice": 5542.0,
+    "keccak_instances": [
+      {
+        "instance": "scalar_execution.unrolled[0].round_logic",
+        "module": "keccak",
+        "lut": 2161,
+        "ff": 0
+      }
+    ],
+    "scheduled_or_context_hierarchy_present": false,
+    "rows": [
+      {
+        "instance": "common",
+        "module": "(top)",
+        "lut": 18838,
+        "ff": 6660
+      },
+      {
+        "instance": "(common)",
+        "module": "(top)",
+        "lut": 1,
+        "ff": 80
+      },
+      {
+        "instance": "core",
+        "module": "executor",
+        "lut": 18837,
+        "ff": 6580
+      },
+      {
+        "instance": "(core)",
+        "module": "executor",
+        "lut": 5626,
+        "ff": 3266
+      },
+      {
+        "instance": "endpoints",
+        "module": "value",
+        "lut": 2069,
+        "ff": 0
+      },
+      {
+        "instance": "lane",
+        "module": "recipe",
+        "lut": 10972,
+        "ff": 3161
+      },
+      {
+        "instance": "(lane)",
+        "module": "recipe",
+        "lut": 8811,
+        "ff": 3161
+      },
+      {
+        "instance": "scalar_execution.unrolled[0].round_logic",
+        "module": "keccak",
+        "lut": 2161,
+        "ff": 0
+      },
+      {
+        "instance": "sequencer",
+        "module": "sequencer",
+        "lut": 170,
+        "ff": 153
+      }
+    ],
+    "scope": "Hierarchy report confirms a scalar recipe branch and one combinational Keccak round. Full-state-register count remains source-level evidence; hierarchy does not enumerate individual registers."
+  },
+  "assessment": "No obvious context duplication, extra full Keccak register bank, XMSS mask lifetime, or capture lifetime error found. P>1 scheduled body is token-identical after generate-wrapper normalization; default N change is separately disclosed.",
+  "synthesis_debug_audit": {
+    "path": "build/pu_sign_matrix/20261014_155022/synth/P1U1/common/debug_audit.json",
+    "sha256": "32091a3e63c52bbfe20bf88c3e9dd1aba4decf1a796963ea5df91feb32039050",
+    "passed": true,
+    "diagnostic_ports": 0,
+    "diagnostic_registers": 0,
+    "functional_error_present": 1,
+    "scope": "synthesized design"
+  },
+  "netlist_reviewed_at": "2026-10-14T15:54:41.120822+08:00"
+}

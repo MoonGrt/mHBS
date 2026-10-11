@@ -16,15 +16,17 @@ if {$profile ni {slh_128f slh_192f slh_256f slh_128s slh_192s slh_256s xmss_h10 
 set out [file join $package_root build synth top_P4U1_generic $profile]
 if {!$signature_store} {append out _no_signature_store}
 file mkdir $out
+set archive [exec python3 [file join $package_root scripts experiment_archive.py] --begin-synthesis $out]
+set source_root [file join $archive source]
 set part xc7a200tffg1156-3
 set_param general.maxThreads 2
 create_project -in_memory -part $part
-set handle [open sources.txt r]
+set handle [open [file join $source_root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
 set_property verilog_define $defines [current_fileset]
-foreach source $sources {read_verilog -sv [file join $package_root $source]}
-read_xdc [file join $package_root scripts clock.xdc]
+foreach source $sources {read_verilog -sv [file join $source_root $source]}
+read_xdc [file join $source_root scripts clock.xdc]
 # Sign top with optional signature cache, fixed fixture keys and per-profile ROM.
 set folder [file join tb vectors $profile sign]
 set handle [open [file join $folder job.mem] r]
@@ -48,7 +50,8 @@ report_utilization -file [file join $out top_utilization.rpt]
 report_utilization -hierarchical -file [file join $out top_hierarchical.rpt]
 report_timing_summary -file [file join $out top_timing.rpt]
 write_checkpoint -force [file join $out top_synth.dcp]
-source [file join $package_root scripts audit_debug.tcl]
+source [file join $source_root scripts audit_debug.tcl]
 mhbs_audit_debug [file join $out debug_audit.json]
 puts "MHBS_TOP_SYNTH_PASS profile=$profile P4U1 SYNTHESIS=1 MHBS_SIGNATURE_STORE=$signature_store"
+exec python3 [file join $package_root scripts experiment_archive.py] --finish-synthesis $archive --results $out
 exit

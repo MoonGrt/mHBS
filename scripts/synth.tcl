@@ -13,21 +13,24 @@ if {$lut6 ni {0 1}} {error "KECCAK_LUT6 must be 0 or 1"}
 set out [file join $package_root build synth P${p}U${u}]
 if {!$lut6} {append out _generic}
 file mkdir $out
+set archive [exec python3 [file join $package_root scripts experiment_archive.py] --begin-synthesis $out]
+set source_root [file join $archive source]
 set_param general.maxThreads 2
 create_project -in_memory -part $part
 if {$lut6} {set_property verilog_define MHBS_XILINX_LUT6 [current_fileset]}
-set handle [open sources.txt r]
+set handle [open [file join $source_root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
-foreach source $sources {read_verilog -sv [file join $package_root $source]}
-read_xdc [file join $package_root scripts clock.xdc]
+foreach source $sources {read_verilog -sv [file join $source_root $source]}
+read_xdc [file join $source_root scripts clock.xdc]
 synth_design -top common -part $part -mode out_of_context \
     -flatten_hierarchy rebuilt -max_dsp 0 \
     -generic PIPELINE=$p -generic UNROLL=$u
 report_utilization -file [file join $out core_utilization.rpt]
 report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
 report_timing_summary -file [file join $out core_timing.rpt]
-source [file join $package_root scripts audit_debug.tcl]
+source [file join $source_root scripts audit_debug.tcl]
 mhbs_audit_debug [file join $out debug_audit.json]
 puts "MHBS_SYNTH_PASS P${p}U${u} SYNTHESIS=1"
+exec python3 [file join $package_root scripts experiment_archive.py] --finish-synthesis $archive --results $out
 exit

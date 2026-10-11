@@ -101,7 +101,7 @@ def main():
     vector = work / 'recipes.mem'
     vector.write_text(''.join(values))
     obj = work / 'obj'
-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
+    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
     if args.synthesis: cmd.append('-DSYNTHESIS')
     with (work / 'compile.log').open('w') as log:
         subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)

@@ -1,0 +1,157 @@
+diff --git a/README.md b/README.md
+index 5a30cce..84849fb 100644
+--- a/README.md
++++ b/README.md
+@@ -65,7 +65,7 @@ PROFILE_ENABLE=0 ./scripts/simulate.sh slh_128f sign 4 1
+ ./scripts/simulate.sh lms_h10 verify 4 1 +STALL=1 +REPLAYS=2 +INTERRUPT=1
+ ```
+ 
+-`P` 范围为 1～12，`U>0`，要求 `P×U` 整除 24。常用 U1 的 P1/2/3/4/6/8/12，U2 的 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。
++`P` 范围为 1～24，`U>0`，要求 `P×U` 整除 24。U1 支持 P1/2/3/4/6/8/12/24，U2 支持 P1/2/3/4/6/12。P1 使用普通链请求，P>1 可交错执行 P 个独立链上下文；每级组合展开 U 轮，完成总计 24 轮才返回置换结果。P24U1 的新矩阵验收结果以后台报告为准。
+ 
+ 2026-10-13 优化：XMSS/LMS 的完整端点批次直接写入单端口端点存储；无需输出捕获的批次在最后一个响应到达时推进。直接写回与批后读取共用上下文读端口。Verify、仅签名链及单槽捕获尾批保留原消费顺序。
+ 
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 3870e01..43110ea 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -282,7 +282,7 @@ module executor #(
+             .response_value(lane_value),.response_capture(lane_capture),.error(lane_error),
+             .hash_count(lane_hashes),.permutation_count(lane_permutations)
+         );
+-    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>12 ||
++    initial if(UNROLL<1 || PIPELINE<1 || PIPELINE>24 ||
+         UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0) $fatal(1,"Unsupported P/U configuration");
+ 
+     // Verify never emits output: share its input-node latch with the output latch.
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index 5431ce2..bd0b05b 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -609,7 +609,7 @@ module recipe #(
+     assign compact_capture = captured_value;
+ 
+     initial begin
+-        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 12 || ROUNDS > 24 || (24 % ROUNDS) != 0)
++        if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 24 || ROUNDS > 24 || (24 % ROUNDS) != 0)
+             $error("recipe lane requires positive U/P and U*P dividing 24");
+     end
+ 
+diff --git a/scripts/simulate.sh b/scripts/simulate.sh
+index 95d4129..cd0a46a 100755
+--- a/scripts/simulate.sh
++++ b/scripts/simulate.sh
+@@ -21,8 +21,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $stats =~ ^[01]$ || ! $lut6 =~ ^
+     echo 'P/U must be integers; PROFILE_ENABLE and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
+ fi
+ p=$((10#$p)); u=$((10#$u))
+-if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
+-    echo 'Require 1<=P<=12, U>0 and P*U dividing 24.' >&2; exit 2
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+ fi
+ verilator_bin=${VERILATOR:-verilator}
+ command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
+diff --git a/scripts/simulate_fast.sh b/scripts/simulate_fast.sh
+index 9679263..5bd5303 100644
+--- a/scripts/simulate_fast.sh
++++ b/scripts/simulate_fast.sh
+@@ -3,8 +3,14 @@ set -euo pipefail
+ cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+ profile=$(python3 -c 'from model.profiles import get_profile; import sys; print(get_profile(sys.argv[1]).name)' "${1:-xmss_h10}")
+ operation=${2:-verify}
++p=${3:-4}; u=${4:-1}
++if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then echo 'P/U must be integers.' >&2; exit 2; fi
++p=$((10#$p)); u=$((10#$u))
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
++fi
+ vector="${VECTORS_DIR:-tb/vectors}/$profile/$operation"
+-work=build/sim/P4U1_fast_o3
++work=build/sim/P${p}U${u}_fast_o3
+ mkdir -p "$work"
+ mapfile -t sources < sources.txt
+ verilator_bin=${VERILATOR:-verilator}
+@@ -14,6 +20,7 @@ if [[ ! -x "$work/obj/Vtb_fast" || ! -f "$work/source.sha256" || $(cat "$work/so
+     flock 9
+     if [[ ! -x "$work/obj/Vtb_fast" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
+         "$verilator_bin" --cc --exe --build -O3 -j 2 -Wno-fatal --top-module tb_fast \
++            "-GPIPELINE=$p" "-GUNROLL=$u" \
+             --Mdir "$work/obj" -MAKEFLAGS "OPT_FAST=-O3 OPT_SLOW=-O3" -CFLAGS '-O3 -march=native' "${sources[@]}" tb/tb_fast.sv \
+             "$PWD/tb/fast_main.cpp" > "$work/compile.log" 2>&1
+         printf '%s\n' "$identity" > "$work/source.sha256"
+diff --git a/scripts/synth.tcl b/scripts/synth.tcl
+index 91c4ef4..be7a057 100644
+--- a/scripts/synth.tcl
++++ b/scripts/synth.tcl
+@@ -5,7 +5,7 @@ set u 2
+ if {[llength $argv] > 0} {set p [lindex $argv 0]}
+ if {[llength $argv] > 1} {set u [lindex $argv 1]}
+ if {![string is integer -strict $p] || ![string is integer -strict $u]} {error "P/U must be integers"}
+-if {$p < 1 || $p > 12 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
++if {$p < 1 || $p > 24 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
+ set part xc7a200tffg1156-3
+ set lut6 0
+ if {[info exists ::env(KECCAK_LUT6)]} {set lut6 $::env(KECCAK_LUT6)}
+diff --git a/scripts/synthesize.sh b/scripts/synthesize.sh
+index b2159f2..04afb38 100755
+--- a/scripts/synthesize.sh
++++ b/scripts/synthesize.sh
+@@ -6,8 +6,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then
+     echo 'Usage: scripts/synthesize.sh [P] [U]' >&2; exit 2
+ fi
+ p=$((10#$p)); u=$((10#$u))
+-if ((p < 1 || p > 12 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
+-    echo 'Require 1<=P<=12, U>0 and P*U dividing 24.' >&2; exit 2
++if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
++    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+ fi
+ vivado_bin=${VIVADO:-vivado}
+ command -v "$vivado_bin" >/dev/null || { echo 'Vivado is required.' >&2; exit 2; }
+diff --git a/tb/fast_main.cpp b/tb/fast_main.cpp
+index 8c9829d..55628b9 100644
+--- a/tb/fast_main.cpp
++++ b/tb/fast_main.cpp
+@@ -80,7 +80,8 @@ int main(int argc,char **argv) {
+         }
+         if(cursor!=output_size)throw std::runtime_error("Signature cache length mismatch");
+     }
+-    std::cout<<"STATEFUL_PASS P4U1 op="<<op<<" cycles="<<cycles<<" total="<<total
++    std::cout<<"STATEFUL_PASS P"<<dut.configuration_pipeline<<"U"<<dut.configuration_unroll
++             <<" op="<<op<<" cycles="<<cycles<<" total="<<total
+              <<" hashes="<<hashes<<" permutations="<<perms<<" tamper=0"
+              <<" seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<std::endl;
+     dut.final();return 0;
+diff --git a/tb/tb_fast.sv b/tb/tb_fast.sv
+index 213c10a..2bf6d6b 100644
+--- a/tb/tb_fast.sv
++++ b/tb/tb_fast.sv
+@@ -1,6 +1,6 @@
+ `timescale 1ns/1ps
+ // Direct C++ clock driver for full-tree regression. Same production common/cache.
+-module tb_fast(
++module tb_fast #(parameter integer PIPELINE=4,UNROLL=1)(
+  input wire clk,rst,
+  input wire message_valid,input wire [63:0] message_data,output wire message_ready,
+  input wire verify_valid,input wire [255:0] verify_data,output wire verify_ready,
+@@ -11,7 +11,8 @@ module tb_fast(
+  input wire signature_read_enable,input wire [10:0] signature_read_address,
+  output wire signature_read_valid,output wire [255:0] signature_read_data,
+  output wire [5:0] signature_read_bytes,output wire signature_complete,signature_error,
+- output wire [10:0] signature_nodes,output wire [15:0] signature_length
++ output wire [10:0] signature_nodes,output wire [15:0] signature_length,
++ output wire [31:0] configuration_pipeline,configuration_unroll
+ );
+  reg [63:0] pm[0:15],tm[0:15],dm[0:31];reg [255:0] cfg[0:8];
+  wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
+@@ -22,7 +23,9 @@ module tb_fast(
+  wire [1:0] job_operation=cfg[7][1:0];wire [6:0] message_length=job_operation==0 ? 0 : cfg[8][6:0];
+  wire [63:0] boot_cycles,keygen_cycles,sign_cycles;wire busy,keygen_done;
+  wire [1:0] result_kind;wire [5:0] cache_node_bytes;
+- common #(.PIPELINE(4),.UNROLL(1),.PROFILE_ENABLE(1)) dut(.*);
++ assign configuration_pipeline=PIPELINE;
++ assign configuration_unroll=UNROLL;
++ common #(.PIPELINE(PIPELINE),.UNROLL(UNROLL),.PROFILE_ENABLE(1)) dut(.*);
+  assign execution_cycles=job_operation==0 ? keygen_cycles : job_operation==1 ? sign_cycles : dut.core.cycles;
+  assign execution_reset=dut.core.execution_rst;
+  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;

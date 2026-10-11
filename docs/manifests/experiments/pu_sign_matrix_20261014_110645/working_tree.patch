@@ -1,0 +1,569 @@
+diff --git a/docs/report/PU_Generic_Sharing_20261013.json b/docs/report/PU_Generic_Sharing_20261013.json
+index 446b602..7e615b7 100644
+--- a/docs/report/PU_Generic_Sharing_20261013.json
++++ b/docs/report/PU_Generic_Sharing_20261013.json
+@@ -1,7 +1,7 @@
+ {
+   "schema": "mhbs.pu_generic.audit.v1",
+   "started_at": "2026-10-13T20:47:06+08:00",
+-  "complete": false,
++  "complete": true,
+   "tasks": {
+     "full32": {
+       "status": "passed",
+@@ -70,17 +70,19 @@
+       "returncode": 0
+     },
+     "route/candidate/P24U1": {
+-      "status": "running",
++      "status": "failed",
+       "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log",
+       "started_at": "2026-10-14T07:12:16+08:00",
+-      "pid": 554955
++      "pid": 554955,
++      "finished_at": "2026-10-14T10:38:30+08:00",
++      "returncode": 1
+     }
+   },
+   "baseline": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/report/PU_Sign_Matrix_20261013_183754_ATP.json",
+   "matrix": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261013_203826",
+   "source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261013_203826/source",
+   "h20_full_stopped": true,
+-  "updated_at": "2026-10-14T07:12:16+08:00",
++  "updated_at": "2026-10-14T10:38:30+08:00",
+   "matrix_counts": {
+     "pending": 0,
+     "running": 1,
+@@ -230,5 +232,12 @@
+       "wns_ns": 0.062,
+       "whs_ns": 0.138
+     }
+-  }
++  },
++  "errors": [
++    "route/baseline/P24U1",
++    "route/candidate/P24U1"
++  ],
++  "source_unchanged": true,
++  "finished_at": "2026-10-14T10:38:30+08:00",
++  "accepted": false
+ }
+diff --git a/docs/report/PU_Generic_Sharing_20261013.md b/docs/report/PU_Generic_Sharing_20261013.md
+index 83783a4..cc3b20b 100644
+--- a/docs/report/PU_Generic_Sharing_20261013.md
++++ b/docs/report/PU_Generic_Sharing_20261013.md
+@@ -1,6 +1,6 @@
+ # 通用 P/U 执行、统计宏与资源复用（2026-10-13）
+ 
+-更新时间：2026-10-14T07:12:16+08:00。验收：后台验证中。
++更新时间：2026-10-14T10:38:30+08:00。验收：未通过。
+ 
+ 删除 P4U1 独占分支，所有合法 P/U 使用统一固定引擎、滚动链、并行 L-tree、128位流式生产和 FORS 四叶微组。P1 复用原迭代 Keccak 状态。统计直接用 SYNTHESIS 宏裁剪，统计端口保持64位并在综合时置零。
+ 
+@@ -28,7 +28,7 @@
+ | route/baseline/P24U1 | failed | [route_baseline_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P24U1.log) |
+ | route/baseline/P4U1 | passed | [route_baseline_P4U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_baseline_P4U1.log) |
+ | route/candidate/P12U1 | passed | [route_candidate_P12U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P12U1.log) |
+-| route/candidate/P24U1 | running | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
++| route/candidate/P24U1 | failed | [route_candidate_P24U1.log](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/audit/route_candidate_P24U1.log) |
+ 
+ 完整回归为十个非h20配置的三操作加两个h20 Verify，共32项；h20完整Keygen、Sign继续停止。其他合法P/U逐项执行三算法Verify和459项独立配方。扩展回归覆盖乱序标签、捕获、停顿、复位、异常、截断、篡改、消息和填充边界及q边界。
+ 
+@@ -56,3 +56,7 @@ P4U1逐步对照：
+ 工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。
+ 
+ [逐步CSV](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/steps.csv)、[周期分解](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/profile/profile.json)、[证据清单](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/EVIDENCE.json)。
++
++待解决：route/baseline/P24U1
++
++待解决：route/candidate/P24U1
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 400d31f..346ccc4 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -174,6 +174,9 @@ module executor #(
+     wire lt_pipe = state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT;
+     wire pipe_mode=state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe;
+     wire pipe_ready, pipe_valid, pipe_selected;
++    wire lt_batch_complete =
++        ((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1) << pipe_tag) : '0)) &
++         pipe_expected_mask) == pipe_expected_mask;
+     wire [TAG_BITS-1:0] pipe_tag;
+ `ifndef SYNTHESIS
+     wire [63:0] pipe_hashes, pipe_permutations;
+@@ -526,7 +529,7 @@ module executor #(
+                 else if (state == LT_PIPE_INIT) address <= {lt_cursor[INDEX_BITS-1:1], 1'b0};
+                 else if (state == LT_PIPE_ISSUE && pipe_ready)
+                     address <= lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
+-                else if (state == LT_PIPE_ADVANCE) begin
++                else if (state == LT_PIPE_WAIT && lt_batch_complete) begin
+                     if (lt_cursor + 2 * PIPELINE < lt_count) address <= lt_cursor + 2 * PIPELINE;
+                     else if (lt_count[0]) address <= lt_count - 1'b1;
+                     else address <= 0;
+@@ -1010,7 +1013,6 @@ module executor #(
+                         enter_state(FORS_WAIT);
+                     else begin
+                         pipe_issue_slot <= pipe_issue_slot + 1'b1;
+-                        enter_state(FORS_LEFT);
+                     end
+                 end
+                 FORS_WAIT:
+@@ -1082,7 +1084,7 @@ module executor #(
+                         lt_count  <= endpoint_count;
+                         lt_cursor <= 0;
+                         lt_level  <= 0;
+-                        enter_state(LT_SETUP);
++                        enter_state(LT_PIPE_INIT);
+                     end else if (standalone_chain && chain_descriptor[13:12] == 0)
+                         route_result(ROUTE_NODE);
+                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
+@@ -1128,10 +1130,10 @@ module executor #(
+                         enter_state(LT_PIPE_WAIT);
+                     else pipe_issue_slot <= pipe_issue_slot + 1'b1;
+                 end
+-                LT_PIPE_WAIT:
+-                if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)
+-                    enter_state(LT_PIPE_ADVANCE);
+-                LT_PIPE_ADVANCE: begin
++                // The last response writes RAM on this edge. The following
++                // INIT/COPY/FINISH state observes the committed value, so an
++                // extra ADVANCE state is unnecessary.
++                LT_PIPE_WAIT: if (lt_batch_complete) begin
+                     if (lt_cursor + 2 * PIPELINE < lt_count) begin
+                         lt_cursor <= lt_cursor + 2 * PIPELINE;
+                         enter_state(LT_PIPE_INIT);
+diff --git a/rtl/hash/pipeline.sv b/rtl/hash/pipeline.sv
+index d608279..a0db90e 100644
+--- a/rtl/hash/pipeline.sv
++++ b/rtl/hash/pipeline.sv
+@@ -59,7 +59,8 @@ module pipeline #(
+     logic [PIPELINE-1:0] busy, complete, capture_enable;
+     // Isolation variant: retain the original counter policy in each context.
+     logic [PIPELINE-1:0] preserve_counter;
+-    logic [255:0] digest[0:PIPELINE-1], captured[0:PIPELINE-1];
++    (* ram_style="distributed" *) logic [255:0] digest[0:PIPELINE-1];
++    (* ram_style="distributed" *) logic [255:0] captured[0:PIPELINE-1];
+     localparam [2:0] SEED = 0, STEP = 1, KEY = 2, MASK = 3, FINAL = 4, MASK1 = 5, SINGLE = 6;
+     wire [1:0] family[0:PIPELINE-1];
+     wire [3:0] fixed_shape[0:PIPELINE-1];
+@@ -67,7 +68,7 @@ module pipeline #(
+     logic [3:0] shared_shape;
+     logic shared_pair;
+     logic [2:0] phase[0:PIPELINE-1];
+-    logic [255:0] key_value[0:PIPELINE-1];
++    (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
+     logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
+     assign read_digest = initial_pending[read_tag] ? key_value[read_tag] : digest[read_tag];
+     assign read_capture = captured_valid[read_tag] ?
+@@ -103,125 +104,88 @@ module pipeline #(
+     wire [3:0] block_step = again ? next_step[3:0] : request_start;
+     wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+     wire block_pair = again ? paired[t] : requested_pair;
+-    wire [255:0] block_value = again ? (phase[t] == MASK1 ? digest[t] : phase[t] == MASK ?
+-                                        digest[t] ^ perm_digest[255:0] : perm_digest[255:0]) :
+-        requested_shape == 1 || requested_shape == 9 ? secret_seed :
+-        request_no_seed ? request_initial_value : secret_seed;
++    // Decode mutually exclusive operands once, ahead of the wide data path.
++    // Feedback MASK consumes both the saved value and the returned mask.
++    wire value_seed = !again &&
++        (requested_shape == 1 || requested_shape == 9 || !request_no_seed);
++    wire value_initial = !again && !value_seed;
++    wire value_saved = again && (phase[t] == MASK || phase[t] == MASK1);
++    wire value_return = again && phase[t] != MASK1;
++    wire [255:0] block_value =
++        (secret_seed & {256{value_seed}}) |
++        (request_initial_value & {256{value_initial}}) |
++        ((digest[t] & {256{value_saved}}) ^ (perm_digest[255:0] & {256{value_return}}));
+     wire [255:0] block_right = again ? captured[t] ^ perm_digest[255:0] : request_right;
+     wire [1599:0] unified_state;
+     generate
+         begin : formatter
+-            logic [255:0] f0, f1, f2, f3, masked_address;
+-            logic [183:0] prefix;
+-            logic [7:0] domain;
+-            logic [1:0] layout;
+-            logic two;
+-            logic [1599:0] data;
+             wire seed = block_phase == SEED || block_shape == 7;
+             wire prf = block_phase == KEY || block_phase == MASK || block_phase == MASK1;
++            wire index_prf = block_shape == 5;
++            wire xmss_seed = !index_prf && seed;
++            wire xmss_prf = !index_prf && !seed && prf;
++            wire xmss_value = !index_prf && !seed && !prf;
++            wire [255:0] masked_address = {
++                be32(block_phase == MASK ? 32'd1 : block_phase == MASK1 ? 32'd2 : 32'd0),
++                block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
++                block_address[223:192], block_address[191:160], block_address[159:128], 96'd0
++            };
++            wire [255:0] xmss0 =
++                (block_value & {256{index_prf}}) |
++                (secret_seed & {256{xmss_seed}}) |
++                (public_seed & {256{xmss_prf}}) |
++                (key_value[t] & {256{xmss_value}});
++            wire [255:0] xmss1 =
++                ({block_address[191:160], 224'd0} & {256{index_prf}}) |
++                (public_seed & {256{xmss_seed}}) |
++                (masked_address & {256{xmss_prf}}) |
++                (block_value & {256{xmss_value}});
++            wire [255:0] xmss2 = seed ? masked_address : block_right;
++            wire [7:0] domain = index_prf || prf ? 8'd3 :
++                seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
++            wire two = block_family == 1 ? seed || (block_pair && !prf) :
++                block_family == 2 && block_shape != 14 && block_shape != 15 ? 1'b0 : block_pair;
++            wire n16 = node_bytes == 16;
++            wire n24 = node_bytes == 24;
++            wire n32 = !n16 && !n24;
++            wire slh32 = n32 && block_family != 1 && block_family != 2;
++            wire xmss32 = n32 && block_family == 1;
++            wire lms_tree = n32 && block_family == 2 && (block_shape == 14 || block_shape == 15);
++            wire lms_chain = n32 && block_family == 2 && !lms_tree;
++            wire [183:0] lms_prefix = {
++                (seed || block_shape == 9) ? 8'hff :
++                    block_shape == 10 ? block_address[255:248] : {4'd0, block_step},
++                block_address[223:216], 8'd0, block_address[191:160], identifier
++            };
++            wire [175:0] tree_prefix = {
++                block_shape == 14 ? 16'h8282 : 16'h8383, block_address[255:224], identifier
++            };
++            wire [1087:0] frame16 = {448'd0, (block_right[127:0] & {128{two}}),
++                block_value[127:0], block_address, public_seed[127:0]};
++            wire [1087:0] frame24 = {256'd0, (block_right[191:0] & {192{two}}),
++                block_value[191:0], block_address, public_seed[191:0]};
++            wire [1087:0] frame32 = {64'd0, (block_right & {256{two}}),
++                block_value, block_address, public_seed};
++            wire [1087:0] frame_xmss = {64'd0, (xmss2 & {256{two}}), xmss1, xmss0, domain, 248'd0};
++            wire [1087:0] frame_chain = {648'd0, block_value, lms_prefix};
++            wire [1087:0] frame_tree = {400'd0, (block_right & {256{two}}), block_value, tree_prefix};
++            logic [1087:0] padding;
+             always_comb begin
+-                masked_address = {
+-                    be32(block_phase == MASK ? 32'd1 : block_phase == MASK1 ? 32'd2 : 32'd0),
+-                    block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
+-                    block_address[223:192],
+-                    block_address[191:160],
+-                    block_address[159:128],
+-                    96'd0
+-                };
+-                f0 = public_seed;
+-                f1 = block_address;
+-                f2 = block_value;
+-                f3 = block_right;
+-                layout = 0;
+-                two = block_pair;
+-                prefix = 0;
+-                domain = 0;
+-                if (block_family == 1) begin
+-                    layout = 1;
+-                    domain = block_shape == 5 || prf ? 8'd3 :
+-                        seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+-                    f1 = block_shape == 5 ? block_value :
+-                        seed ? secret_seed : prf ? public_seed : key_value[t];
+-                    f2 = block_shape == 5 ? {block_address[191:160], 224'd0} :
+-                        seed ? public_seed : prf ? masked_address : block_value;
+-                    f3 = seed ? masked_address : block_right;
+-                    two = seed || (block_pair && !prf);
+-                end else if (block_family == 2) begin
+-                    if (block_shape == 14 || block_shape == 15) begin
+-                        layout = 3;
+-                        prefix = {
+-                            8'd0,
+-                            block_shape == 14 ? 16'h8282 : 16'h8383,
+-                            block_address[255:224],
+-                            identifier
+-                        };
+-                    end else begin
+-                        layout = 2;
+-                        two = 0;
+-                        prefix = {
+-                            (seed || block_shape == 9) ? 8'hff :
+-                                block_shape == 10 ? block_address[255:248] : {4'd0, block_step},
+-                            block_address[223:216],
+-                            8'd0,
+-                            block_address[191:160],
+-                            identifier
+-                        };
+-                    end
+-                    f1 = block_value;
+-                    f2 = block_right;
+-                end
+-                data = 0;
+-                case (node_bytes)
+-                    16: begin
+-                        data[511:0] = {block_value[127:0], block_address, public_seed[127:0]};
+-                        if (two) begin
+-                            data[639:512] = block_right[127:0];
+-                            data[647:640] = 8'h1f;
+-                        end else data[519:512] = 8'h1f;
+-                    end
+-                    24: begin
+-                        data[639:0] = {block_value[191:0], block_address, public_seed[191:0]};
+-                        if (two) begin
+-                            data[831:640] = block_right[191:0];
+-                            data[839:832] = 8'h1f;
+-                        end else data[647:640] = 8'h1f;
+-                    end
+-                    default:
+-                    case (layout)
+-                        0: begin
+-                            data[767:0] = {f2, f1, f0};
+-                            if (two) begin
+-                                data[1023:768]  = f3;
+-                                data[1031:1024] = 8'h1f;
+-                            end else data[775:768] = 8'h1f;
+-                        end
+-                        1: begin
+-                            data[255:248] = domain;
+-                            data[511:256] = f1;
+-                            data[767:512] = f2;
+-                            if (two) begin
+-                                data[1023:768]  = f3;
+-                                data[1031:1024] = 8'h1f;
+-                            end else data[775:768] = 8'h1f;
+-                        end
+-                        2: begin
+-                            data[183:0]   = prefix;
+-                            data[439:184] = f1;
+-                            data[447:440] = 8'h1f;
+-                        end
+-                        3: begin
+-                            data[175:0]   = prefix[175:0];
+-                            data[431:176] = f1;
+-                            if (two) begin
+-                                data[687:432] = f2;
+-                                data[695:688] = 8'h1f;
+-                            end else data[439:432] = 8'h1f;
+-                        end
+-                    endcase
+-                endcase
+-                data[1087] = 1;
++                padding = 0;
++                padding[519:512] = {8{n16 && !two}} & 8'h1f;
++                padding[647:640] = {8{(n16 && two) || (n24 && !two)}} & 8'h1f;
++                padding[839:832] = {8{n24 && two}} & 8'h1f;
++                padding[775:768] = {8{(slh32 || xmss32) && !two}} & 8'h1f;
++                padding[1031:1024] = {8{(slh32 || xmss32) && two}} & 8'h1f;
++                padding[447:440] = {8{lms_chain}} & 8'h1f;
++                padding[439:432] = {8{lms_tree && !two}} & 8'h1f;
++                padding[695:688] = {8{lms_tree && two}} & 8'h1f;
++                padding[1087] = 1'b1;
+             end
+-            assign unified_state = data;
++            assign unified_state = {512'd0,
++                (frame16 & {1088{n16}}) | (frame24 & {1088{n24}}) |
++                (frame32 & {1088{slh32}}) | (frame_xmss & {1088{xmss32}}) |
++                (frame_chain & {1088{lms_chain}}) | (frame_tree & {1088{lms_tree}}) | padding};
+         end
+     endgenerate
+     assign perm_state = unified_state;
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index d936b81..e139697 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -153,8 +153,8 @@ module recipe #(
+         state == STREAM && stream_accept && position >= prefix_bytes &&
+         next_remainder >= stream_node_bytes ? list_cursor + 1'b1 : list_cursor;
+     assign list_index1 = list_index0 + 1'b1;
+-    assign request_ready = state == IDLE;
+-    assign response_valid = state == RESPONSE;
++    assign request_ready = state == IDLE && (!scalar_fixed || (!batch_mode && engine_ready));
++    assign response_valid = state == RESPONSE || (state == FIXED_WAIT && engine_valid);
+ 
+     function automatic [31:0] be32(input [31:0] value);
+         be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
+@@ -322,16 +322,22 @@ module recipe #(
+             stream_payload = list_window;
+     end
+ 
+-    integer i, absolute;
++    // One remaining-length subtractor serves every byte of the beat. A
++    // byte-local position adder otherwise replicates a wide carry chain.
++    wire [12:0] remaining_bytes = input_length - position;
++    wire padding_reached = position > input_length;
++    wire partial_beat = remaining_bytes < 16;
+     always_comb begin
+         stream_data = stream_payload;
+-        for (i = 0; i < 16; i = i + 1) begin
+-            absolute = position + i;
+-            if (beat * 16 + i < 136) begin
+-                if (absolute >= input_length) stream_data[i*8+:8] = 0;
+-                if (absolute == input_length) stream_data[i*8+:8] = 8'h1f;
+-                if (stream_last && beat * 16 + i == 135) stream_data[i*8+7] = 1'b1;
+-            end else stream_data[i*8+:8] = 0;
++        for (integer i = 0; i < 16; i++) begin
++            if (padding_reached || (partial_beat && remaining_bytes[3:0] <= 4'(i)))
++                stream_data[i*8+:8] = 0;
++            if (!padding_reached && partial_beat && remaining_bytes[3:0] == 4'(i))
++                stream_data[i*8+:8] = 8'h1f;
++            if (beat == 8) begin
++                if (i >= 8) stream_data[i*8+:8] = 0;
++                else if (i == 7 && stream_last) stream_data[i*8+7] = 1'b1;
++            end
+         end
+     end
+ 
+@@ -339,7 +345,10 @@ module recipe #(
+     wire [1599:0] batch_perm_state, batch_perm_digest;
+     wire [TAG_BITS-1:0] batch_perm_tag, batch_perm_result_tag;
+     logic bridge_response;
+-    wire scalar_bridge = bridge_response;
++    // A fixed request can enter the context engine on the outer handshake.
++    // The response remains in its context until the caller consumes it.
++    wire scalar_bridge = bridge_response ||
++        (!batch_mode && state == IDLE && request_valid && scalar_fixed);
+     wire engine_mode = batch_mode || scalar_bridge;
+     wire engine_ready, engine_valid;
+     wire [255:0] engine_digest, engine_capture;
+@@ -365,7 +374,7 @@ module recipe #(
+                 .hash_count(batch_hashes),.permutation_count(batch_permutations),
+ `endif
+                 .clk,.rst,.node_bytes,
+-                .request_valid(scalar_bridge ? state==FIXED_ISSUE : batch_request_valid),.request_ready(engine_ready),
++                .request_valid(scalar_bridge ? state==IDLE && request_valid : batch_request_valid),.request_ready(engine_ready),
+                 .request_tag(scalar_bridge ? TAG_BITS'(0) : batch_request_tag),
+                 .request_steps(scalar_bridge ? (request_chain ? request_steps : 5'd0) : batch_steps),
+                 .request_capture_after(scalar_bridge ? (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) : batch_capture_after),
+@@ -382,7 +391,7 @@ module recipe #(
+                 .request_a(scalar_bridge ? 8'(request_a) : batch_a),.request_b(scalar_bridge ? request_b : batch_b),
+                 .seed_domain(scalar_bridge ? request_recipe[55:48] : batch_seed_domain),
+                 .step_domain(scalar_bridge ? (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) : batch_step_domain),
+-                .response_valid(engine_valid),.response_ready(scalar_bridge ? state==FIXED_WAIT : batch_response_ready),
++                .response_valid(engine_valid),.response_ready(scalar_bridge ? state==FIXED_WAIT && response_ready : batch_response_ready),
+                 .response_tag(batch_response_tag),.response_digest(),.response_capture(),
+                 .read_tag(scalar_bridge ? TAG_BITS'(0) : batch_read_tag),.read_digest(engine_digest),.read_capture(engine_capture),
+                 .perm_valid(batch_perm_valid),.perm_ready(batch_perm_ready),.perm_state(batch_perm_state),.perm_tag(batch_perm_tag),
+@@ -621,7 +630,7 @@ module recipe #(
+             if (STREAM_ENABLE && staged_valid && block_ready) staged_valid <= 0;
+             case (state)
+                 IDLE:
+-                if (request_valid) begin
++                if (request_valid && request_ready) begin
+                     staged_valid <= 0;
+                     position <= 0;
+                     list_cursor <= 0;
+@@ -630,10 +639,13 @@ module recipe #(
+                     rate_block <= 0;
+                     beat <= 0;
+                     bridge_response <= scalar_fixed;
+-                    state <= scalar_fixed ? FIXED_ISSUE : START;
++                    state <= scalar_fixed ? FIXED_WAIT : START;
++                end
++                FIXED_WAIT:
++                if (engine_valid && response_ready) begin
++                    bridge_response <= 0;
++                    state <= IDLE;
+                 end
+-                FIXED_ISSUE: if (engine_ready) state <= FIXED_WAIT;
+-                FIXED_WAIT: if (engine_valid) state <= RESPONSE;
+                 START:
+                 if (hash_ready) begin
+                     state <= STREAM;
+diff --git a/scripts/run_pu_sign_matrix.py b/scripts/run_pu_sign_matrix.py
+index 9f11bd7..d7dcd40 100644
+--- a/scripts/run_pu_sign_matrix.py
++++ b/scripts/run_pu_sign_matrix.py
+@@ -46,6 +46,7 @@ def atomic_write(path, text):
+ 
+ 
+ def launch(args):
++    configs = args.configs or CONFIGS
+     stamp = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
+     run = ROOT / 'build/pu_sign_matrix' / stamp
+     snapshot = run / 'source'
+@@ -86,7 +87,7 @@ def launch(args):
+                     started_at=now(), source_root=str(snapshot), report=str(report),
+                     base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'],
+                                                         cwd=ROOT, text=True).strip(),
+-                    configs=CONFIGS, profiles=PROFILES, operations=['sign'], part=PART,
++                    configs=configs, profiles=PROFILES, operations=['sign'], part=PART,
+                     area_top='common', area_scope='One shared common core per P/U',
+                     vivado_workers=args.vivado_workers, vivado_threads=2,
+                     simulation_workers=args.sim_workers, versions=versions,
+@@ -112,7 +113,8 @@ def launch(args):
+              status=str(run / 'status.json'), report=str(report)), indent=2) + '\n')
+     print(json.dumps(dict(pid=child.pid, root=str(run), log=str(log),
+                           status=str(run / 'status.json'), report=str(report),
+-                          simulation_cases=42, common_syntheses=14, area_top='common',
++                          simulation_cases=len(configs) * len(PROFILES),
++                          common_syntheses=len(configs), area_top='common',
+                           vivado_workers=args.vivado_workers, vivado_threads=2), indent=2))
+ 
+ 
+@@ -157,6 +159,7 @@ class Runner:
+     def __init__(self, run):
+         self.run = run
+         self.meta = json.loads((run / 'SOURCE.json').read_text())
++        self.configs = self.meta['configs']
+         self.source = Path(self.meta['source_root'])
+         self.report = Path(self.meta['report'])
+         self.lock = threading.Lock()
+@@ -169,7 +172,7 @@ class Runner:
+                           synthesis_mode='OOC, generic Keccak, no DSP', routed_sta=False,
+                           clock_period_ns=6.666667, tasks={}, results=[])
+         self.state.update(area_top='common', area_scope='One shared common core per P/U')
+-        for p, u in CONFIGS:
++        for p, u in self.configs:
+             config = f'P{p}U{u}'
+             for profile in PROFILES:
+                 self.state['tasks'][f'sim/{config}/{profile}'] = dict(status='pending')
+@@ -186,7 +189,7 @@ class Runner:
+     def publish(self):
+         rows = []
+         tasks = self.state['tasks']
+-        for p, u in CONFIGS:
++        for p, u in self.configs:
+             config = f'P{p}U{u}'
+             common = tasks[f'synth/{config}/common']
+             for profile in PROFILES:
+@@ -250,7 +253,7 @@ class Runner:
+             if v is None:
+                 return '—'
+             return f'{v:,.3f}'.rstrip('0').rstrip('.') if isinstance(v, float) else f'{v:,}'
+-        for p, u in CONFIGS:
++        for p, u in self.configs:
+             config = f'P{p}U{u}'
+             task = tasks[f'synth/{config}/common']
+             area = task.get('area', {})
+@@ -288,6 +291,7 @@ class Runner:
+         renderer = cls.__new__(cls)
+         renderer.run = run
+         renderer.meta = json.loads((run / 'SOURCE.json').read_text())
++        renderer.configs = renderer.meta['configs']
+         renderer.state = json.loads((run / 'status.json').read_text())
+         renderer.source = Path(renderer.meta['source_root'])
+         renderer.report = prefix or Path(renderer.meta['report'])
+@@ -381,7 +385,7 @@ class Runner:
+         with ThreadPoolExecutor(max_workers=self.meta['vivado_workers']) as synth_pool, \
+                 ThreadPoolExecutor(max_workers=self.meta['simulation_workers']) as sim_pool:
+             futures = []
+-            for p, u in CONFIGS:
++            for p, u in self.configs:
+                 futures.append(sim_pool.submit(self.simulate, p, u))
+                 futures.append(synth_pool.submit(self.synthesize, p, u, 'common'))
+             for future in as_completed(futures):
+@@ -407,10 +411,26 @@ def main():
+     parser.add_argument('--watch', action='store_true', help='Refresh an existing report as measurements finish')
+     parser.add_argument('--vivado-workers', type=int, default=12)
+     parser.add_argument('--sim-workers', type=int, default=2)
++    parser.add_argument('--configs', nargs='+', metavar='PxUy',
++                        help='Restrict measurement to these P/U points; default is the 14-point matrix')
+     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
+                         dest='synth_skip_seconds', type=int, default=1200,
+                         help='After 20 minutes defer analysis; synthesis keeps running')
+     args = parser.parse_args()
++    if args.configs:
++        if not args.launch:
++            parser.error('--configs requires --launch; existing runs use their frozen configuration list')
++        configs = []
++        for name in args.configs:
++            match = re.fullmatch(r'P([0-9]+)U([0-9]+)', name, re.I)
++            if not match:
++                parser.error(f'Invalid configuration: {name}')
++            p, u = map(int, match.groups())
++            if p < 1 or u < 1 or p * u > 24 or 24 % (p * u):
++                parser.error(f'Invalid configuration: {name}')
++            if (p, u) not in configs:
++                configs.append((p, u))
++        args.configs = configs
+     if sum([args.launch, bool(args.run_root), bool(args.render_root)]) != 1:
+         parser.error('Choose --launch, --run-root or --render-root')
+     if (args.watch or args.report_prefix) and not args.render_root:

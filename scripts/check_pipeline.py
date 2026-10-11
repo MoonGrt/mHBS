@@ -18,7 +18,7 @@ def main():
     def be(x, n=4): return x.to_bytes(n, 'big')
     def h(v): return shake_256(v).digest(32)
     obj = work / 'obj'
-    command = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_pipeline', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/pipeline.sv', 'rtl/hash/recipe.sv', 'tb/tb_pipeline.sv']
+    command = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_pipeline', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/recipe.sv', 'tb/tb_pipeline.sv']
     if args.synthesis: command.append('-DSYNTHESIS')
     with (work/'compile.log').open('w') as log:
         subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
