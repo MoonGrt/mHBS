@@ -1,0 +1,31 @@
+{
+  "candidate": "candidate1",
+  "title": "Scalar direct prefix literals",
+  "change": "Leave shared source/index decode in place but directly select the literal payload by one-hot shape and 6-bit word index. Remove the 4-bit literal-code encode/decode from the scalar combinational path.",
+  "scope": "Scalar execution for all legal U; scheduled execution unchanged.",
+  "equivalence": "The priority ordering exactly follows decode_source. Six streaming shapes remain one-hot, with the same RECIPE_MASK and lms_only guards. Literal words for ROOT_MESSAGE indices 3/15 and PREFIX_LIST indices 0..3 are unchanged; all others are zero.",
+  "lifetime": "No registers, state transitions or timing boundaries changed. All selected input fields remain stable for the full request.",
+  "baseline_sha256": "497bdd0ed46e69ae51d55559325602151c4b83de51341d91debb988ee5d07a69",
+  "candidate_sha256": "a6d5f60e10223321a08a473f8da69f9ae99fbbf9bab31946d4f626af79a24b2d",
+  "cycles": "Expected exactly unchanged; root schedules complete Sign comparison.",
+  "area": "Unknown pending root synthesis; reject if area increases.",
+  "tests": [
+    {
+      "kind": "local_rtl_combinational_equivalence",
+      "checks": 262144,
+      "passed": true,
+      "testbench": "build/area8_20261014/scalar/candidate1/tb_formatter_equivalence.sv",
+      "log": "build/area8_20261014/scalar/candidate1/proof_run.log"
+    },
+    {
+      "kind": "independent_sha_keccak_recipe_frames",
+      "pipeline": 1,
+      "unroll": 1,
+      "cases": 459,
+      "passed": true,
+      "coverage": "build/area8_20261014/scalar/candidate1/recipe_check_root/build/recipe_check/P1U1/coverage.json",
+      "log": "build/area8_20261014/scalar/candidate1/recipe_p1u1.log"
+    }
+  ],
+  "validation_command": "python3 build/area8_20261014/scalar/candidate1/recipe_check_root/scripts/check_recipes.py --pipeline 1 --unroll 1"
+}

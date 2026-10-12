@@ -1,0 +1,140 @@
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 5590b57..051a80a 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -250,15 +250,19 @@ module executor #(
+     logic endpoint_write;
+     logic [INDEX_BITS-1:0] endpoint_address;
+     wire [INDEX_BITS-1:0] endpoint_read0, endpoint_read1;
++    wire endpoint_read_odd;
+     logic [255:0] endpoint_data;
+     wire [255:0] endpoint_value0, endpoint_value1;
++    wire [255:0] endpoint_even_value, endpoint_odd_value;
++    assign endpoint_value0 = endpoint_read_odd ? endpoint_odd_value : endpoint_even_value;
++    assign endpoint_value1 = endpoint_read_odd ? endpoint_even_value : endpoint_odd_value;
+     // All list producers are mutually exclusive. A single write port serves
+     // WOTS completions, FORS roots and in-place L-tree reduction.
+     wire root_write = state == ROUTE && macro_route != 0 && route_descriptor[53];
+     // verilog_format: off
+-    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS)) endpoints (
++    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS),.PHYSICAL_READS(1'b1)) endpoints (
+         .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
+-        .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
++        .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_even_value),.value1(endpoint_odd_value)
+     );
+     // verilog_format: on
+     wire [INDEX_BITS-1:0] batch_chain_index=pipe_rolling ? pipe_next_chain : chain_cursor+INDEX_BITS'(pipe_issue_slot);
+@@ -527,42 +531,53 @@ module executor #(
+ 
+     generate
+         begin : read_addresses
+-            logic [INDEX_BITS-1:0] address;
+-            always_ff @(posedge clk) begin
+-                if (rst) address <= 0;
+-                else if (state == REDUCE_SETUP || state == TREE_INIT) address <= 0;
++            logic [INDEX_BITS-1:0] address, next_address;
++            logic [INDEX_BITS-1:0] even_address, odd_address;
++            wire [INDEX_BITS-1:0] next_partner = next_address == INDEX_BITS'(WORKSPACE_DEPTH - 1)
++                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : next_address + 1'b1;
++            always_comb begin
++                next_address = address;
++                if (rst) next_address = 0;
++                else if (state == REDUCE_SETUP || state == TREE_INIT) next_address = 0;
+                 else if (state == PUSH_NODE)
+-                    address<=node_level==tree_height ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE)+INDEX_BITS'(node_level);
++                    next_address =node_level==tree_height ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE)+INDEX_BITS'(node_level);
+                 else if (state == AUTH_OUTPUT)
+-                    address <= INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_level) + 1'b1;
+-                else if (state == HASH_ISSUE || state == HASH_WAIT) address <= lane_list_next;
+-                else if (state == LT_PIPE_INIT) address <= {lt_cursor[INDEX_BITS-1:1], 1'b0};
+-                else if (PIPELINE == 1 && state == LT_NEXT) address <= 0;
++                    next_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_level) + 1'b1;
++                else if (state == HASH_ISSUE || state == HASH_WAIT) next_address = lane_list_next;
++                else if (state == LT_PIPE_INIT) next_address = {lt_cursor[INDEX_BITS-1:1], 1'b0};
++                else if (PIPELINE == 1 && state == LT_NEXT) next_address = 0;
+                 else if (state == LT_PIPE_ISSUE && pipe_ready)
+-                    address <= lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
++                    next_address = lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
+                 else if (state == LT_PIPE_WAIT && lt_batch_complete) begin
+-                    if (lt_cursor + 2 * PIPELINE < lt_count) address <= lt_cursor + 2 * PIPELINE;
+-                    else if (lt_count[0]) address <= lt_count - 1'b1;
+-                    else address <= 0;
+-                end else if (state == LT_COPY) address <= 0;
++                    if (lt_cursor + 2 * PIPELINE < lt_count) next_address = lt_cursor + 2 * PIPELINE;
++                    else if (lt_count[0]) next_address = lt_count - 1'b1;
++                    else next_address = 0;
++                end else if (state == LT_COPY) next_address = 0;
+                 else if (state == FORS_LEAF_NEXT)
+-                    address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((target-fors_base)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++                    next_address =fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((target-fors_base)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
+                 else if(state==FORS_AUTH0 || state==FORS_BEGIN || state==FORS_AUTH1 || state==FORS_LEVEL)
+-                    address <= INDEX_BITS'(FORS_SCRATCH);
++                    next_address = INDEX_BITS'(FORS_SCRATCH);
+                 else if (state == FORS_ISSUE && pipe_ready)
+-                    address<=pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0 ? INDEX_BITS'(FORS_SCRATCH) : INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
++                    next_address =pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0 ? INDEX_BITS'(FORS_SCRATCH) : INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
+                 else if (state == FORS_WAIT) begin
+                     if (fors_offset + PIPELINE < fors_outputs)
+-                        address<=INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(PIPELINE))<<1);
+-                    else if (fors_level) address <= INDEX_BITS'(FORS_SCRATCH);
++                        next_address =INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(PIPELINE))<<1);
++                    else if (fors_level) next_address = INDEX_BITS'(FORS_SCRATCH);
+                     else
+-                        address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(((target-fors_base)>>1)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++                        next_address =fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(((target-fors_base)>>1)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
+                 end else if (state == FORS_ROOT_NEXT)
+-                    address <= INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
++                    next_address = INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
++            end
++            // Keep the original read latency. Decode the two physical banks
++            // before the address registers rather than before the RAM ports.
++            always_ff @(posedge clk) begin
++                address <= next_address;
++                even_address <= next_address[0] ? next_partner : next_address;
++                odd_address <= next_address[0] ? next_address : next_partner;
+             end
+-            assign endpoint_read0 = address;
+-            assign endpoint_read1 = address == INDEX_BITS'(WORKSPACE_DEPTH - 1)
+-                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : address + 1'b1;
++            assign endpoint_read0 = even_address;
++            assign endpoint_read1 = odd_address;
++            assign endpoint_read_odd = address[0];
+         end
+     endgenerate
+ 
+diff --git a/rtl/memory/value.sv b/rtl/memory/value.sv
+index c3fd7ea..d783a21 100644
+--- a/rtl/memory/value.sv
++++ b/rtl/memory/value.sv
+@@ -4,7 +4,8 @@
+ // bank. XMSS L-tree and unaligned LMS list absorption need both read values.
+ // verilog_format: off
+ module value #(
+-    parameter integer WIDTH=256, DEPTH=136, ADDRESS_BITS=8
++    parameter integer WIDTH=256, DEPTH=136, ADDRESS_BITS=8,
++    parameter bit PHYSICAL_READS=1'b0
+ ) (
+     input wire clk,write_enable,
+     input wire [ADDRESS_BITS-1:0] write_address,
+@@ -16,7 +17,10 @@ module value #(
+     wire [WIDTH-1:0] bank_value[0:1];
+     for (genvar bank = 0; bank < 2; bank = bank + 1) begin : banks
+         wire we = write_enable && write_address[0] == bank;
+-        wire [ADDRESS_BITS-1:0] ra = read0[0] == bank ? read0 : read1;
++        // A caller can prepare physical parity-bank addresses in its existing
++        // address stage. This removes a selector in front of every RAM bit.
++        wire [ADDRESS_BITS-1:0] ra = PHYSICAL_READS ? (bank == 0 ? read0 : read1)
++            : read0[0] == bank ? read0 : read1;
+         if (DEPTH == 136) begin : compact
+             (* ram_style="distributed" *)logic [WIDTH-1:0] main[0:63];
+             (* ram_style="distributed" *)logic [WIDTH-1:0] tail[ 0:3];
+@@ -32,7 +36,7 @@ module value #(
+             assign bank_value[bank] = words[ra[ADDRESS_BITS-1:1]];
+         end
+     end
+-    assign value0 = read0[0] ? bank_value[1] : bank_value[0];
+-    assign value1 = read0[0] ? bank_value[0] : bank_value[1];
++    assign value0 = PHYSICAL_READS ? bank_value[0] : read0[0] ? bank_value[1] : bank_value[0];
++    assign value1 = PHYSICAL_READS ? bank_value[1] : read0[0] ? bank_value[0] : bank_value[1];
+ endmodule
+ `default_nettype wire

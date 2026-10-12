@@ -17,7 +17,7 @@ if [[ ! $lut6 =~ ^[01]$ ]]; then echo 'KECCAK_LUT6 must be 0 or 1.' >&2; exit 2;
 if [[ $lut6 == 0 ]]; then work+=_generic; fi
 mkdir -p "$work"
 echo "Synthesize common core P${p}U${u}; log: $work/vivado.log"
-defer_seconds=${SYNTH_DEFER_SECONDS:-${SYNTH_SKIP_SECONDS:-1200}}
+defer_seconds=${SYNTH_DEFER_SECONDS:-${SYNTH_SKIP_SECONDS:-600}}
 [[ $defer_seconds =~ ^[1-9][0-9]*$ ]] || { echo 'SYNTH_DEFER_SECONDS must be positive.' >&2; exit 2; }
 status=0
 setsid "$vivado_bin" -mode batch -nolog -nojournal -source scripts/synth.tcl \

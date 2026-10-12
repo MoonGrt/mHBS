@@ -1,0 +1,51 @@
+{
+  "scope": "scalar_execution only; P1 scalar path; no FSM, cycles, capture, counters, ports or scheduled execution changes",
+  "source_baseline": "build/pu_sign_matrix/20261014_155022/source/rtl/hash/recipe.sv",
+  "area_baseline": {
+    "P1U1": {
+      "lut": 18838,
+      "ff": 6660,
+      "slice": 5542.0,
+      "recipe_lut": 10972,
+      "recipe_ff": 3161,
+      "recipe_own_lut": 8811
+    },
+    "P1U2": {
+      "lut": 21644,
+      "ff": 6668,
+      "slice": 6244.5
+    }
+  },
+  "preferred_candidate": {
+    "name": "scalar_mask_lifetime",
+    "live_range_proof": [
+      "KEY digest must be retained across MASK0 and optional MASK1, so temporary_key remains.",
+      "chain_value contains the original left operand after request preload or prior chain hash. KEY and MASK PRFs use public_seed/address and do not consume chain_value.",
+      "After MASK0 completion, original left operand has no later consumer. Overwrite chain_value with left_value XOR completed_value on the same completed edge; FINAL uses chain_value for chained and standalone requests.",
+      "For binary FINAL, MASK1 is the immediately preceding completed hash. Its final-round edge writes sponge_state; digest reads sponge_state. During next START cycle FINAL formats right XOR digest and the launch edge consumes that frame before overwriting sponge_state.",
+      "All hash launch/completion edges, compound updates, capture enable tests and statistical updates remain unchanged.",
+      "Legal XMSS arities are 1 and 2; existing recipe vectors cover both plus q/address boundaries. Full chained Sign verification remains necessary."
+    ],
+    "expected_structural_gain": "Delete two N*8-bit mask register banks (512 FF for N=32); corresponding bank write enables disappear. XOR work moves into chain_value update. LUT and timing gain requires synthesis because this adds one chain_value write-data alternative.",
+    "conservative_variant": "If the full two-bank reuse increases LUT/timing, evaluate mask1-only removal first; this reuses digest without modifying chain_value.",
+    "validation_required": [
+      "P1U1 459 independent SHAKE256 recipe byte-frame vectors including XMSS arity1/2",
+      "Nine full Sign tests P1U1/P4U1/P12U1 vs frozen baseline: exact cycles, hashes, permutations, outputs, cache",
+      "Normal/SYNTHESIS, capture stalls, reset/error replay, q=1/1023 boundary tests",
+      "Common OOC synthesis, frozen source checksum, hierarchical/timing/log archive"
+    ]
+  },
+  "avoided_failed_candidates": {
+    "parallel_formatter": {
+      "historic_run": "20261014_110401",
+      "P1U1_slice": 7342.375,
+      "reason": "Previously increased area; do not repeat wholesale fixed formatter expansion"
+    },
+    "masked_state_write": {
+      "historic_run": "20261014_111452",
+      "P4U1_slice": 10669.375,
+      "reason": "Previously increased wide-state selection/masking cost; do not replace the Keccak register write mux with whole-width masked OR"
+    },
+    "word_write": "Prior recipe integration word-write masked OR candidate increased its first five area points, including P4U1 +12.45%; preserve existing write mux."
+  }
+}

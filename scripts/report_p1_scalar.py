@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Compare the P1 scalar implementation with the frozen context-engine baseline."""
 import argparse
-import csv
 from datetime import datetime
 import hashlib
-import io
 import json
 from pathlib import Path
 import time
@@ -55,11 +53,6 @@ def report(args):
                 area_top='common', routed_sta=False, rows=rows, validation=validation,
                 candidate_complete=candidate['complete'], tasks=candidate['tasks'])
     write(args.output.with_suffix('.json'), json.dumps(data, indent=2) + '\n')
-    csv_text = io.StringIO(newline='')
-    writer = csv.DictWriter(csv_text, fieldnames=list(rows[0]))
-    writer.writeheader()
-    writer.writerows(rows)
-    write(args.output.with_suffix('.csv'), csv_text.getvalue())
     lines = ['# P1 标量执行路径', '',
              f'更新时间：{data["updated_at"]}。基线 `{args.baseline}`；候选 `{args.candidate}`。', '',
              'P1 使用标量固定块、链反馈和流式吸收；P>1 保留 recipe 内的统一上下文执行。'

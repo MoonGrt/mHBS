@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Profile the three P4 targets without modifying the DUT or production harness."""
 import argparse
-import csv
 import json
 import os
 from pathlib import Path
@@ -18,7 +17,7 @@ INSTRUMENT = r'''
  end
  always @(posedge clk)if(!rst && dut.core.state!=0 && dut.core.state!=32)begin
   states[dut.core.state]++;
-  if(dut.core.state==23)begin returns[dut.core.hash_return]++;recipes[dut.core.task_recipe[59:56]]++;end
+  if(dut.core.state==23)begin returns[dut.core.continuation]++;recipes[dut.core.task_recipe[59:56]]++;end
   if(dut.core.pipe_mode)live[$countones(dut.core.lane.stage_valid)]++;
  end
  final begin
@@ -46,7 +45,7 @@ def main():
     sources=[str(source/p) for p in (source/'sources.txt').read_text().splitlines()]
     command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
     with (out/'compile.log').open('w') as log:subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
-    rows=[];results={}
+    results={}
     for profile,op in (('slh_128f','sign'),('xmss_h10',args.stateful_operation),('lms_h10',args.stateful_operation)):
         key=f'{profile}_{op}'
         with (out/f'{key}.log').open('w') as log:subprocess.run([str(out/'obj/Vtb'),f'+VECTOR={ROOT}/tb/vectors/{profile}/{op}'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
@@ -54,13 +53,10 @@ def main():
         for kind in ('STATE','RETURN','RECIPE','LIVE'):
             records={int(i):int(n) for i,n in re.findall(rf'PROFILE_{kind} (\d+) (\d+)',text)}
             results[key][kind.lower()]=records
-            for i,n in records.items():rows.append(dict(target=key,category=kind.lower(),index=i,name=names.get(i,'') if kind in ('STATE','RETURN') else '',cycles=n))
         match=re.search(r'STATEFUL_PASS .*?cycles=(\d+).*?hashes=(\d+) permutations=(\d+)',text)
         if not match:raise ValueError(f'missing pass: {key}')
         results[key]['cycles'],results[key]['hashes'],results[key]['permutations']=map(int,match.groups())
         print(key,results[key]['cycles'],flush=True)
     (out/'profile.json').write_text(json.dumps(results,indent=2)+'\n')
-    with (out/'profile.csv').open('w',newline='') as handle:
-        writer=csv.DictWriter(handle,fieldnames=('target','category','index','name','cycles'));writer.writeheader();writer.writerows(rows)
 
 if __name__=='__main__':main()

@@ -1,0 +1,43 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1207,7 +1207,13 @@
+                     (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
+                      captured[ctx_read_tag]) : 256'd0;
+                 wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
+-                logic [PIPELINE-1:0] node_phase, more_steps;
++                logic [PIPELINE-1:0] more_steps;
++                wire [PIPELINE-1:0] node_phase;
++                // Every active node phase is outside the three XMSS PRF phases.
++                for (genvar j = 0; j < PIPELINE; j++) begin : node_phase_decode
++                    assign node_phase[j] = busy[j] &&
++                        !(phase[j][2] || phase[j][3] || phase[j][5]);
++                end
+                 wire node_done = node_phase[t];
+                 wire again = ctx_perm_done && (!node_done || more_steps[t]);
+                 wire capture_now = ctx_perm_done && node_done && capture_enable[t] &&
+@@ -1370,7 +1376,6 @@
+                 end
+                 always_ff @(posedge clk) begin
+                     if (rst) begin
+-                        node_phase <= 0;
+                         more_steps <= 0;
+                         initial_pending <= 0;
+                         capture_initial <= 0;
+@@ -1397,8 +1402,6 @@
+                             iteration[ctx_request_tag] <= ctx_request_no_seed ?
+                                 {1'b0, ctx_request_start} + 1'b1 : 5'd0;
+                             phase[ctx_request_tag] <= first_phase;
+-                            node_phase[ctx_request_tag] <= first_phase[0] || first_phase[1] ||
+-                                first_phase[6];
+                             more_steps[ctx_request_tag] <= ctx_request_no_seed ?
+                                 ctx_request_steps > 1 : ctx_request_steps != 0;
+                             if (busy == 0) begin
+@@ -1427,8 +1430,6 @@
+                             if (digest_write) initial_pending[t] <= 0;
+                             if (again) begin
+                                 phase[t] <= next_phase;
+-                                node_phase[t] <= next_phase[0] || next_phase[1] || next_phase[4] ||
+-                                    next_phase[6];
+                                 if (node_done) more_steps[t] <= iteration[t] + 1'b1 < steps[t];
+                                 if (node_done) iteration[t] <= iteration[t] + 1'b1;
+                             end else complete[t] <= 1;

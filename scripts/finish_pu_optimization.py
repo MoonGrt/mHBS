@@ -95,14 +95,9 @@ class Audit:
             for row in stages['steps']:
                 area=row['area'];cycles=row['cycles']
                 lines.append(f'| {row["stage"]} | {area["lut"]:.0f} | {area["ff"]:.0f} | {area["equivalent_slice"]:.3f} | {cycles["slh_128f"]} | {cycles["xmss_h10"]} | {cycles["lms_h10"]} |')
-            lines+=['','工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。', '',f'[逐步CSV]({self.run.parent/"steps.csv"})、[周期分解]({self.run.parent/"profile/profile.json"})、[证据清单]({self.run.parent/"EVIDENCE.json"})。']
+            lines+=['','工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。', '',f'[逐步JSON]({self.run.parent/"steps.json"})、[周期分解]({self.run.parent/"profile/profile.json"})、[证据清单]({self.run.parent/"EVIDENCE.json"})。']
         for err in self.state.get('errors',[]):lines+=['',f'待解决：{err}']
         write(self.prefix.with_suffix('.md'),'\n'.join(lines)+'\n')
-        import csv,io
-        f=io.StringIO();rows=self.state.get('comparison',[])
-        if rows:
-            w=csv.DictWriter(f,fieldnames=list(rows[0]));w.writeheader();w.writerows(rows)
-        write(self.prefix.with_suffix('.csv'),f.getvalue())
     def repair_full32(self):
         out=self.run/'full32';status=json.loads((out/'status.json').read_text())
         if not status['complete'] or any('is not in the subpath' not in e for e in status['errors']):return False

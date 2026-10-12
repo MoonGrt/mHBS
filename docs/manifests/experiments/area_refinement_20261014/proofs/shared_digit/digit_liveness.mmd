@@ -1,0 +1,12 @@
+flowchart LR
+  T[transform_index] --> M[8位索引预选]
+  C[chain_cursor] --> M
+  B[batch_chain_index] --> M
+  M --> D[唯一digit函数]
+  V[value2 / checksum / LEN1] --> D
+  D --> TC[TRANSFORM: checksum更新]
+  D --> CS[CHAIN_SETUP: task参数锁存]
+  D --> BC[batch request接受: 上下文参数锁存]
+  ST[唯一executor state] -.互斥消费.-> TC
+  ST -.互斥消费.-> CS
+  ST -.互斥消费.-> BC

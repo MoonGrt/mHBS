@@ -1,0 +1,21 @@
+{
+  "title": "链计数与校验和实际范围压缩",
+  "candidate_sha256": "fce986b0b7ab5e68cb2d1c7e46c159426e2c160e4afbaae2f75837c46cd05be8",
+  "changed_declarations": {
+    "logic [11:0] checksum;": "logic [9:0] checksum;",
+    "logic [7:0] transform_index;": "logic [6:0] transform_index;",
+    "logic [7:0] pipe_next_chain, pipe_completed;": "logic [6:0] pipe_next_chain, pipe_completed;",
+    "logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];": "logic [6:0] pipe_chain_index[0:PIPE_BATCH-1];",
+    "digit = {1'b0, checksum[11:8]};": "digit = {3'b0, checksum[9:8]};"
+  },
+  "invariants": [
+    "CHAIN_SETUP keeps 8-bit endpoint_count and rejects zero or values above67 before rolling",
+    "pipe_next_chain/pipe_completed are reset and only increase up to accepted endpoint_count<=67",
+    "slot chain indices are issued before pipe_next_chain reaches endpoint_count",
+    "TRANSFORM reads 32/48/64 message digits; index is always0..63 and checksum<=15*64=960"
+  ],
+  "scope": "All supported standard profiles and accepted chain counts 1..67; external widths/error checks retained; no state/handshake/cycle change",
+  "risks": [
+    "Range proof must match actual consumers and reset/replay; register-width reduction need not lower area"
+  ]
+}

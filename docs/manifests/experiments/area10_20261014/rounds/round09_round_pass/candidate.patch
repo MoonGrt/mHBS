@@ -1,0 +1,51 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1506,13 +1506,15 @@
+             // Fixed requests and streaming permutations share the P-stage datapath.
+             // P1's iterative datapath lives only in scalar_execution.
+             localparam integer ROUNDS = UNROLL * PIPELINE;
++            localparam integer PASSES = 24 / ROUNDS;
++            localparam integer PASS_BITS = PASSES > 1 ? $clog2(PASSES) : 1;
+             logic [1599:0] state_reg[0:PIPELINE-1];
+             logic [PIPELINE-1:0] stage_valid;
+-            logic [4:0] stage_base[0:PIPELINE-1];
++            logic [PASS_BITS-1:0] stage_pass[0:PIPELINE-1];
+             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
+             logic sent;
+             wire recycle = stage_valid[PIPELINE-1] &&
+-                stage_base[PIPELINE-1] + ROUNDS < 24;
++                stage_pass[PIPELINE-1] != PASS_BITS'(PASSES-1);
+             wire ready = !rst && !recycle;
+             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+             wire normal_valid = hash_state == HASH_RUN && !sent;
+@@ -1522,17 +1524,18 @@
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+-                wire [4:0] start_round;
++                wire [PASS_BITS-1:0] source_pass;
++                wire [4:0] start_round = 5'(source_pass * ROUNDS);
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid;
+                 if (s == 0) begin : input_stage
+                     assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
+-                    assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
++                    assign source_pass = recycle ? stage_pass[PIPELINE-1] + 1'b1 : '0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
+                     assign source_valid = recycle || issue_valid;
+                 end else begin : following_stage
+                     assign rounds[0] = state_reg[s-1];
+-                    assign start_round = stage_base[s-1];
++                    assign source_pass = stage_pass[s-1];
+                     assign source_tag = stage_tag[s-1];
+                     assign source_valid = stage_valid[s-1];
+                 end
+@@ -1557,7 +1560,7 @@
+                     else begin
+                         stage_valid[s] <= source_valid;
+                         if (source_valid) begin
+-                            stage_base[s] <= start_round;
++                            stage_pass[s] <= source_pass;
+                             stage_tag[s]  <= source_tag;
+                         end
+                     end

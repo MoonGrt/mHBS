@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Report measured migration results; completion fails closed on missing evidence."""
 import argparse
-import csv
 import hashlib
 import json
 from pathlib import Path
@@ -83,8 +82,6 @@ def main():
               routed_sta=False,old_experimental_atp_comparable=False)
     REPORT.parent.mkdir(parents=True,exist_ok=True)
     REPORT.with_suffix('.json').write_text(json.dumps(data,indent=2)+'\n')
-    with REPORT.with_suffix('.csv').open('w',newline='') as f:
-        writer=csv.DictWriter(f,fieldnames=list(rows[0]));writer.writeheader();writer.writerows(rows)
     state_label='用户已停止两组h=20全树运行，完整36项验收未完成' if status.get('stopped_by_user') else ('全部完成' if complete else '执行中，尚未满足全部验收项')
     lines=['# SHAKE256 XMSS/LMS 六参数标准迁移（2026-10-13）','',
         f'验收状态：{state_label}。完整 RTL 三操作通过 {len(results)}/36 项。未完成实测周期留空。运行时间预测独立记录于 [h=20预测报告](../h20_stopped/Stateful_h20_Runtime_Forecast_20261013.md)，不作为实测验收结果。','',

@@ -1,0 +1,126 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1207,14 +1207,72 @@
+                     (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
+                      captured[ctx_read_tag]) : 256'd0;
+                 wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
++                // Read small return controls one stage before their token reaches
++                // the output. A slot keeps its metadata while its token is in flight.
++                wire [TAG_BITS-1:0] control_read_tag = stage_tag[PIPELINE-2];
++                wire control_read_valid = stage_valid[PIPELINE-2];
++                logic [2:0] return_phase;
++                logic return_node_phase, return_more_steps, return_capture_match;
++                logic return_initial_pending, return_capture_initial;
++                logic [4:0] return_iteration, return_steps;
++                always_ff @(posedge clk) begin
++                    if (!rst && control_read_valid) begin
++                        return_phase <= {phase[control_read_tag][5],
++                            phase[control_read_tag][3], phase[control_read_tag][2]};
++                        return_node_phase <= node_phase[control_read_tag];
++                        return_more_steps <= more_steps[control_read_tag];
++                        return_iteration <= iteration[control_read_tag];
++                        return_steps <= steps[control_read_tag];
++                        return_capture_match <= capture_enable[control_read_tag] &&
++                            iteration[control_read_tag] == capture_after[control_read_tag];
++                        return_initial_pending <= initial_pending[control_read_tag];
++                        return_capture_initial <= capture_initial[control_read_tag];
++                    end
++                end
++`ifndef SYNTHESIS
++                logic return_control_valid;
++                logic [TAG_BITS-1:0] return_control_tag;
++                always_ff @(posedge clk) begin : debug_prefetch_tag
++                    if (rst) begin
++                        return_control_valid <= 0;
++                        return_control_tag <= 0;
++                    end else begin
++                        return_control_valid <= control_read_valid;
++                        if (control_read_valid) return_control_tag <= control_read_tag;
++                    end
++                end
++                always @(posedge clk) begin : debug_prefetch_hazards
++                    if (!rst && engine_mode && control_read_valid) begin
++                        if (stage_valid[PIPELINE-1] &&
++                            control_read_tag == stage_tag[PIPELINE-1])
++                            $fatal(1, "one context has duplicate in-flight return tokens");
++                        if (accept && control_read_tag == ctx_request_tag)
++                            $fatal(1, "in-flight controls overwritten by new acceptance");
++                    end
++                end
++                always @(negedge clk) begin : debug_prefetch_consumption
++                    if (!rst && ctx_perm_done) begin
++                        if (!return_control_valid || return_control_tag != t)
++                            $fatal(1, "return control prefetch token mismatch");
++                        if (return_phase !== {phase[t][5],phase[t][3],phase[t][2]} ||
++                            return_node_phase !== node_phase[t] ||
++                            return_more_steps !== more_steps[t] ||
++                            return_iteration !== iteration[t] || return_steps !== steps[t] ||
++                            return_capture_match !== (capture_enable[t] &&
++                                iteration[t] == capture_after[t]) ||
++                            return_initial_pending !== initial_pending[t] ||
++                            return_capture_initial !== capture_initial[t])
++                            $fatal(1, "prefetched return metadata changed in flight");
++                    end
++                end
++`endif
+                 logic [PIPELINE-1:0] node_phase, more_steps;
+-                wire node_done = node_phase[t];
+-                wire again = ctx_perm_done && (!node_done || more_steps[t]);
+-                wire capture_now = ctx_perm_done && node_done && capture_enable[t] &&
+-                    iteration[t] == capture_after[t];
+-                wire [6:0] next_phase = phase[t][2] ? MASK : phase[t][3] ?
+-                    (paired[t] ? MASK1 : FINAL) : phase[t][5] ? FINAL : family[t] == 1 ? KEY : STEP;
+-                wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
++                wire node_done = return_node_phase;
++                wire again = ctx_perm_done && (!node_done || return_more_steps);
++                wire capture_now = ctx_perm_done && node_done && return_capture_match;
++                wire [6:0] next_phase = return_phase[0] ? MASK : return_phase[1] ?
++                    (paired[t] ? MASK1 : FINAL) : return_phase[2] ? FINAL : family[t] == 1 ? KEY : STEP;
++                wire [4:0] next_step = node_done ? return_iteration : return_iteration - 1'b1;
+                 logic [255:0] next_address;
+                 always_comb begin
+                     next_address = address[t];
+@@ -1242,8 +1300,8 @@
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
+                 wire [255:0] block_value = again ?
+-                    (phase[t][5] ? digest[t] :
+-                     phase[t][3] ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                    (return_phase[2] ? digest[t] :
++                     return_phase[1] ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                 wire [255:0]
+@@ -1345,17 +1403,17 @@
+                 end
+                 // A KEY return always feeds MASK immediately, so feedback priority excludes
+                 // accepting an initial value on the same edge. Each bank has one write port.
+-                wire key_return = ctx_perm_done && phase[t][2];
+-                wire initial_transfer = key_return && initial_pending[t];
++                wire key_return = ctx_perm_done && return_phase[0];
++                wire initial_transfer = key_return && return_initial_pending;
+                 wire key_write = key_return || (accept && ctx_request_no_seed);
+                 wire [TAG_BITS-1:0] key_write_tag = key_return ? t : ctx_request_tag;
+                 wire [255:0] key_write_data = key_return ? ctx_perm_digest[255:0] :
+                     ctx_request_initial_value;
+-                wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
++                wire mask_left = ctx_perm_done && paired[t] && return_phase[1];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+                 wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
+                     mask_left ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+-                wire capture_transfer = initial_transfer && capture_initial[t];
++                wire capture_transfer = initial_transfer && return_capture_initial;
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+@@ -1429,8 +1487,8 @@
+                                 phase[t] <= next_phase;
+                                 node_phase[t] <= next_phase[0] || next_phase[1] || next_phase[4] ||
+                                     next_phase[6];
+-                                if (node_done) more_steps[t] <= iteration[t] + 1'b1 < steps[t];
+-                                if (node_done) iteration[t] <= iteration[t] + 1'b1;
++                                if (node_done) more_steps[t] <= return_iteration + 1'b1 < return_steps;
++                                if (node_done) iteration[t] <= return_iteration + 1'b1;
+                             end else complete[t] <= 1;
+                         end
+                     end

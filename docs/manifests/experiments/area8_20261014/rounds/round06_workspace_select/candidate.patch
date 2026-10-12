@@ -1,0 +1,75 @@
+--- baseline/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -468,44 +468,55 @@
+         end
+     endtask
+ 
++    // The workspace commits only one writer. Select the five data sources
++    // once, then combine them without a 256-bit cascaded priority mux.
++    // Address and write-enable priority remain identical to the controller.
++    logic [4:0] endpoint_source;
+     always_comb begin
+         endpoint_write = 0;
+         endpoint_address = chain_cursor;
+-        endpoint_data = result[W-1:0];
++        endpoint_source = 0;
+         if (auth_write) begin
+             endpoint_write = 1;
+             endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
+-            endpoint_data = auth_write_data;
++            endpoint_source = state == FORS_AUTH0 || state == FORS_AUTH1 ? 5'b00010 : 5'b00001;
+         end else if (stack_write) begin
+             endpoint_write = 1;
+             endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
+-            endpoint_data = node_value;
++            endpoint_source = 5'b00001;
+         end else if (fors_leaves || fors_pipe) begin
+             endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
+             endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_source = 5'b00100;
+         end else if (lt_pipe) begin
+             endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
+             endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_source = 5'b00100;
+         end else if (pipe_direct && pipe_mode) begin
+             endpoint_write = pipe_valid;
+             endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_source = 5'b00100;
+         end else if (state == CHAIN_STORE && indexing != 1) begin
+             endpoint_write = 1;
++            endpoint_source = 5'b01000;
+         end else if (PIPELINE == 1 && state == LT_STORE) begin
+             endpoint_write = 1;
+             endpoint_address = lt_cursor >> 1;
++            endpoint_source = 5'b01000;
+         end else if (state == LT_COPY) begin
+             endpoint_write = 1;
+             endpoint_address = lt_cursor >> 1;
+-            endpoint_data = endpoint_value0;
++            endpoint_source = 5'b00010;
+         end else if (root_write) begin
+             endpoint_write = 1;
+             endpoint_address = INDEX_BITS'(group_index);
+-            endpoint_data = route_value[W-1:0];
+-        end
++            endpoint_source = 5'b10000;
++        end
++        endpoint_data = ({W{endpoint_source[0]}} & node_value)
++            | ({W{endpoint_source[1]}} & endpoint_value0)
++            | ({W{endpoint_source[2]}} & pipe_read_result)
++            | ({W{endpoint_source[3]}} & result[W-1:0])
++            | ({W{endpoint_source[4]}} & route_value[W-1:0]);
+     end
+ 
+     generate
+@@ -554,7 +565,6 @@
+     wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
+         || state==FORS_AUTH0 || state==FORS_AUTH1);
+     wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
+-    wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
+     wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_level<tree_height && !node_index[0] && !verifying;
+ `ifndef SYNTHESIS
+     initial begin : workspace_capacity

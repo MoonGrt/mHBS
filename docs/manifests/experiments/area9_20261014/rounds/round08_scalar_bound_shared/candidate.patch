@@ -1,0 +1,28 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -384,15 +384,19 @@
+                         default: begin end
+                     endcase
+                     case (source)
+-                        1: source_word = node_word(secret_prf, selected_index);
+-                        2: source_word = node_word(randomizer, selected_index);
+-                        3: source_word = node_word(public_seed, selected_index);
+-                        4: source_word = node_word(root, selected_index);
++                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
++                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
++                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
++                        4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+-                        6: source_word = node_word(address, selected_index);
+-                        7: source_word = node_word(list_data0, selected_index);
++                        6: source_word = node_word_indexed(address, selected_index[1:0]);
++                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
+                         default: source_word = literal;
+                     endcase
++                    // All six node banks share the same four-word bound.
++                    // Prefix literals and the longer message bank keep their own rules.
++                    if (|selected_index[5:2] && source != 0 && source != 5)
++                        source_word = 64'd0;
+                 end
+             endfunction
+             logic [511:0] list_pair;

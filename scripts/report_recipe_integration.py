@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
 """Compare a frozen 14-point recipe integration with its exact baseline."""
 import argparse
-import csv
 from datetime import datetime
 import hashlib
-import io
 import json
 from pathlib import Path
 import time
@@ -84,11 +82,6 @@ def report(args):
                 area_top='common', routed_sta=False, candidate_matches_worktree=matches,
                 candidate_source_sha256=hashes, rows=rows, experiments=stages, validation=validation)
     write(args.output.with_suffix('.json'), json.dumps(data, indent=2) + '\n')
-    output = io.StringIO(newline='')
-    writer = csv.DictWriter(output, fieldnames=list(rows[0]), lineterminator='\n')
-    writer.writeheader()
-    writer.writerows(rows)
-    write(args.output.with_suffix('.csv'), output.getvalue())
     lines = ['# Recipe 合并与 14 点面积优化', '',
              f'更新时间：{data["updated_at"]}。基线 `{args.baseline}`，候选 `{args.candidate}`。', '',
              f'完成周期对照 {summary["measured_sign_cases"]}/{len(rows)}；'

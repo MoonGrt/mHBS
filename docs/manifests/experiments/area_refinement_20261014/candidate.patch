@@ -1,0 +1,107 @@
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -1422,8 +1422,6 @@
+                                     identifier
+                                 };
+                             end
+-                            f1 = block_value;
+-                            f2 = block_right;
+                         end
+                         data = 0;
+                         case (node_bytes)
+@@ -1465,14 +1463,14 @@
+                                 end
+                                 2: begin
+                                     data[183:0]   = prefix;
+-                                    data[439:184] = f1;
++                                    data[439:184] = block_value;
+                                     data[447:440] = 8'h1f;
+                                 end
+                                 3: begin
+                                     data[175:0]   = prefix[175:0];
+-                                    data[431:176] = f1;
++                                    data[431:176] = block_value;
+                                     if (two) begin
+-                                        data[687:432] = f2;
++                                        data[687:432] = block_right;
+                                         data[695:688] = 8'h1f;
+                                     end else data[439:432] = 8'h1f;
+                                 end
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -80,9 +80,9 @@
+         // SF_REDUCED/LT_PIPE_ADVANCE remain retired.
+         PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
+         LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM,
+-        PIPE_VERIFY_INPUT, LT_PIPE_INIT,LT_PIPE_ISSUE,LT_PIPE_WAIT,LT_PIPE_ADVANCE,
+-        FORS_PICK,FORS_AUTH0,FORS_BEGIN,FORS_LEFT,FORS_RIGHT,FORS_ISSUE,FORS_WAIT,FORS_LEVEL,FORS_AUTH1,FORS_PUSH,
+-        FORS_LEAF_NEXT,FORS_ROOT_NEXT,PUSH_STACK
++        PIPE_VERIFY_INPUT, LT_PIPE_INIT, LT_PIPE_ISSUE, LT_PIPE_WAIT, LT_PIPE_ADVANCE,
++        FORS_PICK, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_RIGHT, FORS_ISSUE, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
++        FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
+     } state_t;
+     state_t state, hash_return, output_return;
+     task automatic enter_state(input state_t next_state);
+@@ -278,13 +278,13 @@
+         .clk,.rst(execution_rst),.node_bytes,
+         .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
+         .batch_request_tag(issue_slot),
+-        .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-digit(batch_chain_index)
+-        : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? digit(batch_chain_index) : chain_descriptor[19:15]),
++        .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-shared_digit
++        : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? shared_digit : chain_descriptor[19:15]),
+         .batch_family(stateful ? (xmss ? 2'd1 : 2'd2) : 2'd0),
+-        .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(digit(batch_chain_index)) : 4'd0),
++        .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(shared_digit) : 4'd0),
+         .batch_initial_value(fors_pipe || lt_pipe ? endpoint_value0 : verify_data),
+         .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(endpoint_value1),
+-        .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
++        .batch_capture_after(indexing==1 ? 5'd0 : shared_digit),
+         .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
+         .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
+         .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
+@@ -358,6 +358,11 @@
+             end
+         end
+     endfunction
++    // Checksum, scalar setup and batch acceptance are disjoint consumers.
++    // Select their small index before the shared WOTS digit data selector.
++    wire [7:0] digit_index = state == TRANSFORM ? transform_index
++        : state == CHAIN_SETUP ? chain_cursor : batch_chain_index;
++    wire [4:0] shared_digit = digit(digit_index);
+     wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
+     wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
+     genvar fb;
+@@ -907,9 +912,7 @@
+                             task_steps <= 0;
+                             task_leaf <= scalar_leaf;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+-                            task_b <= indexing == 1 ? (group_index << FORS_A) + target : digit(
+-                                chain_cursor
+-                            );
++                            task_b <= indexing == 1 ? (group_index << FORS_A) + target : shared_digit;
+                             read_verify_node(VERIFY_CHAIN_INPUT);
+                         end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
+                             if (pipe_cache_valid) begin
+@@ -936,10 +939,8 @@
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+                             task_b <= indexing == 1 ? (group_index << FORS_A) + leaf_cursor : 0;
+                             task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target))
+-                            ? digit(
+-                                chain_cursor
+-                            ) : chain_descriptor[19:15];
+-                            task_capture_after <= indexing == 1 ? 0 : digit(chain_cursor);
++                            ? shared_digit : chain_descriptor[19:15];
++                            task_capture_after <= indexing == 1 ? 0 : shared_digit;
+                             start_hash(descriptors[4], CHAIN_STORE);
+                         end
+                     end
+@@ -1317,7 +1318,7 @@
+                         scalar_tree <= scalar_tree >> descriptor[43:40];
+                         complete_macro();
+                     end else if (descriptor[59:56] == 1) begin
+-                        checksum <= checksum + chain_max - digit(transform_index);
++                        checksum <= checksum + chain_max - shared_digit;
+                         if (transform_index + 1 == LEN1) complete_macro();
+                         else transform_index <= transform_index + 1'b1;
+                     end else fail();

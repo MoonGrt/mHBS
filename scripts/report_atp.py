@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Build an ATP comparison from frozen source, simulation and Vivado evidence."""
 import argparse
-import csv
 import hashlib
 import json
 from pathlib import Path
@@ -141,18 +140,6 @@ def main():
                   current_rtl_sha256=current_source, evidence_sha256=evidence)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.with_suffix(".json").write_text(json.dumps(result, indent=2) + "\n")
-    with args.output.with_suffix(".csv").open("w", newline="") as handle:
-        fields = ("profile", "operation", "config", "assumed_mhz", "before_cycles", "after_cycles",
-                  "before_slices", "after_slices", "before_atp", "after_atp", "cycles_change_pct",
-                  "area_change_pct", "atp_change_pct")
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        for row in rows:
-            writer.writerow({**{k: row[k] for k in fields if k in row},
-                             "before_cycles": row["before"]["cycles"], "after_cycles": row["after"]["cycles"],
-                             "before_slices": row["before"]["equivalent_slices"],
-                             "after_slices": row["after"]["equivalent_slices"],
-                             "before_atp": row["before"]["atp"], "after_atp": row["after"]["atp"]})
     lines = ["# 三目标 ATP 优化实测（2026-10-13）", "",
              "基线为本工作区修改前的冻结源码；本轮只比较列出的配置，不宣称覆盖全部 P/U 的全局最优。",
              "器件 xc7a200tffg1156-3，Vivado 2025.2，共同核 OOC，6.666667 ns，4 线程，统计关闭。",
@@ -189,7 +176,7 @@ def main():
               f"归档补充检查共 {sum(checks.values())} 个通过项（包括两组各 816 项逐轮检查）；明细见 JSON。", "",
               "## 源码与证据", "",
               f"冻结源码、完整仿真日志、分层面积及综合时序：[`{result['experiment']}`](../../{result['experiment']}/)。",
-              "同名 JSON 保存逐文件 SHA-256、Hash/置换计数与综合 WNS；CSV 保存可直接比较的数据。",
+              "同名 JSON 保存逐文件 SHA-256、Hash/置换计数与综合 WNS；Markdown 表格保存可直接比较的数据。",
               "XMSS/LMS 的 omega4 表示每个链数字占 4 位，n=32、h=10，使用本仓库实验 SHAKE 配方。",
               "旧报告的历史面积不替代本轮冻结源码复测。", ""]
     args.output.with_suffix(".md").write_text("\n".join(lines))

@@ -1,0 +1,33 @@
+--- baseline/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -360,7 +360,29 @@
+                     control = decode_source(index, lms_only, shapes, node_words);
+                     source = control[8:6];
+                     selected_index = control[5:0];
+-                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
++                    // Scalar has no registered source-control boundary: emit the
++                    // small prefix constants directly, avoiding encode/decode muxes.
++                    literal = 0;
++                    (* parallel_case *) case (1'b1)
++                        shapes[MESSAGE_PRF], shapes[MESSAGE_DIGEST]: begin end
++                        shapes[ROOT_MESSAGE]:
++                        if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
++                            if (index == 3) literal = 64'h0200000000000000;
++                            else if (index == 15) literal = {be32(leaf), 32'd0};
++                        end
++                        shapes[PREFIX_MESSAGE], shapes[ADDRESS_LIST]: begin end
++                        shapes[PREFIX_LIST]:
++                        if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
++                            case (index)
++                                0: literal = identifier[63:0];
++                                1: literal = identifier[127:64];
++                                2: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
++                                3: literal = list_data0[79:16];
++                                default: literal = 0;
++                            endcase
++                        end
++                        default: begin end
++                    endcase
+                     case (source)
+                         1: source_word = node_word(secret_prf, selected_index);
+                         2: source_word = node_word(randomizer, selected_index);

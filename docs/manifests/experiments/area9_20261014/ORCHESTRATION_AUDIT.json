@@ -1,0 +1,11 @@
+{
+  "schema": "mhbs.area9.orchestration_audit.v1",
+  "initial_peak_observed_main_syntheses": 14,
+  "requested_limit": 12,
+  "threads_per_synthesis": 2,
+  "reason": "Earlier launch helper omitted an older run if its initial status.json was not published yet; rounds04/06 omitted pools03/05",
+  "fix": "Subsequent launches wait for status of every prior LAUNCH record, reserving every pending/running pool",
+  "existing_processes_stopped": false,
+  "scope": "No RTL/constraints/optimization change; elapsed synthesis time was affected by resource sharing",
+  "persistent_launcher_fix": "scripts/run_pu_sign_matrix.py now waits for initial status publication before returning LAUNCH, leaving active tasks running on failure"
+}

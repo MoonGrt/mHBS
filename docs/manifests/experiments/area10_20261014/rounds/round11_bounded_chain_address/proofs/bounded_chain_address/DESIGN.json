@@ -1,0 +1,44 @@
+{
+  "candidate": "bounded_chain_address",
+  "baseline": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/area10_20261014/baseline",
+  "baseline_executor_sha256": "62040a30a0957eeed72c43094012857e7bb8d3798c5a7b1af550f17d5d8fabe8",
+  "candidate_executor_sha256": "d0fff8eccf7699395ec782c19d48b774c83fca4e4994550a7be3a8541dca21ed",
+  "change": "Narrow only chain_cursor and task_a from8 to7 bits; zero-extend task_a at the unchanged eight-bit recipe request_a boundary.",
+  "register_bits_removed": 2,
+  "state_transition_changes": false,
+  "ports_changed": false,
+  "p_u_specialization": false,
+  "capacity_unchanged": 128,
+  "index_bits_unchanged": 8,
+  "endpoint_count_bits": 8,
+  "recipe_default_and_instance_index_bits_unchanged": true,
+  "unchanged": [
+    "Endpoint RAM parity/banks and read/write addresses",
+    "Recipe list cursor/ports, including primitive133 entries",
+    "Twenty-bit leaf and twenty-one-bit LMS/FORS address fields",
+    "All three live XMSS context banks",
+    "Existing invalid-chain/profile/index checks"
+  ],
+  "bounds": [
+    "Accepted chain endpoint_count is checked for1..67 before chain iteration.",
+    "chain_cursor starts at0, increments only while below endpoint_count, and final assignment is endpoint_count-1.",
+    "task_a writers select0, chain_cursor, four-bit lt_level, five-bit node_level, or node_level+1 (maximum32)."
+  ],
+  "risk": "Only two source register bits removed; Vivado may have already trimmed them, so measured area can stay equal or regress.",
+  "validation_pending": false,
+  "validation_passed": true,
+  "validation_summary": "VALIDATION_SUMMARY.json",
+  "recipe_default_index_bits": 7,
+  "executor_recipe_instance_index_bits": 8,
+  "public_primitive_instance_index_bits": 8,
+  "recipe_default_changed": false,
+  "frozen_candidate_binding": {
+    "source_manifest": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/area10_20261014/round11_bounded_chain_address/candidate/build/pu_sign_matrix/20261014_221230/SOURCE.json",
+    "source_manifest_sha256": "346501315f1ceee1ac3cd15b55fda0973d36b9632d1abea5d54362f9e879b7b8",
+    "file": "rtl/executor/executor.sv",
+    "candidate_sha256": "d0fff8eccf7699395ec782c19d48b774c83fca4e4994550a7be3a8541dca21ed",
+    "local_input_sha256": "d0fff8eccf7699395ec782c19d48b774c83fca4e4994550a7be3a8541dca21ed",
+    "local_input_matches_frozen_candidate": true,
+    "original_proof_sha256": "97df05c741f34c5335aa9c9bc23a49b59e09a0543eb610151492708ebd39cf8e"
+  }
+}

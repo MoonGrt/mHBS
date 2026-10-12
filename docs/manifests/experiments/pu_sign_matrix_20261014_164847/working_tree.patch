@@ -1,0 +1,40 @@
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index b8e8659..bfd7363 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -76,7 +76,7 @@ module recipe #(
+             logic [1:0] compound;
+             // XMSS retains its value across key/mask hashes. SLH
+             // chains instead reuse the sponge's retained digest at the next START.
+-            logic [N*8-1:0] chain_value, temporary_key, mask0, mask1;
++            logic [N*8-1:0] chain_value, temporary_key;
+             wire [N*8-1:0] current_value = MASKED_ENABLE ? chain_value :
+                 seed_phase ? request_left : digest[N*8-1:0];
+             localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
+@@ -427,9 +427,11 @@ module recipe #(
+                             frame_layout = 3;
+                             frame_domain = arity - 1'b1;
+                             frame1 = temporary_key;
+-                            frame2 = left_value ^ mask0;
++                            // MASK0 already masked the retained left value in place.
++                            frame2 = chain_value;
+                             frame_two = arity == 2;
+-                            frame3 = frame_two ? request_right ^ mask1 : 256'd0;
++                            // MASK1 is the retained sponge digest until this FINAL launch.
++                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
+                         end
+                     end
+                     shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
+@@ -818,8 +820,10 @@ module recipe #(
+                                              compound < arity + 1) begin
+                                     case (compound)
+                                         0: temporary_key <= completed_value[N*8-1:0];
+-                                        1: mask0 <= completed_value[N*8-1:0];
+-                                        default: mask1 <= completed_value[N*8-1:0];
++                                        // The unmasked value dies at MASK0 completion.
++                                        1: chain_value <= left_value ^ completed_value[N*8-1:0];
++                                        // MASK1 stays in sponge_state until FINAL reads it.
++                                        default: begin end
+                                     endcase
+                                     compound <= compound + 1'b1;
+                                     state <= START;

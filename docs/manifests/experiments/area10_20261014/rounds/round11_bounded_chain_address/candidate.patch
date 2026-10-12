@@ -1,0 +1,31 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -131,7 +131,8 @@
+     logic [4:0] tree_height, node_level, auth_level;
+     logic [1:0] indexing;
+     logic [20:0] target, leaf_cursor, node_index;
+-    logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
++    logic [6:0] chain_cursor;
++    logic [7:0] endpoint_count;
+     localparam integer PIPE_BATCH = PIPELINE;
+     localparam integer TAG_BITS   = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
+     localparam integer COUNT_BITS = $clog2(PIPELINE + 1);
+@@ -195,7 +196,8 @@
+     logic task_capture;
+     logic [4:0] task_steps, task_capture_after;
+     logic [19:0] task_leaf;
+-    logic [INDEX_BITS-1:0] task_a;
++    // Chain cursors are bounded by 67; parent/L-tree levels fit below 128.
++    logic [6:0] task_a;
+     // Every supported address fits 21 bits: LMS leaves are 2^h+q,
+     // h<=20; FORS uses a six-bit group and at most a fourteen-bit leaf.
+     // Extend at the recipe boundary rather than carrying eleven dead bits.
+@@ -305,7 +307,7 @@
+         .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
+         .identifier(job_identifier),.message_buffer,.message_length,
+         .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
+-        .request_a(task_a),.request_b({11'd0, task_b}),.request_left(result[W-1:0]),.request_right(parent_right),
++        .request_a({1'b0, task_a}),.request_b({11'd0, task_b}),.request_left(result[W-1:0]),.request_right(parent_right),
+         .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
+         .list_data0(endpoint_value0),.list_data1(endpoint_value1),
+         .response_valid(lane_valid),.response_ready(state==HASH_WAIT),

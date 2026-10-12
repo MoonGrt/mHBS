@@ -59,7 +59,7 @@ module common #(parameter integer UNROLL=2,PIPELINE=1)(
         .job_index,.job_identifier,
         .job_operation,.job_message_length(message_length),
         .job_secret_seed,.job_secret_prf,
-        .job_public_seed,.job_randomizer,.job_public_root,
+        .job_public_seed,.job_public_root,.job_randomizer,
         .message_valid(message_valid && phase==RUN),.message_ready(core_message_ready),.message_data,
         .verify_valid(verify_valid && phase==RUN),.verify_ready,.verify_data,.verify_pass,
         .out_valid,.out_data,.out_bytes,

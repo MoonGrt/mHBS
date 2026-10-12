@@ -1,0 +1,67 @@
+{
+  "candidate": "digest_lifetime",
+  "complete": true,
+  "passed": 70,
+  "total": 70,
+  "candidate_executor_sha256": "9735b5edb078423704bcb906bf960583dcb91432f0cb3735a6834dc98e19dd2d",
+  "validation_summaries": [
+    "DIGEST_VALIDATION.json",
+    "DIGEST_SLH_SIGN_VALIDATION.json",
+    "DIGEST_EDGE_VALIDATION.json",
+    "DIGEST_LIFETIME_PROOF.json"
+  ],
+  "cannot_share": [
+    {
+      "banks": [
+        "value[0]",
+        "value[3]"
+      ],
+      "reason": "R and public root are consumed together by SLH and XMSS message digest hashing."
+    },
+    {
+      "banks": [
+        "result[255:0]",
+        "node_value"
+      ],
+      "reason": "Parent hashes require retained left and right nodes simultaneously. Also XMSS MASK0/MASK1 keep both alive across internal requests."
+    },
+    {
+      "banks": [
+        "emit_value",
+        "node_value"
+      ],
+      "reason": "Verify parent setup needs the input authentication node and current subtree node simultaneously."
+    },
+    {
+      "banks": [
+        "fors_digest_tail",
+        "transient result[319:256]"
+      ],
+      "reason": "FORS target bits must persist through all FORS trees while scalar result is overwritten by each hash."
+    },
+    {
+      "banks": [
+        "tree stack",
+        "authentication path"
+      ],
+      "reason": "Complete recomputation keeps both live until authentication output; already separate regions in the shared workspace."
+    },
+    {
+      "banks": [
+        "signature cache",
+        "endpoints/workspace"
+      ],
+      "reason": "Earlier output signature nodes remain live while later tree calculations overwrite workspace."
+    }
+  ],
+  "optional_followups": [
+    {
+      "item": "task_recipe/step immutable ROM descriptor latches",
+      "potential": "Could retain a 5-bit descriptor ID and hold ROM read address through HASH_ISSUE/HASH_WAIT to remove a 64-bit copy. Would lengthen ROM-to-formatter combinational path, require address/ready equivalence tests, and should be a separate timing-aware candidate."
+    },
+    {
+      "item": "pipe_chain_index width",
+      "potential": "Valid chains are 0..66; seven bits suffice for each slot, saving PIPELINE FF. No full node-bank removal; low-priority versus measured digest sharing."
+    }
+  ]
+}

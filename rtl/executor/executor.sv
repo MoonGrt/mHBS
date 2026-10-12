@@ -7,29 +7,23 @@ module executor #(
 ) (
 `ifndef SYNTHESIS
     output logic [15:0] error_code,
-    output wire [63:0] hash_count, permutation_count,
     output logic [63:0] cycles,
+    output wire [63:0] hash_count, permutation_count,
 `endif
-    input wire [63:0] image_header, profile_descriptor,
-    output wire [3:0] program_address,
-    output wire [3:0] template_address,
-    input wire [63:0] program_data, template_data,
-    input wire [3:0] job_entry,
-    output wire [9:0] descriptor_addresses,
-    input wire [127:0] descriptor_data,
     input wire clk, rst,
-    input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
-    input wire [6:0] job_message_length,
+    input wire [63:0] image_header, profile_descriptor,
+    output wire [3:0] program_address, input wire [63:0] program_data,
+    output wire [3:0] template_address, input wire [63:0] template_data,
+    output wire [9:0] descriptor_addresses, input wire [127:0] descriptor_data,
+    input wire [3:0] job_entry, input wire [1:0] job_operation,
+    input wire job_valid, output wire job_ready, input wire [6:0] job_message_length,
     input wire [31:0] job_index, input wire [127:0] job_identifier,
-    input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
-    input wire message_valid, output wire message_ready,
-    input wire [63:0] message_data,
+    input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_public_root, job_randomizer,
+    input wire message_valid, output wire message_ready, input wire [63:0] message_data,
     input wire verify_valid, output wire verify_ready,
-    input wire [255:0] verify_data,
-    output logic verify_pass,
+    input wire [255:0] verify_data, output logic verify_pass,
     output wire out_valid, output wire [255:0] out_data,
-    output wire [5:0] out_bytes,
-    output wire busy, output logic done, error
+    output wire [5:0] out_bytes, output wire busy, output logic done, error
 );
 // verilog_format: on
     localparam integer N = 32, W = 256, V = 392, INDEX_BITS = 8, MAX_MESSAGE_BYTES = 87;
@@ -51,43 +45,41 @@ module executor #(
     wire [3:0] chain_max = 4'd15;
     wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
         : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
-    wire [3:0] HP=small_signature ? (profile_code[1] ? 4'd8 : 4'd9)
-        : profile_code[1] ? 4'd4 : 4'd3;
     wire [7:0] LEN1 = {1'b0, node_bytes, 1'b0};
-    wire [63:0] descriptors[0:7];
     // Two reads are sufficient: request recipe plus chain-step recipe.
     // Macro and tree/chain descriptors are already latched in setup states.
-    assign descriptors[0] = descriptor_data[63:0];
-    assign descriptors[1] = descriptor_data[127:64];
-    assign descriptors[2] = 64'd0;
-    assign descriptors[3] = descriptor_data[63:0];
-    assign descriptors[4] = descriptor_data[63:0];
-    assign descriptors[5] = descriptor_data[127:64];
-    assign descriptors[6] = descriptor_data[63:0];
-    assign descriptors[7] = descriptor_data[63:0];
     typedef enum logic [6:0] {
         IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
         TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
-        CHAIN_OUTPUT0=10,
-        CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
+        CHAIN_OUTPUT0=10, CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
         PUSH_NODE, PARENT_SETUP, PARENT_DONE, AUTH_OUTPUT, TREE_FINISH,
         HASH_ISSUE, HASH_WAIT, HASH_RESULT, ROUTE, TRANSFORM,
         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
         VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
-        // Keep retired enum positions stable for historical cycle observers.
-        // P1 uses LT_SETUP/LT_STORE/LT_NEXT for scalar L-tree reduction.
-        // SF_REDUCED/LT_PIPE_ADVANCE remain retired.
-        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
-        LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM,
-        PIPE_VERIFY_INPUT, LT_PIPE_INIT,LT_PIPE_ISSUE,LT_PIPE_WAIT,LT_PIPE_ADVANCE,
-        FORS_PICK,FORS_AUTH0,FORS_BEGIN,FORS_LEFT,FORS_RIGHT,FORS_ISSUE,FORS_WAIT,FORS_LEVEL,FORS_AUTH1,FORS_PUSH,
-        FORS_LEAF_NEXT,FORS_ROOT_NEXT,PUSH_STACK
+        // Explicit gaps preserve active state encodings used by cycle observers.
+        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE_NEXT=42,
+        LT_SETUP=44, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_LEAF=50, SF_LEAF_DONE, SF_RANDOM,
+        PIPE_VERIFY_INPUT, LT_PIPE_INIT, LT_PIPE_ISSUE, LT_PIPE_WAIT,
+        FORS_PICK=58, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_ISSUE=63, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
+        FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
     } state_t;
-    state_t state, hash_return, output_return;
+    state_t state, continuation;
     task automatic enter_state(input state_t next_state);
         begin
             state <= next_state;
+            // Decode the destination on the transition edge, before these
+            // shared phase controls fan out through the recipe formatter.
+            // IDLE membership is empty, so the reset transition clears all four.
+            pipe_mode <= PIPELINE > 1 && (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
+                next_state == PIPE_VERIFY_INPUT || next_state == LT_PIPE_ISSUE ||
+                next_state == LT_PIPE_WAIT || next_state == FORS_LEFT ||
+                next_state == FORS_ISSUE || next_state == FORS_WAIT);
+            fors_pipe <= PIPELINE > 1 && (next_state == FORS_LEFT ||
+                next_state == FORS_ISSUE || next_state == FORS_WAIT);
+            lt_pipe <= PIPELINE > 1 && (next_state == LT_PIPE_ISSUE || next_state == LT_PIPE_WAIT);
+            fors_leaves <= PIPELINE > 1 && indexing == 1 && !verifying &&
+                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT);
         end
     endtask
     // Abort outstanding execution on an error. The autonomous wrapper halts
@@ -98,7 +90,8 @@ module executor #(
     wire execution_rst = rst || abort_execution;
     logic [1:0] operation;
     wire verifying = operation == 2;
-    state_t verify_return;
+    // Hash, output and Verify transfers are serialized. Their continuation
+    // is consumed before another transfer starts, so one register is enough.
     // Boot loader owns immutable Job registers for this reset epoch.
     wire [255:0] secret_seed = job_secret_seed, secret_prf = job_secret_prf;
     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
@@ -113,10 +106,15 @@ module executor #(
     logic [7:0] lt_count, lt_cursor;
     logic [3:0] lt_level;
     localparam integer FORS_BATCH = 4 * ((PIPELINE + 3) / 4);
-    localparam integer FORS_SCRATCH = 112;
+    // FORS runs before WOTS. Its at most 35 roots use 0..34, so
+    // the 24-node microgroup scratch can reuse dead endpoints 36..59.
+    // Tree-stack/auth data remain independently live in 68..107.
+    localparam integer FORS_SCRATCH = 36, WORKSPACE_DEPTH = 128;
     logic fors_level, fors_roots_pending;
     logic [4:0] fors_total, fors_offset, fors_root_cursor;
     logic [20:0] fors_base;
+    logic [9:0] fors_digest_offset;
+    logic [13:0] fors_target_prefetch;
     wire fors_target_group = target >= fors_base && target < fors_base + 21'(fors_total);
     wire fors_target_wave=fors_target_group && target>=fors_base+21'(fors_offset)
         && target<fors_base+21'(fors_offset)+21'(PIPELINE);
@@ -128,7 +126,7 @@ module executor #(
     logic [4:0] macro_desc, macro_route;
     logic [63:0] saved_descriptor, saved_chain_descriptor;
     wire [63:0] descriptor = saved_descriptor;
-    wire [63:0] route_descriptor = descriptors[1];
+    wire [63:0] route_descriptor = descriptor_data[127:64];
 
     logic seq_start, seq_complete;
     wire seq_ready, seq_done, cmd_valid;
@@ -141,7 +139,7 @@ module executor #(
     );
     // verilog_format: on
 
-    logic [4:0] chain_id, parent_id;
+    logic [4:0] parent_id;
     wire [63:0] chain_descriptor = saved_chain_descriptor;
     logic standalone_chain;
     logic [4:0] tree_height, node_level, auth_level;
@@ -155,6 +153,8 @@ module executor #(
     logic pipe_rolling;
     logic [PIPE_BATCH-1:0] pipe_active;
     logic [7:0] pipe_next_chain, pipe_completed;
+    logic [INDEX_BITS-1:0] batch_chain_prefetch;
+    logic [4:0] batch_digit_prefetch;
     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
     logic [TAG_BITS-1:0] roll_slot;
     wire [PIPE_BATCH-1:0] roll_free=~pipe_active | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0);
@@ -171,10 +171,7 @@ module executor #(
     // Stateful endpoint batches use the same single write port as SLH WOTS.
     // Sign-only and verification batches retain their CHAIN_STORE path.
     wire pipe_direct = PIPELINE > 1 && indexing != 1 && (stateful ? (!verifying && !sign_only) : operation == 1);
-    wire fors_pipe = PIPELINE > 1 && (state == FORS_LEFT || state == FORS_ISSUE || state == FORS_WAIT);
-    wire fors_leaves = PIPELINE > 1 && indexing == 1 && !verifying && (state == PIPE_ISSUE || state == PIPE_WAIT);
-    wire lt_pipe = PIPELINE > 1 && (state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT);
-    wire pipe_mode=PIPELINE>1 && (state==PIPE_ISSUE || state==PIPE_WAIT || state==PIPE_VERIFY_INPUT || lt_pipe || fors_pipe);
+    logic fors_pipe, fors_leaves, lt_pipe, pipe_mode;
     wire pipe_ready, pipe_valid, pipe_selected;
     wire lt_batch_complete =
         ((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1) << pipe_tag) : '0)) &
@@ -212,11 +209,28 @@ module executor #(
     logic [4:0] task_steps, task_capture_after;
     logic [19:0] task_leaf;
     logic [INDEX_BITS-1:0] task_a;
-    logic [31:0] task_b;
+    // Every supported address fits 21 bits: LMS leaves are 2^h+q,
+    // h<=20; FORS uses a six-bit group and at most a fourteen-bit leaf.
+    // Extend at the recipe boundary rather than carrying eleven dead bits.
+    logic [20:0] task_b;
+    wire [19:0] fors_tree_base = {14'd0, group_index} << FORS_A;
+    wire [20:0] fors_chain_address = {1'b0, fors_tree_base}
+        + (verifying ? target : leaf_cursor);
+    wire [4:0] parent_level = node_level + 5'd1;
+    wire [20:0] parent_index = node_index >> 1;
+    wire [20:0] parent_address = parent_index
+        + (indexing == 1 ? ({1'b0, fors_tree_base} >> parent_level)
+           : indexing == 2 ? (21'd1 << (tree_height - parent_level)) : 21'd0);
+    wire [20:0] batch_address = fors_pipe
+        ? ({1'b0, fors_tree_base} >> (fors_level ? 2 : 1))
+          + (fors_base >> (fors_level ? 2 : 1))
+          + 21'(fors_offset) + 21'(pipe_issue_slot)
+        : lt_pipe ? 21'(lt_cursor >> 1) + 21'(pipe_issue_slot)
+        : indexing == 1 ? {1'b0, fors_tree_base} + batch_leaf_index : 21'd0;
     // Parent operands stay unchanged until the successful parent response
     // is consumed. Other recipes do not consume the right input, so no
     // duplicate parent-right register is needed.
-    wire [255:0] parent_right = verifying && hash_return==PARENT_DONE && !node_index[0] ? emit_value : node_value;
+    wire [255:0] parent_right = verifying && continuation==PARENT_DONE && !node_index[0] ? emit_value : node_value;
     // A scalar input is dead when its result arrives. Parent setup loads
     // the left operand into result; LMS leaves and Verify chains already
     // have their input there. The right node remains independently live.
@@ -224,7 +238,7 @@ module executor #(
     wire lane_ready, lane_valid, lane_error;
     wire [V-1:0] lane_value;
     wire [255:0] lane_capture;
-    wire [INDEX_BITS-1:0] lane_list0, lane_list1, lane_list_next;
+    wire [INDEX_BITS-1:0] lane_list_next;
 `ifndef SYNTHESIS
     wire [63:0] lane_hashes, lane_permutations;
     logic [63:0] hash_base, permutation_base;
@@ -255,17 +269,18 @@ module executor #(
     // WOTS completions, FORS roots and in-place L-tree reduction.
     wire root_write = state == ROUTE && macro_route != 0 && route_descriptor[53];
     // verilog_format: off
-    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS)) endpoints (
+    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS)) endpoints (
         .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
         .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
     );
     // verilog_format: on
-    wire [INDEX_BITS-1:0] batch_chain_index=pipe_rolling ? pipe_next_chain : chain_cursor+INDEX_BITS'(pipe_issue_slot);
+    wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
     assign pipe_selected=PIPELINE>1 && (state==PIPE_ISSUE || state==LT_PIPE_ISSUE || state==FORS_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid))
         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
     // verilog_format: off
-    recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+    recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
+        .UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
         .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe)) lane (
 `ifndef SYNTHESIS
         .hash_count(lane_hashes),
@@ -275,17 +290,17 @@ module executor #(
         .clk,.rst(execution_rst),.node_bytes,
         .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
         .batch_request_tag(issue_slot),
-        .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-digit(batch_chain_index)
-        : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? digit(batch_chain_index) : chain_descriptor[19:15]),
+        .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-batch_digit_prefetch
+        : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? batch_digit_prefetch : chain_descriptor[19:15]),
         .batch_family(stateful ? (xmss ? 2'd1 : 2'd2) : 2'd0),
-        .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(digit(batch_chain_index)) : 4'd0),
+        .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(batch_digit_prefetch) : 4'd0),
         .batch_initial_value(fors_pipe || lt_pipe ? endpoint_value0 : verify_data),
         .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(endpoint_value1),
-        .batch_capture_after(indexing==1 ? 5'd0 : digit(batch_chain_index)),
+        .batch_capture_after(indexing==1 ? 5'd0 : batch_digit_prefetch),
         .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
         .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
         .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
-        .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(fors_base)>>(fors_level ? 2 : 1))+32'(fors_offset)+32'(pipe_issue_slot) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
+        .batch_b({11'd0, batch_address}),
         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
         .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT)),.batch_response_tag(pipe_tag),
         .batch_response_digest(),.batch_response_capture(),
@@ -303,10 +318,9 @@ module executor #(
         .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
         .identifier(job_identifier),.message_buffer,.message_length,
         .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
-        .request_a(task_a),.request_b(task_b),.request_left(result[W-1:0]),.request_right(parent_right),
-        .list_index0(lane_list0),.list_index1(lane_list1),.list_next_index0(lane_list_next),
-        .list_data0(endpoint_value0),
-        .list_data1(endpoint_value1),
+        .request_a(task_a),.request_b({11'd0, task_b}),.request_left(result[W-1:0]),.request_right(parent_right),
+        .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
+        .list_data0(endpoint_value0),.list_data1(endpoint_value1),
         .response_valid(lane_valid),.response_ready(state==HASH_WAIT),
         .response_value(lane_value),.response_capture(lane_capture),.error(lane_error)
     );
@@ -324,7 +338,7 @@ module executor #(
     logic [  5:0] emit_length;
     logic [  7:0] emit_base;
     logic [3:0] emit_count, emit_cursor;
-    wire [63:0] emit_descriptor = descriptors[3];
+    wire [63:0] emit_descriptor = descriptor_data[63:0];
     // One node per valid cycle, low byte first. The receiver uses done to
     // delimit the job and out_bytes to discard unused high bytes.
     assign out_valid = state == OUTPUT_CHUNK;
@@ -355,6 +369,10 @@ module executor #(
             end
         end
     endfunction
+    // Checksum and scalar setup retain their shared selector. Batch requests
+    // use the next chain/digit prepared on the preceding acceptance edge.
+    wire [7:0] digit_index = state == TRANSFORM ? transform_index : chain_cursor;
+    wire [4:0] shared_digit = digit(digit_index);
     wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
     wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
     genvar fb;
@@ -363,17 +381,20 @@ module executor #(
             assign fors_bitstream[fb] = fors_digest[(fb/8)*8+7-(fb%8)];
         end
     endgenerate
-    function automatic [13:0] fors_target(input [5:0] group_number);
-        reg [ 9:0] offset;
-        reg [13:0] segment;
+    function automatic [9:0] fors_group_offset(input [5:0] group_number);
         begin
             case (FORS_A)
-                6: offset = ({group_number, 2'b0} + {group_number, 1'b0});
-                8: offset = {group_number, 3'b0};
-                9: offset = ({group_number, 3'b0} + group_number);
-                12: offset = ({group_number, 3'b0} + {group_number, 2'b0});
-                default: offset = ({group_number, 4'b0} - {group_number, 1'b0});
+                6: fors_group_offset = ({group_number, 2'b0} + {group_number, 1'b0});
+                8: fors_group_offset = {group_number, 3'b0};
+                9: fors_group_offset = ({group_number, 3'b0} + group_number);
+                12: fors_group_offset = ({group_number, 3'b0} + {group_number, 2'b0});
+                default: fors_group_offset = ({group_number, 4'b0} - {group_number, 1'b0});
             endcase
+        end
+    endfunction
+    function automatic [13:0] fors_target(input [9:0] offset);
+        reg [13:0] segment;
+        begin
             segment = fors_bitstream >> offset;
             // verilog_format: off
             case (FORS_A)
@@ -443,7 +464,7 @@ module executor #(
         begin
             emit_value <= v;
             emit_length <= length;
-            output_return <= ret;
+            continuation <= ret;
             enter_state(OUTPUT_CHUNK);
         end
     endtask
@@ -453,6 +474,8 @@ module executor #(
         begin
             if (chain_cursor + PIPELINE < endpoint_count) begin
                 chain_cursor <= chain_cursor + PIPELINE;
+                batch_chain_prefetch <= chain_cursor + INDEX_BITS'(PIPELINE);
+                batch_digit_prefetch <= digit(chain_cursor + INDEX_BITS'(PIPELINE));
                 pipe_pair <= 0;
                 pipe_issue_slot <= 0;
                 pipe_done_mask <= 0;
@@ -468,13 +491,13 @@ module executor #(
     task automatic start_hash(input [63:0] selected_recipe, input state_t ret);
         begin
             task_recipe <= selected_recipe;
-            hash_return <= ret;
+            continuation <= ret;
             enter_state(HASH_ISSUE);
         end
     endtask
     task automatic read_verify_node(input state_t ret);
         begin
-            verify_return <= ret;
+            continuation <= ret;
             enter_state(VERIFY_INPUT);
         end
     endtask
@@ -555,7 +578,8 @@ module executor #(
                     address <= INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
             end
             assign endpoint_read0 = address;
-            assign endpoint_read1 = address == 135 ? 8'd134 : address + 1'b1;
+            assign endpoint_read1 = address == INDEX_BITS'(WORKSPACE_DEPTH - 1)
+                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : address + 1'b1;
         end
     endgenerate
 
@@ -567,15 +591,54 @@ module executor #(
     wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
     wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_level<tree_height && !node_index[0] && !verifying;
 `ifndef SYNTHESIS
+    initial begin : workspace_capacity
+        if (FORS_BATCH > 24 || FORS_SCRATCH <= 35 ||
+            FORS_SCRATCH + FORS_BATCH > STACK_BASE || AUTH_BASE + 20 > WORKSPACE_DEPTH)
+            $fatal(1, "workspace regions exceed preserved algorithm capacities");
+    end
     always @(posedge clk)
         if (!execution_rst) begin
-            if (endpoint_write && endpoint_address >= 136)
+            if (endpoint_write && endpoint_address >= WORKSPACE_DEPTH)
                 $fatal(1, "workspace write out of range");
-            if (endpoint_read0 >= 136 || endpoint_read1 >= 136)
+            if (endpoint_read0 >= WORKSPACE_DEPTH || endpoint_read1 >= WORKSPACE_DEPTH)
                 $fatal(1, "workspace read out of range");
             if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
                 if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
         end
+    // Every state transition prepares these flags on the same edge.
+    always @(posedge clk) begin : phase_control_equivalence
+        if (!rst) begin
+            if (fors_pipe !== (PIPELINE > 1 &&
+                (state == FORS_LEFT || state == FORS_ISSUE || state == FORS_WAIT)))
+                $fatal(1, "registered FORS phase differs from execution state");
+            if (fors_leaves !== (PIPELINE > 1 && indexing == 1 && !verifying &&
+                (state == PIPE_ISSUE || state == PIPE_WAIT)))
+                $fatal(1, "registered FORS leaf phase differs from execution state");
+            if (lt_pipe !== (PIPELINE > 1 &&
+                (state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT)))
+                $fatal(1, "registered L-tree phase differs from execution state");
+            if (pipe_mode !== (PIPELINE > 1 &&
+                (state == PIPE_ISSUE || state == PIPE_WAIT || state == PIPE_VERIFY_INPUT ||
+                 state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
+                 state == FORS_ISSUE || state == FORS_WAIT)))
+                $fatal(1, "registered batch mode differs from execution state");
+        end
+    end
+    // Check prepared metadata at acceptance, including rolling reuse and stalls.
+    always @(posedge clk) begin : batch_prefetch_equivalence
+        if (!execution_rst && state == TREE_INIT && !stateful && descriptor[37:36] == 1)
+            if (fors_target_prefetch !== fors_target(fors_group_offset(group_index)))
+                $fatal(1, "prefetched FORS target differs at tree initialization");
+        if (!execution_rst && PIPELINE > 1 && pipe_selected && pipe_ready &&
+            !fors_pipe && !lt_pipe && indexing != 1) begin
+            if (batch_chain_index !== (pipe_rolling ? pipe_next_chain :
+                chain_cursor + INDEX_BITS'(pipe_issue_slot)))
+                $fatal(1, "prefetched chain index differs at acceptance");
+            if (batch_digit_prefetch !== digit(pipe_rolling ? pipe_next_chain :
+                chain_cursor + INDEX_BITS'(pipe_issue_slot)))
+                $fatal(1, "prefetched WOTS digit differs at acceptance");
+        end
+    end
 `endif
 
     reg [255:0] emit_source;
@@ -614,7 +677,7 @@ module executor #(
                 diagnostic_reason = 16'h300a;
             HASH_WAIT: if (lane_valid && lane_error) diagnostic_reason = 16'h3007;
             TRANSFORM: if (descriptor[59:56] != 1 && descriptor[59:56] != 2) diagnostic_reason = 16'h3006;
-            12,16,24,6,8,9,AUTH_OUTPUT,CHAIN_NEXT,CHAIN_OUTPUT0,CHAIN_STORE,
+            TREE_INIT,AUTH_OUTPUT,CHAIN_NEXT,CHAIN_OUTPUT0,CHAIN_STORE,
             DRAIN,EMIT,EMIT_NEXT,FAILED,FETCH,FINISH,
             FORS_AUTH0,FORS_AUTH1,FORS_BEGIN,FORS_ISSUE,FORS_LEAF_NEXT,FORS_LEFT,FORS_LEVEL,FORS_PICK,FORS_PUSH,FORS_ROOT_NEXT,FORS_WAIT,
             HASH_ISSUE,HASH_RESULT,LAUNCH,LEAF_SETUP,LOAD_DESCRIPTOR,
@@ -664,7 +727,7 @@ module executor #(
             scalar_tree <= 0;
             scalar_leaf <= 0;
             verify_pass <= 0;
-            verify_return <= IDLE;
+            continuation <= IDLE;
             macro_op <= 0;
             macro_desc <= 0;
             macro_route <= 0;
@@ -685,6 +748,8 @@ module executor #(
             fors_level <= 0;
             fors_roots_pending <= 0;
             fors_base <= 0;
+            fors_digest_offset <= 0;
+            fors_target_prefetch <= 0;
             pipe_cache_valid <= 0;
             pipe_batch_used <= 0;
             pipe_pair <= 0;
@@ -693,6 +758,8 @@ module executor #(
             pipe_active <= 0;
             pipe_next_chain <= 0;
             pipe_completed <= 0;
+            batch_chain_prefetch <= 0;
+            batch_digit_prefetch <= 0;
             pipe_done_mask <= 0;
             pipe_expected_mask <= 0;
 
@@ -790,10 +857,15 @@ module executor #(
                     end
                 end
                 LOAD_DESCRIPTOR: begin
-                    saved_descriptor <= descriptors[0];
+                    saved_descriptor <= descriptor_data[63:0];
+                    // Group coordinates already settled in FETCH. Split the
+                    // offset arithmetic from the digest selector using these
+                    // existing descriptor/decode cycles; TREE_INIT never waits.
+                    fors_digest_offset <= fors_group_offset(group_index);
                     enter_state(DECODE);
                 end
                 DECODE: begin
+                    fors_target_prefetch <= fors_target(fors_digest_offset);
                     case (macro_op)
                         1: begin
                             task_leaf <= scalar_leaf;
@@ -808,7 +880,6 @@ module executor #(
                             else start_hash(saved_descriptor, HASH_RESULT);
                         end
                         2: begin
-                            chain_id <= macro_desc;
                             standalone_chain <= 1;
                             indexing <= 0;
                             leaf_cursor <= stateful ? job_index[19:0] : 0;
@@ -839,21 +910,19 @@ module executor #(
                     fors_roots_pending <= 0;
                     pipe_cache_valid <= 0;
                     pipe_batch_used <= 0;
-                    saved_chain_descriptor <= descriptors[6];
+                    saved_chain_descriptor <= descriptor_data[63:0];
 
-                    chain_id <= descriptor[59:52];
                     parent_id <= descriptor[51:44];
                     tree_height <= {descriptor[39], descriptor[43:40]};
                     indexing <= descriptor[33:32];
                     standalone_chain <= 0;
-                    target<=stateful ? {1'b0,job_index[19:0]} : descriptor[37:36]==1 ? fors_target(
-                        group_index
-                    ) : scalar_leaf;
+                    target<=stateful ? {1'b0,job_index[19:0]} : descriptor[37:36]==1 ?
+                        {7'd0,fors_target_prefetch} : {1'b0,scalar_leaf};
                     leaf_cursor <= verifying ? scalar_leaf : 0;
                     chain_cursor <= 0;
                     node_level <= 0;
                     auth_level <= 0;
-                    endpoint_count <= descriptors[6][27:20];
+                    endpoint_count <= descriptor_data[27:20];
                     if (stateful && verifying) begin
                         node_value <= value[2];
                         node_index <= job_index[19:0];
@@ -861,6 +930,10 @@ module executor #(
                     end else enter_state(CHAIN_SETUP);
                 end
                 CHAIN_SETUP: begin
+                    // This setup edge already precedes every new chain batch.
+                    // The prefetched index and digit remain stable on stalls.
+                    batch_chain_prefetch <= chain_cursor;
+                    batch_digit_prefetch <= digit(chain_cursor);
                     if(endpoint_count==0 || endpoint_count>67 || (!standalone_chain && (tree_height>20 || (indexing==1 && tree_height<2))))
                         fail();
                     else begin
@@ -886,23 +959,20 @@ module executor #(
                                 pipe_done_mask <= 0;
                                 for (integer q = 0; q < PIPE_BATCH; q = q + 1)
                                 pipe_expected_mask[q] <= 32'(chain_cursor) + q < endpoint_count;
-                                pipe_seed_domain <= descriptors[4][55:48];
-                                pipe_step_domain <= descriptors[5][55:48];
+                                pipe_seed_domain <= descriptor_data[55:48];
+                                pipe_step_domain <= descriptor_data[119:112];
                                 enter_state(verifying ? PIPE_VERIFY_INPUT : PIPE_ISSUE);
                             end
                         end else if (verifying) begin
                             task_chain <= 0;
                             task_capture <= 0;
-                            task_step <= descriptors[5];
-
+                            task_step <= descriptor_data[127:64];
                             task_steps <= 0;
                             task_leaf <= scalar_leaf;
                             task_a <= indexing == 1 ? 0 : chain_cursor;
-                            task_b <= indexing == 1 ? (group_index << FORS_A) + target : digit(
-                                chain_cursor
-                            );
+                            task_b <= indexing == 1 ? fors_chain_address : 21'(shared_digit);
                             read_verify_node(VERIFY_CHAIN_INPUT);
-                        end else if(!stateful && PIPELINE>1 && descriptors[4][59:56]==1 && descriptors[5][59:56]==2)begin
+                        end else if(!stateful && PIPELINE>1 && descriptor_data[59:56]==1 && descriptor_data[123:120]==2)begin
                             if (pipe_cache_valid) begin
                                 pipe_pair <= pipe_pair + 1'b1;
                                 enter_state(PIPE_LOAD);
@@ -913,29 +983,32 @@ module executor #(
                                 for (integer q = 0; q < PIPE_BATCH; q = q + 1)
                                 pipe_expected_mask[q]<=indexing==1 ? (q<FORS_BATCH && 32'(leaf_cursor)+q < (32'd1<<tree_height))
                                     : (32'(chain_cursor)+q < endpoint_count);
-                                pipe_seed_domain <= descriptors[4][55:48];
-                                pipe_step_domain <= descriptors[5][55:48];
+                                pipe_seed_domain <= descriptor_data[55:48];
+                                pipe_step_domain <= descriptor_data[119:112];
                                 enter_state(PIPE_ISSUE);
                             end
                         end else begin
                             pipe_batch_used <= 0;
                             task_chain <= 1;
-                            task_step <= descriptors[5];
+                            task_step <= descriptor_data[127:64];
 
                             task_capture<=(indexing==1 ? leaf_cursor==target : leaf_cursor==target) && macro_flags[0];
                             task_leaf <= indexing == 1 ? scalar_leaf : leaf_cursor;
                             task_a <= indexing == 1 ? 0 : chain_cursor;
-                            task_b <= indexing == 1 ? (group_index << FORS_A) + leaf_cursor : 0;
+                            task_b <= indexing == 1 ? fors_chain_address : 21'd0;
                             task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target))
-                            ? digit(
-                                chain_cursor
-                            ) : chain_descriptor[19:15];
-                            task_capture_after <= indexing == 1 ? 0 : digit(chain_cursor);
-                            start_hash(descriptors[4], CHAIN_STORE);
+                            ? shared_digit : chain_descriptor[19:15];
+                            task_capture_after <= indexing == 1 ? 0 : shared_digit;
+                            start_hash(descriptor_data[63:0], CHAIN_STORE);
                         end
                     end
                 end
                 PIPE_ISSUE: begin
+                    if ((pipe_rolling && pipe_selected && pipe_ready) ||
+                        (!pipe_rolling && (!pipe_expected_mask[pipe_issue_slot] || pipe_ready))) begin
+                        batch_chain_prefetch <= batch_chain_index + 1'b1;
+                        batch_digit_prefetch <= digit(batch_chain_index + INDEX_BITS'(1));
+                    end
                     if (pipe_rolling) begin
                         if (pipe_valid && pipe_completed + 1 >= endpoint_count) begin
                             pipe_rolling <= 0;
@@ -953,6 +1026,8 @@ module executor #(
                 end
                 PIPE_VERIFY_INPUT:
                 if (verify_valid && pipe_ready) begin
+                    batch_chain_prefetch <= batch_chain_index + 1'b1;
+                    batch_digit_prefetch <= digit(batch_chain_index + INDEX_BITS'(1));
                     if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)
                         enter_state(PIPE_WAIT);
                     else pipe_issue_slot <= pipe_issue_slot + 1'b1;
@@ -1113,7 +1188,7 @@ module executor #(
                     task_leaf <= leaf_cursor;
                     task_a <= 0;
                     task_b <= 0;
-                    start_hash(descriptors[4], stateful ? SF_LEAF : LEAF_SETUP);
+                    start_hash(descriptor_data[63:0], stateful ? SF_LEAF : LEAF_SETUP);
                 end
                 LT_PIPE_INIT: begin
                     pipe_rolling <= 0;
@@ -1122,8 +1197,8 @@ module executor #(
                     else begin
                         pipe_issue_slot  <= 0;
                         pipe_done_mask   <= 0;
-                        pipe_seed_domain <= descriptors[4][55:48];
-                        pipe_step_domain <= descriptors[4][55:48];
+                        pipe_seed_domain <= descriptor_data[55:48];
+                        pipe_step_domain <= descriptor_data[55:48];
                         for (integer q = 0; q < PIPE_BATCH; q++)
                         pipe_expected_mask[q] <= 32'(lt_cursor) + 2 * q + 1 < lt_count;
                         enter_state(LT_PIPE_ISSUE);
@@ -1160,10 +1235,10 @@ module executor #(
                     task_steps <= 0;
                     task_leaf <= leaf_cursor;
                     task_a <= {4'd0, lt_level};
-                    task_b <= 32'(lt_cursor >> 1);
+                    task_b <= 21'(lt_cursor >> 1);
                     result <= {{(V - W) {1'b0}}, endpoint_value0};
                     node_value <= endpoint_value1;
-                    start_hash(descriptors[4], LT_STORE);
+                    start_hash(descriptor_data[63:0], LT_STORE);
                 end else fail();
                 LT_STORE: if (PIPELINE == 1) enter_state(LT_NEXT);
                 else fail();
@@ -1196,8 +1271,8 @@ module executor #(
                     task_steps <= 0;
                     task_leaf <= leaf_cursor;
                     task_a <= 0;
-                    task_b <= (32'd1 << stateful_height) + 32'(leaf_cursor);
-                    start_hash(descriptors[0], SF_LEAF_DONE);
+                    task_b <= (21'd1 << stateful_height) + leaf_cursor;
+                    start_hash(descriptor_data[63:0], SF_LEAF_DONE);
                 end
                 SF_LEAF_DONE: begin
                     node_value <= result[W-1:0];
@@ -1253,11 +1328,10 @@ module executor #(
                         task_capture <= 0;
                         task_steps <= 0;
                         task_leaf <= indexing == 1 ? scalar_leaf : 0;
-                        task_a <= descriptors[7][59:56] == 8 ? node_level : node_level + 1'b1;
-                        task_b<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
-                            : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
+                        task_a <= descriptor_data[59:56] == 8 ? node_level : node_level + 1'b1;
+                        task_b <= parent_address;
                         result[W-1:0]<=verifying ? (node_index[0] ? emit_value : node_value) : endpoint_value0;
-                        start_hash(descriptors[4], PARENT_DONE);
+                        start_hash(descriptor_data[63:0], PARENT_DONE);
                     end
                 end
                 PARENT_DONE: begin
@@ -1281,7 +1355,7 @@ module executor #(
                 if (lane_valid) begin
                     result <= lane_value;
                     if (lane_error) fail();
-                    else enter_state(hash_return);
+                    else enter_state(continuation);
                 end
                 HASH_RESULT: route_result(ROUTE_HASH);
                 ROUTE: begin
@@ -1308,7 +1382,7 @@ module executor #(
                         scalar_tree <= scalar_tree >> descriptor[43:40];
                         complete_macro();
                     end else if (descriptor[59:56] == 1) begin
-                        checksum <= checksum + chain_max - digit(transform_index);
+                        checksum <= checksum + chain_max - shared_digit;
                         if (transform_index + 1 == LEN1) complete_macro();
                         else transform_index <= transform_index + 1'b1;
                     end else fail();
@@ -1325,7 +1399,7 @@ module executor #(
                 VERIFY_INPUT:
                 if (verify_valid) begin
                     emit_value <= verify_data;
-                    enter_state(verify_return);
+                    enter_state(continuation);
                 end
                 VERIFY_RANDOM: route_result(ROUTE_EMIT);
                 VERIFY_CHAIN_INPUT: begin
@@ -1337,19 +1411,19 @@ module executor #(
                 VERIFY_CHAIN_RUN: begin
                     if (!verify_step_needed) begin
                         enter_state(CHAIN_STORE);
-                    end else start_hash(descriptors[0], VERIFY_CHAIN_ADVANCE);
+                    end else start_hash(descriptor_data[63:0], VERIFY_CHAIN_ADVANCE);
                 end
                 VERIFY_CHAIN_ADVANCE: begin
-                    task_b <= {28'd0, task_b[3:0] + 4'd1};
+                    task_b <= {17'd0, task_b[3:0] + 4'd1};
                     enter_state(VERIFY_CHAIN_RUN);
                 end
                 OUTPUT_CHUNK: begin
-                    if (pipe_direct && output_return == PIPE_CAPTURE_NEXT) begin
+                    if (pipe_direct && continuation == PIPE_CAPTURE_NEXT) begin
                         if (pipe_pair < PIPELINE && (pipe_expected_mask >> pipe_pair) != 0) begin
                             emit_value <= pipe_read_capture;
                             pipe_pair  <= pipe_pair + 1'b1;
                         end else advance_direct_batch();
-                    end else enter_state(output_return);
+                    end else enter_state(continuation);
                 end
                 DRAIN: enter_state(FINISH);
                 FINISH: begin

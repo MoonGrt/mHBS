@@ -1,0 +1,288 @@
+--- baseline/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -45,8 +45,6 @@
+     wire [3:0] chain_max = 4'd15;
+     wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
+         : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
+-    wire [3:0] HP=small_signature ? (profile_code[1] ? 4'd8 : 4'd9)
+-        : profile_code[1] ? 4'd4 : 4'd3;
+     wire [7:0] LEN1 = {1'b0, node_bytes, 1'b0};
+     // Two reads are sufficient: request recipe plus chain-step recipe.
+     // Macro and tree/chain descriptors are already latched in setup states.
+@@ -59,13 +57,11 @@
+         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
+         VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
+         VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
+-        // Keep retired enum positions stable for historical cycle observers.
+-        // P1 uses LT_SETUP/LT_STORE/LT_NEXT for scalar L-tree reduction.
+-        // SF_REDUCED/LT_PIPE_ADVANCE remain retired.
+-        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE, PIPE_CAPTURE_NEXT, PIPE_ADVANCE,
+-        LT_SETUP, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_REDUCED, SF_LEAF, SF_LEAF_DONE, SF_RANDOM,
+-        PIPE_VERIFY_INPUT, LT_PIPE_INIT, LT_PIPE_ISSUE, LT_PIPE_WAIT, LT_PIPE_ADVANCE,
+-        FORS_PICK, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_RIGHT, FORS_ISSUE, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
++        // Explicit gaps preserve active state encodings used by cycle observers.
++        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE_NEXT=42,
++        LT_SETUP=44, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_LEAF=50, SF_LEAF_DONE, SF_RANDOM,
++        PIPE_VERIFY_INPUT, LT_PIPE_INIT, LT_PIPE_ISSUE, LT_PIPE_WAIT,
++        FORS_PICK=58, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_ISSUE=63, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
+         FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
+     } state_t;
+     state_t state, continuation;
+@@ -129,7 +125,7 @@
+     );
+     // verilog_format: on
+ 
+-    logic [4:0] chain_id, parent_id;
++    logic [4:0] parent_id;
+     wire [63:0] chain_descriptor = saved_chain_descriptor;
+     logic standalone_chain;
+     logic [4:0] tree_height, node_level, auth_level;
+@@ -212,7 +208,7 @@
+     wire lane_ready, lane_valid, lane_error;
+     wire [V-1:0] lane_value;
+     wire [255:0] lane_capture;
+-    wire [INDEX_BITS-1:0] lane_list0, lane_list1, lane_list_next;
++    wire [INDEX_BITS-1:0] lane_list_next;
+ `ifndef SYNTHESIS
+     wire [63:0] lane_hashes, lane_permutations;
+     logic [63:0] hash_base, permutation_base;
+@@ -293,7 +289,7 @@
+         .identifier(job_identifier),.message_buffer,.message_length,
+         .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
+         .request_a(task_a),.request_b(task_b),.request_left(result[W-1:0]),.request_right(parent_right),
+-        .list_index0(lane_list0),.list_index1(lane_list1),.list_next_index0(lane_list_next),
++        .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
+         .list_data0(endpoint_value0),.list_data1(endpoint_value1),
+         .response_valid(lane_valid),.response_ready(state==HASH_WAIT),
+         .response_value(lane_value),.response_capture(lane_capture),.error(lane_error)
+@@ -613,7 +609,7 @@
+                 diagnostic_reason = 16'h300a;
+             HASH_WAIT: if (lane_valid && lane_error) diagnostic_reason = 16'h3007;
+             TRANSFORM: if (descriptor[59:56] != 1 && descriptor[59:56] != 2) diagnostic_reason = 16'h3006;
+-            12,16,24,6,8,9,AUTH_OUTPUT,CHAIN_NEXT,CHAIN_OUTPUT0,CHAIN_STORE,
++            TREE_INIT,AUTH_OUTPUT,CHAIN_NEXT,CHAIN_OUTPUT0,CHAIN_STORE,
+             DRAIN,EMIT,EMIT_NEXT,FAILED,FETCH,FINISH,
+             FORS_AUTH0,FORS_AUTH1,FORS_BEGIN,FORS_ISSUE,FORS_LEAF_NEXT,FORS_LEFT,FORS_LEVEL,FORS_PICK,FORS_PUSH,FORS_ROOT_NEXT,FORS_WAIT,
+             HASH_ISSUE,HASH_RESULT,LAUNCH,LEAF_SETUP,LOAD_DESCRIPTOR,
+@@ -807,7 +803,6 @@
+                             else start_hash(saved_descriptor, HASH_RESULT);
+                         end
+                         2: begin
+-                            chain_id <= macro_desc;
+                             standalone_chain <= 1;
+                             indexing <= 0;
+                             leaf_cursor <= stateful ? job_index[19:0] : 0;
+@@ -840,7 +835,6 @@
+                     pipe_batch_used <= 0;
+                     saved_chain_descriptor <= descriptor_data[63:0];
+ 
+-                    chain_id <= descriptor[59:52];
+                     parent_id <= descriptor[51:44];
+                     tree_height <= {descriptor[39], descriptor[43:40]};
+                     indexing <= descriptor[33:32];
+--- baseline/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1128,8 +1128,6 @@
+                 wire ctx_response_ready = scalar_bridge ? state == FIXED_WAIT && response_ready :
+                     batch_response_ready;
+                 logic [TAG_BITS-1:0] ctx_response_tag;
+-                wire [255:0] ctx_response_digest;
+-                wire [255:0] ctx_response_capture;
+                 wire ctx_perm_valid;
+                 wire ctx_perm_ready = batch_perm_ready;
+                 wire [1599:0] ctx_perm_state;
+@@ -1352,11 +1350,6 @@
+                     if (complete[j]) ctx_response_tag = TAG_BITS'(j);
+                     if (response_held) ctx_response_tag = held_tag;
+                 end
+-                assign ctx_response_digest = initial_pending[ctx_response_tag] ?
+-                    key_value[ctx_response_tag] : digest[ctx_response_tag];
+-                assign ctx_response_capture = captured_valid[ctx_response_tag] ?
+-                    (capture_initial[ctx_response_tag] ? key_value[ctx_response_tag] :
+-                     captured[ctx_response_tag]) : 256'd0;
+                 // A KEY return always feeds MASK immediately, so feedback priority excludes
+                 // accepting an initial value on the same edge. Each bank has one write port.
+                 wire key_return = ctx_perm_done && phase[t][2];
+@@ -1507,7 +1500,7 @@
+                 end
+ `endif
+             end
+-            // Direct Keccak datapath and absorb/chain control.
++            // Shared P>1 Keccak datapath and streaming absorb control.
+ 
+             logic [1:0] hash_state;
+             logic first_block, running_last;
+@@ -1517,60 +1510,33 @@
+             logic [1599:0] sponge_state;
+             wire [1599:0] advanced_state;
+             wire round_complete, round_update;
+-            logic p1_busy;
+-            logic [4:0] permutation_round;
+-            wire p1_done = p1_busy && permutation_round + UNROLL >= 24;
+-            always_ff @(posedge clk) begin
+-                if (rst) p1_busy <= 0;
+-                else if (PIPELINE == 1) begin
+-                    if (batch_perm_valid && batch_perm_ready) p1_busy <= 1;
+-                    else if (p1_done) p1_busy <= 0;
+-                end
+-            end
+-            // Fixed and streaming permutations are mutually exclusive. A new fixed
+-            // block takes priority over the finishing round so feedback can relaunch
+-            // on the same edge; the last stream beat starts its permutation at zero.
+-            always_ff @(posedge clk) begin
+-                if (rst) permutation_round <= 0;
+-                else if (PIPELINE == 1) begin
+-                    if (batch_perm_valid && batch_perm_ready) permutation_round <= 0;
+-                    else if (hash_state == HASH_WAIT_BLOCK && staged_valid && append_index == 8)
+-                        permutation_round <= 0;
+-                    else if ((p1_busy && !p1_done) || (hash_state == HASH_RUN && !round_complete))
+-                        permutation_round <= permutation_round + 5'(UNROLL);
+-                end
+-            end
+-            // One P-stage datapath for both serial and interleaved execution. P1
+-            // writes its sole state through the sponge word enables, without launch
+-            // or return bubbles. P>1 carries valid/round/tag through the same stages.
++            // Fixed requests and streaming permutations share the P-stage datapath.
++            // P1's iterative datapath lives only in scalar_execution.
+             localparam integer ROUNDS = UNROLL * PIPELINE;
+             logic [1599:0] state_reg[0:PIPELINE-1];
+             logic [PIPELINE-1:0] stage_valid;
+             logic [4:0] stage_base[0:PIPELINE-1];
+             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
+             logic sent;
+-            wire recycle = PIPELINE > 1 && stage_valid[PIPELINE-1] &&
++            wire recycle = stage_valid[PIPELINE-1] &&
+                 stage_base[PIPELINE-1] + ROUNDS < 24;
+             wire ready = !rst && !recycle;
+-            wire finished = PIPELINE > 1 && !rst && stage_valid[PIPELINE-1] && !recycle;
++            wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+             wire normal_valid = hash_state == HASH_RUN && !sent;
+             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+             wire [1599:0] issue_state = engine_mode ? batch_perm_state : sponge_state;
+             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+-            wire [1599:0] stage_result[0:PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+                 wire [4:0] start_round;
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = PIPELINE == 1 ? sponge_state :
+-                        recycle ? state_reg[PIPELINE-1] : issue_state;
+-                    assign start_round = PIPELINE == 1 ? permutation_round :
+-                        recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
++                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
++                    assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
+-                    assign source_valid = PIPELINE > 1 && (recycle || issue_valid);
++                    assign source_valid = recycle || issue_valid;
+                 end else begin : following_stage
+                     assign rounds[0] = state_reg[s-1];
+                     assign start_round = stage_base[s-1];
+@@ -1583,16 +1549,10 @@
+                         .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
+                     // verilog_format: on
+                 end
+-                assign stage_result[s] = rounds[UNROLL];
+                 for (genvar w = 0; w < 25; w = w + 1) begin : words
+                     always_ff @(posedge clk)
+                         if (!rst) begin
+-                            if (PIPELINE == 1 && engine_mode) begin
+-                                if (batch_perm_valid && batch_perm_ready)
+-                                    state_reg[s][64*w+:64] <= batch_perm_state[64*w+:64];
+-                                else if (p1_busy)
+-                                    state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
+-                            end else if ((PIPELINE == 1 || (SHARED_STATE && s == PIPELINE - 1)) &&
++                            if ((SHARED_STATE && s == PIPELINE - 1) &&
+                                          state_write_enable[w])
+                                 state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
+                             else if (source_valid)
+@@ -1610,16 +1570,14 @@
+                     end
+                 end
+             end
+-            assign
+-                batch_perm_ready = engine_mode && (PIPELINE == 1 ? (!p1_busy || p1_done) : ready);
+-            assign batch_perm_done = engine_mode && (PIPELINE == 1 ? p1_done : finished);
+-            assign batch_perm_digest = PIPELINE > 1 ? finished_state : stage_result[0];
+-            assign batch_perm_result_tag = PIPELINE > 1 ? stage_tag[PIPELINE-1] : '0;
+-            if (PIPELINE == 1 || SHARED_STATE) assign sponge_state = finished_state;
+-            assign advanced_state = PIPELINE == 1 ? stage_result[0] : finished_state;
+-            assign round_complete = PIPELINE == 1 ? permutation_round + UNROLL >= 24 :
+-                !engine_mode && finished;
+-            assign round_update = hash_state == HASH_RUN && (PIPELINE == 1 || round_complete);
++            assign batch_perm_ready = engine_mode && ready;
++            assign batch_perm_done = engine_mode && finished;
++            assign batch_perm_digest = finished_state;
++            assign batch_perm_result_tag = stage_tag[PIPELINE-1];
++            if (SHARED_STATE) assign sponge_state = finished_state;
++            assign advanced_state = finished_state;
++            assign round_complete = !engine_mode && finished;
++            assign round_update = hash_state == HASH_RUN && round_complete;
+             always_ff @(posedge clk) begin
+                 if (rst) sent <= 0;
+                 else if (!engine_mode) begin
+@@ -1629,7 +1587,7 @@
+             end
+ `ifndef SYNTHESIS
+             always @(posedge clk)
+-                if (!rst && PIPELINE > 1 && SHARED_STATE && |state_write_enable)
++                if (!rst && SHARED_STATE && |state_write_enable)
+                     if (|(stage_valid & ~(finished ?
+                                           PIPELINE'(1 << (PIPELINE - 1)) : {PIPELINE{1'b0}})))
+                         $fatal(1, "sponge write while pipeline occupied");
+@@ -1674,7 +1632,7 @@
+             for (word_index = 0; word_index < 25; word_index = word_index + 1) begin : state_words
+                 wire select_stream = word_index < 17 && take_stream &&
+                     append_index == word_index / 2;
+-                wire [63:0] round_or_clear = (clear_stream || (SHARED_STATE && PIPELINE > 1)) ?
++                wire [63:0] round_or_clear = (clear_stream || SHARED_STATE) ?
+                     64'd0 : advanced_state[word_index*64+:64];
+                 wire [63:0] absorb_word = word_index % 2 == 0 ? absorbed_block[63:0] :
+                     absorbed_block[127:64];
+@@ -1684,9 +1642,9 @@
+                 // A completed permutation already resides in the shared register.
+                 // Only absorption, initialization or a new chain block needs a write.
+                 assign state_write_enable[word_index] = !rst &&
+-                    ((!(SHARED_STATE && PIPELINE > 1) && round_update) || select_stream ||
++                    ((!SHARED_STATE && round_update) || select_stream ||
+                      clear_stream);
+-                if (!SHARED_STATE && PIPELINE > 1) begin : private_state
++                if (!SHARED_STATE) begin : private_state
+                     always_ff @(posedge clk)
+                         if (state_write_enable[word_index])
+                             sponge_state[word_index*64+:64] <= next_word;
+--- baseline/scripts/run_pu_sign_matrix.py
++++ candidate/scripts/run_pu_sign_matrix.py
+@@ -338,7 +338,7 @@
+                                            start_new_session=True)
+                 self.update(key, 'running', pid=process.pid)
+                 try:
+-                    code = process.wait(timeout=self.meta.get('synthesis_skip_seconds',1200))
++                    code = process.wait(timeout=self.meta.get('synthesis_skip_seconds',600))
+                 except subprocess.TimeoutExpired:
+                     self.update(key, 'running', analysis_deferred=True,
+                                 reason='综合继续后台运行；当前分析不等待异常耗时配置')
+@@ -439,8 +439,8 @@
+     parser.add_argument('--configs', nargs='+', metavar='PxUy',
+                         help='Restrict measurement to these P/U points; default is the 14-point matrix')
+     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
+-                        dest='synth_skip_seconds', type=int, default=1200,
+-                        help='After 20 minutes defer analysis; synthesis keeps running')
++                        dest='synth_skip_seconds', type=int, default=600,
++                        help='After 10 minutes defer analysis; synthesis keeps running')
+     args = parser.parse_args()
+     if args.configs:
+         if not args.launch:
+--- baseline/scripts/synthesize.sh
++++ candidate/scripts/synthesize.sh
+@@ -17,7 +17,7 @@
+ if [[ $lut6 == 0 ]]; then work+=_generic; fi
+ mkdir -p "$work"
+ echo "Synthesize common core P${p}U${u}; log: $work/vivado.log"
+-defer_seconds=${SYNTH_DEFER_SECONDS:-${SYNTH_SKIP_SECONDS:-1200}}
++defer_seconds=${SYNTH_DEFER_SECONDS:-${SYNTH_SKIP_SECONDS:-600}}
+ [[ $defer_seconds =~ ^[1-9][0-9]*$ ]] || { echo 'SYNTH_DEFER_SECONDS must be positive.' >&2; exit 2; }
+ status=0
+ setsid "$vivado_bin" -mode batch -nolog -nojournal -source scripts/synth.tcl \

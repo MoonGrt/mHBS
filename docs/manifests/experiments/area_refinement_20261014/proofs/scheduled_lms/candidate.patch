@@ -1,0 +1,29 @@
+--- B/rtl/hash/recipe.sv
++++ D/rtl/hash/recipe.sv
+@@ -1422,8 +1422,6 @@
+                                     identifier
+                                 };
+                             end
+-                            f1 = block_value;
+-                            f2 = block_right;
+                         end
+                         data = 0;
+                         case (node_bytes)
+@@ -1465,14 +1463,14 @@
+                                 end
+                                 2: begin
+                                     data[183:0]   = prefix;
+-                                    data[439:184] = f1;
++                                    data[439:184] = block_value;
+                                     data[447:440] = 8'h1f;
+                                 end
+                                 3: begin
+                                     data[175:0]   = prefix[175:0];
+-                                    data[431:176] = f1;
++                                    data[431:176] = block_value;
+                                     if (two) begin
+-                                        data[687:432] = f2;
++                                        data[687:432] = block_right;
+                                         data[695:688] = 8'h1f;
+                                     end else data[439:432] = 8'h1f;
+                                 end

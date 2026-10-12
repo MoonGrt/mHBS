@@ -1,0 +1,60 @@
+{
+  "experiment": "timing_focus_20261015_1200",
+  "started_at": "2026-10-15T12:01:29+08:00",
+  "baseline_run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_101848",
+  "baseline_route": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_route_matrix/20261015_120539",
+  "user_authorized_routing": false,
+  "stages": [
+    {
+      "name": "01_physical_read_addresses",
+      "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_120435",
+      "description": "在原有端点地址准备拍登记奇偶物理RAM读址，读数据按逻辑顺序重排；无新增节点缓存或执行拍。",
+      "route_after_validation": false
+    },
+    {
+      "name": "02_control_and_valid",
+      "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_120712",
+      "description": "叠加FORS偏移/目标分拍预计算、批次链索引与digit预取，并移除中间Keccak级宽数据保持使能。末级保留sponge/结果及流式吸收保持；valid/tag/轮次/接口不变。空泡期间中间级翻转可能增加，当前未测动态功耗。",
+      "route": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_route_matrix/20261015_121039",
+      "route_before_extended_validation": true,
+      "route_gate": "Twelve complete byte/cycle/workload Sign checks passed before launch; extended controls passed later",
+      "route_after_validation": false
+    },
+    {
+      "name": "03_ram_output_boundary",
+      "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_121328",
+      "route_after_validation": false,
+      "description": "保留组合候选的预计算与中间级使能简化；将逻辑节点顺序选择放回RAM模块边界，物理地址仍提前登记。测试是否减少层次边界改变导致的格式化逻辑复制；不增加接口或周期。",
+      "automatic_routing_status": "归因候选；P1面积+7%、P12综合WNS回退，未启动布线"
+    },
+    {
+      "name": "04_control_only",
+      "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_121959",
+      "route_after_validation": false,
+      "required_validation": [
+        "CONTROL_ONLY_FULL_VALIDATION",
+        "CONTROL_ONLY_STALL_VALIDATION"
+      ],
+      "description": "撤回全部物理RAM地址实验（value及端点读址恢复原基线），保留FORS分拍预计算、链索引/digit预取和Keccak中间级去保持使能。无P/U特化；与01/02/03逐步对照，以实测布线频率和ATP取舍。",
+      "automatic_routing_status": "launched",
+      "route_before_extended_validation": false,
+      "route": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_route_matrix/20261015_130642"
+    },
+    {
+      "name": "05_registered_phase",
+      "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_sign_matrix/20261015_123235",
+      "route_after_validation": false,
+      "route_before_extended_validation": false,
+      "required_validation": [
+        "PHASE_FULL_VALIDATION",
+        "PHASE_STALL_VALIDATION"
+      ],
+      "description": "在04上将batch/FORS/L-tree阶段标志与原状态转移同拍登记，移除state多项译码到固定块格式化和首轮Keccak的串联。只增加四个窄控制位，P1自然裁剪；无新数据缓存或周期，逐拍断言核对原表达式。",
+      "automatic_routing_status": "cancelled_by_user_before_launch"
+    }
+  ],
+  "started_at_basis": "Frozen baseline manifest creation time",
+  "vivado_headroom": 1,
+  "status": "stopped_by_user",
+  "stopped_at": "2026-10-15T15:00:58+08:00"
+}

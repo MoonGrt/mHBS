@@ -1,0 +1,119 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -85,7 +85,12 @@
+     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
+     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
+     logic [6:0] message_length, message_received;
+-    logic [W-1:0] value[0:3];
++    // Standard ROM lifetimes permit FORS slot 1 and WOTS slot 2 to share.
++    // Physical slots 0/1/2 represent logical R/(FORS or WOTS)/public root.
++    // Preserve the indexed array write form used by the original register bank.
++    logic [W-1:0] value[0:2];
++    wire [1:0] route_value_slot = route_descriptor[57:56] == 0 ? 2'd0
++        : route_descriptor[57:56] == 3 ? 2'd2 : 2'd1;
+     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+@@ -238,7 +243,7 @@
+     logic [1:0] route_source;
+     wire [V-1:0] route_value = route_source==ROUTE_HASH ? result
+         : {{(V-W){1'b0}}, (route_source==ROUTE_NODE ? node_value
+-                        : route_source==ROUTE_SAVED ? value[3] : emit_value)};
++                        : route_source==ROUTE_SAVED ? value[2] : emit_value)};
+     // Captures remain stable until CHAIN_OUTPUT0 consumes them.
+ `ifndef SYNTHESIS
+     wire [63:0] total_hashes = lane_hashes + pipe_hashes;
+@@ -301,7 +306,7 @@
+         .request_chain(task_chain), .request_steps(task_steps),
+         .request_capture_after(task_capture_after),
+         .request_capture(task_capture),
+-        .secret_seed,.secret_prf,.public_seed,.root(value[3][W-1:0]),
++        .secret_seed,.secret_prf,.public_seed,.root(value[2][W-1:0]),
+         .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
+         .identifier(job_identifier),.message_buffer,.message_length,
+         .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
+@@ -345,7 +350,7 @@
+             checksum_index = index - LEN1;
+             digit = 0;
+             if (index < LEN1) begin
+-                digit = {1'b0, value[2][{(index[5:0]^6'd1), 2'b0}+:4]};
++                digit = {1'b0, value[1][{(index[5:0]^6'd1), 2'b0}+:4]};
+             end else begin
+                 case (checksum_index)
+                     0: digit = {1'b0, checksum[11:8]};
+@@ -596,7 +601,7 @@
+             0: emit_source = secret_seed;
+             1: emit_source = secret_prf;
+             2: emit_source = public_seed;
+-            3: emit_source = value[3][W-1:0];
++            3: emit_source = value[2][W-1:0];
+             4: emit_source = xmss ? value[0] : randomizer;
+             5: emit_source = {128'd0, job_identifier};
+             6: emit_source = {224'd0, be32(job_index)};
+@@ -756,7 +761,7 @@
+                     layer <= 0;
+                     group_index <= 0;
+ 
+-                    value[3] <= job_public_root;
++                    value[2] <= job_public_root;
+                     if (!valid_profile) fail();
+                     else if (decoded_stateful && job_index >= (32'd1 << decoded_height)) fail();
+                     else if (job_operation) begin
+@@ -781,9 +786,9 @@
+                 FETCH: begin
+                     if (seq_done) begin
+                         if (verifying) begin
+-                            verify_pass <= value[2][127:0]==job_public_root[127:0]
+-                                    && (node_bytes==16 || value[2][191:128]==job_public_root[191:128])
+-                                    && (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
++                            verify_pass <= value[1][127:0]==job_public_root[127:0]
++                                    && (node_bytes==16 || value[1][191:128]==job_public_root[191:128])
++                                    && (node_bytes!=32 || value[1][255:192]==job_public_root[255:192]);
+                             enter_state(DRAIN);
+                         end else enter_state(DRAIN);
+                     end else if (cmd_valid) begin
+@@ -865,7 +870,7 @@
+                     auth_level <= 0;
+                     endpoint_count <= descriptor_data[27:20];
+                     if (stateful && verifying) begin
+-                        node_value <= value[2];
++                        node_value <= value[1];
+                         node_index <= job_index[19:0];
+                         enter_state(PUSH_NODE);
+                     end else enter_state(CHAIN_SETUP);
+@@ -1187,7 +1192,7 @@
+                 LT_FINISH: begin
+                     node_value <= endpoint_value0;
+                     if (verifying && standalone_chain) begin
+-                        value[2] <= endpoint_value0;
++                        value[1] <= endpoint_value0;
+                         complete_macro();
+                     end else begin
+                         node_index <= leaf_cursor;
+@@ -1207,7 +1212,7 @@
+                 SF_LEAF_DONE: begin
+                     node_value <= result[W-1:0];
+                     if (verifying && standalone_chain) begin
+-                        value[2] <= result[W-1:0];
++                        value[1] <= result[W-1:0];
+                         complete_macro();
+                     end else begin
+                         node_index <= leaf_cursor;
+@@ -1277,7 +1282,7 @@
+                     end else enter_state(TREE_FINISH);
+                 end
+                 TREE_FINISH: begin
+-                    if (stateful && verifying) value[2] <= node_value;
++                    if (stateful && verifying) value[1] <= node_value;
+                     route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
+                 end
+                 HASH_ISSUE: if (lane_ready) enter_state(HASH_WAIT);
+@@ -1292,7 +1297,7 @@
+                     if (macro_route == 0) complete_macro();
+                     else begin
+                         if (!route_descriptor[53]) begin
+-                            value[route_descriptor[57:56]] <= route_value[W-1:0];
++                            value[route_value_slot] <= route_value[W-1:0];
+                             if (route_descriptor[57:56] == 1)
+                                 fors_digest_tail <= route_value[FORS_DIGEST_BITS-1:W];
+                         end

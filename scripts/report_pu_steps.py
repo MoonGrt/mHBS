@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Archive isolated P4 step evidence alongside the measured common matrix."""
-import argparse,csv,hashlib,json,re,sys
+import argparse,hashlib,json,re,sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from scripts.run_pu_sign_matrix import utilization
@@ -23,11 +23,8 @@ for name in ('macro','generic'):
 new=[r for r in matrix['results'] if r['configuration']=='P4U1'];r=new[0];record('shared_workspace',{k:r['common_'+k] for k in ('lut','ff','bram36','dsp','equivalent_slice')},new,a.matrix/'SOURCE.json',matrix['tasks']['synth/P4U1/common']['seconds'])
 data=dict(schema='mhbs.pu_generic.steps.v1',steps=steps,scope='P4U1 isolated steps; all final matrix configurations share one RTL',profile=str(run/'profile/profile.json'))
 (run/'steps.json').write_text(json.dumps(data,indent=2)+'\n')
-with (run/'steps.csv').open('w',newline='') as f:
- writer=csv.DictWriter(f,fieldnames=('stage','lut','ff','bram36','dsp','equivalent_slice',*profiles,'synthesis_seconds'));writer.writeheader()
- for r in steps:writer.writerow(dict(stage=r['stage'],**r['area'],**r['cycles'],synthesis_seconds=r['synthesis_seconds']))
 manifest={}
 for f in run.rglob('*'):
- if f.is_file() and f.suffix in ('.json','.csv','.log','.rpt','.tcl') and '/source/build/' not in str(f) and 'obj/' not in str(f):manifest[str(f.relative_to(run))]=hashlib.sha256(f.read_bytes()).hexdigest()
+ if f.is_file() and f.suffix in ('.json','.log','.rpt','.tcl') and '/source/build/' not in str(f) and 'obj/' not in str(f):manifest[str(f.relative_to(run))]=hashlib.sha256(f.read_bytes()).hexdigest()
 (run/'EVIDENCE.json').write_text(json.dumps({'sha256':manifest,'supplemental_validation_inputs':str((a.matrix/'source/VALIDATION_INPUTS.json').resolve())},indent=2)+'\n')
 print(json.dumps(steps,indent=2))

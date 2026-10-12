@@ -1,0 +1,122 @@
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 994e36b..9b2aab4 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -62,8 +62,7 @@ module executor #(
+     typedef enum logic [6:0] {
+         IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
+         TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
+-        CHAIN_OUTPUT0=10,
+-        CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
++        CHAIN_OUTPUT0=10, CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
+         PUSH_NODE, PARENT_SETUP, PARENT_DONE, AUTH_OUTPUT, TREE_FINISH,
+         HASH_ISSUE, HASH_WAIT, HASH_RESULT, ROUTE, TRANSFORM,
+         EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
+@@ -78,7 +77,7 @@ module executor #(
+         FORS_PICK, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_RIGHT, FORS_ISSUE, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
+         FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
+     } state_t;
+-    state_t state, hash_return, output_return;
++    state_t state, continuation;
+     task automatic enter_state(input state_t next_state);
+         begin
+             state <= next_state;
+@@ -92,7 +91,8 @@ module executor #(
+     wire execution_rst = rst || abort_execution;
+     logic [1:0] operation;
+     wire verifying = operation == 2;
+-    state_t verify_return;
++    // Hash, output and Verify transfers are serialized. Their continuation
++    // is consumed before another transfer starts, so one register is enough.
+     // Boot loader owns immutable Job registers for this reset epoch.
+     wire [255:0] secret_seed = job_secret_seed, secret_prf = job_secret_prf;
+     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
+@@ -213,7 +213,7 @@ module executor #(
+     // Parent operands stay unchanged until the successful parent response
+     // is consumed. Other recipes do not consume the right input, so no
+     // duplicate parent-right register is needed.
+-    wire [255:0] parent_right = verifying && hash_return==PARENT_DONE && !node_index[0] ? emit_value : node_value;
++    wire [255:0] parent_right = verifying && continuation==PARENT_DONE && !node_index[0] ? emit_value : node_value;
+     // A scalar input is dead when its result arrives. Parent setup loads
+     // the left operand into result; LMS leaves and Verify chains already
+     // have their input there. The right node remains independently live.
+@@ -445,7 +445,7 @@ module executor #(
+         begin
+             emit_value <= v;
+             emit_length <= length;
+-            output_return <= ret;
++            continuation <= ret;
+             enter_state(OUTPUT_CHUNK);
+         end
+     endtask
+@@ -470,13 +470,13 @@ module executor #(
+     task automatic start_hash(input [63:0] selected_recipe, input state_t ret);
+         begin
+             task_recipe <= selected_recipe;
+-            hash_return <= ret;
++            continuation <= ret;
+             enter_state(HASH_ISSUE);
+         end
+     endtask
+     task automatic read_verify_node(input state_t ret);
+         begin
+-            verify_return <= ret;
++            continuation <= ret;
+             enter_state(VERIFY_INPUT);
+         end
+     endtask
+@@ -672,7 +672,7 @@ module executor #(
+             scalar_tree <= 0;
+             scalar_leaf <= 0;
+             verify_pass <= 0;
+-            verify_return <= IDLE;
++            continuation <= IDLE;
+             macro_op <= 0;
+             macro_desc <= 0;
+             macro_route <= 0;
+@@ -1285,7 +1285,7 @@ module executor #(
+                 if (lane_valid) begin
+                     result <= lane_value;
+                     if (lane_error) fail();
+-                    else enter_state(hash_return);
++                    else enter_state(continuation);
+                 end
+                 HASH_RESULT: route_result(ROUTE_HASH);
+                 ROUTE: begin
+@@ -1329,7 +1329,7 @@ module executor #(
+                 VERIFY_INPUT:
+                 if (verify_valid) begin
+                     emit_value <= verify_data;
+-                    enter_state(verify_return);
++                    enter_state(continuation);
+                 end
+                 VERIFY_RANDOM: route_result(ROUTE_EMIT);
+                 VERIFY_CHAIN_INPUT: begin
+@@ -1348,12 +1348,12 @@ module executor #(
+                     enter_state(VERIFY_CHAIN_RUN);
+                 end
+                 OUTPUT_CHUNK: begin
+-                    if (pipe_direct && output_return == PIPE_CAPTURE_NEXT) begin
++                    if (pipe_direct && continuation == PIPE_CAPTURE_NEXT) begin
+                         if (pipe_pair < PIPELINE && (pipe_expected_mask >> pipe_pair) != 0) begin
+                             emit_value <= pipe_read_capture;
+                             pipe_pair  <= pipe_pair + 1'b1;
+                         end else advance_direct_batch();
+-                    end else enter_state(output_return);
++                    end else enter_state(continuation);
+                 end
+                 DRAIN: enter_state(FINISH);
+                 FINISH: begin
+diff --git a/scripts/profile_p4.py b/scripts/profile_p4.py
+index f643dc9..61a1a77 100644
+--- a/scripts/profile_p4.py
++++ b/scripts/profile_p4.py
+@@ -18,7 +18,7 @@ INSTRUMENT = r'''
+  end
+  always @(posedge clk)if(!rst && dut.core.state!=0 && dut.core.state!=32)begin
+   states[dut.core.state]++;
+-  if(dut.core.state==23)begin returns[dut.core.hash_return]++;recipes[dut.core.task_recipe[59:56]]++;end
++  if(dut.core.state==23)begin returns[dut.core.continuation]++;recipes[dut.core.task_recipe[59:56]]++;end
+   if(dut.core.pipe_mode)live[$countones(dut.core.lane.stage_valid)]++;
+  end
+  final begin

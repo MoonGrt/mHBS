@@ -1,0 +1,33 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -89,8 +89,8 @@
+     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+-    logic [11:0] checksum;
+-    logic [7:0] transform_index;
++    logic [9:0] checksum;
++    logic [6:0] transform_index;
+     logic [7:0] lt_count, lt_cursor;
+     logic [3:0] lt_level;
+     localparam integer FORS_BATCH = 4 * ((PIPELINE + 3) / 4);
+@@ -138,8 +138,8 @@
+     logic pipe_cache_valid, pipe_batch_used;
+     logic pipe_rolling;
+     logic [PIPE_BATCH-1:0] pipe_active;
+-    logic [7:0] pipe_next_chain, pipe_completed;
+-    logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
++    logic [6:0] pipe_next_chain, pipe_completed;
++    logic [6:0] pipe_chain_index[0:PIPE_BATCH-1];
+     logic [TAG_BITS-1:0] roll_slot;
+     wire [PIPE_BATCH-1:0] roll_free=~pipe_active | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0);
+     always_comb begin
+@@ -348,7 +348,7 @@
+                 digit = {1'b0, value[2][{(index[5:0]^6'd1), 2'b0}+:4]};
+             end else begin
+                 case (checksum_index)
+-                    0: digit = {1'b0, checksum[11:8]};
++                    0: digit = {3'b0, checksum[9:8]};
+                     1: digit = {1'b0, checksum[7:4]};
+                     2: digit = {1'b0, checksum[3:0]};
+                     default: digit = 0;

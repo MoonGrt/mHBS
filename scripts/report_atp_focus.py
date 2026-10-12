@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 """Compare frozen common-area / Sign runs without mixing RTL candidates."""
 import argparse
-import csv
 import hashlib
-import io
 import json
 from pathlib import Path
+import re
 from experiment_archive import archive_run, canonical_report
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIGS = ('P12U1', 'P4U1', 'P1U1')
 PROFILES = ('slh_128f', 'xmss_h10', 'lms_h10')
+
+
+def rtl_tokens(path):
+    """Ignore layout/comments while preserving identifiers and quoted strings."""
+    pattern = r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|[A-Za-z_$][\w$]*|\\\S+|\d+|\S'
+    return [token for token in re.findall(pattern, path.read_text(), re.S)
+            if not token.startswith(('//', '/*'))]
 
 
 def read_run(stamp):
@@ -89,25 +95,22 @@ def main():
     source_hashes = {p: hashlib.sha256((source / p).read_bytes()).hexdigest() for p in files}
     matches_worktree = all(hashlib.sha256((ROOT / p).read_bytes()).hexdigest() == h
                           for p, h in source_hashes.items())
+    matches_tokens = all(rtl_tokens(ROOT / p) == rtl_tokens(source / p) for p in files)
     data = dict(baseline_run=args.baseline, candidate_run=args.candidate,
                 complete=complete, measured_best_targets_improved=accepted,
                 all_points_area_cycles_atp_improved=all_points_improved, best=best,
                 candidate_matches_worktree=matches_worktree,
+                candidate_matches_worktree_tokens=matches_tokens,
                 candidate_source_sha256=source_hashes,
                 baseline_source_manifest=baseline['source_manifest'],
                 candidate_source_manifest=candidate['source_manifest'],
                 validation=validation, routed_sta=False, rows=rows, experiments=experiments)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.with_suffix('.json').write_text(json.dumps(data, indent=2) + '\n')
-    output = io.StringIO(newline='')
-    writer = csv.DictWriter(output, fieldnames=list(rows[0]), lineterminator='\n')
-    writer.writeheader()
-    writer.writerows(rows)
-    args.output.with_suffix('.csv').write_text(output.getvalue())
     lines = ['# P12U1 / P4U1 / P1U1 Sign 面积、周期与 ATP 优化', '',
              f'基线 `{args.baseline}`；候选 `{args.candidate}`。'
              f'三点九项完成：{complete}；三个算法最佳ATP均下降：{accepted}；'
-             f'工作区RTL与候选源码逐文件一致：{matches_worktree}。', '',
+             f'工作区RTL与候选源码字节一致：{matches_worktree}；词法一致：{matches_tokens}。', '',
              '基线为所列冻结源码对应的综合和实测结果，候选使用自身源码对应的面积与周期。'
              '每个P/U共用一个完整标准算法common核，三种算法按Job互斥执行。'
              '节点、认证路径、签名输出及Hash/置换工作量保持一致，未增加Hash lane或按P/U特化。', '',

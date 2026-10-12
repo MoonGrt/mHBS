@@ -1,0 +1,30 @@
+{
+  "title": "链计数与校验和实际范围压缩",
+  "candidate_sha256": "fce986b0b7ab5e68cb2d1c7e46c159426e2c160e4afbaae2f75837c46cd05be8",
+  "changed_declarations": {
+    "logic [11:0] checksum;": "logic [9:0] checksum;",
+    "logic [7:0] transform_index;": "logic [6:0] transform_index;",
+    "logic [7:0] pipe_next_chain, pipe_completed;": "logic [6:0] pipe_next_chain, pipe_completed;",
+    "logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];": "logic [6:0] pipe_chain_index[0:PIPE_BATCH-1];",
+    "digit = {1'b0, checksum[11:8]};": "digit = {3'b0, checksum[9:8]};"
+  },
+  "invariants": [
+    "CHAIN_SETUP keeps 8-bit endpoint_count and rejects zero or values above67 before rolling",
+    "pipe_next_chain/pipe_completed are reset and only increase up to accepted endpoint_count<=67",
+    "slot chain indices are issued before pipe_next_chain reaches endpoint_count",
+    "TRANSFORM reads 32/48/64 message digits; index is always0..63 and checksum<=15*64=960"
+  ],
+  "scope": "All supported standard profiles and accepted chain counts 1..67; external widths/error checks retained; no state/handshake/cycle change",
+  "risks": [
+    "Range proof must match actual consumers and reset/replay; register-width reduction need not lower area"
+  ],
+  "frozen_candidate_binding": {
+    "source_manifest": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/area10_20261014/round07_bounded_counters/candidate/build/pu_sign_matrix/20261014_215718/SOURCE.json",
+    "source_manifest_sha256": "dd5da3f3d32820432868aacaf042f5f2a4d9e522cbce021cfe4a2abbeebe9306",
+    "file": "rtl/executor/executor.sv",
+    "candidate_sha256": "fce986b0b7ab5e68cb2d1c7e46c159426e2c160e4afbaae2f75837c46cd05be8",
+    "local_input_sha256": "fce986b0b7ab5e68cb2d1c7e46c159426e2c160e4afbaae2f75837c46cd05be8",
+    "local_input_matches_frozen_candidate": true,
+    "original_proof_sha256": "32342a0bbc3a7c50ca064aaf2a06a4ebde3cceef77ceed52a98fc069601f8ecb"
+  }
+}

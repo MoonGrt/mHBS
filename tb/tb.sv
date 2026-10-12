@@ -2,6 +2,14 @@
 // Runtime Job/ROM common-core harness, including the production signature store.
 module tb;
  parameter integer UNROLL=1,PIPELINE=1;
+`ifdef MHBS_TRACE_VCD
+ string vcd_path;
+ initial begin
+  if(!$value$plusargs("VCD=%s",vcd_path))$fatal(1,"VCD path required for traced simulation");
+  $dumpfile(vcd_path);
+  $dumpvars(0,tb);
+ end
+`endif
 `ifdef SYNTHESIS
  localparam bit DEBUG_STATS=0;
 `else

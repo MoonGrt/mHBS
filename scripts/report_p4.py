@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Rebuild the P4 comparison from archived reports; fail acceptance closed."""
 import argparse
-import csv
 import hashlib
 import json
 from pathlib import Path
@@ -64,9 +63,6 @@ def main():
     result=dict(schema='mhbs.p4_joint_optimization.v1',date='2026-10-13',configuration='P4U1',scope='common OOC, single physical hash lane, all ten profiles and three operations',keccak_mapping='generic',part='xc7a200tffg1156-3',vivado='2025.2',statistics_enabled=False,area_formula='LUT/4 + FF/8 + 232.4*BRAM36 + 102.4*DSP',sta_basis='setup/hold on a frozen physical route; clock period swept in 0.1 ns increments from 6.666667 ns',variants=variants,rows=rows,acceptance=gates,accepted=all(gates.values()),steps=spec['steps'],validation=spec['validation'],source_and_evidence_sha256=evidence,checkpoint_archive=spec['checkpoint_archive'])
     out.parent.mkdir(parents=True,exist_ok=True)
     out.with_suffix('.json').write_text(json.dumps(result,indent=2)+'\n')
-    fields=list(dict.fromkeys(k for row in rows for k in row))
-    with out.with_suffix('.csv').open('w',newline='') as handle:
-        writer=csv.DictWriter(handle,fieldnames=fields);writer.writeheader();writer.writerows(rows)
     print('P4_REPORT_ACCEPTED' if result['accepted'] else 'P4_REPORT_REJECTED',gates)
     if not result['accepted']:raise SystemExit(1)
 

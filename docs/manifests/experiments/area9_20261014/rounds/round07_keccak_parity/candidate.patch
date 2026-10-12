@@ -1,0 +1,19 @@
+--- baseline/input/rtl/hash/keccak.sv
++++ candidate/rtl/hash/keccak.sv
+@@ -128,7 +128,15 @@
+         end
+         for (x = 0; x < 5; x = x + 1) begin : columns
+             assign c[x] = a[x] ^ a[x+5] ^ a[x+10] ^ a[x+15] ^ a[x+20];
+-            assign d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
++            // Expose the six-input parity alongside the five-input column parity.
++            // Both forms are portable XOR logic; mapping decides whether to share it.
++            for (genvar bit_index = 0; bit_index < 64; bit_index++) begin : parity
++                assign d[x][bit_index] = ^{
++                    a[(x+4)%5][bit_index], a[(x+4)%5+5][bit_index],
++                    a[(x+4)%5+10][bit_index], a[(x+4)%5+15][bit_index],
++                    a[(x+4)%5+20][bit_index], c[(x+1)%5][(bit_index+63)%64]
++                };
++            end
+         end
+     endgenerate
+ endmodule

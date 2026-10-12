@@ -153,9 +153,14 @@ def archive_run(run):
                           timing=(directory / 'timing.rpt').exists(), rtl_archive=rtl['status']))
     artifacts = {str(p.relative_to(output)): sha(p) for p in sorted(output.rglob('*'))
                  if p.is_file() and p.name not in ('ARTIFACTS.json',) and 'reports' not in p.parts}
-    atomic(output / 'ARTIFACTS.json', json.dumps(dict(updated_at=now(), run_id=run.name,
-           source=str(manifest), rtl=rtl, tests=tests,
-           omitted_details=['sim', 'validation'], sha256=artifacts), indent=2) + '\n')
+    artifact_path = output / 'ARTIFACTS.json'
+    data = dict(updated_at=now(), run_id=run.name, source=str(manifest), rtl=rtl, tests=tests,
+                omitted_details=['sim', 'validation'], sha256=artifacts)
+    if artifact_path.exists():
+        previous = json.loads(artifact_path.read_text())
+        if {k:v for k,v in previous.items() if k != 'updated_at'} == {k:v for k,v in data.items() if k != 'updated_at'}:
+            data['updated_at'] = previous['updated_at']
+    atomic(artifact_path, json.dumps(data, indent=2) + '\n')
     return output
 
 
@@ -278,7 +283,7 @@ def rewrite_links(text, old_path, new_path, mapping):
 
 def migrate_reports():
     LEGACY.mkdir(parents=True, exist_ok=True)
-    paths = [p for p in LEGACY.iterdir() if p.is_file() and p.name != 'README.md' and p.suffix in ('.md', '.csv', '.json')]
+    paths = [p for p in LEGACY.iterdir() if p.is_file() and p.name != 'README.md' and p.suffix in ('.md', '.json')]
     mapping_path = ARCHIVES / 'REPORT_PATHS.json'
     mapping = json.loads(mapping_path.read_text()) if mapping_path.exists() else {}
     new = {str(p): str(report_prefix(p.name)) for p in paths}
@@ -296,12 +301,76 @@ def migrate_reports():
     return destinations
 
 
-def index():
-    folders = [p for p in sorted(ARCHIVES.iterdir()) if p.is_dir()]
+def experiment_time(folder):
+    """Use frozen start time, then recorded run ID, then the experiment date."""
+    source = folder / 'SOURCE.json'
+    if source.exists():
+        metadata = json.loads(source.read_text())
+        if metadata.get('started_at'):
+            started = datetime.fromisoformat(metadata['started_at'].replace('Z', '+00:00'))
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=ZoneInfo('Asia/Singapore'))
+            return started.astimezone(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
+    named = re.search(r'(\d{8})(?:_(\d{6}))?', folder.name)
+    if named and named[2]:
+        return named[0]
+    for path in [folder / 'EXPERIMENTS.json', *sorted((folder / 'reports').glob('*.json'))]:
+        if not path.exists():
+            continue
+        metadata = json.loads(path.read_text())
+        if not isinstance(metadata, dict):
+            continue
+        for field in ('candidate_run', 'run_id', 'selected', 'candidate', 'matrix'):
+            value = metadata.get(field)
+            run = re.search(r'\d{8}_\d{6}', value) if isinstance(value, str) else None
+            if run and (not named or run[0].startswith(named[1])):
+                return run[0]
+    # Older archives sometimes record the start only in synthesis/full-run
+    # measurements. Do not substitute filesystem copy or modification time.
+    for path in [folder / 'SYNTHESIS.json', folder / 'MEASUREMENTS.json',
+                 *sorted((folder / 'reports').glob('*.json'))]:
+        if not path.exists():
+            continue
+        metadata = json.loads(path.read_text())
+        if not isinstance(metadata, dict):
+            continue
+        full_run = metadata.get('full36', {})
+        values = [metadata.get('started_at'), metadata.get('started'),
+                  full_run.get('started_at') if isinstance(full_run, dict) else None,
+                  metadata.get('updated_at')]
+        for value in values:
+            if isinstance(value, (int, float)):
+                started = datetime.fromtimestamp(value, ZoneInfo('Asia/Singapore'))
+            elif isinstance(value, str):
+                started = datetime.fromisoformat(value.replace('Z', '+00:00'))
+                if started.tzinfo is None:
+                    started = started.replace(tzinfo=ZoneInfo('Asia/Singapore'))
+            else:
+                continue
+            stamp = started.astimezone(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
+            if not named or stamp.startswith(named[1]):
+                return stamp
+    return named[1] + '_000000' if named else '99999999_999999'
+
+
+def index(reorder=False):
+    folders = sorted((p for p in ARCHIVES.iterdir() if p.is_dir()),
+                     key=lambda p: (experiment_time(p), p.name))
+    path = ARCHIVES / 'INDEX.md'
+    if path.exists() and not reorder:
+        # Backfilling reports keeps old rows in place; new experiments append.
+        previous = re.findall(r'^\| ([A-Za-z0-9_]+) \|', path.read_text(), re.M)
+        positions = {name: i for i, name in enumerate(previous)}
+        folders.sort(key=lambda p: (positions.get(p.name, len(previous)),
+                                    experiment_time(p), p.name))
     lines = ['# 实验与测试归档', '',
              '每次测试保存报告、冻结 RTL 压缩包及对应综合的 hierarchical.rpt / timing.rpt。'
              'RTL_SOURCE.json 和 ARTIFACTS.json 记录文件校验、后台状态和实际缺项。', '',
-             '最新结果：[P1 标量路径](p1_scalar_20261014/reports/P1_Scalar_20261014.md)、'
+             '索引按实验时间升序整理；后续新实验追加在表尾，既有实验补齐结果时保留位置。报告仅生成 Markdown / JSON。', '',
+             '最新结果：[Executor 状态与返回复用](executor_state_20261014/reports/Executor_State_Reuse_20261014.md)、'
+             '[面积优化与复用取舍](area_refinement_20261014/reports/Area_Refinement_20261014.md)、'
+             '[上一轮面积优化](area_continuation_20261014/reports/Area_Continuation_20261014.md)、'
+             '[P1 标量路径](p1_scalar_20261014/reports/P1_Scalar_20261014.md)、'
              '[Recipe 合并](recipe_integration_20261014/reports/Recipe_Integration_Matrix_20261014.md)。', '',
              '| 实验 | 报告 | RTL / 综合证据 |', '|---|---|---|']
     for folder in folders:

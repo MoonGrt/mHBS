@@ -1,0 +1,31 @@
+{
+  "passed": true,
+  "recipe_sha256": "d1a2b646da1f7f08a94ee46e9cd8e784bd4b29fe6618e34db286db35588b50dd",
+  "control_combinations": 153600,
+  "enabled_word_controls": 66024,
+  "operand_checks": 264096,
+  "method": "Exhaustive local control equations derived from unchanged hash_state and scalar state predicates, with basis operands and one random 64-bit operand tuple per enabled word.",
+  "scope": "Local enabled-word next_word algebra plus separate real recipe/event regressions; not whole-RTL formal proof.",
+  "source_mutual_exclusion": [
+    "take_fast and take_feedback belong to different hash_state modes",
+    "take_stream requires HASH_WAIT_BLOCK and !take_fast",
+    "ordinary advanced-state source requires HASH_RUN and !take_feedback",
+    "clear_stream belongs to HASH_WAIT_BLOCK; unselected first-block words have no source and receive zero"
+  ],
+  "covered": {
+    "hash_modes": [
+      "HASH_IDLE",
+      "HASH_WAIT_BLOCK",
+      "HASH_RUN"
+    ],
+    "scalar_start_fixed_first_staged_round_complete_chain_remaining_flags": "all 128 Boolean combinations",
+    "append_index": "all 0..15 values",
+    "state_words": "all 25 64-bit words"
+  },
+  "limitations": [
+    "Does not prove reachability or sequential equivalence of the complete design",
+    "Does not claim equality of combinational next_word on disabled writes",
+    "Does not cover X/Z or an externally forced illegal hash_state encoding",
+    "Simulation result summary is bound separately to this exact recipe SHA256"
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "schema": "mhbs.return_controls.invariant.v1",
+  "candidate_recipe_sha256": "035588bac26d155815d180978983812267b72ef6e27251baff89eda1c33ffed6",
+  "baseline_recipe_sha256": "d1a2b646da1f7f08a94ee46e9cd8e784bd4b29fe6618e34db286db35588b50dd",
+  "functional_register_bits": 18,
+  "unprefetched_data_banks": [
+    "digest256",
+    "key_value256",
+    "captured256"
+  ],
+  "p1_scalar_unchanged": true,
+  "phase_and_stage_base_storage_unchanged": true,
+  "invariants": [
+    {
+      "claim": "At a sampling edge, an active prior-stage token advances to last stage on the same edge, carrying its unchanged tag.",
+      "RTL_basis": "stage_tag[last] <= source_tag from stage_tag[last-1] and stage_valid[last] <= stage_valid[last-1]",
+      "checked": "actual stage/round/tag shadow in both views"
+    },
+    {
+      "claim": "A context tag has at most one in-flight token, so the prior-stage metadata read cannot share a tag with a simultaneous last-stage return or acceptance.",
+      "RTL_basis": "busy excludes accepting an active tag except after completed response; again creates feedback only as old token leaves last",
+      "checked": "normal-view duplicate-token/acceptance assertions plus P2/P4 batch shadow"
+    },
+    {
+      "claim": "Per-slot phase/node/more/iteration/steps/capture/initial metadata stay stable from prior-stage sampling until last-stage consumption.",
+      "RTL_basis": "slot metadata writes occur only on acceptance or its last-stage permutation return; neither can overlap that slot in prior stage",
+      "checked": "all 18 functional bits compared against true baseline at consumption in normal and SYNTHESIS views"
+    },
+    {
+      "claim": "For P2, the prior stage is stage0; accepted or feedback metadata was written on the preceding edge and is visible before sampling.",
+      "checked": "P2 normal/SYNTHESIS 459 recipes each, 12 batch scenarios per view with 12-pass recycle"
+    },
+    {
+      "claim": "Common family/coordinates change only after all busy/captured results drain; prefetched metadata is overwritten by the next valid token before any next-job return.",
+      "checked": "explicit no-reset two-job family/q switch in COORDINATE_VALIDATION.json"
+    }
+  ],
+  "counterexample_found": false,
+  "scope": "Reset-generated legal ready/valid protocol, one in-flight token per active tag. Arbitrary invalid mid-flight metadata overwrite or duplicate-tag protocol violations are not equivalence claims.",
+  "validation_summary": "VALIDATION.json",
+  "coordinate_switch_summary": "COORDINATE_VALIDATION.json"
+}

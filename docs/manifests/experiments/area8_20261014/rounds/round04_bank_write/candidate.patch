@@ -1,0 +1,38 @@
+--- baseline/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1356,18 +1356,29 @@
+                 wire initial_transfer = key_return && initial_pending[t];
+                 wire key_write = key_return || (accept && ctx_request_no_seed);
+                 wire [TAG_BITS-1:0] key_write_tag = key_return ? t : ctx_request_tag;
+-                wire [255:0] key_write_data = key_return ? ctx_perm_digest[255:0] :
+-                    ctx_request_initial_value;
++                // Width-independent enables select the single write-port source.
++                wire key_from_initial = accept && ctx_request_no_seed && !key_return;
++                wire [255:0] key_write_data =
++                    ({256{key_return}} & ctx_perm_digest[255:0]) |
++                    ({256{key_from_initial}} & ctx_request_initial_value);
+                 wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+-                wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
+-                    mask_left ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
++                wire digest_from_initial = digest_write && initial_transfer;
++                wire digest_from_return = digest_write && !initial_transfer;
++                wire [255:0] digest_write_data =
++                    ({256{digest_from_initial}} & key_value[t]) |
++                    ({256{digest_from_return}} &
++                     (ctx_perm_digest[255:0] ^ ({256{mask_left}} & digest[t])));
+                 wire capture_transfer = initial_transfer && capture_initial[t];
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+-                wire [255:0] captured_write_data = right_write ? ctx_request_right :
+-                    capture_transfer ? key_value[t] : ctx_perm_digest[255:0];
++                wire capture_from_initial = capture_transfer && !right_write;
++                wire capture_from_return = capture_now && !capture_transfer && !right_write;
++                wire [255:0] captured_write_data =
++                    ({256{right_write}} & ctx_request_right) |
++                    ({256{capture_from_initial}} & key_value[t]) |
++                    ({256{capture_from_return}} & ctx_perm_digest[255:0]);
+                 always_ff @(posedge clk) begin
+                     if (!rst) begin
+                         if (key_write) key_value[key_write_tag] <= key_write_data;

@@ -1,0 +1,38 @@
+{
+  "name": "return_control_prefetch",
+  "title": "返回小控制提前一级读取",
+  "baseline_recipe_sha256": "d1a2b646da1f7f08a94ee46e9cd8e784bd4b29fe6618e34db286db35588b50dd",
+  "candidate_recipe_sha256": "035588bac26d155815d180978983812267b72ef6e27251baff89eda1c33ffed6",
+  "functional_prefetch_bits": 18,
+  "data_bank_prefetch_bits": 0,
+  "p1_scalar_branch_byte_unchanged": true,
+  "baseline_stage_base_and_phase_storage_retained": true,
+  "p_u_specialization": false,
+  "changes_fsm_cycles_ports_keccak_mapping": false,
+  "controls": [
+    "phase.KEY/MASK/MASK1",
+    "node_phase",
+    "more_steps",
+    "iteration5",
+    "steps5",
+    "capture_match",
+    "initial_pending",
+    "capture_initial"
+  ],
+  "source_stage": "PIPELINE-2 for the existing P>1 scheduled branch",
+  "valid_update": "!rst && stage_valid[PIPELINE-2]",
+  "debug_tag_and_assertions": "separate always blocks under ifndef SYNTHESIS",
+  "safety_argument": [
+    "At most one in-flight token per context tag; valid prior and last stage cannot both own the same tag.",
+    "Acceptance writes the context before its token can reach prior stage; P2 prior stage0 metadata was written on the preceding edge.",
+    "Returned-tag phase/iteration updates cannot collide with a different token of that tag in prior stage. Same-edge feedback creates a new stage0 token whose updated metadata is visible before its later prior-stage read.",
+    "Common family/coordinates still remain shared until busy contexts and captured results drain; they are not prefetched."
+  ],
+  "risk": "Splits returned tag-to-small-control selection path, but data-bank and initial digit/formatter paths remain. Area/Fmax improvements require actual common measurements.",
+  "validation_status": "passed",
+  "compile_workers": 3,
+  "threads_per_compile": 2,
+  "validation_summary": "VALIDATION.json",
+  "coordinate_switch_summary": "COORDINATE_VALIDATION.json",
+  "invariant_summary": "PREFETCH_INVARIANT.json"
+}

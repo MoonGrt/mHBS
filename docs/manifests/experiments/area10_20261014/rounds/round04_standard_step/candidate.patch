@@ -1,0 +1,42 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -190,7 +190,14 @@
+             end
+         endcase
+     end
+-    logic [63:0] task_recipe, task_step;
++    logic [63:0] task_recipe;
++    // The twelve standard ROMs use one chain step recipe per family; FORS
++    // selects domain 3 and WOTS domain 0. Rebuild the immutable step fields
++    // from the existing Job/tree context instead of retaining a second copy.
++    wire [3:0] task_step_shape = stateful ? (xmss ? 4'd8 : 4'd10) : 4'd2;
++    wire [7:0] task_step_domain = !stateful && indexing == 1 ? 8'd3 : 8'd0;
++    wire [63:0] task_step = {4'd0, task_step_shape, task_step_domain, 8'd1,
++                            2'd0, node_bytes, 2'd0, 6'd1, 24'd0};
+     logic task_chain;
+     logic task_capture;
+     logic [4:0] task_steps, task_capture_after;
+@@ -686,7 +693,6 @@
+ 
+             layer <= 0;
+             task_recipe <= 0;
+-            task_step <= 0;
+             message_received <= 0;
+             lt_count <= 0;
+             lt_cursor <= 0;
+@@ -903,7 +909,6 @@
+                         end else if (verifying) begin
+                             task_chain <= 0;
+                             task_capture <= 0;
+-                            task_step <= descriptor_data[127:64];
+                             task_steps <= 0;
+                             task_leaf <= scalar_leaf;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+@@ -927,7 +932,6 @@
+                         end else begin
+                             pipe_batch_used <= 0;
+                             task_chain <= 1;
+-                            task_step <= descriptor_data[127:64];
+ 
+                             task_capture<=(indexing==1 ? leaf_cursor==target : leaf_cursor==target) && macro_flags[0];
+                             task_leaf <= indexing == 1 ? scalar_leaf : leaf_cursor;

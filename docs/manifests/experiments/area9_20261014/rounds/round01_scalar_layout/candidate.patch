@@ -1,0 +1,41 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -553,33 +553,14 @@
+                     end
+                     32:
+                     case (frame_layout)
+-                        0: begin
+-                            fast_block[0+:256]   = frame0[255:0];
++                        0, 1, 2, 3: begin
++                            fast_block[0+:256]   = frame0;
++                            if (frame_layout != 0) fast_block[248+:8] = frame_domain;
+                             fast_block[256+:256] = frame1;
+-                            fast_block[512+:256] = frame2[255:0];
+-                            fast_block[768+:256] = frame3[255:0];
+-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
+-                            else fast_block[768+:8] = 8'h1f;
+-                        end
+-                        1: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+                             fast_block[512+:256] = frame2;
+-                            fast_block[768+:8]   = 8'h1f;
+-                        end
+-                        2: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+-                            fast_block[512+:256] = frame2[255:0];
+                             fast_block[768+:256] = frame3;
+-                            fast_block[1024+:8]  = 8'h1f;
+-                        end
+-                        3: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+-                            fast_block[512+:256] = frame2[255:0];
+-                            fast_block[768+:256] = frame3[255:0];
+-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
++                            if (frame_layout == 2 || frame_two)
++                                fast_block[1024+:8] = 8'h1f;
+                             else fast_block[768+:8] = 8'h1f;
+                         end
+                         4: begin

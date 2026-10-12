@@ -1,0 +1,33 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -85,7 +85,12 @@
+     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
+     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
+     logic [6:0] message_length, message_received;
++    // Standard ROM lifetimes permit logical FORS slot 1 and WOTS slot 2
++    // to share physical slot 2. Preserve the original four-row array form;
++    // physical row 1 has no read and its dynamic write address is unreachable.
+     logic [W-1:0] value[0:3];
++    wire [1:0] route_value_slot = {route_descriptor[57] | route_descriptor[56],
++                                  route_descriptor[57] & route_descriptor[56]};
+     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+@@ -361,7 +366,7 @@
+     wire [7:0] digit_index = state == TRANSFORM ? transform_index
+         : state == CHAIN_SETUP ? chain_cursor : batch_chain_index;
+     wire [4:0] shared_digit = digit(digit_index);
+-    wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
++    wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[2]};
+     wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
+     genvar fb;
+     generate
+@@ -1292,7 +1297,7 @@
+                     if (macro_route == 0) complete_macro();
+                     else begin
+                         if (!route_descriptor[53]) begin
+-                            value[route_descriptor[57:56]] <= route_value[W-1:0];
++                            value[route_value_slot] <= route_value[W-1:0];
+                             if (route_descriptor[57:56] == 1)
+                                 fors_digest_tail <= route_value[FORS_DIGEST_BITS-1:W];
+                         end

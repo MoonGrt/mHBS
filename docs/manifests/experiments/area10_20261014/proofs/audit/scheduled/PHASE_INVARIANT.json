@@ -1,0 +1,76 @@
+{
+  "passed": true,
+  "checks": [
+    {
+      "role": "SEED",
+      "phase": 1,
+      "old_node_class": true,
+      "derived_node_class": true,
+      "encoded_role": 0,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "STEP",
+      "phase": 2,
+      "old_node_class": true,
+      "derived_node_class": true,
+      "encoded_role": 0,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "KEY",
+      "phase": 4,
+      "old_node_class": false,
+      "derived_node_class": false,
+      "encoded_role": 1,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "MASK",
+      "phase": 8,
+      "old_node_class": false,
+      "derived_node_class": false,
+      "encoded_role": 2,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "FINAL",
+      "phase": 16,
+      "old_node_class": true,
+      "derived_node_class": true,
+      "encoded_role": 0,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "MASK1",
+      "phase": 32,
+      "old_node_class": false,
+      "derived_node_class": false,
+      "encoded_role": 3,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    },
+    {
+      "role": "SINGLE",
+      "phase": 64,
+      "old_node_class": true,
+      "derived_node_class": true,
+      "encoded_role": 0,
+      "live_phase_bits_preserved": true,
+      "passed": true
+    }
+  ],
+  "scope": "Finite one-hot roles used by first_phase and next_phase, plus live context invariant checked against baseline every cycle in actual dual-recipe tests. Inactive retired context classification is intentionally gated by busy and cannot drive a valid return.",
+  "first_phase_actual_rtl": "wire [6:0] first_phase = requested_shape == 8 ? KEY :\n                    requested_shape == 7 ? SEED : requested_shape != 0 ? SINGLE :\n                    !ctx_request_no_seed ? SEED : ctx_request_family == 1 ? KEY : STEP;",
+  "next_phase_actual_rtl": "wire [6:0] next_phase = phase[t][2] ? MASK : phase[t][3] ?\n                    (paired[t] ? MASK1 : FINAL) : phase[t][5] ? FINAL : family[t] == 1 ? KEY : STEP;",
+  "baseline_recipe_sha256": "d1a2b646da1f7f08a94ee46e9cd8e784bd4b29fe6618e34db286db35588b50dd",
+  "candidate_recipe_sha256": {
+    "S1_phase_role": "a8c7afd4661986f457295af2dfccd4b29e09a4f4a5a071db7051d23f3ab4bf2b",
+    "S2_node_phase_derived": "a86f25f73eef05eccd835f43171ad37011062d9751dd1b3326489ae8a4b6b75c"
+  }
+}

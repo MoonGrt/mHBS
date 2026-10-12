@@ -1,0 +1,33 @@
+{
+  "candidate": "rolling_ltree_count",
+  "baseline": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/area10_20261014/baseline",
+  "baseline_executor_sha256": "62040a30a0957eeed72c43094012857e7bb8d3798c5a7b1af550f17d5d8fabe8",
+  "candidate_executor_sha256": "4605ab3ea5e6b99ed2a33a1a2c4c22040f2d4b2b4a6e4ad0dcbf826adff85eaa",
+  "change": "Alias rolling pipe_completed to the existing 8-bit lt_count register and retain every consumer/update edge.",
+  "register_bits_removed": 8,
+  "state_transition_changes": false,
+  "ports_changed": false,
+  "p_u_specialization": false,
+  "new_cycles": 0,
+  "validation_pending": false,
+  "simultaneous_live_data_untouched": [
+    "XMSS key/digest/captured banks",
+    "result/node_value/emit_value",
+    "value[0..3]",
+    "FORS/tree/auth workspace"
+  ],
+  "lifetime_argument": [
+    "CHAIN_SETUP initializes rolling completion before rolling PIPE states.",
+    "Rolling completion is consumed only under pipe_rolling && pipe_mode.",
+    "CHAIN_NEXT explicitly loads endpoint_count into lt_count before L-tree entry.",
+    "LT_PIPE_INIT clears pipe_rolling; L-tree states never consume rolling count.",
+    "The next rolling batch reinitializes lt_count only after prior L-tree consumers have ended."
+  ],
+  "risk": "Merging state-dependent enables can raise mux/control area; actual common measurements decide adoption.",
+  "custom_rom_scope": "No new format or standard-ROM-only assumption is introduced. Directly forcing incompatible internal states is outside the lifetime proof; malformed ROM behavior must still follow existing reject paths.",
+  "validation_passed": true,
+  "validation_summary": "VALIDATION_SUMMARY.json",
+  "tests": 25,
+  "shadow_sign_tests": 7,
+  "candidate_verify_tests": 18
+}

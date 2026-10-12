@@ -1,0 +1,654 @@
+{
+  "schema": "mhbs.executor_workspace_liveness.v1",
+  "production_rtl_edited": true,
+  "baseline_run": "20261014_155022",
+  "production_sha256": {
+    "rtl/executor/executor.sv": "f1a6ee0ef278df849f5060d4d1f84d50ab4e174e9ffd6ad7713efccff4f7e5ab"
+  },
+  "candidate": {
+    "name": "scratch_alias_128",
+    "changes": [
+      "FORS_SCRATCH:112 -> 36",
+      "endpoints DEPTH:136 -> 128",
+      "workspace range checks:136 -> 128",
+      "final neighbor clamp:135/134 -> 127/126"
+    ],
+    "memory_value_module_unchanged": true,
+    "external_ports_unchanged": true,
+    "state_transitions_unchanged": true,
+    "expected_cycle_change": 0
+  },
+  "regions": [
+    {
+      "range": [
+        0,
+        66
+      ],
+      "use": "WOTS/LMOTS endpoints or FORS roots",
+      "FORS_live_root_range": [
+        0,
+        34
+      ]
+    },
+    {
+      "range": [
+        67,
+        67
+      ],
+      "use": "list adjacent-read guard"
+    },
+    {
+      "range": [
+        68,
+        87
+      ],
+      "use": "20 tree-stack levels"
+    },
+    {
+      "range": [
+        88,
+        107
+      ],
+      "use": "20 auth-path levels"
+    },
+    {
+      "range": [
+        108,
+        111
+      ],
+      "use": "unused, including speculative auth read 108/109"
+    },
+    {
+      "range": [
+        112,
+        127
+      ],
+      "use": "unused remaining capacity"
+    },
+    {
+      "range": [
+        36,
+        59
+      ],
+      "use": "FORS scratch aliases dead WOTS/LMOTS endpoints",
+      "worst_case_nodes": 24
+    }
+  ],
+  "proof": {
+    "algorithm_mutual_exclusion": "A Job cannot execute SLH, XMSS and LMS concurrently. In SLH Sign, FORS macros complete before WOTS macro endpoint writes; there is no in-flight WOTS chain while FORS scratch lives.",
+    "root_scratch_nonoverlap": "FORS macro group loop is exactly 0..k-1 for all six validated profiles; k <=35, so roots occupy 0..34 and scratch 36..59 never overlaps.",
+    "stack_auth_simultaneous_liveness": "Tree-stack and auth-path data survive FORS microgroups; their 68..107 addresses remain disjoint from scratch, so no algorithm-mutual-exclusion shortcut covers live same-operation data.",
+    "scratch_lifetime": "Scratch first receives FORS leaves, then level-1 parents and level-2 roots, in place. FORS_ROOT_NEXT consumes group roots in sequence into the existing stack. All roots are consumed before CHAIN_SETUP starts the next microgroup. Final macro root is stored at group_index <=34.",
+    "scalar_path": "P1 never asserts fors_leaves/fors_pipe; FORS uses scalar hash and existing node/stack/auth. Shrink affects memory mapping only.",
+    "capacity": "67 endpoints, 35 FORS roots, 20 stack, 20 auth and 24 scratch all retained. Scratch aliases endpoint 36..59 only while those endpoints are dead.",
+    "parity": "New base36 is even, same as old112; all adjacency and in-place pair parity preserved.",
+    "tail_reads": "AUTH_OUTPUT speculates one beyond last valid node: read0=108/read1=109, both remain <128. List guard remains67; pipeline scratch guard60 remains available. Clamp127/126 preserves opposite-bank rule at final physical slot."
+  },
+  "all_legal_configurations": [
+    {
+      "p": 1,
+      "u": 1,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 2,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 3,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 4,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 6,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 8,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 12,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 1,
+      "u": 24,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 1,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 2,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 3,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 4,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 6,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 2,
+      "u": 12,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 3,
+      "u": 1,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 3,
+      "u": 2,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 3,
+      "u": 4,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 3,
+      "u": 8,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 4,
+      "u": 1,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 4,
+      "u": 2,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 4,
+      "u": 3,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 4,
+      "u": 6,
+      "scratch_nodes": 4,
+      "last_scratch_address": 39
+    },
+    {
+      "p": 6,
+      "u": 1,
+      "scratch_nodes": 8,
+      "last_scratch_address": 43
+    },
+    {
+      "p": 6,
+      "u": 2,
+      "scratch_nodes": 8,
+      "last_scratch_address": 43
+    },
+    {
+      "p": 6,
+      "u": 4,
+      "scratch_nodes": 8,
+      "last_scratch_address": 43
+    },
+    {
+      "p": 8,
+      "u": 1,
+      "scratch_nodes": 8,
+      "last_scratch_address": 43
+    },
+    {
+      "p": 8,
+      "u": 3,
+      "scratch_nodes": 8,
+      "last_scratch_address": 43
+    },
+    {
+      "p": 12,
+      "u": 1,
+      "scratch_nodes": 12,
+      "last_scratch_address": 47
+    },
+    {
+      "p": 12,
+      "u": 2,
+      "scratch_nodes": 12,
+      "last_scratch_address": 47
+    },
+    {
+      "p": 24,
+      "u": 1,
+      "scratch_nodes": 24,
+      "last_scratch_address": 59
+    }
+  ],
+  "profiles": [
+    {
+      "profile": "slh_128f",
+      "n": 16,
+      "fors_height": 6,
+      "fors_roots": 33,
+      "largest_root_address": 32,
+      "wots_chains": 35,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32
+      ]
+    },
+    {
+      "profile": "slh_192f",
+      "n": 24,
+      "fors_height": 8,
+      "fors_roots": 33,
+      "largest_root_address": 32,
+      "wots_chains": 51,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32
+      ]
+    },
+    {
+      "profile": "slh_256f",
+      "n": 32,
+      "fors_height": 9,
+      "fors_roots": 35,
+      "largest_root_address": 34,
+      "wots_chains": 67,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34
+      ]
+    },
+    {
+      "profile": "slh_128s",
+      "n": 16,
+      "fors_height": 12,
+      "fors_roots": 14,
+      "largest_root_address": 13,
+      "wots_chains": 35,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13
+      ]
+    },
+    {
+      "profile": "slh_192s",
+      "n": 24,
+      "fors_height": 14,
+      "fors_roots": 17,
+      "largest_root_address": 16,
+      "wots_chains": 51,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16
+      ]
+    },
+    {
+      "profile": "slh_256s",
+      "n": 32,
+      "fors_height": 14,
+      "fors_roots": 22,
+      "largest_root_address": 21,
+      "wots_chains": 67,
+      "command_group_indices": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21
+      ]
+    }
+  ],
+  "hierarchy_baseline": {
+    "P1U1": {
+      "common_lut": 18838,
+      "common_ff": 6660,
+      "equivalent_slice": 5542.0,
+      "endpoints_lut": 2069,
+      "endpoints_logic_lut": 1041,
+      "endpoints_lutram": 1028,
+      "recipe_lut": 10972,
+      "executor_own_lut": 5626
+    },
+    "P4U1": {
+      "common_lut": 32261,
+      "common_ff": 10685,
+      "equivalent_slice": 9400.875,
+      "endpoints_lut": 2069,
+      "endpoints_logic_lut": 1041,
+      "endpoints_lutram": 1028,
+      "recipe_lut": 24278,
+      "executor_own_lut": 5748
+    }
+  },
+  "history_do_not_repeat": [
+    "route_value converted to source selector; parent-left duplicates already removed",
+    "parent direct hash return widened write mux and regressed area",
+    "Keccak word-write masked OR regressed first five measured points",
+    "Do not merge live XMSS key/digest/captured banks, signature with tree/auth, or stack and auth ranges"
+  ],
+  "commands": {
+    "launch": "python3 scripts/run_pu_sign_matrix.py --launch --configs P1U1 P4U1 P12U1 --vivado-workers 3 --sim-workers 3 [--synth-capacity-run build/pu_sign_matrix/<existing_runid> ...]",
+    "backfill_one": "python3 scripts/experiment_archive.py --run build/pu_sign_matrix/<runid>",
+    "index_and_all_runs": "python3 scripts/experiment_archive.py --sync",
+    "background_backfill": "python3 scripts/experiment_archive.py --sync --watch"
+  },
+  "archive_requirements": {
+    "path": "docs/manifests/experiments/pu_sign_matrix_<runid>/reports/",
+    "frozen_rtl": "rtl.tar.gz + SOURCE.json + RTL_SOURCE.json + ARTIFACTS.json",
+    "synthesis": "hierarchical.rpt/timing.rpt/vivado.log/settings.txt/debug_audit.json",
+    "validation": "summary only, detailed sim/validation retained in build run",
+    "readme_generated": false,
+    "index": "docs/manifests/experiments/INDEX.md"
+  },
+  "candidate_a_run": "20261014_164847",
+  "candidate_a_executor_sha256": "f1a6ee0ef278df849f5060d4d1f84d50ab4e174e9ffd6ad7713efccff4f7e5ab",
+  "candidate_b_executor_sha256": "8a586ea9afd32d08ef6e7490d8287eb3b69aa6fc295f944bd98d9ae1f02cf763",
+  "checks": {
+    "normal_verilator_lint": {
+      "passed": true,
+      "log": "build/area_continuation_20261014/workspace_normal_lint.log"
+    },
+    "synthesis_verilator_lint": {
+      "passed": true,
+      "log": "build/area_continuation_20261014/workspace_synthesis_lint.log"
+    }
+  },
+  "next_candidate": {
+    "name": "prelude_bank_alias",
+    "proposed_only": true,
+    "common_register_bits_reduced": 256,
+    "aliases": [
+      "value[0]",
+      "value[1]"
+    ],
+    "SLH_sign_order": "MESSAGE_PRF writes value0 and emits R -> MESSAGE_DIGEST consumes value0 -> ROUTE writes value1/FORS digest -> FORS tree loop consumes value1; R is dead before FORS digest writes",
+    "SLH_verify_order": "VERIFY_RANDOM routes external R to value0 -> Hmsg consumes value0 -> Hmsg response writes value1",
+    "XMSS_LMS_order": "Only value0 is used for R/C; standard programs route Hmsg to value2 and do not route anything to value1",
+    "Keygen_order": "value0/value1 not read by standard Keygen programs",
+    "data_retained": [
+      "value[2] message digest remains separate",
+      "value[3] public root remains separate",
+      "fors_digest_tail remains separate"
+    ],
+    "constraint": "Valid only for currently offline-validated standard program sequences, not arbitrary custom ROMs with another Hmsg after FORS digest",
+    "algorithm_interface": "No external value-slot interface exists; slot selection internal route descriptors remain unchanged",
+    "decision": "not_implemented",
+    "reason": "Preserve generic ROM value-slot semantics, including subsequent arbitrary EMIT/request sequences. Do not alias value0/value1 without explicit stronger architecture constraints."
+  },
+  "supported_rom_address_audit": {
+    "write_branches": [
+      {
+        "source": "auth_write",
+        "range": [
+          88,
+          107
+        ],
+        "capacity": 20
+      },
+      {
+        "source": "stack_write",
+        "range": [
+          68,
+          87
+        ],
+        "capacity": 20
+      },
+      {
+        "source": "fors_leaves/fors_pipe",
+        "range": [
+          36,
+          59
+        ],
+        "capacity": 24
+      },
+      {
+        "source": "lt_pipe/LT_STORE/LT_COPY",
+        "range": [
+          0,
+          33
+        ],
+        "capacity": "67-input in-place reduction"
+      },
+      {
+        "source": "pipe_direct/CHAIN_STORE",
+        "range": [
+          0,
+          66
+        ],
+        "capacity": 67
+      },
+      {
+        "source": "root_write",
+        "range": [
+          0,
+          34
+        ],
+        "capacity": 35
+      }
+    ],
+    "largest_live_write_address": 107,
+    "read_sources": [
+      {
+        "source": "chain/list absorption",
+        "range": [
+          0,
+          67
+        ],
+        "guard": 67
+      },
+      {
+        "source": "stack/auth including terminal speculative read",
+        "range": [
+          68,
+          109
+        ],
+        "live_upper": 107
+      },
+      {
+        "source": "L-tree pairs/odd tail",
+        "range": [
+          0,
+          67
+        ]
+      },
+      {
+        "source": "FORS pairs/auth/microgroup guard",
+        "range": [
+          36,
+          60
+        ]
+      }
+    ],
+    "largest_registered_read_address_in_valid_supported_flow": 108,
+    "largest_neighbor_read_address_in_valid_supported_flow": 109,
+    "slots_128_135_publicly_exposed": false,
+    "slots_128_135_old_use": "Only private FORS scratch indices16..23; remapped to52..59. No 67-chain endpoint, 20-level stack/auth, root-list or list-guard capacity lost.",
+    "rom_encoding_changed": false,
+    "value_slot_semantics_changed": false,
+    "supported_layout_scope": "Six SLH profiles plus six SHAKE256 XMSS/LMS height profiles generated and validated by model compiler. Generic arbitrary malformed or unsupported ROMs were never permitted by the private offline-validated image contract."
+  }
+}

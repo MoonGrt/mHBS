@@ -1,0 +1,47 @@
+{
+  "name": "return_control_prefetch",
+  "title": "返回小控制提前一级读取",
+  "baseline_recipe_sha256": "d1a2b646da1f7f08a94ee46e9cd8e784bd4b29fe6618e34db286db35588b50dd",
+  "candidate_recipe_sha256": "035588bac26d155815d180978983812267b72ef6e27251baff89eda1c33ffed6",
+  "functional_prefetch_bits": 18,
+  "data_bank_prefetch_bits": 0,
+  "p1_scalar_branch_byte_unchanged": true,
+  "baseline_stage_base_and_phase_storage_retained": true,
+  "p_u_specialization": false,
+  "changes_fsm_cycles_ports_keccak_mapping": false,
+  "controls": [
+    "phase.KEY/MASK/MASK1",
+    "node_phase",
+    "more_steps",
+    "iteration5",
+    "steps5",
+    "capture_match",
+    "initial_pending",
+    "capture_initial"
+  ],
+  "source_stage": "PIPELINE-2 for the existing P>1 scheduled branch",
+  "valid_update": "!rst && stage_valid[PIPELINE-2]",
+  "debug_tag_and_assertions": "separate always blocks under ifndef SYNTHESIS",
+  "safety_argument": [
+    "At most one in-flight token per context tag; valid prior and last stage cannot both own the same tag.",
+    "Acceptance writes the context before its token can reach prior stage; P2 prior stage0 metadata was written on the preceding edge.",
+    "Returned-tag phase/iteration updates cannot collide with a different token of that tag in prior stage. Same-edge feedback creates a new stage0 token whose updated metadata is visible before its later prior-stage read.",
+    "Common family/coordinates still remain shared until busy contexts and captured results drain; they are not prefetched."
+  ],
+  "risk": "Splits returned tag-to-small-control selection path, but data-bank and initial digit/formatter paths remain. Area/Fmax improvements require actual common measurements.",
+  "validation_status": "passed",
+  "compile_workers": 3,
+  "threads_per_compile": 2,
+  "validation_summary": "VALIDATION.json",
+  "coordinate_switch_summary": "COORDINATE_VALIDATION.json",
+  "invariant_summary": "PREFETCH_INVARIANT.json",
+  "frozen_candidate_binding": {
+    "source_manifest": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/area10_20261014/round12_return_control_prefetch/candidate/build/pu_sign_matrix/20261014_222810/SOURCE.json",
+    "source_manifest_sha256": "f50fcb47d5536cb7dfeb5806452183af923a498965952b1324e84fa7d5769058",
+    "file": "rtl/hash/recipe.sv",
+    "candidate_sha256": "035588bac26d155815d180978983812267b72ef6e27251baff89eda1c33ffed6",
+    "local_input_sha256": "035588bac26d155815d180978983812267b72ef6e27251baff89eda1c33ffed6",
+    "local_input_matches_frozen_candidate": true,
+    "original_proof_sha256": "3cf09e5529788ad4d6b4d2c29da5a5425897e2e33c480c3f7d9e2825d7ed25b5"
+  }
+}

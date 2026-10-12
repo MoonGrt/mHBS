@@ -96,7 +96,7 @@ module top #(
         .job_index(KEY_INDEX),.job_identifier(IDENTIFIER),
         .job_operation(OPERATION),.job_message_length(message_length),
         .job_secret_seed(SECRET_SEED),.job_secret_prf(SECRET_PRF),
-        .job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),
+        .job_public_seed(PUBLIC_SEED),.job_public_root(PUBLIC_ROOT),.job_randomizer(RANDOMIZER),
         .message_valid(message_valid && phase==RUN),.message_ready(core_message_ready),.message_data,
         .verify_valid(verify_valid && phase==RUN),.verify_ready,.verify_data,.verify_pass,
         .out_valid,.out_data,.out_bytes,

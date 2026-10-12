@@ -1,0 +1,35 @@
+{
+  "candidate": "task_leaf_source",
+  "baseline": "build/area9_20261014/baseline",
+  "files": [
+    "rtl/executor/executor.sv"
+  ],
+  "baseline_executor_sha256": "62040a30a0957eeed72c43094012857e7bb8d3798c5a7b1af550f17d5d8fabe8",
+  "candidate_executor_sha256": "a561856fb10e6ef60907f21d1131e16a434adff9352999a020c4c76554c1308a",
+  "purpose": "Replace duplicate scalar coordinate registers with live-source selectors; retain all states and handshakes.",
+  "register_bits_before": 20,
+  "register_bits_after": 2,
+  "p_u_specialization": false,
+  "state_transition_changes": false,
+  "source_lifetimes": {
+    "task_leaf": [
+      "DECODE: scalar_leaf, used by scalar HASH request",
+      "CHAIN_SETUP: scalar_leaf or leaf_cursor, used by scalar CHAIN or Verify request",
+      "REDUCE_SETUP/LT_SETUP/SF_LEAF: leaf_cursor, used by the immediately following scalar HASH request",
+      "PARENT_SETUP: scalar_leaf or zero, used by scalar parent HASH request"
+    ],
+    "task_a": [
+      "CHAIN_SETUP: chain_cursor remains fixed until CHAIN_NEXT, after hash consumption",
+      "LT_SETUP: lt_level remains fixed until LT_NEXT, after hash consumption",
+      "PARENT_SETUP: node_level remains fixed until PARENT_DONE, after hash consumption; descriptor choice is latched in source tag"
+    ]
+  },
+  "notes": [
+    "Selection tags retain setup-cycle timing. Coordinate sources cannot update in HASH_ISSUE, HASH_WAIT or Verify input wait.",
+    "The 20-bit leaf_cursor was truncated at the old assignment; new live wire retains the same 20-bit truncation.",
+    "The parent increment is computed at INDEX_BITS width, matching the original task_a assignment even for node_level=31."
+  ],
+  "validation_summary": "../VALIDATION.json",
+  "proof_coverage": 12,
+  "proof_status": "PASS"
+}

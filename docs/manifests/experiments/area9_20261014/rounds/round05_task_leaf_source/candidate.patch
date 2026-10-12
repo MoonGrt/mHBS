@@ -1,0 +1,88 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -194,7 +194,12 @@
+     logic task_chain;
+     logic task_capture;
+     logic [4:0] task_steps, task_capture_after;
+-    logic [19:0] task_leaf;
++    // The leaf coordinate is immutable until the scalar request is accepted.
++    // Remember its source rather than another copy of the 20-bit coordinate.
++    localparam logic [1:0] TASK_LEAF_ZERO = 0, TASK_LEAF_SCALAR = 1, TASK_LEAF_CURSOR = 2;
++    logic [1:0] task_leaf_source;
++    wire [19:0] task_leaf = task_leaf_source == TASK_LEAF_SCALAR ? scalar_leaf
++        : task_leaf_source == TASK_LEAF_CURSOR ? leaf_cursor[19:0] : 20'd0;
+     logic [INDEX_BITS-1:0] task_a;
+     // Every supported address fits 21 bits: LMS leaves are 2^h+q,
+     // h<=20; FORS uses a six-bit group and at most a fourteen-bit leaf.
+@@ -710,7 +715,7 @@
+ 
+             task_steps <= 0;
+             task_capture_after <= 0;
+-            task_leaf <= 0;
++            task_leaf_source <= TASK_LEAF_ZERO;
+             task_a <= 0;
+             task_b <= 0;
+         end else begin
+@@ -808,7 +813,7 @@
+                 DECODE: begin
+                     case (macro_op)
+                         1: begin
+-                            task_leaf <= scalar_leaf;
++                            task_leaf_source <= TASK_LEAF_SCALAR;
+                             task_a <= 0;
+                             task_b <= 0;
+                             // The sign program starts with PRF_msg. Verification
+@@ -905,7 +910,7 @@
+                             task_capture <= 0;
+                             task_step <= descriptor_data[127:64];
+                             task_steps <= 0;
+-                            task_leaf <= scalar_leaf;
++                            task_leaf_source <= TASK_LEAF_SCALAR;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+                             task_b <= indexing == 1 ? fors_chain_address : 21'(shared_digit);
+                             read_verify_node(VERIFY_CHAIN_INPUT);
+@@ -930,7 +935,7 @@
+                             task_step <= descriptor_data[127:64];
+ 
+                             task_capture<=(indexing==1 ? leaf_cursor==target : leaf_cursor==target) && macro_flags[0];
+-                            task_leaf <= indexing == 1 ? scalar_leaf : leaf_cursor;
++                            task_leaf_source <= indexing == 1 ? TASK_LEAF_SCALAR : TASK_LEAF_CURSOR;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+                             task_b <= indexing == 1 ? fors_chain_address : 21'd0;
+                             task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target))
+@@ -1115,7 +1120,7 @@
+                     task_chain <= 0;
+                     task_capture <= 0;
+                     task_steps <= 0;
+-                    task_leaf <= leaf_cursor;
++                    task_leaf_source <= TASK_LEAF_CURSOR;
+                     task_a <= 0;
+                     task_b <= 0;
+                     start_hash(descriptor_data[63:0], stateful ? SF_LEAF : LEAF_SETUP);
+@@ -1163,7 +1168,7 @@
+                     task_chain <= 0;
+                     task_capture <= 0;
+                     task_steps <= 0;
+-                    task_leaf <= leaf_cursor;
++                    task_leaf_source <= TASK_LEAF_CURSOR;
+                     task_a <= {4'd0, lt_level};
+                     task_b <= 21'(lt_cursor >> 1);
+                     result <= {{(V - W) {1'b0}}, endpoint_value0};
+@@ -1199,7 +1204,7 @@
+                     task_chain <= 0;
+                     task_capture <= 0;
+                     task_steps <= 0;
+-                    task_leaf <= leaf_cursor;
++                    task_leaf_source <= TASK_LEAF_CURSOR;
+                     task_a <= 0;
+                     task_b <= (21'd1 << stateful_height) + leaf_cursor;
+                     start_hash(descriptor_data[63:0], SF_LEAF_DONE);
+@@ -1257,7 +1262,7 @@
+                         task_chain <= 0;
+                         task_capture <= 0;
+                         task_steps <= 0;
+-                        task_leaf <= indexing == 1 ? scalar_leaf : 0;
++                        task_leaf_source <= indexing == 1 ? TASK_LEAF_SCALAR : TASK_LEAF_ZERO;
+                         task_a <= descriptor_data[59:56] == 8 ? node_level : node_level + 1'b1;
+                         task_b <= parent_address;
+                         result[W-1:0]<=verifying ? (node_index[0] ? emit_value : node_value) : endpoint_value0;

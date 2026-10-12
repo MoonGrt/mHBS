@@ -1,0 +1,26 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -85,6 +85,15 @@
+     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
+     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
+     logic [6:0] message_length, message_received;
++    // Decode a word write once; do not shift a write mask across the full
++    // message vector. The final stored word has only its 56 meaningful bits.
++    for (genvar mw = 0; mw < (MAX_MESSAGE_BYTES + 7) / 8; mw++) begin : message_words
++        localparam integer WORD_BITS = MAX_MESSAGE_BYTES * 8 - mw * 64 >= 64
++            ? 64 : MAX_MESSAGE_BYTES * 8 - mw * 64;
++        always_ff @(posedge clk)
++            if (!rst && state == MESSAGE && message_valid && message_received[6:3] == 4'(mw))
++                message_buffer[mw*64+:WORD_BITS] <= message_data[WORD_BITS-1:0];
++    end
+     logic [W-1:0] value[0:3];
+     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+     logic [63:0] scalar_tree;
+@@ -769,7 +778,6 @@
+                 if (message_valid) begin
+                     // The offline-validated private ROM stream always supplies full
+                     // eight-byte beats; its last word is already zero padded.
+-                    message_buffer[{message_received[6:3], 6'b0}+:64] <= message_data;
+                     message_received <= message_received + 7'd8;
+                     if (message_received + 7'd8 >= message_length) enter_state(LAUNCH);
+                 end

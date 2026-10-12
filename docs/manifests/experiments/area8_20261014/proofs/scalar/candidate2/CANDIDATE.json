@@ -1,0 +1,49 @@
+{
+  "candidate": "candidate2",
+  "title": "Shared one-hot message word selection",
+  "change": "Replace dynamic 704-bit indexed part select plus index<11 gating with eleven constant 64-bit windows and one-hot mask/OR.",
+  "scope": "Pure message_word helper used by scalar and scheduled execution for all legal P/U.",
+  "equivalence": "Index is six bits: select_word equals 1<<index truncated to eleven bits. Exactly one lane is selected for indices0..10; every lane is zero for11..63. Existing padded_message bit layout unchanged.",
+  "lifetime": "Combinational only; no data or control register change; same source-control timing.",
+  "baseline_sha256": "497bdd0ed46e69ae51d55559325602151c4b83de51341d91debb988ee5d07a69",
+  "candidate_sha256": "f97c3114e4d818fcc415ca346b1ccc3faa532c7c6bae495ade6fc7a5774179b3",
+  "cycles": "Expected exactly unchanged; root schedules complete Sign comparison.",
+  "area": "Unknown pending root synthesis; reject if area increases.",
+  "tests": [
+    {
+      "kind": "local_rtl_combinational_equivalence",
+      "checks": 262144,
+      "passed": true,
+      "testbench": "build/area8_20261014/scalar/candidate2/tb_formatter_equivalence.sv",
+      "log": "build/area8_20261014/scalar/candidate2/proof_run.log"
+    },
+    {
+      "kind": "independent_sha_keccak_recipe_frames",
+      "pipeline": 1,
+      "unroll": 1,
+      "cases": 459,
+      "passed": true,
+      "coverage": "build/area8_20261014/scalar/candidate2/recipe_check_root/build/recipe_check/P1U1/coverage.json",
+      "log": "build/area8_20261014/scalar/candidate2/recipe_p1u1.log"
+    },
+    {
+      "kind": "independent_sha_keccak_recipe_frames",
+      "pipeline": 4,
+      "unroll": 1,
+      "cases": 459,
+      "passed": true,
+      "coverage": "build/area8_20261014/scalar/candidate2/recipe_check_root/build/recipe_check/P4U1/coverage.json",
+      "log": "build/area8_20261014/scalar/candidate2/recipe_p4u1.log"
+    },
+    {
+      "kind": "independent_sha_keccak_recipe_frames",
+      "pipeline": 12,
+      "unroll": 1,
+      "cases": 459,
+      "passed": true,
+      "coverage": "build/area8_20261014/scalar/candidate2/recipe_check_root/build/recipe_check/P12U1/coverage.json",
+      "log": "build/area8_20261014/scalar/candidate2/recipe_p12u1.log"
+    }
+  ],
+  "validation_command": "python3 build/area8_20261014/scalar/candidate2/recipe_check_root/scripts/check_recipes.py --pipeline 1 --unroll 1"
+}

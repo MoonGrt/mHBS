@@ -1,0 +1,16 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1066,8 +1066,11 @@
+ 
+             // One remaining-length subtractor serves every byte of the beat. A
+             // byte-local position adder otherwise replicates a wide carry chain.
+-            wire [12:0] remaining_bytes = input_length - position;
+-            wire padding_reached = position > input_length;
++            // The subtraction's borrow bit also marks positions beyond the input.
++            // Low bits preserve the existing modulo-8192 remaining-byte value.
++            wire [13:0] remaining_extended = {1'b0, input_length} - {1'b0, position};
++            wire [12:0] remaining_bytes = remaining_extended[12:0];
++            wire padding_reached = remaining_extended[13];
+             wire partial_beat = remaining_bytes < 16;
+             // Only the last eight-byte beat consumes this flag. Exactly eight bytes
+             // remaining requires another rate block for SHAKE's delimiter.

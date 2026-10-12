@@ -1,0 +1,16 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1523,7 +1523,12 @@
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
++                    if (SHARED_STATE) begin : shared_input
++                        assign rounds[0] = engine_mode && !recycle ?
++                            batch_perm_state : state_reg[PIPELINE-1];
++                    end else begin : private_input
++                        assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
++                    end
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
+                     assign source_valid = recycle || issue_valid;

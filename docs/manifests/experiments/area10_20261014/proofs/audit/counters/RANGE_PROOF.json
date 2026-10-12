@@ -1,0 +1,71 @@
+{
+  "candidate_executor_sha256": "fce986b0b7ab5e68cb2d1c7e46c159426e2c160e4afbaae2f75837c46cd05be8",
+  "method": "Inductive bounds from actual reset/assignment/guard sites, supplemented by real RTL shadow consumer checks and actual checksum extreme/rejection executions. No mirrored Python test is used as evidence of RTL equivalence.",
+  "checksum": {
+    "node_bytes": [
+      16,
+      24,
+      32
+    ],
+    "LEN1": [
+      32,
+      48,
+      64
+    ],
+    "max_values": [
+      480,
+      720,
+      960
+    ],
+    "bits_required": 10,
+    "induction": "DECODE macro4 resets to zero; each TRANSFORM adds 15-digit for digit in0..15; exactly LEN1 iterations, so all partial sums0..15*LEN1<=960. Bits11:10 remain zero.",
+    "first_digit": "Original {1b0,checksum[11:8]} equals new {3b0,checksum[9:8]} because bits11:10 remain zero."
+  },
+  "transform_index": {
+    "range": [
+      0,
+      63
+    ],
+    "bits_required": 7,
+    "induction": "Initialized0 at macro4; only incremented when index+1 != LEN1; LEN1 in32/48/64. The equality is evaluated before assignment truncation, so no valid wrap occurs."
+  },
+  "pipe_next_chain": {
+    "range": [
+      0,
+      67
+    ],
+    "bits_required": 7,
+    "induction": "Reset0 or assigned chain_cursor at validated batch setup; accepted requests require next<endpoint_count; increment can reach endpoint_count<=67, after which no further request is admitted."
+  },
+  "pipe_completed": {
+    "range": [
+      0,
+      67
+    ],
+    "bits_required": 7,
+    "induction": "Reset0 for batch; each allocated tag can retire once; terminal response transitions out of pipe mode when completed+1>=endpoint_count. At most endpoint_count<=67 returns exist."
+  },
+  "pipe_chain_index": {
+    "range": [
+      0,
+      66
+    ],
+    "bits_required": 7,
+    "induction": "Stores pre-increment next_chain only on selected&&ready, which requires next<endpoint_count<=67; per-tag entry is not consumed before allocation and not overwritten until return."
+  },
+  "same_cycle_issue_return": "Existing ordered nonblocking updates retire before reallocation. Counters increase independently; old shadow stores the pre-increment8-bit index into each issued tag, checks actual batch address and successful endpoint writeback.",
+  "invalid_endpoint_counts": {
+    "field_width_unchanged": 8,
+    "guard": "CHAIN_SETUP: endpoint_count==0 || endpoint_count>67, before pipe/cache setup and issue states",
+    "tested_values": [
+      0,
+      68,
+      127,
+      128,
+      255
+    ],
+    "scope_correction": "Accepted standard chain-count interval is1..67;0 is rejected."
+  },
+  "integer_arithmetic": "No changed shift expression. Unsized +1/PIPELINE comparisons retain at least32-bit width; assignment truncation is harmless under bounds. The checksum arithmetic width shrinks from12 to10 but960 maximum fits and the per-digit subtraction never makes the accumulated final expression negative.",
+  "scope": "Canonical standard12 ROMs, valid node sizes, normal reset/handshake behavior; no X/Z or arbitrary forced malformed-state equivalence claimed."
+}

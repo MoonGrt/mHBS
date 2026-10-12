@@ -55,7 +55,7 @@ P4U1逐步对照：
 
 工作区复用这一独立步骤在P4U1增加57.125等效Slice及86个SLH周期；最终组合相对当前标准基线面积下降1.41%，三个已测最佳ATP下降。复用并非在所有点上单独降低面积，表中保留实测代价。
 
-[逐步CSV](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/steps.csv)、[周期分解](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/profile/profile.json)、[证据清单](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/EVIDENCE.json)。
+[逐步JSON](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/steps.json)、[周期分解](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/profile/profile.json)、[证据清单](/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/pu_generic/20261013_201408/EVIDENCE.json)。
 
 待解决：route/baseline/P24U1
 

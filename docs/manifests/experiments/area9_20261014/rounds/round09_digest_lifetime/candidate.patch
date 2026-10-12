@@ -1,0 +1,77 @@
+--- baseline/input/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -85,7 +85,15 @@
+     wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
+     logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
+     logic [6:0] message_length, message_received;
+-    logic [W-1:0] value[0:3];
++    // FORS message bits die when its roots are compressed into the WOTS
++    // message. Stateful jobs only use the WOTS/message view. Slots 1 and 2
++    // therefore share one node bank; R and the public root remain live alone.
++    logic [W-1:0] value_r, digest_value, value_root;
++    wire [W-1:0] value[0:3];
++    assign value[0] = value_r;
++    assign value[1] = digest_value;
++    assign value[2] = digest_value;
++    assign value[3] = value_root;
+     logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+@@ -756,7 +764,7 @@
+                     layer <= 0;
+                     group_index <= 0;
+ 
+-                    value[3] <= job_public_root;
++                    value_root <= job_public_root;
+                     if (!valid_profile) fail();
+                     else if (decoded_stateful && job_index >= (32'd1 << decoded_height)) fail();
+                     else if (job_operation) begin
+@@ -1187,7 +1195,7 @@
+                 LT_FINISH: begin
+                     node_value <= endpoint_value0;
+                     if (verifying && standalone_chain) begin
+-                        value[2] <= endpoint_value0;
++                        digest_value <= endpoint_value0;
+                         complete_macro();
+                     end else begin
+                         node_index <= leaf_cursor;
+@@ -1207,7 +1215,7 @@
+                 SF_LEAF_DONE: begin
+                     node_value <= result[W-1:0];
+                     if (verifying && standalone_chain) begin
+-                        value[2] <= result[W-1:0];
++                        digest_value <= result[W-1:0];
+                         complete_macro();
+                     end else begin
+                         node_index <= leaf_cursor;
+@@ -1216,7 +1224,7 @@
+                     end
+                 end
+                 SF_RANDOM: begin
+-                    value[0] <= emit_value;
++                    value_r <= emit_value;
+                     if (xmss) complete_macro();
+                     else start_hash(saved_descriptor, HASH_RESULT);
+                 end
+@@ -1277,7 +1285,7 @@
+                     end else enter_state(TREE_FINISH);
+                 end
+                 TREE_FINISH: begin
+-                    if (stateful && verifying) value[2] <= node_value;
++                    if (stateful && verifying) digest_value <= node_value;
+                     route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
+                 end
+                 HASH_ISSUE: if (lane_ready) enter_state(HASH_WAIT);
+@@ -1292,7 +1300,11 @@
+                     if (macro_route == 0) complete_macro();
+                     else begin
+                         if (!route_descriptor[53]) begin
+-                            value[route_descriptor[57:56]] <= route_value[W-1:0];
++                            case (route_descriptor[57:56])
++                                0: value_r <= route_value[W-1:0];
++                                1, 2: digest_value <= route_value[W-1:0];
++                                3: value_root <= route_value[W-1:0];
++                            endcase
+                             if (route_descriptor[57:56] == 1)
+                                 fors_digest_tail <= route_value[FORS_DIGEST_BITS-1:W];
+                         end

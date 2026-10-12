@@ -1,0 +1,275 @@
+{
+  "schema": "mhbs.executor.state_audit.v1",
+  "source": "build/pu_sign_matrix/20261014_182411/source/rtl/executor/executor.sv",
+  "source_sha256": "69c841006c49f0579c0f60a766ddd3428b35a7fedead05e9dd04f8674b1725e2",
+  "execution_model": "SLH/XMSS/LMS share one state register; Job mutual exclusion already exists",
+  "encoding": {
+    "declared_bits": 7,
+    "enum_names": 67,
+    "maximum_code": 70,
+    "numeric_holes": [
+      9,
+      11,
+      12,
+      13
+    ],
+    "dead_labels": [
+      "PIPE_CAPTURE",
+      "PIPE_ADVANCE",
+      "SF_REDUCED",
+      "LT_PIPE_ADVANCE",
+      "FORS_RIGHT"
+    ],
+    "sentinel_label": "PIPE_CAPTURE_NEXT",
+    "live_main_states": 61,
+    "retained_compact_labels": 62,
+    "compact_bits": 6,
+    "enum": {
+      "IDLE": 0,
+      "MESSAGE": 1,
+      "LAUNCH": 2,
+      "FETCH": 3,
+      "LOAD_DESCRIPTOR": 4,
+      "DECODE": 5,
+      "TREE_INIT": 6,
+      "CHAIN_SETUP": 7,
+      "CHAIN_STORE": 8,
+      "CHAIN_OUTPUT0": 10,
+      "CHAIN_NEXT": 14,
+      "REDUCE_SETUP": 15,
+      "LEAF_SETUP": 16,
+      "PUSH_NODE": 17,
+      "PARENT_SETUP": 18,
+      "PARENT_DONE": 19,
+      "AUTH_OUTPUT": 20,
+      "TREE_FINISH": 21,
+      "HASH_ISSUE": 22,
+      "HASH_WAIT": 23,
+      "HASH_RESULT": 24,
+      "ROUTE": 25,
+      "TRANSFORM": 26,
+      "EMIT": 27,
+      "EMIT_NEXT": 28,
+      "OUTPUT_CHUNK": 29,
+      "DRAIN": 30,
+      "FINISH": 31,
+      "FAILED": 32,
+      "VERIFY_INPUT": 33,
+      "VERIFY_RANDOM": 34,
+      "VERIFY_CHAIN_INPUT": 35,
+      "VERIFY_CHAIN_RUN": 36,
+      "VERIFY_CHAIN_ADVANCE": 37,
+      "PIPE_ISSUE": 38,
+      "PIPE_WAIT": 39,
+      "PIPE_LOAD": 40,
+      "PIPE_CAPTURE": 41,
+      "PIPE_CAPTURE_NEXT": 42,
+      "PIPE_ADVANCE": 43,
+      "LT_SETUP": 44,
+      "LT_STORE": 45,
+      "LT_COPY": 46,
+      "LT_NEXT": 47,
+      "LT_FINISH": 48,
+      "SF_REDUCED": 49,
+      "SF_LEAF": 50,
+      "SF_LEAF_DONE": 51,
+      "SF_RANDOM": 52,
+      "PIPE_VERIFY_INPUT": 53,
+      "LT_PIPE_INIT": 54,
+      "LT_PIPE_ISSUE": 55,
+      "LT_PIPE_WAIT": 56,
+      "LT_PIPE_ADVANCE": 57,
+      "FORS_PICK": 58,
+      "FORS_AUTH0": 59,
+      "FORS_BEGIN": 60,
+      "FORS_LEFT": 61,
+      "FORS_RIGHT": 62,
+      "FORS_ISSUE": 63,
+      "FORS_WAIT": 64,
+      "FORS_LEVEL": 65,
+      "FORS_AUTH1": 66,
+      "FORS_PUSH": 67,
+      "FORS_LEAF_NEXT": 68,
+      "FORS_ROOT_NEXT": 69,
+      "PUSH_STACK": 70
+    }
+  },
+  "candidate_A": {
+    "change": "Merge hash_return/output_return/verify_return into state_t continuation; retain all state codes and transitions",
+    "declaration_lines": [
+      80,
+      94
+    ],
+    "write_lines": [
+      447,
+      472,
+      478
+    ],
+    "consume_lines": [
+      215,
+      1287,
+      1331,
+      1350,
+      1355
+    ],
+    "reset_line": 674,
+    "ownership": {
+      "hash": [
+        "HASH_ISSUE",
+        "HASH_WAIT"
+      ],
+      "output": [
+        "OUTPUT_CHUNK"
+      ],
+      "verify": [
+        "VERIFY_INPUT"
+      ]
+    },
+    "hash_targets": [
+      "HASH_RESULT",
+      "CHAIN_STORE",
+      "SF_LEAF",
+      "LEAF_SETUP",
+      "LT_STORE",
+      "SF_LEAF_DONE",
+      "PARENT_DONE",
+      "VERIFY_CHAIN_ADVANCE"
+    ],
+    "output_targets": [
+      "PIPE_CAPTURE_NEXT",
+      "FORS_LEAF_NEXT",
+      "CHAIN_NEXT",
+      "AUTH_OUTPUT",
+      "FETCH",
+      "EMIT_NEXT"
+    ],
+    "verify_targets": [
+      "SF_RANDOM",
+      "VERIFY_RANDOM",
+      "VERIFY_CHAIN_INPUT",
+      "PARENT_SETUP"
+    ],
+    "nominal_width_saved": 14,
+    "baseline_variable_bits_estimate": 18,
+    "candidate_variable_bits": 7,
+    "upper_direct_variable_ff_saved": 11,
+    "risk": "Merged write mux and downstream decode can offset the few saved FF; area must be measured",
+    "cycles_expected": "exactly equal",
+    "lifetime_proof": [
+      "start_hash writes continuation and enters HASH_ISSUE on the same edge. HASH_ISSUE only goes to HASH_WAIT; no other return producer occurs before HASH_WAIT consumes lane_valid.",
+      "P1 scalar recipe reads external request_right during several internal hash phases; continuation stays unchanged during the entire HASH_ISSUE/HASH_WAIT interval, preserving parent_right.",
+      "P>1 scalar fixed bridge samples right node on accepted request. Continuation remains valid at that acceptance edge.",
+      "start_output writes continuation before OUTPUT_CHUNK. Multi-beat direct captures keep the PIPE_CAPTURE_NEXT sentinel stable until advance_direct_batch retires the last beat.",
+      "read_verify_node writes continuation before VERIFY_INPUT. The node acceptance edge consumes it before a later state may start another hash/output/input operation.",
+      "Reset initializes continuation to IDLE, retaining old verify_return reset. Old hash_return/output_return were uninitialized but cannot be consumed before start_hash/start_output assigns them.",
+      "No task nests a hash wait inside an output/input wait, or starts output/input while the scalar hash is in flight; return validity follows serial state phases, not merely algorithm exclusivity."
+    ]
+  },
+  "candidate_B": {
+    "change": "Drop 5 unreferenced labels, fill 4 historical numeric holes, retain sentinel, encode all62 labels with6bits",
+    "benefit": "At most one bit per logical state/return word; actual constants may already prune high return bits. Decoder remapping can dominate area change.",
+    "interface": "State is internal; update tb_fast execution_active and profile_p4 observer numeric assumptions; public interfaces and ROM unchanged",
+    "cycles_expected": "exactly equal"
+  },
+  "next_structural_candidates": [
+    {
+      "name": "Shared binary reduction issue",
+      "states": [
+        "LT_PIPE_ISSUE",
+        "FORS_ISSUE"
+      ],
+      "lines": [
+        1135,
+        1018
+      ],
+      "change": "Replace both with REDUCTION_ISSUE. In this operation xmss identifies L-tree and !stateful/indexing==1 identifies FORS. Their issue-slot increment/end-mask test is identical. Keep separate wait behavior or branch by immutable algorithm selector.",
+      "required_rewire": [
+        "lt_pipe/fors_pipe",
+        "pipe_selected",
+        "batch_response_ready",
+        "endpoint read address update",
+        "pipe_done_mask update",
+        "debug whitelist"
+      ],
+      "cycle_risk": "Low if one current state maps to one new state; do not remove FORS_LEFT read/setup bubble."
+    },
+    {
+      "name": "Shared leaf commit",
+      "states": [
+        "LT_FINISH",
+        "SF_LEAF_DONE"
+      ],
+      "lines": [
+        1185,
+        1205
+      ],
+      "change": "One LEAF_COMMIT with leaf_value=xmss?endpoint_value0:result[255:0]. Both states copy node value and, on standalone verify, update value[2]/complete_macro; otherwise set node_index, node_level0 and PUSH_NODE.",
+      "cycle_risk": "One-for-one state replacement possible, but introduces a 256-bit source mux and may increase area."
+    },
+    {
+      "name": "Shared init/auth phases",
+      "states": [
+        "FORS_BEGIN",
+        "FORS_LEVEL",
+        "FORS_AUTH0",
+        "FORS_AUTH1"
+      ],
+      "lines": [
+        1005,
+        1006,
+        1040,
+        1041
+      ],
+      "change": "Group identical assignment logic first. A truly shared state requires moving/latching phase because fors_level has stale value before FORS_BEGIN/AUTH0 and current value0 before AUTH1.",
+      "cycle_risk": "Medium; first/second-level auth write addresses and in-place reduction lifetime require exact edge proof."
+    }
+  ],
+  "not_redundant": [
+    {
+      "states": [
+        "LT_SETUP",
+        "LT_STORE",
+        "LT_NEXT"
+      ],
+      "reason": "Live P1 scalar L-tree path; P>1 compile-time pruning does not make them globally dead."
+    },
+    {
+      "states": [
+        "FORS_LEFT"
+      ],
+      "reason": "One read/setup cycle before issuing binary hash; RAM prefetch and public-context handoff occur here. Cannot remove just because main case only transitions."
+    },
+    {
+      "states": [
+        "PUSH_NODE",
+        "PUSH_STACK"
+      ],
+      "reason": "Serializes auth-before-stack writes sharing one RAM write port. Two simultaneously live data values cannot collapse into one write."
+    },
+    {
+      "states": [
+        "LT_COPY"
+      ],
+      "reason": "Required odd67-node L-tree tail move and layer advance. Hash wait and copy share case body but have different RAM actions."
+    },
+    {
+      "states": [
+        "HASH_ISSUE",
+        "HASH_WAIT",
+        "CHAIN_STORE",
+        "CHAIN_OUTPUT0",
+        "CHAIN_NEXT"
+      ],
+      "reason": "Request acceptance, response capture, endpoint write and ordered signature capture occur at separate edges. One shared state needs extra phase flags; deleting stages changes protocol or cycles."
+    }
+  ],
+  "proof_artifacts": {
+    "runner": "build/executor_state_20261014/lockstep/run_lockstep.py",
+    "summary": "build/executor_state_20261014/lockstep/A/SUMMARY.json",
+    "scope": "Measured lockstep cases, not exhaustive formal equivalence. Baseline/candidate sources untouched.",
+    "complete": true,
+    "passed_cases": 10,
+    "total_checked_cycles": 1411726,
+    "source_unchanged": true
+  }
+}

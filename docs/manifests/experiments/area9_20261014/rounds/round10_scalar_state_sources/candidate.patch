@@ -1,0 +1,20 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -695,11 +695,14 @@
+                 wire [63:0] fast_word;
+                 if (w < 17) assign fast_word = fast_block[w*64+:64];
+                 else assign fast_word = 64'd0;
+-                wire [63:0] round_or_clear = clear_stream ? 64'd0 : advanced_state[w*64+:64];
+                 wire [63:0]
+                     absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
+-                wire [63:0] next_word = (take_fast || take_feedback) ? fast_word :
+-                    select_stream ? absorb_word : round_or_clear;
++                // These sources are disjoint in the hash FSM. Initialization
++                // clears unselected words by enabling a write with no source.
++                wire [63:0] next_word =
++                    (fast_word & {64{take_fast || take_feedback}}) |
++                    (absorb_word & {64{select_stream}}) |
++                    (advanced_state[w*64+:64] & {64{round_update && !take_feedback}});
+                 always_ff @(posedge clk)
+                     if (!rst && (round_update || take_fast || select_stream || clear_stream))
+                         sponge_state[w*64+:64] <= next_word;

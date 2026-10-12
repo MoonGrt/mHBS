@@ -1,0 +1,18 @@
+--- baseline/measured/scripts/run_pu_sign_matrix.py
++++ baseline/input/scripts/run_pu_sign_matrix.py
+@@ -110,6 +110,15 @@
+     atomic_write(ROOT / 'build/pu_sign_matrix/latest.json', json.dumps(
+         dict(run_id=stamp, pid=child.pid, root=str(run), log=str(log),
+              status=str(run / 'status.json'), report=str(report)), indent=2) + '\n')
++    # A following launch must be able to reserve this pool immediately. Publishing
++    # LAUNCH before the initial status allowed callers to miss an in-flight pool.
++    publication_deadline = time.monotonic() + 30
++    while not (run / 'status.json').exists():
++        if child.poll() is not None:
++            raise RuntimeError(f'Matrix runner exited before publishing status; see {log}')
++        if time.monotonic() >= publication_deadline:
++            raise RuntimeError(f'Matrix runner is still active but status is not published; see {log}')
++        time.sleep(0.05)
+     print(json.dumps(dict(pid=child.pid, root=str(run), log=str(log),
+                           status=str(run / 'status.json'), report=str(report),
+                           simulation_cases=len(configs) * len(PROFILES),

@@ -1,0 +1,68 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1204,6 +1204,22 @@
+                     (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
+                      captured[ctx_read_tag]) : 256'd0;
+                 wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
++                // Decode the returned tag once for all three fixed-context banks.
++                wire [PIPELINE-1:0] return_select;
++                for (genvar j = 0; j < PIPELINE; j++) begin : return_decode
++                    assign return_select[j] = t == TAG_BITS'(j);
++                end
++                logic [255:0] returned_key, returned_digest, returned_captured;
++                always_comb begin
++                    returned_key = 0;
++                    returned_digest = 0;
++                    returned_captured = 0;
++                    for (integer j = 0; j < PIPELINE; j++) begin
++                        returned_key |= key_value[j] & {256{return_select[j]}};
++                        returned_digest |= digest[j] & {256{return_select[j]}};
++                        returned_captured |= captured[j] & {256{return_select[j]}};
++                    end
++                end
+                 logic [PIPELINE-1:0] node_phase, more_steps;
+                 wire node_done = node_phase[t];
+                 wire again = ctx_perm_done && (!node_done || more_steps[t]);
+@@ -1239,12 +1255,12 @@
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
+                 wire [255:0] block_value = again ?
+-                    (phase[t][5] ? digest[t] :
+-                     phase[t][3] ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                    (phase[t][5] ? returned_digest :
++                     phase[t][3] ? returned_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                 wire [255:0]
+-                    block_right = again ? captured[t] ^ ctx_perm_digest[255:0] : ctx_request_right;
++                    block_right = again ? returned_captured ^ ctx_perm_digest[255:0] : ctx_request_right;
+                 wire [1599:0] unified_state;
+                 begin : formatter
+                     // Keep each byte placement independent of the family mux.
+@@ -1268,7 +1284,7 @@
+                     wire [7:0] xmss_domain = block_shape == 5 || prf ? 8'd3 :
+                         seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+                     wire [255:0] xmss_key = block_shape == 5 ? block_value :
+-                        seed ? ctx_secret_seed : prf ? ctx_public_seed : key_value[t];
++                        seed ? ctx_secret_seed : prf ? ctx_public_seed : returned_key;
+                     wire [255:0] xmss_value = block_shape == 5 ? {block_address[191:160],224'd0} :
+                         seed ? ctx_public_seed : prf ? masked_address : block_value;
+                     wire [255:0] xmss_right = seed ? masked_address : block_right;
+@@ -1350,14 +1366,14 @@
+                     ctx_request_initial_value;
+                 wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+-                wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
+-                    mask_left ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
++                wire [255:0] digest_write_data = initial_transfer ? returned_key :
++                    mask_left ? returned_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+                 wire capture_transfer = initial_transfer && capture_initial[t];
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+                 wire [255:0] captured_write_data = right_write ? ctx_request_right :
+-                    capture_transfer ? key_value[t] : ctx_perm_digest[255:0];
++                    capture_transfer ? returned_key : ctx_perm_digest[255:0];
+                 always_ff @(posedge clk) begin
+                     if (!rst) begin
+                         if (key_write) key_value[key_write_tag] <= key_write_data;

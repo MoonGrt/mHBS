@@ -1,0 +1,101 @@
+--- baseline/rtl/executor/executor.sv
++++ candidate/rtl/executor/executor.sv
+@@ -196,7 +196,24 @@
+     logic [4:0] task_steps, task_capture_after;
+     logic [19:0] task_leaf;
+     logic [INDEX_BITS-1:0] task_a;
+-    logic [31:0] task_b;
++    // Every supported address fits 21 bits: LMS leaves are 2^h+q,
++    // h<=20; FORS uses a six-bit group and at most a fourteen-bit leaf.
++    // Extend at the recipe boundary rather than carrying eleven dead bits.
++    logic [20:0] task_b;
++    wire [19:0] fors_tree_base = {14'd0, group_index} << FORS_A;
++    wire [20:0] fors_chain_address = {1'b0, fors_tree_base}
++        + (verifying ? target : leaf_cursor);
++    wire [4:0] parent_level = node_level + 5'd1;
++    wire [20:0] parent_index = node_index >> 1;
++    wire [20:0] parent_address = parent_index
++        + (indexing == 1 ? ({1'b0, fors_tree_base} >> parent_level)
++           : indexing == 2 ? (21'd1 << (tree_height - parent_level)) : 21'd0);
++    wire [20:0] batch_address = fors_pipe
++        ? ({1'b0, fors_tree_base} >> (fors_level ? 2 : 1))
++          + (fors_base >> (fors_level ? 2 : 1))
++          + 21'(fors_offset) + 21'(pipe_issue_slot)
++        : lt_pipe ? 21'(lt_cursor >> 1) + 21'(pipe_issue_slot)
++        : indexing == 1 ? {1'b0, fors_tree_base} + batch_leaf_index : 21'd0;
+     // Parent operands stay unchanged until the successful parent response
+     // is consumed. Other recipes do not consume the right input, so no
+     // duplicate parent-right register is needed.
+@@ -270,7 +287,7 @@
+         .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
+         .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
+         .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
+-        .batch_b(fors_pipe ? ((32'(group_index)<<FORS_A)>>(fors_level ? 2 : 1))+(32'(fors_base)>>(fors_level ? 2 : 1))+32'(fors_offset)+32'(pipe_issue_slot) : lt_pipe ? 32'(lt_cursor>>1)+32'(pipe_issue_slot) : indexing==1 ? (32'(group_index)<<FORS_A)+32'(batch_leaf_index) : 32'd0),
++        .batch_b({11'd0, batch_address}),
+         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
+         .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT)),.batch_response_tag(pipe_tag),
+         .batch_response_digest(),.batch_response_capture(),
+@@ -288,7 +305,7 @@
+         .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
+         .identifier(job_identifier),.message_buffer,.message_length,
+         .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
+-        .request_a(task_a),.request_b(task_b),.request_left(result[W-1:0]),.request_right(parent_right),
++        .request_a(task_a),.request_b({11'd0, task_b}),.request_left(result[W-1:0]),.request_right(parent_right),
+         .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
+         .list_data0(endpoint_value0),.list_data1(endpoint_value1),
+         .response_valid(lane_valid),.response_ready(state==HASH_WAIT),
+@@ -890,7 +907,7 @@
+                             task_steps <= 0;
+                             task_leaf <= scalar_leaf;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+-                            task_b <= indexing == 1 ? (group_index << FORS_A) + target : shared_digit;
++                            task_b <= indexing == 1 ? fors_chain_address : 21'(shared_digit);
+                             read_verify_node(VERIFY_CHAIN_INPUT);
+                         end else if(!stateful && PIPELINE>1 && descriptor_data[59:56]==1 && descriptor_data[123:120]==2)begin
+                             if (pipe_cache_valid) begin
+@@ -915,7 +932,7 @@
+                             task_capture<=(indexing==1 ? leaf_cursor==target : leaf_cursor==target) && macro_flags[0];
+                             task_leaf <= indexing == 1 ? scalar_leaf : leaf_cursor;
+                             task_a <= indexing == 1 ? 0 : chain_cursor;
+-                            task_b <= indexing == 1 ? (group_index << FORS_A) + leaf_cursor : 0;
++                            task_b <= indexing == 1 ? fors_chain_address : 21'd0;
+                             task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target))
+                             ? shared_digit : chain_descriptor[19:15];
+                             task_capture_after <= indexing == 1 ? 0 : shared_digit;
+@@ -1148,7 +1165,7 @@
+                     task_steps <= 0;
+                     task_leaf <= leaf_cursor;
+                     task_a <= {4'd0, lt_level};
+-                    task_b <= 32'(lt_cursor >> 1);
++                    task_b <= 21'(lt_cursor >> 1);
+                     result <= {{(V - W) {1'b0}}, endpoint_value0};
+                     node_value <= endpoint_value1;
+                     start_hash(descriptor_data[63:0], LT_STORE);
+@@ -1184,7 +1201,7 @@
+                     task_steps <= 0;
+                     task_leaf <= leaf_cursor;
+                     task_a <= 0;
+-                    task_b <= (32'd1 << stateful_height) + 32'(leaf_cursor);
++                    task_b <= (21'd1 << stateful_height) + leaf_cursor;
+                     start_hash(descriptor_data[63:0], SF_LEAF_DONE);
+                 end
+                 SF_LEAF_DONE: begin
+@@ -1242,8 +1259,7 @@
+                         task_steps <= 0;
+                         task_leaf <= indexing == 1 ? scalar_leaf : 0;
+                         task_a <= descriptor_data[59:56] == 8 ? node_level : node_level + 1'b1;
+-                        task_b<=indexing==1 ? ((group_index<<FORS_A)>>(node_level+1))+(node_index>>1)
+-                            : indexing==2 ? (1<<(tree_height-node_level-1))+(node_index>>1) : (node_index>>1);
++                        task_b <= parent_address;
+                         result[W-1:0]<=verifying ? (node_index[0] ? emit_value : node_value) : endpoint_value0;
+                         start_hash(descriptor_data[63:0], PARENT_DONE);
+                     end
+@@ -1328,7 +1344,7 @@
+                     end else start_hash(descriptor_data[63:0], VERIFY_CHAIN_ADVANCE);
+                 end
+                 VERIFY_CHAIN_ADVANCE: begin
+-                    task_b <= {28'd0, task_b[3:0] + 4'd1};
++                    task_b <= {17'd0, task_b[3:0] + 4'd1};
+                     enter_state(VERIFY_CHAIN_RUN);
+                 end
+                 OUTPUT_CHUNK: begin

@@ -1,0 +1,28 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1267,10 +1267,21 @@
+                     };
+                     wire [7:0] xmss_domain = block_shape == 5 || prf ? 8'd3 :
+                         seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+-                    wire [255:0] xmss_key = block_shape == 5 ? block_value :
+-                        seed ? ctx_secret_seed : prf ? ctx_public_seed : key_value[t];
+-                    wire [255:0] xmss_value = block_shape == 5 ? {block_address[191:160],224'd0} :
+-                        seed ? ctx_public_seed : prf ? masked_address : block_value;
++                    wire xmss_prfkeygen = block_shape == 5;
++                    wire keygen_source = xmss_prfkeygen;
++                    wire seed_source = !xmss_prfkeygen && seed;
++                    wire address_source = !xmss_prfkeygen && !seed && prf;
++                    wire node_source = !xmss_prfkeygen && !seed && !prf;
++                    wire [255:0] xmss_key =
++                        ({256{keygen_source}} & block_value) |
++                        ({256{seed_source}} & ctx_secret_seed) |
++                        ({256{address_source}} & ctx_public_seed) |
++                        ({256{node_source}} & key_value[t]);
++                    wire [255:0] xmss_value =
++                        ({256{keygen_source}} & {block_address[191:160],224'd0}) |
++                        ({256{seed_source}} & ctx_public_seed) |
++                        ({256{address_source}} & masked_address) |
++                        ({256{node_source}} & block_value);
+                     wire [255:0] xmss_right = seed ? masked_address : block_right;
+                     wire [183:0] chain_prefix = {
+                         (seed || block_shape == 9) ? 8'hff : block_shape == 10 ?

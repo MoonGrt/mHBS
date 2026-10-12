@@ -1,0 +1,64 @@
+--- a/tb/tb.sv
++++ b/tb/tb.sv
+@@ -57,11 +57,11 @@
+   if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;fors_positions=0;ltree_odd=0;rolling_reuse=0;end
+   else begin
+    begin
+-    if(dut.core.state==58 && dut.core.fors_target_wave)fors_positions[dut.core.target[1:0]]=1;
+-    if(dut.core.state==46 && dut.core.lt_count[0])ltree_odd++;
++    if(dut.core.state==dut.core.STATE_FORS_PICK && dut.core.fors_target_wave)fors_positions[dut.core.target[1:0]]=1;
++    if(dut.core.state==dut.core.STATE_LT_COPY && dut.core.lt_count[0])ltree_odd++;
+     if(dut.core.pipe_rolling && dut.core.pipe_selected && dut.core.pipe_ready && dut.core.pipe_valid
+       && dut.core.lane.batch_request_tag==dut.core.pipe_tag)rolling_reuse++;
+-    if(dut.core.state==55 && dut.core.endpoint_write)$fatal(1,"L-tree writes before batch inputs accepted");
++    if(dut.core.state==dut.core.STATE_LT_PIPE_ISSUE && dut.core.endpoint_write)$fatal(1,"L-tree writes before batch inputs accepted");
+    end
+    // Retire before allocation: a slot may be reused on the same edge.
+    if(dut.core.pipe_valid&&dut.core.lane.batch_response_ready)begin
+@@ -89,8 +89,8 @@
+  initial begin hashes[1]=0;perms[1]=0;end
+  always @(posedge clk)begin
+   if(dut.core.rst)compute=0;
+-  else if(dut.core.state==0&&dut.core.job_valid)compute=0;
+-  else if(dut.core.state!=0&&dut.core.state!=32)compute++;
++  else if(dut.core.state==dut.core.STATE_IDLE&&dut.core.job_valid)compute=0;
++  else if(dut.core.state!=dut.core.STATE_IDLE&&dut.core.state!=dut.core.STATE_FAILED)compute++;
+   if(rst)begin cycles=0;cursor=0;sent=0;accepted=0;end
+   else begin
+    cycles++;
+@@ -152,8 +152,8 @@
+    if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
+    if(fault)begin
+     if(fault==2)begin while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();end
+-    else begin while(dut.core.state!=23)tick();end
+-    if(fault==3)force dut.core.state=type(dut.core.state)'(7'd127);
++    else begin while(dut.core.state!=dut.core.STATE_HASH_WAIT)tick();end
++    if(fault==3)force dut.core.state=type(dut.core.state)'('1);
+     else force dut.core.lane.error=1;
+     while(!error)tick();
+ `ifndef SYNTHESIS
+--- a/tb/tb_fast.sv
++++ b/tb/tb_fast.sv
+@@ -43,7 +43,7 @@
+  assign debug_stats=1;
+  assign statistics_zero=!(boot_cycles|keygen_cycles|sign_cycles|hash_count|permutation_count|dut.core.cycles);
+ `endif
+- assign execution_active=dut.core.state!=0 && dut.core.state!=32;
++ assign execution_active=dut.core.state!=dut.core.STATE_IDLE && dut.core.state!=dut.core.STATE_FAILED;
+  assign execution_reset=dut.core.execution_rst;
+  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;
+  assign permutation_event=dut.core.lane.permutation_complete;
+--- a/scripts/profile_p4.py
++++ b/scripts/profile_p4.py
+@@ -16,9 +16,9 @@
+   for(integer i=0;i<16;i++)recipes[i]=0;
+   for(integer i=0;i<5;i++)live[i]=0;
+  end
+- always @(posedge clk)if(!rst && dut.core.state!=0 && dut.core.state!=32)begin
++ always @(posedge clk)if(!rst && dut.core.state!=dut.core.STATE_IDLE && dut.core.state!=dut.core.STATE_FAILED)begin
+   states[dut.core.state]++;
+-  if(dut.core.state==23)begin returns[dut.core.continuation]++;recipes[dut.core.task_recipe[59:56]]++;end
++  if(dut.core.state==dut.core.STATE_HASH_WAIT)begin returns[dut.core.continuation]++;recipes[dut.core.task_recipe[59:56]]++;end
+   if(dut.core.pipe_mode)live[$countones(dut.core.lane.stage_valid)]++;
+  end
+  final begin

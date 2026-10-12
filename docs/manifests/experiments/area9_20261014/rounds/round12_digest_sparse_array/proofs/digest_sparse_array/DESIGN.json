@@ -1,0 +1,42 @@
+{
+  "candidate": "digest_sparse_array",
+  "baseline": "build/area9_20261014/baseline",
+  "files": [
+    "rtl/executor/executor.sv"
+  ],
+  "baseline_executor_sha256": "62040a30a0957eeed72c43094012857e7bb8d3798c5a7b1af550f17d5d8fabe8",
+  "candidate_executor_sha256": "bfd3c3bdcdcd63298bca89abae146c26b9f6de9ba1413fd6921bf7ef342919bb",
+  "purpose": "Preserve original four-row variable-index register-array form while making physical row 1 unread and unwritable; standard logical slots 1/2 share physical row 2.",
+  "register_bits_before": 1024,
+  "register_bits_after": 768,
+  "p_u_specialization": false,
+  "state_transition_changes": false,
+  "scope": "All 12 standard profiles, all legal P/U, Keygen/Sign/Verify with standard compiled ROM programs.",
+  "lifetime_proof": [
+    "SLH Sign/Verify: H_msg writes slot1 before the first FORS tree; all FORS trees consume slot1; root compression writes slot2 only after the last FORS tree. No later command reads slot1.",
+    "SLH Keygen omits FORS and never consumes slot1.",
+    "XMSS/LMS never consume slot1; their message digest and chain/tree roots use slot2.",
+    "R slot0 and public-root slot3 remain independent because they can be live during message hashing and output.",
+    "No other task operand or node_value is merged; parent left and right remain simultaneously live."
+  ],
+  "notes": [
+    "Physical mapped address bits are {logical[1]|logical[0],logical[1]&logical[0]}; all four logical indices exhaustively map to 0/2/2/3.",
+    "Only original logical slot1 constant references need remapping; slot0/2/3 references retain original array indices.",
+    "Identical standard-ROM lifetime restriction as digest_lifetime; no arbitrary custom ROM claim.",
+    "This structural variant still requires complete target matrix simulation and all three common syntheses before adoption."
+  ],
+  "validation_status": "PASS",
+  "validation_summary": "../DIGEST_SPARSE_VALIDATION.json",
+  "extra_slh_sign_summary": "../DIGEST_SLH_SIGN_VALIDATION.json",
+  "edge_summary": "../DIGEST_EDGE_VALIDATION.json",
+  "rom_lifetime_proof": "../DIGEST_LIFETIME_PROOF.json",
+  "physical_slot_mapping": {
+    "logical0": 0,
+    "logical1": 2,
+    "logical2": 2,
+    "logical3": 3
+  },
+  "validation_passed": 12,
+  "validation_total": 12,
+  "full_matrix_status": "REQUIRED"
+}

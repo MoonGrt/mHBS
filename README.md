@@ -173,7 +173,7 @@ vivado -mode batch -nolog -nojournal -source scripts/synth_top.tcl -tclargs xmss
 
 通用 P/U 重构移除了 P4U1 专用执行分支，固定哈希统一使用上下文引擎，P1 复用迭代 Keccak。树栈和认证路径分别复用端点 RAM 的 68～87、88～107 槽；112～135 槽保存 FORS 批次结果。签名缓存与 XMSS 同时存活的 key/digest/captured 银行保持独立。
 
-综合时间异常时跳过该点的当前分析，让综合继续在后台运行，不终止进程；通过其他已完成配置给出总体结论。后台矩阵及 `synthesize.sh` 默认20分钟后标记分析暂缓，尚未完成的面积与ATP留空，完成后补入报告。矩阵可用 `--synth-defer-seconds`、单点脚本可用 `SYNTH_DEFER_SECONDS` 调整分析等待阈值。
+综合时间异常时跳过该点的当前分析，让综合继续在后台运行，不终止进程；通过其他已完成配置给出总体结论。后台矩阵及 `synthesize.sh` 默认10分钟后标记分析暂缓，尚未完成的面积与ATP留空，完成后补入报告。矩阵可用 `--synth-defer-seconds`、单点脚本可用 `SYNTH_DEFER_SECONDS` 调整分析等待阈值。
 
 本轮冻结矩阵与后台验收见 [PU_Generic_Sharing_20261013.md](docs/manifests/experiments/pu_generic_sharing_20261013/reports/PU_Generic_Sharing_20261013.md)，P3U2 的当前分析暂缓，综合继续后台运行。XMSS/LMS h20 完整 Keygen、Sign 继续停止。
 

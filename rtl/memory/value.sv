@@ -9,8 +9,8 @@ module value #(
     input wire clk,write_enable,
     input wire [ADDRESS_BITS-1:0] write_address,
     input wire [WIDTH-1:0] write_data,
-    input wire [ADDRESS_BITS-1:0] read0,read1,
-    output wire [WIDTH-1:0] value0,value1
+    input wire [ADDRESS_BITS-1:0] read0, read1,
+    output wire [WIDTH-1:0] value0, value1
 );
 // verilog_format: on
     wire [WIDTH-1:0] bank_value[0:1];

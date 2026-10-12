@@ -1,0 +1,20 @@
+--- baseline/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -81,8 +81,16 @@
+         end
+     endfunction
+     function automatic [63:0] message_word(input [5:0] index);
++        reg [10:0] select_word;
++        integer word;
+         begin
+-            message_word = index < 11 ? padded_message[index*64+:64] : 64'd0;
++            // Eleven fixed word windows are the full 87-byte input capacity.
++            // Decode once, then combine lanes; out-of-range indices remain zero.
++            select_word = 11'b1 << index;
++            message_word = 64'd0;
++            for (word = 0; word < 11; word = word + 1)
++                message_word = message_word |
++                    (padded_message[word*64+:64] & {64{select_word[word]}});
+         end
+     endfunction
+     function automatic [12:0] decode_length(input [63:0] desc);

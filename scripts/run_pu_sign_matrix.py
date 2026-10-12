@@ -15,7 +15,6 @@ import sys
 import threading
 import time
 from zoneinfo import ZoneInfo
-import csv
 try:
     from .experiment_archive import archive_run, canonical_report, report_prefix
 except ImportError:
@@ -26,13 +25,6 @@ CONFIGS = [(p, 1) for p in (1, 2, 3, 4, 6, 8, 12, 24)] + [
     (p, 2) for p in (1, 2, 3, 4, 6, 12)]
 PROFILES = ('slh_128f', 'xmss_h10', 'lms_h10')
 PART = 'xc7a200tffg1156-3'
-FIELDS = ['configuration', 'pipeline', 'unroll', 'profile', 'operation',
-          'simulation_status', 'cycles', 'total_cycles', 'hashes', 'permutations',
-          'simulation_seconds', 'assumed_frequency_mhz', 'time_seconds', 'time_ms',
-          'atp_slice_ms', 'atp_rank', 'common_status',
-          'common_lut', 'common_ff', 'common_bram36', 'common_dsp',
-          'common_equivalent_slice']
-
 
 def now():
     return datetime.now(ZoneInfo('Asia/Singapore')).isoformat(timespec='seconds')
@@ -95,6 +87,7 @@ def launch(args):
                     configs=configs, profiles=PROFILES, operations=['sign'], part=PART,
                     area_top='common', area_scope='One shared common core per P/U',
                     vivado_workers=args.vivado_workers, vivado_threads=2,
+                    vivado_headroom=args.vivado_headroom,
                     simulation_workers=args.sim_workers, versions=versions,
                     synthesis_skip_seconds=args.synth_skip_seconds,
                     synthesis_capacity_runs=[str(p.resolve()) for p in args.synth_capacity_run],
@@ -118,6 +111,15 @@ def launch(args):
     atomic_write(ROOT / 'build/pu_sign_matrix/latest.json', json.dumps(
         dict(run_id=stamp, pid=child.pid, root=str(run), log=str(log),
              status=str(run / 'status.json'), report=str(report)), indent=2) + '\n')
+    # A following launch must be able to reserve this pool immediately. Publishing
+    # LAUNCH before the initial status allowed callers to miss an in-flight pool.
+    publication_deadline = time.monotonic() + 30
+    while not (run / 'status.json').exists():
+        if child.poll() is not None:
+            raise RuntimeError(f'Matrix runner exited before publishing status; see {log}')
+        if time.monotonic() >= publication_deadline:
+            raise RuntimeError(f'Matrix runner is still active but status is not published; see {log}')
+        time.sleep(0.05)
     print(json.dumps(dict(pid=child.pid, root=str(run), log=str(log),
                           status=str(run / 'status.json'), report=str(report),
                           simulation_cases=len(configs) * len(PROFILES),
@@ -236,12 +238,6 @@ class Runner:
         if not getattr(self, 'report_only', False):
             atomic_write(self.run / 'status.json', text)
         atomic_write(self.report.with_suffix('.json'), text)
-        import io
-        output = io.StringIO(newline='')
-        writer = csv.DictWriter(output, fieldnames=FIELDS, lineterminator='\n')
-        writer.writeheader()
-        writer.writerows(rows)
-        atomic_write(self.report.with_suffix('.csv'), output.getvalue())
         finished = self.state['complete']
         label = ('用户已停止，未完成矩阵' if self.state.get('stopped_by_user') else
                  '已完成其余配置，异常配置继续后台综合' if deferred and self.state['analysis_ready'] else
@@ -289,7 +285,7 @@ class Runner:
                              row['simulation_status'] + '/' + row['common_status']]) + ' |')
             lines.append('')
         lines.extend(['', f'原始日志、综合检查点、设置和源码：`{self.run}`。',
-                      'JSON含各任务开始/结束状态和错误，CSV随任务完成更新；失败项保持空值，不借用历史结果。', ''])
+                      'JSON含各任务开始/结束状态和错误，报告随任务完成更新；失败项保持空值，不借用历史结果。', ''])
         if self.state.get('stopped_by_user'):
             lines.extend(['用户要求停止后，所有本轮后台子任务均已终止。此前top综合只作为原始归档，不参与本矩阵面积；完成的仿真和common综合结果保留，缺项不补用历史面积。', ''])
         atomic_write(self.report.with_suffix('.md'), '\n'.join(lines))
@@ -323,7 +319,19 @@ class Runner:
                     remaining = sum(t['status'] in ('pending', 'running')
                                     for k, t in state['tasks'].items() if k.startswith('synth/'))
                     reserved += min(state['vivado_workers'], remaining)
-                if reserved + self.active_syntheses < 12:
+                # Routing may be running alongside synthesis in an explicitly
+                # authorized timing experiment. Include those real processes,
+                # and count our reserved slots before their Vivado has spawned.
+                live = subprocess.check_output(['ps', '-eo', 'comm=,args='], text=True)
+                own_script = str(self.source / 'scripts/synth_pu_sign_matrix.tcl')
+                outside = sum(len(fields := line.split(None, 1)) == 2
+                              and fields[0] == 'vivado'
+                              and '/bin/unwrapped/lnx64.o/vivado -mode batch' in fields[1]
+                              and own_script not in fields[1]
+                              for line in live.splitlines())
+                limit = 12 - self.meta.get('vivado_headroom', 0)
+                if (reserved + self.active_syntheses < limit
+                        and outside + self.active_syntheses < limit):
                     self.active_syntheses += 1
                     return
             time.sleep(2)
@@ -352,7 +360,7 @@ class Runner:
                                            start_new_session=True)
                 self.update(key, 'running', pid=process.pid)
                 try:
-                    code = process.wait(timeout=self.meta.get('synthesis_skip_seconds',1200))
+                    code = process.wait(timeout=self.meta.get('synthesis_skip_seconds',600))
                 except subprocess.TimeoutExpired:
                     self.update(key, 'running', analysis_deferred=True,
                                 reason='综合继续后台运行；当前分析不等待异常耗时配置')
@@ -447,14 +455,16 @@ def main():
     parser.add_argument('--report-prefix', type=Path)
     parser.add_argument('--watch', action='store_true', help='Refresh an existing report as measurements finish')
     parser.add_argument('--vivado-workers', type=int, default=12)
+    parser.add_argument('--vivado-headroom', type=int, default=0,
+                        help='Reserve extra process slots when older independent runners are active')
     parser.add_argument('--sim-workers', type=int, default=2)
     parser.add_argument('--synth-capacity-run', action='append', type=Path, default=[],
                         help='Reserve this existing matrix worker pool within the total limit of 12')
     parser.add_argument('--configs', nargs='+', metavar='PxUy',
                         help='Restrict measurement to these P/U points; default is the 14-point matrix')
     parser.add_argument('--synth-defer-seconds', '--synth-skip-seconds',
-                        dest='synth_skip_seconds', type=int, default=1200,
-                        help='After 20 minutes defer analysis; synthesis keeps running')
+                        dest='synth_skip_seconds', type=int, default=600,
+                        help='After 10 minutes defer analysis; synthesis keeps running')
     args = parser.parse_args()
     if args.configs:
         if not args.launch:
@@ -484,6 +494,8 @@ def main():
         parser.error('--watch/--report-prefix require --render-root')
     if not 1 <= args.vivado_workers <= 12 or not 1 <= args.sim_workers <= 4:
         parser.error('Vivado workers must be 1..12; simulation workers 1..4')
+    if not 0 <= args.vivado_headroom < 12:
+        parser.error('--vivado-headroom must be 0..11')
     if args.synth_skip_seconds<=0:
         parser.error('--synth-skip-seconds must be positive')
     if args.launch:

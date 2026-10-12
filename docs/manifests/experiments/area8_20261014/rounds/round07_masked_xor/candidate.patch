@@ -1,0 +1,32 @@
+--- baseline/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -1216,13 +1216,17 @@
+                 wire [3:0] block_step = again ? next_step[3:0] : ctx_request_start;
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
++                // MASK0 uses the left node and MASK1 uses the saved right node.
++                // These return phases cannot overlap; one XOR feeds both feedback
++                // formatting and the left-mask writeback without another register.
++                wire [255:0] mask_operand = phase[t][3] ? digest[t] : captured[t];
++                wire [255:0] masked_node = mask_operand ^ ctx_perm_digest[255:0];
+                 wire [255:0] block_value = again ?
+                     (phase[t][5] ? digest[t] :
+-                     phase[t][3] ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                     phase[t][3] ? masked_node : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+-                wire [255:0]
+-                    block_right = again ? captured[t] ^ ctx_perm_digest[255:0] : ctx_request_right;
++                wire [255:0] block_right = again ? masked_node : ctx_request_right;
+                 wire [1599:0] unified_state;
+                 begin : formatter
+                     logic [255:0] f0, f1, f2, f3, masked_address;
+@@ -1361,7 +1365,7 @@
+                 wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+                 wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
+-                    mask_left ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
++                    mask_left ? masked_node : ctx_perm_digest[255:0];
+                 wire capture_transfer = initial_transfer && capture_initial[t];
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;

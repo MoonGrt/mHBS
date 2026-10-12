@@ -16,8 +16,8 @@ module recipe #(
     output wire [63:0] batch_hashes,batch_permutations,
     output logic [63:0] hash_count,permutation_count,
 `endif
-    input wire clk, rst,
-    input wire batch_mode,batch_request_valid,output wire batch_request_ready,
+    input wire clk, rst, output logic error,
+    input wire batch_mode,batch_request_valid, output wire batch_request_ready,
     input wire [TAG_BITS-1:0] batch_request_tag,
     input wire [4:0] batch_steps, batch_capture_after, input wire batch_capture_enable,
     input wire [19:0] batch_leaf, input wire [7:0] batch_a, input wire [31:0] batch_b,
@@ -27,39 +27,223 @@ module recipe #(
     input wire [7:0] batch_seed_domain, batch_step_domain,
     output wire batch_response_valid, input wire batch_response_ready,
     output wire [TAG_BITS-1:0] batch_response_tag,
-    output wire [255:0] batch_response_digest,batch_response_capture,
+    output wire [255:0] batch_response_digest, batch_response_capture,
     input wire [TAG_BITS-1:0] batch_read_tag,
     output wire [255:0] batch_read_digest,batch_read_capture,
-    input wire [5:0] node_bytes,
+    input wire [5:0] node_bytes, input wire [127:0] identifier,
     input wire request_valid, output wire request_ready,
-    input wire [63:0] request_recipe, request_step_recipe,
-    input wire request_chain,
-    input wire [4:0] request_steps, request_capture_after,
-    input wire request_capture,
+    input wire [63:0] request_recipe, request_step_recipe, input wire request_chain,
+    input wire [4:0] request_steps, request_capture_after, input wire request_capture,
     input wire [N*8-1:0] secret_seed, secret_prf, public_seed, root, randomizer,
-    input wire [127:0] identifier,
-    input wire [MAX_MESSAGE_BYTES*8-1:0] message_buffer,
-    input wire [6:0] message_length,
-    input wire [4:0] request_layer,
-    input wire [63:0] request_tree,
-    input wire [19:0] request_leaf,
-    input wire [INDEX_BITS-1:0] request_a,
-    input wire [31:0] request_b,
+    input wire [MAX_MESSAGE_BYTES*8-1:0] message_buffer, input wire [6:0] message_length,
+    input wire [4:0] request_layer, input wire [63:0] request_tree, input wire [19:0] request_leaf,
+    input wire [INDEX_BITS-1:0] request_a, input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
-    output wire [INDEX_BITS-1:0] list_index0, list_index1,list_next_index0,
+    output wire [INDEX_BITS-1:0] list_index0, list_index1, list_next_index0,
     input wire [N*8-1:0] list_data0, list_data1,
     output wire response_valid, input wire response_ready,
-    output wire [DIGEST_BYTES*8-1:0] response_value,
-    output wire [N*8-1:0] response_capture,
-    output logic error
+    output wire [DIGEST_BYTES*8-1:0] response_value, output wire [N*8-1:0] response_capture
 );
 // verilog_format: on
+    // Shared pure formatting helpers. Execution state, registers and handshake
+    // timing remain local to the scalar and scheduled implementations.
+    wire [703:0] padded_message = {8'd0, message_buffer};
+    localparam [3:0] ADDRESS_SEED = 1, ADDRESS_VALUE = 2, MESSAGE_PRF = 3,
+        MESSAGE_DIGEST = 4, INDEX_PRF = 5, ROOT_MESSAGE = 6, MASKED_SEED = 7,
+        MASKED_VALUE = 8, PREFIX_SEED = 9, PREFIX_VALUE = 10, PREFIX_MESSAGE = 11,
+        ADDRESS_LIST = 12, PREFIX_LIST = 13, PREFIX_LEAF = 14, PREFIX_PARENT = 15;
+    localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
+    localparam logic [1:0] HASH_IDLE = 2'd0;
+    localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
+    localparam logic [1:0] HASH_RUN = 2'd2;
+    function automatic [31:0] be32(input [31:0] value);
+        be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
+    endfunction
+    function automatic [63:0] node_word(input [255:0] data, input [5:0] index);
+        begin
+            case (index)
+                0: node_word = data[63:0];
+                1: node_word = data[127:64];
+                2: node_word = data[191:128];
+                3: node_word = data[255:192];
+                default: node_word = 0;
+            endcase
+        end
+    endfunction
+    function automatic [63:0] node_word_indexed(input [255:0] data, input [1:0] index);
+        begin
+            case (index)
+                0: node_word_indexed = data[63:0];
+                1: node_word_indexed = data[127:64];
+                2: node_word_indexed = data[191:128];
+                default: node_word_indexed = data[255:192];
+            endcase
+        end
+    endfunction
+    function automatic [63:0] message_word(input [5:0] index);
+        begin
+            message_word = index < 11 ? padded_message[index*64+:64] : 64'd0;
+        end
+    endfunction
+    function automatic [12:0] decode_length(input [63:0] desc);
+        reg [12:0] nodes;
+        begin
+            nodes = node_bytes == 16 ? {1'b0, desc[47:40], 4'b0} :
+                node_bytes == 24 ? ({1'b0, desc[47:40], 4'b0} + {2'b0, desc[47:40], 3'b0}) :
+                {desc[47:40], 5'b0};
+            if (!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length = 0;
+            else
+                case (desc[59:56])
+                    ADDRESS_SEED: decode_length = PIPELINE == 1 ? node_bytes + 32 + node_bytes : 13'd0;
+                    ADDRESS_VALUE: decode_length = PIPELINE == 1 ? node_bytes + 32 + nodes : 13'd0;
+                    ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
+                    MESSAGE_PRF: decode_length = 2 * node_bytes + message_length;
+                    MESSAGE_DIGEST: decode_length = 3 * node_bytes + message_length;
+                    INDEX_PRF: decode_length = PIPELINE == 1 ? 96 : 13'd0;
+                    ROOT_MESSAGE: decode_length = 128 + message_length;
+                    MASKED_SEED: decode_length = PIPELINE == 1 ? 128 : 13'd0;
+                    MASKED_VALUE: decode_length = PIPELINE == 1 ? 13'd64 + {desc[47:40], 5'd0} : 13'd0;
+                    PREFIX_SEED, PREFIX_VALUE: decode_length = PIPELINE == 1 ? 55 : 13'd0;
+                    PREFIX_MESSAGE: decode_length = 54 + message_length;
+                    PREFIX_LIST: decode_length = 13'd22 + {desc[47:40], 5'd0};
+                    PREFIX_LEAF: decode_length = PIPELINE == 1 ? 54 : 13'd0;
+                    PREFIX_PARENT: decode_length = PIPELINE == 1 ? 86 : 13'd0;
+                    default: decode_length = 0;
+                endcase
+        end
+    endfunction
+    function automatic [12:0] decode_source(input [5:0] index, input bit lms_only,
+        input [15:0] shapes, input [2:0] node_words);
+        reg [2:0] source;
+        reg [5:0] selected_index;
+        reg [3:0] literal;
+        begin
+            source = 0;
+            selected_index = index;
+            literal = 0;
+            (* parallel_case *) case (1'b1)
+                shapes[MESSAGE_PRF]:
+                if (!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
+                    if (index < node_words) source = 1;
+                    else if (index < 2 * node_words) begin
+                        source = 2;
+                        selected_index = index - node_words;
+                    end else begin
+                        source = 5;
+                        selected_index = index - 2 * node_words;
+                    end
+                end
+                shapes[MESSAGE_DIGEST]:
+                if (!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
+                    if (index < node_words) source = 2;
+                    else if (index < 2 * node_words) begin
+                        source = 3;
+                        selected_index = index - node_words;
+                    end else if (index < 3 * node_words) begin
+                        source = 4;
+                        selected_index = index - 2 * node_words;
+                    end else begin
+                        source = 5;
+                        selected_index = index - 3 * node_words;
+                    end
+                end
+                shapes[ROOT_MESSAGE]:
+                if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
+                    if (index == 3) literal = 4'd1;
+                    else if (index < 4) literal = 0;
+                    else if (index < 8) begin
+                        source = 2;
+                        selected_index = index - 4;
+                    end else if (index < 12) begin
+                        source = 4;
+                        selected_index = index - 8;
+                    end else if (index == 15) literal = 4'd2;
+                    else if (index >= 16) begin
+                        source = 5;
+                        selected_index = index - 16;
+                    end
+                end
+                shapes[PREFIX_MESSAGE]:
+                if (RECIPE_MASK[PREFIX_MESSAGE]) begin
+                    // Unaligned 22-byte prefix: assemble three aligned words,
+                    // then retain the fixed window starting two bytes later.
+                    if (index >= 3 && index < 7) begin
+                        source = 2;
+                        selected_index = index - 3;
+                    end else if (index >= 7) begin
+                        source = 5;
+                        selected_index = index - 7;
+                    end
+                end
+                shapes[ADDRESS_LIST]:
+                if (!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
+                    if (index < node_words) source = 3;
+                    else if (index < node_words + 4) begin
+                        source = 6;
+                        selected_index = index - node_words;
+                    end else begin
+                        source = 7;
+                        selected_index = index - node_words - 4;
+                    end
+                end
+                shapes[PREFIX_LIST]:
+                if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
+                    case (index)
+                        0: literal = 4'd3;
+                        1: literal = 4'd4;
+                        2: literal = 4'd5;
+                        3: literal = 4'd6;
+                        default: literal = 0;
+                    endcase
+                end
+                default: begin
+                end
+            endcase
+            decode_source = {literal, source, selected_index};
+        end
+    endfunction
+    function automatic [63:0] source_literal(input [3:0] code, input [31:0] leaf,
+        input [127:0] id, input [N*8-1:0] first_node);
+        begin
+            case (code)
+                1: source_literal = 64'h0200000000000000;
+                2: source_literal = {be32(leaf), 32'd0};
+                3: source_literal = id[63:0];
+                4: source_literal = id[127:64];
+                5: source_literal = {first_node[15:0], 16'h8080, be32(leaf)};
+                6: source_literal = first_node[79:16];
+                default: source_literal = 0;
+            endcase
+        end
+    endfunction
+    function automatic [511:0] list_nodes(input [5:0] bytes_per_node,
+        input [N*8-1:0] first_node, second_node);
+        begin
+            case (bytes_per_node)
+                16: list_nodes = {256'd0, second_node[127:0], first_node[127:0]};
+                24: list_nodes = {128'd0, second_node[191:0], first_node[191:0]};
+                default: list_nodes = {second_node, first_node};
+            endcase
+        end
+    endfunction
+    function automatic [143:0] list_words(input [511:0] nodes, input [1:0] index);
+        begin
+            case (index)
+                0: list_words = nodes[143:0];
+                1: list_words = nodes[207:64];
+                2: list_words = nodes[271:128];
+                default: list_words = nodes[335:192];
+            endcase
+        end
+    endfunction
+    function automatic [255:0] make_address(input [4:0] layer, input [63:0] tree,
+        input [31:0] leaf, input [7:0] domain, input [31:0] a, b);
+        make_address = {be32(b), be32(a), be32(leaf), be32({24'd0, domain}),
+            be32(tree[31:0]), be32(tree[63:32]), 32'd0, be32({27'd0, layer})};
+    endfunction
+
     generate
         if (PIPELINE == 1) begin : scalar_execution
-            localparam [3:0] ADDRESS_SEED = 1, ADDRESS_VALUE = 2, MESSAGE_PRF = 3,
-                MESSAGE_DIGEST = 4, INDEX_PRF = 5, ROOT_MESSAGE = 6, MASKED_SEED = 7,
-                MASKED_VALUE = 8, PREFIX_SEED = 9, PREFIX_VALUE = 10, PREFIX_MESSAGE = 11,
-                ADDRESS_LIST = 12, PREFIX_LIST = 13, PREFIX_LEAF = 14, PREFIX_PARENT = 15;
             localparam bit MASKED_ENABLE = RECIPE_MASK[MASKED_VALUE];
             typedef enum logic [2:0] {
                 IDLE,
@@ -76,10 +260,9 @@ module recipe #(
             logic [1:0] compound;
             // XMSS retains its value across key/mask hashes. SLH
             // chains instead reuse the sponge's retained digest at the next START.
-            logic [N*8-1:0] chain_value, temporary_key, mask0, mask1;
+            logic [N*8-1:0] chain_value, temporary_key;
             wire [N*8-1:0] current_value = MASKED_ENABLE ? chain_value :
                 seed_phase ? request_left : digest[N*8-1:0];
-            localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
             logic [4:0] rate_block;
             logic [3:0] beat;
             logic stream_half;
@@ -93,32 +276,6 @@ module recipe #(
             // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
             // byte comparator during STREAM. Request fields remain stable until the
             // response, but their registered decode cuts that wide data-path cone.
-            function automatic [12:0] decode_length(input [63:0] desc);
-                reg [12:0] nodes;
-                begin
-                    nodes = node_bytes == 16 ? {1'b0, desc[47:40], 4'b0} :
-                        node_bytes == 24 ? ({1'b0, desc[47:40], 4'b0} + {2'b0, desc[47:40], 3'b0}) :
-                        {desc[47:40], 5'b0};
-                    if (!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length = 0;
-                    else
-                        case (desc[59:56])
-                            ADDRESS_SEED: decode_length = node_bytes + 32 + node_bytes;
-                            ADDRESS_VALUE, ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
-                            MESSAGE_PRF: decode_length = 2 * node_bytes + message_length;
-                            MESSAGE_DIGEST: decode_length = 3 * node_bytes + message_length;
-                            INDEX_PRF: decode_length = 96;
-                            ROOT_MESSAGE: decode_length = 128 + message_length;
-                            MASKED_SEED: decode_length = 128;
-                            MASKED_VALUE: decode_length = 13'd64 + {desc[47:40], 5'd0};
-                            PREFIX_SEED, PREFIX_VALUE: decode_length = 55;
-                            PREFIX_MESSAGE: decode_length = 54 + message_length;
-                            PREFIX_LIST: decode_length = 13'd22 + {desc[47:40], 5'd0};
-                            PREFIX_LEAF: decode_length = 54;
-                            PREFIX_PARENT: decode_length = 86;
-                            default: decode_length = 0;
-                        endcase
-                end
-            endfunction
             always_ff @(posedge clk) begin
                 if (!rst && state == IDLE && request_valid) begin
                     seed_shapes <= (16'b1 << request_recipe[59:56]) & RECIPE_MASK;
@@ -188,105 +345,32 @@ module recipe #(
             assign request_ready = state == IDLE;
             assign response_valid = state == RESPONSE;
 
-            function automatic [31:0] be32(input [31:0] value);
-                be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
-            endfunction
             // All sponge beats start on an eight-byte boundary. Select two words
             // directly instead of shifting a maximum-size concatenated message frame.
             wire [2:0] node_words = stream_node_words;
-            wire [703:0] padded_message = {8'd0, message_buffer};
-            function automatic [63:0] node_word(input [255:0] data, input [5:0] index);
-                begin
-                    case (index)
-                        0: node_word = data[63:0];
-                        1: node_word = data[127:64];
-                        2: node_word = data[191:128];
-                        3: node_word = data[255:192];
-                        default: node_word = 0;
-                    endcase
-                end
-            endfunction
-            function automatic [63:0] message_word(input [5:0] index);
-                begin
-                    message_word = index < 11 ? padded_message[index*64+:64] : 64'd0;
-                end
-            endfunction
             // Select a source and a small word address BEFORE the wide data mux.
             // All recipes share the same message/seed selectors instead of each
             // recipe instantiating its own variable 64-bit extraction network.
             function automatic [63:0] source_word(input [5:0] index, input bit lms_only);
+                reg [12:0] control;
                 reg [2:0] source;
                 reg [5:0] selected_index;
                 reg [63:0] literal;
                 begin
-                    source = 0;
-                    selected_index = index;
+                    control = decode_source(index, lms_only, shapes, node_words);
+                    source = control[8:6];
+                    selected_index = control[5:0];
+                    // Scalar has no registered source-control boundary: emit the
+                    // small prefix constants directly, avoiding encode/decode muxes.
                     literal = 0;
                     (* parallel_case *) case (1'b1)
-                        shapes[MESSAGE_PRF]:
-                        if (!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
-                            if (index < node_words) source = 1;
-                            else if (index < 2 * node_words) begin
-                                source = 2;
-                                selected_index = index - node_words;
-                            end else begin
-                                source = 5;
-                                selected_index = index - 2 * node_words;
-                            end
-                        end
-                        shapes[MESSAGE_DIGEST]:
-                        if (!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
-                            if (index < node_words) source = 2;
-                            else if (index < 2 * node_words) begin
-                                source = 3;
-                                selected_index = index - node_words;
-                            end else if (index < 3 * node_words) begin
-                                source = 4;
-                                selected_index = index - 2 * node_words;
-                            end else begin
-                                source = 5;
-                                selected_index = index - 3 * node_words;
-                            end
-                        end
+                        shapes[MESSAGE_PRF], shapes[MESSAGE_DIGEST]: begin end
                         shapes[ROOT_MESSAGE]:
                         if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
                             if (index == 3) literal = 64'h0200000000000000;
-                            else if (index < 4) literal = 0;
-                            else if (index < 8) begin
-                                source = 2;
-                                selected_index = index - 4;
-                            end else if (index < 12) begin
-                                source = 4;
-                                selected_index = index - 8;
-                            end else if (index == 15) literal = {be32(leaf), 32'd0};
-                            else if (index >= 16) begin
-                                source = 5;
-                                selected_index = index - 16;
-                            end
+                            else if (index == 15) literal = {be32(leaf), 32'd0};
                         end
-                        shapes[PREFIX_MESSAGE]:
-                        if (RECIPE_MASK[PREFIX_MESSAGE]) begin
-                            // Unaligned 22-byte prefix: assemble three aligned words,
-                            // then retain the fixed window starting two bytes later.
-                            if (index >= 3 && index < 7) begin
-                                source = 2;
-                                selected_index = index - 3;
-                            end else if (index >= 7) begin
-                                source = 5;
-                                selected_index = index - 7;
-                            end
-                        end
-                        shapes[ADDRESS_LIST]:
-                        if (!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
-                            if (index < node_words) source = 3;
-                            else if (index < node_words + 4) begin
-                                source = 6;
-                                selected_index = index - node_words;
-                            end else begin
-                                source = 7;
-                                selected_index = index - node_words - 4;
-                            end
-                        end
+                        shapes[PREFIX_MESSAGE], shapes[ADDRESS_LIST]: begin end
                         shapes[PREFIX_LIST]:
                         if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
                             case (index)
@@ -297,8 +381,7 @@ module recipe #(
                                 default: literal = 0;
                             endcase
                         end
-                        default: begin
-                        end
+                        default: begin end
                     endcase
                     case (source)
                         1: source_word = node_word(secret_prf, selected_index);
@@ -314,22 +397,13 @@ module recipe #(
             endfunction
             logic [511:0] list_pair;
             always @* begin
-                case (stream_node_bytes)
-                    16: list_pair = {256'd0, list_data1[127:0], list_data0[127:0]};
-                    24: list_pair = {128'd0, list_data1[191:0], list_data0[191:0]};
-                    default: list_pair = {list_data1, list_data0};
-                endcase
+                list_pair = list_nodes(stream_node_bytes, list_data0, list_data1);
             end
             // Legal list offsets are whole 64-bit words (SLH), or two bytes
             // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
             logic [143:0] list_word_window;
             always @* begin
-                case (list_remainder[4:3])
-                    0: list_word_window = list_pair[143:0];
-                    1: list_word_window = list_pair[207:64];
-                    2: list_word_window = list_pair[271:128];
-                    default: list_word_window = list_pair[335:192];
-                endcase
+                list_word_window = list_words(list_pair, list_remainder[4:3]);
             end
             // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
             // a node boundary; do not retain the legacy two-node byte window.
@@ -360,16 +434,7 @@ module recipe #(
 
             integer i, absolute;
             always @* begin
-                address = {
-                    be32(b),
-                    be32(a),
-                    be32(leaf),
-                    be32({24'd0, address_domain}),
-                    be32(request_tree[31:0]),
-                    be32(request_tree[63:32]),
-                    32'd0,
-                    be32(request_layer)
-                };
+                address = make_address(request_layer, request_tree, leaf, address_domain, a, b);
                 masked_address = {
                     be32(compound), be32(b), be32(a), be32(leaf), be32(domain), 96'd0
                 };
@@ -427,9 +492,11 @@ module recipe #(
                             frame_layout = 3;
                             frame_domain = arity - 1'b1;
                             frame1 = temporary_key;
-                            frame2 = left_value ^ mask0;
+                            // MASK0 already masked the retained left value in place.
+                            frame2 = chain_value;
                             frame_two = arity == 2;
-                            frame3 = frame_two ? request_right ^ mask1 : 256'd0;
+                            // MASK1 is the retained sponge digest until this FINAL launch.
+                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
                         end
                     end
                     shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
@@ -561,9 +628,6 @@ module recipe #(
 `endif
 
             // One iterative Keccak state serves fixed blocks, chains and streams.
-            localparam logic [1:0] HASH_IDLE = 2'd0;
-            localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
-            localparam logic [1:0] HASH_RUN = 2'd2;
             logic [1:0] hash_state;
             logic saved_chain_enable, saved_chain_prefix;
             logic saved_chain_prefix_preserve_counter, saved_capture_enable;
@@ -631,11 +695,14 @@ module recipe #(
                 wire [63:0] fast_word;
                 if (w < 17) assign fast_word = fast_block[w*64+:64];
                 else assign fast_word = 64'd0;
-                wire [63:0] round_or_clear = clear_stream ? 64'd0 : advanced_state[w*64+:64];
                 wire [63:0]
                     absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
-                wire [63:0] next_word = (take_fast || take_feedback) ? fast_word :
-                    select_stream ? absorb_word : round_or_clear;
+                // These sources are disjoint in the hash FSM. Initialization
+                // clears unselected words by enabling a write with no source.
+                wire [63:0] next_word =
+                    (fast_word & {64{take_fast || take_feedback}}) |
+                    (absorb_word & {64{select_stream}}) |
+                    (advanced_state[w*64+:64] & {64{round_update && !take_feedback}});
                 always_ff @(posedge clk)
                     if (!rst && (round_update || take_fast || select_stream || clear_stream))
                         sponge_state[w*64+:64] <= next_word;
@@ -740,8 +807,6 @@ module recipe #(
                     endcase
                 end
             end
-
-
             always_ff @(posedge clk) begin
                 if (rst) begin
                     staged_valid <= 0;
@@ -818,8 +883,10 @@ module recipe #(
                                              compound < arity + 1) begin
                                     case (compound)
                                         0: temporary_key <= completed_value[N*8-1:0];
-                                        1: mask0 <= completed_value[N*8-1:0];
-                                        default: mask1 <= completed_value[N*8-1:0];
+                                        // The unmasked value dies at MASK0 completion.
+                                        1: chain_value <= left_value ^ completed_value[N*8-1:0];
+                                        // MASK1 stays in sponge_state until FINAL reads it.
+                                        default: begin end
                                     endcase
                                     compound <= compound + 1'b1;
                                     state <= START;
@@ -862,10 +929,6 @@ module recipe #(
             end
 `endif
         end else begin : scheduled_execution
-            localparam [3:0] ADDRESS_SEED = 1, ADDRESS_VALUE = 2, MESSAGE_PRF = 3,
-                MESSAGE_DIGEST = 4, INDEX_PRF = 5, ROOT_MESSAGE = 6, MASKED_SEED = 7,
-                MASKED_VALUE = 8, PREFIX_SEED = 9, PREFIX_VALUE = 10, PREFIX_MESSAGE = 11,
-                ADDRESS_LIST = 12, PREFIX_LIST = 13, PREFIX_LEAF = 14, PREFIX_PARENT = 15;
             typedef enum logic [2:0] {
                 IDLE,
                 START,
@@ -875,7 +938,6 @@ module recipe #(
                 FIXED_WAIT
             } state_t;
             state_t state;
-            localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
             logic [3:0] beat;
             wire [63:0] recipe = request_recipe;
             logic [15:0] seed_shapes;
@@ -886,25 +948,6 @@ module recipe #(
             // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
             // byte comparator during STREAM. Request fields remain stable until the
             // response, but their registered decode cuts that wide data-path cone.
-            function automatic [12:0] decode_length(input [63:0] desc);
-                reg [12:0] nodes;
-                begin
-                    nodes = node_bytes == 16 ? {1'b0, desc[47:40], 4'b0} :
-                        node_bytes == 24 ? ({1'b0, desc[47:40], 4'b0} + {2'b0, desc[47:40], 3'b0}) :
-                        {desc[47:40], 5'b0};
-                    if (!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length = 0;
-                    else
-                        case (desc[59:56])
-                            ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
-                            MESSAGE_PRF: decode_length = 2 * node_bytes + message_length;
-                            MESSAGE_DIGEST: decode_length = 3 * node_bytes + message_length;
-                            ROOT_MESSAGE: decode_length = 128 + message_length;
-                            PREFIX_MESSAGE: decode_length = 54 + message_length;
-                            PREFIX_LIST: decode_length = 13'd22 + {desc[47:40], 5'd0};
-                            default: decode_length = 0;
-                        endcase
-                end
-            endfunction
             always_ff @(posedge clk) begin
                 if (!rst && state == IDLE && request_valid) begin
                     seed_shapes <= (16'b1 << request_recipe[59:56]) & RECIPE_MASK;
@@ -918,16 +961,7 @@ module recipe #(
             wire [12:0] input_length = seed_length;
             wire [5:0] stream_node_bytes = {stream_node_words, 3'b0};
             logic [127:0] stream_data;
-            wire [255:0] address = {
-                be32(b),
-                be32(a),
-                be32(leaf),
-                be32({24'd0, domain}),
-                be32(request_tree[31:0]),
-                be32(request_tree[63:32]),
-                32'd0,
-                be32({27'd0, request_layer})
-            };
+            wire [255:0] address = make_address(request_layer, request_tree, leaf, domain, a, b);
             wire hash_ready, block_ready, finish_valid;
             wire [DIGEST_BYTES*8-1:0] digest;
             wire completed = finish_valid;
@@ -954,123 +988,15 @@ module recipe #(
                 request_ready = state == IDLE && (!scalar_fixed || (!batch_mode && engine_ready));
             assign response_valid = state == RESPONSE || (state == FIXED_WAIT && engine_valid);
 
-            function automatic [31:0] be32(input [31:0] value);
-                be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
-            endfunction
             // All sponge beats start on an eight-byte boundary. Select two words
             // directly instead of shifting a maximum-size concatenated message frame.
             wire [2:0] node_words = stream_node_words;
-            wire [703:0] padded_message = {8'd0, message_buffer};
             // Source-range decoding already bounds live node reads to four words.
             // ADDRESS_LIST uses this selector only across its prefix; later beats
             // come from list_window. Do not repeat a six-bit bounds check per node.
-            function automatic [63:0] node_word(input [255:0] data, input [1:0] index);
-                begin
-                    case (index)
-                        0: node_word = data[63:0];
-                        1: node_word = data[127:64];
-                        2: node_word = data[191:128];
-                        default: node_word = data[255:192];
-                    endcase
-                end
-            endfunction
-            function automatic [63:0] message_word(input [5:0] index);
-                begin
-                    message_word = index < 11 ? padded_message[index*64+:64] : 64'd0;
-                end
-            endfunction
             // Select a source and a small word address BEFORE the wide data mux.
             // All recipes share the same message/seed selectors instead of each
             // recipe instantiating its own variable 64-bit extraction network.
-            function automatic [12:0] decode_source(input [5:0] index, input bit lms_only);
-                reg [2:0] source;
-                reg [5:0] selected_index;
-                reg [3:0] literal;
-                begin
-                    source = 0;
-                    selected_index = index;
-                    literal = 0;
-                    (* parallel_case *) case (1'b1)
-                        shapes[MESSAGE_PRF]:
-                        if (!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
-                            if (index < node_words) source = 1;
-                            else if (index < 2 * node_words) begin
-                                source = 2;
-                                selected_index = index - node_words;
-                            end else begin
-                                source = 5;
-                                selected_index = index - 2 * node_words;
-                            end
-                        end
-                        shapes[MESSAGE_DIGEST]:
-                        if (!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
-                            if (index < node_words) source = 2;
-                            else if (index < 2 * node_words) begin
-                                source = 3;
-                                selected_index = index - node_words;
-                            end else if (index < 3 * node_words) begin
-                                source = 4;
-                                selected_index = index - 2 * node_words;
-                            end else begin
-                                source = 5;
-                                selected_index = index - 3 * node_words;
-                            end
-                        end
-                        shapes[ROOT_MESSAGE]:
-                        if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
-                            if (index == 3) literal = 4'd1;
-                            else if (index < 4) literal = 0;
-                            else if (index < 8) begin
-                                source = 2;
-                                selected_index = index - 4;
-                            end else if (index < 12) begin
-                                source = 4;
-                                selected_index = index - 8;
-                            end else if (index == 15) literal = 4'd2;
-                            else if (index >= 16) begin
-                                source = 5;
-                                selected_index = index - 16;
-                            end
-                        end
-                        shapes[PREFIX_MESSAGE]:
-                        if (RECIPE_MASK[PREFIX_MESSAGE]) begin
-                            // Unaligned 22-byte prefix: assemble three aligned words,
-                            // then retain the fixed window starting two bytes later.
-                            if (index >= 3 && index < 7) begin
-                                source = 2;
-                                selected_index = index - 3;
-                            end else if (index >= 7) begin
-                                source = 5;
-                                selected_index = index - 7;
-                            end
-                        end
-                        shapes[ADDRESS_LIST]:
-                        if (!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
-                            if (index < node_words) source = 3;
-                            else if (index < node_words + 4) begin
-                                source = 6;
-                                selected_index = index - node_words;
-                            end else begin
-                                source = 7;
-                                selected_index = index - node_words - 4;
-                            end
-                        end
-                        shapes[PREFIX_LIST]:
-                        if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
-                            case (index)
-                                0: literal = 4'd3;
-                                1: literal = 4'd4;
-                                2: literal = 4'd5;
-                                3: literal = 4'd6;
-                                default: literal = 0;
-                            endcase
-                        end
-                        default: begin
-                        end
-                    endcase
-                    decode_source = {literal, source, selected_index};
-                end
-            endfunction
             // Compute the next beat's small selectors while producing the current
             // beat. START supplies the first selector; backpressure holds both the
             // selector and its position. No node data register or extra cycle is added.
@@ -1081,11 +1007,11 @@ module recipe #(
                     if (!rst) begin
                         if (state == START && hash_ready)
                             source_control[word_slot] <= decode_source(
-                                6'(word_slot), word_slot == 2
+                                6'(word_slot), word_slot == 2, shapes, node_words
                             );
                         else if (state == STREAM && stream_accept)
                             source_control[word_slot] <= decode_source(
-                                following_position[8:3] + 6'(word_slot), word_slot == 2
+                                following_position[8:3] + 6'(word_slot), word_slot == 2, shapes, node_words
                             );
                     end
             end
@@ -1094,45 +1020,28 @@ module recipe #(
                 reg [5:0] selected_index;
                 begin
                     selected_index = control[5:0];
-                    case (control[12:9])
-                        1: literal = 64'h0200000000000000;
-                        2: literal = {be32(leaf), 32'd0};
-                        3: literal = identifier[63:0];
-                        4: literal = identifier[127:64];
-                        5: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
-                        6: literal = list_data0[79:16];
-                        default: literal = 0;
-                    endcase
+                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
                     case (control[8:6])
-                        1: source_word = node_word(secret_prf, selected_index[1:0]);
-                        2: source_word = node_word(randomizer, selected_index[1:0]);
-                        3: source_word = node_word(public_seed, selected_index[1:0]);
-                        4: source_word = node_word(root, selected_index[1:0]);
+                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
+                        4: source_word = node_word_indexed(root, selected_index[1:0]);
                         5: source_word = message_word(selected_index);
-                        6: source_word = node_word(address, selected_index[1:0]);
-                        7: source_word = node_word(list_data0, selected_index[1:0]);
+                        6: source_word = node_word_indexed(address, selected_index[1:0]);
+                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
                         default: source_word = literal;
                     endcase
                 end
             endfunction
             logic [511:0] list_pair;
             always @* begin
-                case (stream_node_bytes)
-                    16: list_pair = {256'd0, list_data1[127:0], list_data0[127:0]};
-                    24: list_pair = {128'd0, list_data1[191:0], list_data0[191:0]};
-                    default: list_pair = {list_data1, list_data0};
-                endcase
+                list_pair = list_nodes(stream_node_bytes, list_data0, list_data1);
             end
             // Legal list offsets are whole 64-bit words (SLH), or two bytes
             // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
             logic [143:0] list_word_window;
             always @* begin
-                case (list_remainder[4:3])
-                    0: list_word_window = list_pair[143:0];
-                    1: list_word_window = list_pair[207:64];
-                    2: list_word_window = list_pair[271:128];
-                    default: list_word_window = list_pair[335:192];
-                endcase
+                list_word_window = list_words(list_pair, list_remainder[4:3]);
             end
             // A fixed two-node window supports both aligned SLH and the LMS prefix.
             wire [127:0] list_window = (RECIPE_MASK[PREFIX_LIST] && list_remainder[1]) ?
@@ -1244,8 +1153,6 @@ module recipe #(
                 wire ctx_response_ready = scalar_bridge ? state == FIXED_WAIT && response_ready :
                     batch_response_ready;
                 logic [TAG_BITS-1:0] ctx_response_tag;
-                wire [255:0] ctx_response_digest;
-                wire [255:0] ctx_response_capture;
                 wire ctx_perm_valid;
                 wire ctx_perm_ready = batch_perm_ready;
                 wire [1599:0] ctx_perm_state;
@@ -1269,29 +1176,10 @@ module recipe #(
                 assign batch_response_digest = engine_digest;
                 assign batch_response_capture = engine_capture;
 
-                function automatic [31:0] be32(input [31:0] v);
-                    be32 = {v[7:0], v[15:8], v[23:16], v[31:24]};
-                endfunction
-                wire [255:0] seed_address = {
-                    be32(ctx_request_b),
-                    be32({24'd0, ctx_request_a}),
-                    be32({12'd0, ctx_request_leaf}),
-                    be32({24'd0, ctx_seed_domain}),
-                    be32(request_tree[31:0]),
-                    be32(request_tree[63:32]),
-                    32'd0,
-                    be32({27'd0, request_layer})
-                };
-                wire [255:0] step_address = {
-                    be32(ctx_request_b),
-                    be32({24'd0, ctx_request_a}),
-                    be32({12'd0, ctx_request_leaf}),
-                    be32({24'd0, ctx_step_domain}),
-                    be32(request_tree[31:0]),
-                    be32(request_tree[63:32]),
-                    32'd0,
-                    be32({27'd0, request_layer})
-                };
+                wire [255:0] seed_address = make_address(request_layer, request_tree,
+                    {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
+                wire [255:0] step_address = make_address(request_layer, request_tree,
+                    {12'd0, ctx_request_leaf}, ctx_step_domain, {24'd0, ctx_request_a}, ctx_request_b);
                 wire [255:0] address[0:PIPELINE-1];
                 logic [4:0]
                     steps[0:PIPELINE-1], iteration[0:PIPELINE-1], capture_after[0:PIPELINE-1];
@@ -1362,121 +1250,87 @@ module recipe #(
                     block_right = again ? captured[t] ^ ctx_perm_digest[255:0] : ctx_request_right;
                 wire [1599:0] unified_state;
                 begin : formatter
-                    logic [255:0] f0, f1, f2, f3, masked_address;
-                    logic [183:0] prefix;
-                    logic [7:0] domain;
-                    logic [1:0] layout;
-                    logic two;
-                    logic [1599:0] data;
+                    // Keep each byte placement independent of the family mux.
+                    // Only the final, mutually exclusive layout enables merge nodes.
                     wire seed = block_phase[0] || block_shape == 7;
                     wire prf = block_phase[2] || block_phase[3] || block_phase[5];
+                    wire xmss = block_family == 1;
+                    wire lms = block_family == 2;
+                    wire lms_node = lms && (block_shape == 14 || block_shape == 15);
+                    wire lms_chain = lms && !lms_node;
+                    wire node16 = node_bytes == 16;
+                    wire node24 = node_bytes == 24;
+                    wire node32 = !node16 && !node24;
+                    wire two = xmss ? seed || (block_pair && !prf) :
+                        lms_chain ? 1'b0 : block_pair;
+                    wire [255:0] masked_address = {
+                        be32(block_phase[3] ? 32'd1 : block_phase[5] ? 32'd2 : 32'd0),
+                        block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
+                        block_address[223:192], block_address[191:160], block_address[159:128], 96'd0
+                    };
+                    wire [7:0] xmss_domain = block_shape == 5 || prf ? 8'd3 :
+                        seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+                    wire [255:0] xmss_key = block_shape == 5 ? block_value :
+                        seed ? ctx_secret_seed : prf ? ctx_public_seed : key_value[t];
+                    wire [255:0] xmss_value = block_shape == 5 ? {block_address[191:160],224'd0} :
+                        seed ? ctx_public_seed : prf ? masked_address : block_value;
+                    wire [255:0] xmss_right = seed ? masked_address : block_right;
+                    wire [183:0] chain_prefix = {
+                        (seed || block_shape == 9) ? 8'hff : block_shape == 10 ?
+                            block_address[255:248] : {4'd0,block_step},
+                        block_address[223:216],8'd0,block_address[191:160],identifier
+                    };
+                    wire [175:0] node_prefix = {
+                        block_shape == 14 ? 16'h8282 : 16'h8383,block_address[255:224],identifier
+                    };
+                    logic [1087:0] slh16, slh24, slh32, xmss32, chain32, parent32;
                     always_comb begin
-                        masked_address = {
-                            be32(block_phase[3] ? 32'd1 : block_phase[5] ? 32'd2 : 32'd0),
-                            block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
-                            block_address[223:192],
-                            block_address[191:160],
-                            block_address[159:128],
-                            96'd0
-                        };
-                        f0 = ctx_public_seed;
-                        f1 = block_address;
-                        f2 = block_value;
-                        f3 = block_right;
-                        layout = 0;
-                        two = block_pair;
-                        prefix = 0;
-                        domain = 0;
-                        if (block_family == 1) begin
-                            layout = 1;
-                            domain = block_shape == 5 || prf ? 8'd3 :
-                                seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
-                            f1 = block_shape == 5 ? block_value :
-                                seed ? ctx_secret_seed : prf ? ctx_public_seed : key_value[t];
-                            f2 = block_shape == 5 ? {block_address[191:160], 224'd0} :
-                                seed ? ctx_public_seed : prf ? masked_address : block_value;
-                            f3 = seed ? masked_address : block_right;
-                            two = seed || (block_pair && !prf);
-                        end else if (block_family == 2) begin
-                            if (block_shape == 14 || block_shape == 15) begin
-                                layout = 3;
-                                prefix = {
-                                    8'd0,
-                                    block_shape == 14 ? 16'h8282 : 16'h8383,
-                                    block_address[255:224],
-                                    identifier
-                                };
-                            end else begin
-                                layout = 2;
-                                two = 0;
-                                prefix = {
-                                    (seed || block_shape == 9) ? 8'hff : block_shape == 10 ?
-                                        block_address[255:248] : {4'd0, block_step},
-                                    block_address[223:216],
-                                    8'd0,
-                                    block_address[191:160],
-                                    identifier
-                                };
-                            end
-                            f1 = block_value;
-                            f2 = block_right;
-                        end
-                        data = 0;
-                        case (node_bytes)
-                            16: begin
-                                data[511:0] = {
-                                    block_value[127:0], block_address, ctx_public_seed[127:0]
-                                };
-                                if (two) begin
-                                    data[639:512] = block_right[127:0];
-                                    data[647:640] = 8'h1f;
-                                end else data[519:512] = 8'h1f;
-                            end
-                            24: begin
-                                data[639:0] = {
-                                    block_value[191:0], block_address, ctx_public_seed[191:0]
-                                };
-                                if (two) begin
-                                    data[831:640] = block_right[191:0];
-                                    data[839:832] = 8'h1f;
-                                end else data[647:640] = 8'h1f;
-                            end
-                            default:
-                            case (layout)
-                                0: begin
-                                    data[767:0] = {f2, f1, f0};
-                                    if (two) begin
-                                        data[1023:768]  = f3;
-                                        data[1031:1024] = 8'h1f;
-                                    end else data[775:768] = 8'h1f;
-                                end
-                                1: begin
-                                    data[255:248] = domain;
-                                    data[511:256] = f1;
-                                    data[767:512] = f2;
-                                    if (two) begin
-                                        data[1023:768]  = f3;
-                                        data[1031:1024] = 8'h1f;
-                                    end else data[775:768] = 8'h1f;
-                                end
-                                2: begin
-                                    data[183:0]   = prefix;
-                                    data[439:184] = f1;
-                                    data[447:440] = 8'h1f;
-                                end
-                                3: begin
-                                    data[175:0]   = prefix[175:0];
-                                    data[431:176] = f1;
-                                    if (two) begin
-                                        data[687:432] = f2;
-                                        data[695:688] = 8'h1f;
-                                    end else data[439:432] = 8'h1f;
-                                end
-                            endcase
-                        endcase
-                        data[1087] = 1;
+                        slh16 = 0;
+                        slh16[511:0] = {block_value[127:0],block_address,ctx_public_seed[127:0]};
+                        if (two) begin
+                            slh16[639:512] = block_right[127:0];
+                            slh16[647:640] = 8'h1f;
+                        end else slh16[519:512] = 8'h1f;
+                        slh24 = 0;
+                        slh24[639:0] = {block_value[191:0],block_address,ctx_public_seed[191:0]};
+                        if (two) begin
+                            slh24[831:640] = block_right[191:0];
+                            slh24[839:832] = 8'h1f;
+                        end else slh24[647:640] = 8'h1f;
+                        slh32 = 0;
+                        slh32[767:0] = {block_value,block_address,ctx_public_seed};
+                        if (two) begin
+                            slh32[1023:768] = block_right;
+                            slh32[1031:1024] = 8'h1f;
+                        end else slh32[775:768] = 8'h1f;
+                        xmss32 = 0;
+                        xmss32[255:248] = xmss_domain;
+                        xmss32[511:256] = xmss_key;
+                        xmss32[767:512] = xmss_value;
+                        if (two) begin
+                            xmss32[1023:768] = xmss_right;
+                            xmss32[1031:1024] = 8'h1f;
+                        end else xmss32[775:768] = 8'h1f;
+                        chain32 = 0;
+                        chain32[183:0] = chain_prefix;
+                        chain32[439:184] = block_value;
+                        chain32[447:440] = 8'h1f;
+                        parent32 = 0;
+                        parent32[175:0] = node_prefix;
+                        parent32[431:176] = block_value;
+                        if (two) begin
+                            parent32[687:432] = block_right;
+                            parent32[695:688] = 8'h1f;
+                        end else parent32[439:432] = 8'h1f;
                     end
-                    assign unified_state = data;
+                    wire [1087:0] payload =
+                        ({1088{node16}} & slh16) |
+                        ({1088{node24}} & slh24) |
+                        ({1088{node32 && !xmss && !lms}} & slh32) |
+                        ({1088{node32 && xmss}} & xmss32) |
+                        ({1088{node32 && lms_chain}} & chain32) |
+                        ({1088{node32 && lms_node}} & parent32);
+                    assign unified_state = {512'd0, 1'b1, payload[1086:0]};
                 end
                 assign ctx_perm_state = unified_state;
                 assign ctx_perm_tag   = again ? t : ctx_request_tag;
@@ -1489,11 +1343,6 @@ module recipe #(
                     if (complete[j]) ctx_response_tag = TAG_BITS'(j);
                     if (response_held) ctx_response_tag = held_tag;
                 end
-                assign ctx_response_digest = initial_pending[ctx_response_tag] ?
-                    key_value[ctx_response_tag] : digest[ctx_response_tag];
-                assign ctx_response_capture = captured_valid[ctx_response_tag] ?
-                    (capture_initial[ctx_response_tag] ? key_value[ctx_response_tag] :
-                     captured[ctx_response_tag]) : 256'd0;
                 // A KEY return always feeds MASK immediately, so feedback priority excludes
                 // accepting an initial value on the same edge. Each bank has one write port.
                 wire key_return = ctx_perm_done && phase[t][2];
@@ -1644,10 +1493,7 @@ module recipe #(
                 end
 `endif
             end
-            // Direct Keccak datapath and absorb/chain control.
-            localparam logic [1:0] HASH_IDLE = 2'd0;
-            localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
-            localparam logic [1:0] HASH_RUN = 2'd2;
+            // Shared P>1 Keccak datapath and streaming absorb control.
 
             logic [1:0] hash_state;
             logic first_block, running_last;
@@ -1657,60 +1503,33 @@ module recipe #(
             logic [1599:0] sponge_state;
             wire [1599:0] advanced_state;
             wire round_complete, round_update;
-            logic p1_busy;
-            logic [4:0] permutation_round;
-            wire p1_done = p1_busy && permutation_round + UNROLL >= 24;
-            always_ff @(posedge clk) begin
-                if (rst) p1_busy <= 0;
-                else if (PIPELINE == 1) begin
-                    if (batch_perm_valid && batch_perm_ready) p1_busy <= 1;
-                    else if (p1_done) p1_busy <= 0;
-                end
-            end
-            // Fixed and streaming permutations are mutually exclusive. A new fixed
-            // block takes priority over the finishing round so feedback can relaunch
-            // on the same edge; the last stream beat starts its permutation at zero.
-            always_ff @(posedge clk) begin
-                if (rst) permutation_round <= 0;
-                else if (PIPELINE == 1) begin
-                    if (batch_perm_valid && batch_perm_ready) permutation_round <= 0;
-                    else if (hash_state == HASH_WAIT_BLOCK && staged_valid && append_index == 8)
-                        permutation_round <= 0;
-                    else if ((p1_busy && !p1_done) || (hash_state == HASH_RUN && !round_complete))
-                        permutation_round <= permutation_round + 5'(UNROLL);
-                end
-            end
-            // One P-stage datapath for both serial and interleaved execution. P1
-            // writes its sole state through the sponge word enables, without launch
-            // or return bubbles. P>1 carries valid/round/tag through the same stages.
+            // Fixed requests and streaming permutations share the P-stage datapath.
+            // P1's iterative datapath lives only in scalar_execution.
             localparam integer ROUNDS = UNROLL * PIPELINE;
             logic [1599:0] state_reg[0:PIPELINE-1];
             logic [PIPELINE-1:0] stage_valid;
             logic [4:0] stage_base[0:PIPELINE-1];
             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
             logic sent;
-            wire recycle = PIPELINE > 1 && stage_valid[PIPELINE-1] &&
+            wire recycle = stage_valid[PIPELINE-1] &&
                 stage_base[PIPELINE-1] + ROUNDS < 24;
             wire ready = !rst && !recycle;
-            wire finished = PIPELINE > 1 && !rst && stage_valid[PIPELINE-1] && !recycle;
+            wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
             wire normal_valid = hash_state == HASH_RUN && !sent;
             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
             wire [1599:0] issue_state = engine_mode ? batch_perm_state : sponge_state;
             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
             wire [1599:0] finished_state = state_reg[PIPELINE-1];
-            wire [1599:0] stage_result[0:PIPELINE-1];
             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
                 wire [1599:0] rounds[0:UNROLL];
                 wire [4:0] start_round;
                 wire [TAG_BITS-1:0] source_tag;
                 wire source_valid;
                 if (s == 0) begin : input_stage
-                    assign rounds[0] = PIPELINE == 1 ? sponge_state :
-                        recycle ? state_reg[PIPELINE-1] : issue_state;
-                    assign start_round = PIPELINE == 1 ? permutation_round :
-                        recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
+                    assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
-                    assign source_valid = PIPELINE > 1 && (recycle || issue_valid);
+                    assign source_valid = recycle || issue_valid;
                 end else begin : following_stage
                     assign rounds[0] = state_reg[s-1];
                     assign start_round = stage_base[s-1];
@@ -1719,23 +1538,20 @@ module recipe #(
                 end
                 for (genvar r = 0; r < UNROLL; r = r + 1) begin : unrolled
                     // verilog_format: off
-            (* keep_hierarchy="yes" *) keccak round_logic(.state_in(rounds[r]),
-                .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
-            // verilog_format: on
+                    (* keep_hierarchy="yes" *) keccak round_logic(.state_in(rounds[r]),
+                        .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
+                    // verilog_format: on
                 end
-                assign stage_result[s] = rounds[UNROLL];
                 for (genvar w = 0; w < 25; w = w + 1) begin : words
                     always_ff @(posedge clk)
                         if (!rst) begin
-                            if (PIPELINE == 1 && engine_mode) begin
-                                if (batch_perm_valid && batch_perm_ready)
-                                    state_reg[s][64*w+:64] <= batch_perm_state[64*w+:64];
-                                else if (p1_busy)
-                                    state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
-                            end else if ((PIPELINE == 1 || (SHARED_STATE && s == PIPELINE - 1)) &&
+                            if ((SHARED_STATE && s == PIPELINE - 1) &&
                                          state_write_enable[w])
                                 state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
-                            else if (source_valid)
+                            // Intermediate data is live only when stage_valid is set.
+                            // Let bubbles advance without a wide valid-controlled hold;
+                            // the final bank must retain the sponge and returned digest.
+                            else if (s < PIPELINE - 1 || source_valid)
                                 state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
                         end
                 end
@@ -1750,16 +1566,14 @@ module recipe #(
                     end
                 end
             end
-            assign
-                batch_perm_ready = engine_mode && (PIPELINE == 1 ? (!p1_busy || p1_done) : ready);
-            assign batch_perm_done = engine_mode && (PIPELINE == 1 ? p1_done : finished);
-            assign batch_perm_digest = PIPELINE > 1 ? finished_state : stage_result[0];
-            assign batch_perm_result_tag = PIPELINE > 1 ? stage_tag[PIPELINE-1] : '0;
-            if (PIPELINE == 1 || SHARED_STATE) assign sponge_state = finished_state;
-            assign advanced_state = PIPELINE == 1 ? stage_result[0] : finished_state;
-            assign round_complete = PIPELINE == 1 ? permutation_round + UNROLL >= 24 :
-                !engine_mode && finished;
-            assign round_update = hash_state == HASH_RUN && (PIPELINE == 1 || round_complete);
+            assign batch_perm_ready = engine_mode && ready;
+            assign batch_perm_done = engine_mode && finished;
+            assign batch_perm_digest = finished_state;
+            assign batch_perm_result_tag = stage_tag[PIPELINE-1];
+            if (SHARED_STATE) assign sponge_state = finished_state;
+            assign advanced_state = finished_state;
+            assign round_complete = !engine_mode && finished;
+            assign round_update = hash_state == HASH_RUN && round_complete;
             always_ff @(posedge clk) begin
                 if (rst) sent <= 0;
                 else if (!engine_mode) begin
@@ -1769,7 +1583,7 @@ module recipe #(
             end
 `ifndef SYNTHESIS
             always @(posedge clk)
-                if (!rst && PIPELINE > 1 && SHARED_STATE && |state_write_enable)
+                if (!rst && SHARED_STATE && |state_write_enable)
                     if (|(stage_valid & ~(finished ?
                                           PIPELINE'(1 << (PIPELINE - 1)) : {PIPELINE{1'b0}})))
                         $fatal(1, "sponge write while pipeline occupied");
@@ -1814,7 +1628,7 @@ module recipe #(
             for (word_index = 0; word_index < 25; word_index = word_index + 1) begin : state_words
                 wire select_stream = word_index < 17 && take_stream &&
                     append_index == word_index / 2;
-                wire [63:0] round_or_clear = (clear_stream || (SHARED_STATE && PIPELINE > 1)) ?
+                wire [63:0] round_or_clear = (clear_stream || SHARED_STATE) ?
                     64'd0 : advanced_state[word_index*64+:64];
                 wire [63:0] absorb_word = word_index % 2 == 0 ? absorbed_block[63:0] :
                     absorbed_block[127:64];
@@ -1824,9 +1638,9 @@ module recipe #(
                 // A completed permutation already resides in the shared register.
                 // Only absorption, initialization or a new chain block needs a write.
                 assign state_write_enable[word_index] = !rst &&
-                    ((!(SHARED_STATE && PIPELINE > 1) && round_update) || select_stream ||
+                    ((!SHARED_STATE && round_update) || select_stream ||
                      clear_stream);
-                if (!SHARED_STATE && PIPELINE > 1) begin : private_state
+                if (!SHARED_STATE) begin : private_state
                     always_ff @(posedge clk)
                         if (state_write_enable[word_index])
                             sponge_state[word_index*64+:64] <= next_word;

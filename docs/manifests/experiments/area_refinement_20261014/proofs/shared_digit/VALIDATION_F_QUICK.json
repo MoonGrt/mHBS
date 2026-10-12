@@ -1,0 +1,199 @@
+{
+  "candidate": "F_E_plus_shared_digit",
+  "passed": true,
+  "source_unchanged": true,
+  "files": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "1e21457b18fe6f18799d71b7755a81b232e3f2680ab3fd3d3d3e445fbd464113",
+    "rtl/memory/value.sv": "a6084c7cf87980e07b6a99ae6cedf3bf4fb3012e7ef2a063ff506db88d45802a",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "79179648d0ad53c209bed0f6e058b820a316d1ed26408f1f8599e1e0da8285c3",
+    "rtl/executor/executor.sv": "e5f42f87b01c285eb35cb525472bc92fa48c57cf913b811c330c1b23959cdaae",
+    "rtl/top/top.sv": "c39b1ce91442d8f73f07addb13a065e7994a32342e5c361929c2f350c175529e",
+    "rtl/top/common.sv": "372607682f31b1f29770553c7b2843b24646b379a7ccbb166f80598eb0f279b4",
+    "tb/tb_fast.sv": "51bc13f77b260e3b58b7972c68b93be2432fbdf93bd5a8c19f4a8f5507301ad1",
+    "tb/fast_main.cpp": "c573e4b5b5a31d4197ce1dd4a0ee9046d2fbbe20e11a8897b834160880d33291"
+  },
+  "tests": [
+    {
+      "label": "lint_normal",
+      "command": [
+        "verilator",
+        "--lint-only",
+        "--timing",
+        "-Wno-fatal",
+        "--top-module",
+        "common",
+        "rtl/hash/keccak.sv",
+        "rtl/hash/recipe.sv",
+        "rtl/memory/value.sv",
+        "rtl/memory/signature.sv",
+        "rtl/executor/sequencer.sv",
+        "rtl/executor/executor.sv",
+        "rtl/top/top.sv",
+        "rtl/top/common.sv"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.34353041648864746,
+      "passed": true
+    },
+    {
+      "label": "lint_synthesis",
+      "command": [
+        "verilator",
+        "--lint-only",
+        "--timing",
+        "-Wno-fatal",
+        "--top-module",
+        "common",
+        "rtl/hash/keccak.sv",
+        "rtl/hash/recipe.sv",
+        "rtl/memory/value.sv",
+        "rtl/memory/signature.sv",
+        "rtl/executor/sequencer.sv",
+        "rtl/executor/executor.sv",
+        "rtl/top/top.sv",
+        "rtl/top/common.sv",
+        "-DSYNTHESIS"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 0.3054947853088379,
+      "passed": true
+    },
+    {
+      "label": "P1U1_slh_128f_verify",
+      "command": [
+        "bash",
+        "scripts/simulate_fast.sh",
+        "slh_128f",
+        "verify",
+        "1",
+        "1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 7.111998796463013,
+      "passed": true,
+      "observed": {
+        "configuration": "P1U1",
+        "operation": 2,
+        "cycles": 197655,
+        "total_cycles": 197660,
+        "hashes": 6441,
+        "permutations": 6533
+      }
+    },
+    {
+      "label": "P4U1_xmss_h10_verify",
+      "command": [
+        "bash",
+        "scripts/simulate_fast.sh",
+        "xmss_h10",
+        "verify",
+        "4",
+        "1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 11.399652242660522,
+      "passed": true,
+      "observed": {
+        "configuration": "P4U1",
+        "operation": 2,
+        "cycles": 19239,
+        "total_cycles": 19244,
+        "hashes": 1970,
+        "permutations": 1970
+      }
+    },
+    {
+      "label": "P12U1_lms_h10_verify",
+      "command": [
+        "bash",
+        "scripts/simulate_fast.sh",
+        "lms_h10",
+        "verify",
+        "12",
+        "1"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 46.3345947265625,
+      "passed": true,
+      "observed": {
+        "configuration": "P12U1",
+        "operation": 2,
+        "cycles": 3452,
+        "total_cycles": 3457,
+        "hashes": 493,
+        "permutations": 508
+      }
+    }
+  ],
+  "elapsed_seconds": 46.337873458862305,
+  "previous_workspace_verify_count_comparison": [
+    {
+      "label": "P1U1_slh_128f_verify",
+      "current": {
+        "configuration": "P1U1",
+        "operation": 2,
+        "cycles": 197655,
+        "total_cycles": 197660,
+        "hashes": 6441,
+        "permutations": 6533
+      },
+      "previous_workspace_verify": {
+        "configuration": "P1U1",
+        "operation": 2,
+        "cycles": 197655,
+        "total_cycles": 197660,
+        "hashes": 6441,
+        "permutations": 6533
+      },
+      "identical": true,
+      "previous_log": "build/area_continuation_20261014/workspace_P1U1_slh_128f_verify.log",
+      "previous_log_sha256": "bbe29e081397de46516e6bb6565bbb0785c53dbc04c2072d149e3be8cb55463f"
+    },
+    {
+      "label": "P4U1_xmss_h10_verify",
+      "current": {
+        "configuration": "P4U1",
+        "operation": 2,
+        "cycles": 19239,
+        "total_cycles": 19244,
+        "hashes": 1970,
+        "permutations": 1970
+      },
+      "previous_workspace_verify": {
+        "configuration": "P4U1",
+        "operation": 2,
+        "cycles": 19239,
+        "total_cycles": 19244,
+        "hashes": 1970,
+        "permutations": 1970
+      },
+      "identical": true,
+      "previous_log": "build/area_continuation_20261014/workspace_P4U1_xmss_h10_verify.log",
+      "previous_log_sha256": "284c865f8414c140ea0d1bb40f2f2e37360784c40985d018a6bf494c00313ec7"
+    },
+    {
+      "label": "P12U1_lms_h10_verify",
+      "current": {
+        "configuration": "P12U1",
+        "operation": 2,
+        "cycles": 3452,
+        "total_cycles": 3457,
+        "hashes": 493,
+        "permutations": 508
+      },
+      "previous_workspace_verify": {
+        "configuration": "P12U1",
+        "operation": 2,
+        "cycles": 3452,
+        "total_cycles": 3457,
+        "hashes": 493,
+        "permutations": 508
+      },
+      "identical": true,
+      "previous_log": "build/area_continuation_20261014/workspace_P12U1_lms_h10_verify.log",
+      "previous_log_sha256": "adc02a4d77edac2cd5b9ba3a6b3e630b19e066a9882189f9daf6d64afb7562f3"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+--- baseline/input/rtl/hash/recipe.sv
++++ candidate/rtl/hash/recipe.sv
+@@ -432,7 +432,7 @@
+                     stream_payload = list_window;
+             end
+ 
+-            integer i, absolute;
++            integer i;
+             always @* begin
+                 address = make_address(request_layer, request_tree, leaf, address_domain, a, b);
+                 masked_address = {
+@@ -602,14 +602,21 @@
+                 endcase
+                 fast_block[1087] = 1'b1;
+             end
++            // A scalar beat consumes eight bytes. Compute its remaining length
++            // once; each byte then needs only a three-bit comparison.
++            wire [12:0] remaining_bytes = input_length - position;
++            wire padding_reached = position > input_length;
++            wire partial_beat = remaining_bytes < 8;
++            wire rate_beat_valid = beat < 8 || (beat == 8 && !stream_half);
+             always_comb begin
+                 stream_data = stream_payload;
+                 for (i = 0; i < 16; i = i + 1) begin
+-                    absolute = position + i;
+-                    if ((i < 8) && beat * 16 + stream_half * 8 + i < 136) begin
+-                        if (absolute >= input_length) stream_data[i*8+:8] = 0;
+-                        if (absolute == input_length) stream_data[i*8+:8] = 8'h1f;
+-                        if (stream_last && beat * 16 + stream_half * 8 + i == 135)
++                    if (i < 8 && rate_beat_valid) begin
++                        if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
++                            stream_data[i*8+:8] = 0;
++                        if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
++                            stream_data[i*8+:8] = 8'h1f;
++                        if (i == 7 && beat == 8 && !stream_half && stream_last)
+                             stream_data[i*8+7] = 1'b1;
+                     end else stream_data[i*8+:8] = 0;
+                 end

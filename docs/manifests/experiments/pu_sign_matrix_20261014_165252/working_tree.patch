@@ -1,0 +1,141 @@
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 1b8bd99..a80727b 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -113,7 +113,10 @@ module executor #(
+     logic [7:0] lt_count, lt_cursor;
+     logic [3:0] lt_level;
+     localparam integer FORS_BATCH = 4 * ((PIPELINE + 3) / 4);
+-    localparam integer FORS_SCRATCH = 112;
++    // FORS runs before WOTS. Its at most 35 roots use 0..34, so
++    // the 24-node microgroup scratch can reuse dead endpoints 36..59.
++    // Tree-stack/auth data remain independently live in 68..107.
++    localparam integer FORS_SCRATCH = 36, WORKSPACE_DEPTH = 128;
+     logic fors_level, fors_roots_pending;
+     logic [4:0] fors_total, fors_offset, fors_root_cursor;
+     logic [20:0] fors_base;
+@@ -255,7 +258,7 @@ module executor #(
+     // WOTS completions, FORS roots and in-place L-tree reduction.
+     wire root_write = state == ROUTE && macro_route != 0 && route_descriptor[53];
+     // verilog_format: off
+-    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(136),.ADDRESS_BITS(INDEX_BITS)) endpoints (
++    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS)) endpoints (
+         .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
+         .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
+     );
+@@ -555,7 +558,8 @@ module executor #(
+                     address <= INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
+             end
+             assign endpoint_read0 = address;
+-            assign endpoint_read1 = address == 135 ? 8'd134 : address + 1'b1;
++            assign endpoint_read1 = address == INDEX_BITS'(WORKSPACE_DEPTH - 1)
++                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : address + 1'b1;
+         end
+     endgenerate
+ 
+@@ -567,11 +571,16 @@ module executor #(
+     wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
+     wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_level<tree_height && !node_index[0] && !verifying;
+ `ifndef SYNTHESIS
++    initial begin : workspace_capacity
++        if (FORS_BATCH > 24 || FORS_SCRATCH <= 35 ||
++            FORS_SCRATCH + FORS_BATCH > STACK_BASE || AUTH_BASE + 20 > WORKSPACE_DEPTH)
++            $fatal(1, "workspace regions exceed preserved algorithm capacities");
++    end
+     always @(posedge clk)
+         if (!execution_rst) begin
+-            if (endpoint_write && endpoint_address >= 136)
++            if (endpoint_write && endpoint_address >= WORKSPACE_DEPTH)
+                 $fatal(1, "workspace write out of range");
+-            if (endpoint_read0 >= 136 || endpoint_read1 >= 136)
++            if (endpoint_read0 >= WORKSPACE_DEPTH || endpoint_read1 >= WORKSPACE_DEPTH)
+                 $fatal(1, "workspace read out of range");
+             if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
+                 if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index b8e8659..d36edcb 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -76,7 +76,7 @@ module recipe #(
+             logic [1:0] compound;
+             // XMSS retains its value across key/mask hashes. SLH
+             // chains instead reuse the sponge's retained digest at the next START.
+-            logic [N*8-1:0] chain_value, temporary_key, mask0, mask1;
++            logic [N*8-1:0] chain_value, temporary_key;
+             wire [N*8-1:0] current_value = MASKED_ENABLE ? chain_value :
+                 seed_phase ? request_left : digest[N*8-1:0];
+             localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
+@@ -427,9 +427,11 @@ module recipe #(
+                             frame_layout = 3;
+                             frame_domain = arity - 1'b1;
+                             frame1 = temporary_key;
+-                            frame2 = left_value ^ mask0;
++                            // MASK0 already masked the retained left value in place.
++                            frame2 = chain_value;
+                             frame_two = arity == 2;
+-                            frame3 = frame_two ? request_right ^ mask1 : 256'd0;
++                            // MASK1 is the retained sponge digest until this FINAL launch.
++                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
+                         end
+                     end
+                     shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
+@@ -818,8 +820,10 @@ module recipe #(
+                                              compound < arity + 1) begin
+                                     case (compound)
+                                         0: temporary_key <= completed_value[N*8-1:0];
+-                                        1: mask0 <= completed_value[N*8-1:0];
+-                                        default: mask1 <= completed_value[N*8-1:0];
++                                        // The unmasked value dies at MASK0 completion.
++                                        1: chain_value <= left_value ^ completed_value[N*8-1:0];
++                                        // MASK1 stays in sponge_state until FINAL reads it.
++                                        default: begin end
+                                     endcase
+                                     compound <= compound + 1'b1;
+                                     state <= START;
+@@ -1418,8 +1422,6 @@ module recipe #(
+                                     identifier
+                                 };
+                             end
+-                            f1 = block_value;
+-                            f2 = block_right;
+                         end
+                         data = 0;
+                         case (node_bytes)
+@@ -1443,15 +1445,10 @@ module recipe #(
+                             end
+                             default:
+                             case (layout)
+-                                0: begin
+-                                    data[767:0] = {f2, f1, f0};
+-                                    if (two) begin
+-                                        data[1023:768]  = f3;
+-                                        data[1031:1024] = 8'h1f;
+-                                    end else data[775:768] = 8'h1f;
+-                                end
+-                                1: begin
+-                                    data[255:248] = domain;
++                                0, 1: begin
++                                    // SLH and XMSS share the aligned operand layout.
++                                    // Only the first 32-byte prefix differs.
++                                    data[255:0] = layout == 0 ? f0 : {domain, 248'd0};
+                                     data[511:256] = f1;
+                                     data[767:512] = f2;
+                                     if (two) begin
+@@ -1461,14 +1458,14 @@ module recipe #(
+                                 end
+                                 2: begin
+                                     data[183:0]   = prefix;
+-                                    data[439:184] = f1;
++                                    data[439:184] = block_value;
+                                     data[447:440] = 8'h1f;
+                                 end
+                                 3: begin
+                                     data[175:0]   = prefix[175:0];
+-                                    data[431:176] = f1;
++                                    data[431:176] = block_value;
+                                     if (two) begin
+-                                        data[687:432] = f2;
++                                        data[687:432] = block_right;
+                                         data[695:688] = 8'h1f;
+                                     end else data[439:432] = 8'h1f;
+                                 end

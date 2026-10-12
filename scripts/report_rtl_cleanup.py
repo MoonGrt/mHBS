@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Collect the frozen debug/sharing candidate without interrupting long synthesis."""
 import argparse
-import csv
 from datetime import datetime
 import hashlib
 import json
@@ -143,19 +142,6 @@ def collect(base):
 def write_report(data, base):
     report = ROOT / 'docs/manifests/experiments/rtl_debug_sharing_20261013/reports' / NAME
     report.with_suffix('.json').write_text(json.dumps(data, indent=2) + '\n')
-    fields = ['kind', 'name', 'synthesis', 'lut', 'ff', 'bram36', 'equivalent_slice',
-              'cycles', 'hashes', 'permutations', 'frequency_mhz', 'fpga_ms',
-              'atp_slice_ms', 'rank_measured', 'status']
-    with report.with_suffix('.csv').open('w', newline='') as handle:
-        writer = csv.DictWriter(handle, fieldnames=fields)
-        writer.writeheader()
-        for item in data['areas']:
-            writer.writerow(dict(kind='area', name=item['name'], status=item['status'],
-                                 **{k: v for k, v in (item['area'] or {}).items() if k in fields}))
-        for item in data['simulations']:
-            writer.writerow(dict(kind='sign', name=item['profile'] + '/' + item['config'],
-                                 status='passed' if item['matches_previous'] else 'changed',
-                                 **{k: v for k, v in item.items() if k in fields}))
     lines = [
         '# RTL 调试裁剪、签名缓存宏与互斥资源复用（2026-10-13）', '',
         f"更新时间：{data['updated_at']}。冻结源码校验：{data['source_unchanged']}。", '',
