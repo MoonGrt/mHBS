@@ -1,3 +1,6 @@
+set hash_backend shake
+if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 # Relaxed-clock synthesis for locating combinational paths, not Fmax/ATP sign-off.
 if {[llength $argv] != 5} {error "Usage: source_root P U output period_ns"}
 lassign $argv root p u out period
@@ -10,6 +13,9 @@ file mkdir $out
 set part xc7a200tffg1156-3
 set_param general.maxThreads 2
 create_project -in_memory -part $part
+set defines [list SYNTHESIS]
+if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+set_property verilog_define $defines [current_fileset]
 set handle [open [file join $root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
@@ -20,7 +26,7 @@ puts $handle "create_clock -name clk -period $period \[get_ports clk\]"
 close $handle
 read_xdc $clock_file
 set handle [open [file join $out settings.txt] w]
-puts $handle "diagnostic_only=1\ntop=common\nPIPELINE=$p\nUNROLL=$u\nperiod_ns=$period\npart=$part\nthreads=2\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nvivado=[version -short]"
+puts $handle "diagnostic_only=1\ntop=common\nPIPELINE=$p\nUNROLL=$u\nperiod_ns=$period\nhash_backend=$hash_backend\npart=$part\nthreads=2\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nvivado=[version -short]"
 close $handle
 synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt \
     -max_dsp 0 -generic PIPELINE=$p -generic UNROLL=$u

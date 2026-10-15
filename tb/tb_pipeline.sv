@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 // Four tags with mixed lengths, response stalls, capture retention and reuse.
-module tb_pipeline;
+module tb_pipeline #(parameter integer PIPELINE=4,UNROLL=1);
  logic clk=0;always #5 clk=~clk;
  logic rst=1,valid=0,ready_response=0;
  wire ready,response_valid;
@@ -14,9 +14,14 @@ module tb_pipeline;
  logic [31:0] b=0;
  logic [255:0] initial_value=0,right_value=0,secret_seed,public_seed;
  logic [127:0] identifier;
+ wire [5:0] node_bytes=
+`ifdef MHBS_SHA2
+  family_arg==0 ? 6'd16 :
+`endif
+  6'd32;
  wire [255:0] digest,capture;
  wire [63:0] hashes,permutations;
- recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.SHARED_STATE(1'b1)) dut(
+ recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL),.SHARED_STATE(1'b1)) dut(
   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
   .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(capture_enable),
   .batch_leaf(leaf),.batch_a(a),.batch_b(b),.batch_family(family),.batch_no_seed(no_seed),
@@ -27,7 +32,7 @@ module tb_pipeline;
 `ifndef SYNTHESIS
   .batch_hashes(hashes),.batch_permutations(permutations),
 `endif
-  .node_bytes(6'd32),.request_valid(1'b0),.request_ready(),.request_recipe(64'd0),.request_step_recipe(64'd0),
+  .node_bytes(node_bytes),.request_valid(1'b0),.request_ready(),.request_recipe(64'd0),.request_step_recipe(64'd0),
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed,.secret_prf(256'd0),.public_seed,.root(256'd0),.randomizer(256'd0),.identifier,
   .message_buffer(696'd0),.message_length(7'd0),.request_layer(5'd3),.request_tree(64'h0123456789abcdef),
@@ -39,6 +44,18 @@ module tb_pipeline;
 `endif
  );
 `ifdef SYNTHESIS
+`ifdef MHBS_SHA2
+ longint unsigned observed_hashes=0,observed_permutations=0;
+ assign hashes=observed_hashes;
+ assign permutations=observed_permutations;
+ always @(posedge clk)begin
+  if(rst)begin observed_hashes=0;observed_permutations=0;end
+  else begin
+   if(dut.hash_complete_event)observed_hashes++;
+   if(dut.compression_complete_event)observed_permutations++;
+  end
+ end
+`else
  longint unsigned observed_permutations=0;
  assign hashes=observed_permutations;
  assign permutations=observed_permutations;
@@ -47,8 +64,9 @@ module tb_pipeline;
   else if(dut.batch_perm_done)observed_permutations++;
  end
 `endif
+`endif
  logic [778:0] vectors[0:7];
- integer slot_row[0:3];integer expected_hashes,cycles=0,same_edge=0,non_order=0,retired=0;
+ integer slot_row[0:3];integer expected_hashes,expected_permutations,cycles=0,same_edge=0,non_order=0,retired=0;
  logic [19:0] leaf=20'd513,job_leaf=20'd513;
  logic poison_active=0;
  integer poisoned_requests=0,poison_cycles=0;
@@ -84,6 +102,7 @@ module tb_pipeline;
  endtask
  initial begin
   if(!$value$plusargs("VECTOR=%s",vector_file) || !$value$plusargs("FAMILY=%d",family_arg) || !$value$plusargs("HASHES=%d",expected_hashes))$fatal(1,"arguments");
+  if(!$value$plusargs("PERMUTATIONS=%d",expected_permutations))expected_permutations=expected_hashes;
   if($value$plusargs("LEAF=%d",job_leaf))begin end
   leaf=job_leaf;
   family=2'(family_arg);$readmemh(vector_file,vectors);
@@ -120,7 +139,8 @@ module tb_pipeline;
    end
   end
   repeat(4)tick();
-  if(response_valid || !same_edge || !non_order || hashes!=expected_hashes || permutations!=hashes)$fatal(1,"coverage/counts %0d %0d %0d/%0d",same_edge,non_order,hashes,expected_hashes);
+  if(response_tag!=0)$fatal(1,"idle response tag must return to zero for subsequent captures");
+  if(response_valid || !same_edge || !non_order || hashes!=expected_hashes || permutations!=expected_permutations)$fatal(1,"coverage/counts %0d %0d %0d/%0d",same_edge,non_order,hashes,expected_hashes);
   if(poisoned_requests!=8 || poison_cycles<8)$fatal(1,"poison coverage %0d/%0d",poisoned_requests,poison_cycles);
   $display("PIPELINE_PASS family=%0d requests=8 returns=8 simultaneous=%0d unordered=%0d hashes=%0d poisoned=%0d poison_cycles=%0d",family_arg,same_edge,non_order,hashes,poisoned_requests,poison_cycles);$finish;
  end

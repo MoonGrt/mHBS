@@ -202,7 +202,9 @@ def begin_synthesis(results):
         if sha(source / name) != before or sha(ROOT / name) != before:
             raise ValueError('RTL changed while freezing: ' + name)
         hashes[name] = before
-    atomic(output / 'SOURCE.json', json.dumps(dict(source_root=str(source), results=str(results),
+    hash_backend = os.environ.get('HASH_BACKEND', 'shake')
+    if hash_backend not in ('shake', 'sha2'): raise ValueError('HASH_BACKEND must be shake or sha2')
+    atomic(output / 'SOURCE.json', json.dumps(dict(hash_backend=hash_backend, source_root=str(source), results=str(results),
            started_at=now(), sha256=hashes), indent=2) + '\n')
     pack_rtl(source, output / 'rtl.tar.gz', hashes)
     print(output)

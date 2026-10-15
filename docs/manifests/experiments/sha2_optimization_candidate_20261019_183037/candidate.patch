@@ -1,0 +1,142 @@
+--- baseline/rtl/hash/sha2-recipe.sv
++++ candidate/rtl/hash/sha2-recipe.sv
+@@ -61,7 +61,7 @@
+     logic [7:0] address_a[0:PIPELINE-1], seed_domain[0:PIPELINE-1], step_domain[0:PIPELINE-1];
+     logic [31:0] address_b[0:PIPELINE-1];
+     logic [4:0] iteration[0:PIPELINE-1], end_step[0:PIPELINE-1], capture_step[0:PIPELINE-1];
+-    logic [7:0] arity[0:PIPELINE-1];
++    logic [12:0] hash_length[0:PIPELINE-1];
+     logic [5:0] output_bytes[0:PIPELINE-1];
+     logic [6:0] block_index[0:PIPELINE-1];
+     logic [255:0] cv[0:PIPELINE-1], digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
+@@ -79,42 +79,43 @@
+     function automatic [255:0] node_result(input [255:0] data,input [1:0] f);
+         node_result = f==0 ? {128'd0,data[127:0]} : data;
+     endfunction
+-    function automatic [12:0] input_length(input integer t);
+-        begin
+-            case (phase[t])
+-                KEY,MASK0,MASK1: input_length=96;
+-                FINAL: input_length=paired[t] ? 128 : 96;
+-                HMAC_IN: input_length=13'd80+13'(message_length);
+-                HMAC_OUT: input_length=96;
+-                HMSG_IN: input_length=13'd48+13'(message_length);
+-                MGF0,MGF1: input_length=68;
++    function automatic [12:0] initial_length(input phase_t ph, input [3:0] sh, input [1:0] fam,
++        input pair_node, input [7:0] count);
++        begin
++            case (ph)
++                KEY,MASK0,MASK1: initial_length=96;
++                FINAL: initial_length=pair_node ? 128 : 96;
++                HMAC_IN: initial_length=13'd80+13'(message_length);
++                HMAC_OUT: initial_length=96;
++                HMSG_IN: initial_length=13'd48+13'(message_length);
++                MGF0,MGF1: initial_length=68;
+                 default: begin
+-                    if (shape[t]==0 || phase[t]==SEED) begin
+-                        case(family[t])
+-                            0: input_length=102;
+-                            1: input_length=128;
+-                            default: input_length=55;
++                    if (sh==0 || ph==SEED) begin
++                        case(fam)
++                            0: initial_length=102;
++                            1: initial_length=128;
++                            default: initial_length=55;
+                         endcase
+-                    end else case(shape[t])
+-                        1: input_length=102;
+-                        2: input_length=paired[t] ? 118 : 102;
+-                        5: input_length=96;
+-                        6: input_length=13'd128+13'(message_length);
+-                        7: input_length=128;
+-                        9,10: input_length=55;
+-                        11: input_length=13'd54+13'(message_length);
+-                        12: input_length=13'd86+{1'b0,arity[t],4'd0};
+-                        13: input_length=13'd22+{arity[t],5'd0};
+-                        14: input_length=54;
+-                        15: input_length=86;
+-                        default: input_length=0;
++                    end else case(sh)
++                        1: initial_length=102;
++                        2: initial_length=pair_node ? 118 : 102;
++                        5: initial_length=96;
++                        6: initial_length=13'd128+13'(message_length);
++                        7: initial_length=128;
++                        9,10: initial_length=55;
++                        11: initial_length=13'd54+13'(message_length);
++                        12: initial_length=13'd86+{1'b0,count,4'd0};
++                        13: initial_length=13'd22+{count,5'd0};
++                        14: initial_length=54;
++                        15: initial_length=86;
++                        default: initial_length=0;
+                     endcase
+                 end
+             endcase
+         end
+     endfunction
+     function automatic [6:0] last_block(input integer t);
+-        last_block=7'((input_length(t)+13'd8)>>6);
++        last_block=7'((hash_length[t]+13'd8)>>6);
+     endfunction
+     function automatic [31:0] effective_b(input integer t);
+         effective_b = shape[t]==0 && phase[t]!=SEED && step_domain[t]!=3 ?
+@@ -393,14 +394,17 @@
+     // In SEND, the old block already resides in block_buffer. Its acceptance
+     // can also prepare the next slot and prefetch its first endpoint address.
+     wire start_format=candidate_valid && (formatter==SELECT || (formatter==SEND && compression_ready));
+-    assign list_next_index0=start_format ? list_address(selected_format(int'(candidate)),{block_index[candidate],2'd0}) :
++    // List requests remain in DIRECT until completion. Their RAM prefetch only
++    // needs the accepted shape, not the full phase/family formatter decode.
++    assign list_next_index0=start_format ? list_address(shape[candidate]==12 ? SLH_LIST :
++        shape[candidate]==13 ? LMS_LIST : SLH_SEED,{block_index[candidate],2'd0}) :
+         list_address(format_kind,{block_index[format_tag],formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
+     task automatic prepare_block(input integer t);
+         begin
+             format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD;
+-            format_kind<=selected_format(t); format_length<=input_length(t);
++            format_kind<=selected_format(t); format_length<=hash_length[t];
+             format_address<=packed_address(t,selected_format(t));
+-            prepare_beat(selected_format(t),{block_index[t],2'd0},input_length(t));
++            prepare_beat(selected_format(t),{block_index[t],2'd0},hash_length[t]);
+             schedule_cursor<=t==PIPELINE-1 ? TAG_BITS'(0) : TAG_BITS'(t+1);
+         end
+     endtask
+@@ -481,7 +485,17 @@
+     // A full SHA256 call starts from IV. Intermediate compression returns only
+     // update CV/offset; only a full call can change a recipe or chain phase.
+     task automatic next_hash(input integer t,input phase_t next_phase);
+-        begin phase[t]<=next_phase; cv[t]<=IV; block_index[t]<=0; need_block[t]<=1; end
++        begin
++            phase[t]<=next_phase; cv[t]<=IV; block_index[t]<=0; need_block[t]<=1;
++            // List lengths are accepted once. Only chain and fixed hash phases
++            // restart a call here, so no per-slot list arity bank is needed.
++            case(next_phase)
++                KEY,MASK0,MASK1,HMAC_OUT: hash_length[t]<=13'd96;
++                FINAL: hash_length[t]<=paired[t] ? 13'd128 : 13'd96;
++                MGF0,MGF1: hash_length[t]<=13'd68;
++                default: hash_length[t]<=family[t]==0 ? 13'd102 : family[t]==1 ? 13'd128 : 13'd55;
++            endcase
++        end
+     endtask
+     task automatic finish_node(input integer t,input [255:0] value);
+         reg [255:0] node;
+@@ -513,7 +527,7 @@
+             scalar_result<=0;
+             for(integer k=0;k<PIPELINE;k=k+1) begin
+                 phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+-                arity[k]<=0; output_bytes[k]<=0;
++                hash_length[k]<=0; output_bytes[k]<=0;
+             end
+         end else begin
+             // Match the common executor's idle-tag contract: after draining a
+@@ -582,7 +596,8 @@
+                 iteration[t]<=incoming_start; end_step[t]<=incoming_start+incoming_steps;
+                 capture_step[t]<=scalar_accept && !request_chain ? (scalar_shape==7 ? 5'd0 : 5'd1) : incoming_capture_step;
+                 capture_enable[t]<=incoming_capture;
+-                arity[t]<=scalar_accept ? request_recipe[47:40] : 8'd1;
++                hash_length[t]<=initial_length(initial_phase(incoming_shape,incoming_family,incoming_no_seed),
++                    incoming_shape,incoming_family,incoming_pair,scalar_accept ? request_recipe[47:40] : 8'd1);
+                 output_bytes[t]<=scalar_accept ? request_recipe[37:32] : incoming_family==0 ? 6'd16 : 6'd32;
+                 if(incoming_shape==0 && incoming_no_seed) begin
+                     if(incoming_capture && incoming_capture_step==incoming_start)

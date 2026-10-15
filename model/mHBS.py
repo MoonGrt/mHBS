@@ -61,9 +61,12 @@ class _EmbeddedImage:
         if any(self.descriptors[len(ADDRESSES):]): raise ValueError('descriptor padding')
         # The physical header stores output sizes only, profile omits family/w.
         if self.descriptors[0]>>36: raise ValueError('header reserved')
-        code=self.descriptors[1]
+        encoded_code=self.descriptors[1]
+        if encoded_code >> 6:raise ValueError('profile reserved bits')
+        hash_backend='sha2' if encoded_code & 32 else 'shake'
+        code=encoded_code & 31
         if code not in SLH_PROFILE_CODES:raise ValueError('SLH profile code')
-        d[1]=compile_logical_image(SLH_PROFILE_CODES[code]).descriptors[1]
+        d[1]=compile_logical_image(SLH_PROFILE_CODES[code], hash_backend=hash_backend).descriptors[1]
         n=field(d[1],48,8)
         if n not in (16,24,32): raise ValueError('node width')
         templates=[]
@@ -104,7 +107,7 @@ class _EmbeddedImage:
         for start in (0,sg_entry):
             tid=field(tokens[start],120,6)
             templates[tid] &= ~((255<<116)|(255<<108))
-        image=LogicalImage(FORMAT,tuple(tokens),tuple(templates),tuple(d))
+        image=LogicalImage(FORMAT,tuple(tokens),tuple(templates),tuple(d), hash_backend)
         validate(image)
         if any(field(w,56,4) not in (1,2,3,4,12) for w in d if w>>60==1): raise ValueError('SLH recipe')
         if any(field(w,76,4)&4 for op in (False,True) for w in image.words(op)[:-1]): raise ValueError('SLH flags')
@@ -124,10 +127,10 @@ class _EmbeddedImage:
         if any(raw[size:]): raise ValueError('message padding')
         return image,Job(*slots[:4]),slots[4],raw[:size],sign
 
-def _pack_embedded(name, job, message, root, sign):
-    p=get_profile(name)
+def _pack_embedded(name, job, message, root, sign, hash_backend="shake"):
+    p=get_profile(name, hash_backend)
     if p.family!='slh' or job.q or any(job.identifier): raise ValueError('SLH-only job')
-    image=compile_logical_image(name)
+    image=compile_logical_image(name, hash_backend=hash_backend)
     prog=[0]*64;tpl=[0]*16;desc=[0]*32
     for i,w in enumerate(image.tokens):
         kind=w>>126
@@ -147,7 +150,7 @@ def _pack_embedded(name, job, message, root, sign):
     for i,(old,kind) in enumerate(zip(ADDRESSES,KINDS)):
         desc[i]=remap(image.descriptors[old]&((1<<60)-1),kind)
     desc[0] &= (1<<36)-1
-    desc[1] = next(code for code,profile in SLH_PROFILE_CODES.items() if profile==p.name)
+    desc[1] = next(code for code,profile in SLH_PROFILE_CODES.items() if profile==p.name) | (int(hash_backend == 'sha2') << 5)
     for start,data in zip(range(32,52,4),(job.secret,job.prf,job.public,job.random,root if sign else bytes(p.n))):
         if len(data)!=p.n: raise ValueError('node size')
         data=data.ljust(32,b'\0')
@@ -169,7 +172,14 @@ class ExternalImage:
     templates: tuple[int, ...]
     descriptors: tuple[int, ...]
 
-    def decode(self):
+    @property
+    def hash_backend(self):
+        """The ROM marker is the sole backend identity for serialized images."""
+        return 'sha2' if self.descriptors[1] & 32 else 'shake'
+
+    def decode(self, hash_backend=None):
+        if hash_backend is not None and hash_backend not in ('shake', 'sha2'):
+            raise ValueError('unknown hash backend')
         if len(self.program) != 16 or len(self.templates) != 16 or len(self.descriptors) != 32:
             raise ValueError('layout 3 capacity')
         if any(w < 0 or w >= 1 << 64 for a in
@@ -182,7 +192,12 @@ class ExternalImage:
         sg = (h >> 41) & 31
         if kg >= 16 or sg >= 16:
             raise ValueError('entry exceeds program capacity')
-        if self.descriptors[1] in (0x18,0x19,0x1a,0x1b,0x1c,0x1d):
+        code=self.descriptors[1]
+        if code >> 6:raise ValueError('profile reserved bits')
+        encoded_backend=self.hash_backend
+        if hash_backend is not None and hash_backend != encoded_backend:
+            raise ValueError('ROM hash backend mismatch')
+        if (code & 31) in (0x18,0x19,0x1a,0x1b,0x1c,0x1d):
             from model.stateful import decode
             return decode(self)
         desc = list(self.descriptors)
@@ -220,16 +235,16 @@ def _convert_embedded(image):
     return result
 
 
-def compile_image(name):
+def compile_image(name, hash_backend="shake"):
     """Build the external-input 16/16/32-word image for any supported profile."""
     from model.stateful import PROFILE_CODES, encode
-    name=get_profile(name).name
+    name=get_profile(name, hash_backend).name
     if name in PROFILE_CODES.values():
-        return encode(name)
-    n = compile_logical_image(name).n
+        return encode(name, hash_backend)
+    n = compile_logical_image(name, hash_backend=hash_backend).n
     zero = bytes(n)
     return _convert_embedded(
-        _pack_embedded(name, Job(zero, zero, zero, zero), b'\0', zero, False))
+        _pack_embedded(name, Job(zero, zero, zero, zero), b'\0', zero, False, hash_backend))
 
 
 # Clear public name for callers that already distinguish logical and ROM images.

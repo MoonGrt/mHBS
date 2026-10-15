@@ -8,7 +8,8 @@ import json
 from pathlib import Path
 import tempfile
 
-from model.profiles import PROFILES, ALIASES, get_profile
+from model.profiles import PROFILES, ALIASES, get_profile, profile_names
+from model.hashes import block_count
 from model.executor import Job, Machine, compile_image
 from model.stateful import cold_image
 from model.mHBS import compile_image as compile_hardware_image
@@ -23,8 +24,9 @@ def mem(path: Path, values, width: int) -> None:
     path.write_text(''.join(f'{int(value):0{width}x}\n' for value in values))
 
 
-def generate_profile(name: str, config: dict, output: str) -> dict:
-    profile = get_profile(name)
+def generate_profile(name: str, config: dict, output: str, hash_backend="shake") -> dict:
+    profile = get_profile(name, hash_backend)
+    name = profile.name
     def octets(key, length):
         value = bytes.fromhex(config[key])
         if len(value) != length:
@@ -42,11 +44,11 @@ def generate_profile(name: str, config: dict, output: str) -> dict:
         raise ValueError(f'{name}: SLH requires q=0 and zero identifier')
     if profile.stateful:
         from model.reference.stateful_native import generate
-        keygen, signature, native_counts = generate(name, job, message)
+        keygen, signature, native_counts = generate(name, job, message, hash_backend)
         root = keygen[4:36] if profile.family == 'xmss' else keygen[24:56]
         operation_counts = [native_counts[:2], native_counts[2:]]
     else:
-        image = compile_image(name)
+        image = compile_image(name, hash_backend=hash_backend)
         kg = Machine(image, job, index_policy='fixed_q_no_guard')
         keygen = kg.run(False)
         root = kg.values[3][:profile.n]
@@ -56,10 +58,10 @@ def generate_profile(name: str, config: dict, output: str) -> dict:
         operation_counts = [[kg.hashes,kg.permutations],[signing.hashes,signing.permutations]]
     verify_counts = [0, 0]
     if profile.family == 'slh':
-        params = getattr(slh_dsa, f'SLH_DSA_SHAKE_{profile.n*8}{name[-1].upper()}')
+        params = getattr(slh_dsa, f'SLH_DSA_{hash_backend.upper()}_{profile.n*8}{name[-1].upper()}')
         def observe(kind, data, result):
             verify_counts[0] += 1
-            verify_counts[1] += len(data)//136 + 1
+            verify_counts[1] += block_count(len(data), hash_backend)
         if not slh_dsa.verify_internal(params, message, signature,
                                        job.public + root, observe):
             raise AssertionError(f'{name}: independent SLH verifier rejected signature')
@@ -67,13 +69,13 @@ def generate_profile(name: str, config: dict, output: str) -> dict:
     else:
         observed = {}
         if not stateful_shake.verify(name, message, signature, job.public,
-                                     root, job.identifier, observed):
+                                     root, job.identifier, observed, hash_backend):
             raise AssertionError(f'{name}: independent stateful verifier rejected signature')
         verify_counts = [observed['hashes'], observed['permutations']]
-        q, random, chains, auth = stateful_shake.parse_signature(name, signature)
+        q, random, chains, auth = stateful_shake.parse_signature(name, signature, hash_backend)
         assert q == job.q
         nodes = [random, *chains, *auth]
-    external = compile_hardware_image(name)
+    external = compile_hardware_image(name, hash_backend=hash_backend)
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
     records = []
@@ -107,7 +109,7 @@ def generate_profile(name: str, config: dict, output: str) -> dict:
                                 hashes=counts[0],permutations=counts[1],
                                 sha256={n:hashlib.sha256((destination/n).read_bytes()).hexdigest()
                                         for n in MEM_FILES}))
-    return dict(profile=name,q=job.q,message_hex=message.hex(),
+    return dict(profile=name,hash_backend=hash_backend,q=job.q,message_hex=message.hex(),
                 public_root=root.hex(),independent_verify_passed=True,
                 sign_recompute_auth=profile.stateful,operations=records)
 
@@ -115,7 +117,9 @@ def generate_profile(name: str, config: dict, output: str) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', default='all', help='profile name or all; legacy omega names are retired')
-    parser.add_argument('--output', type=Path, default=ROOT/'tb/vectors')
+    parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
+    parser.add_argument('--output', type=Path, help='Default: tb/vectors for SHAKE, tb/vectors/sha2 for SHA2')
+    parser.add_argument('--include-h20-full', action='store_true', help='Explicitly enable expensive h20 full-tree vector generation')
     parser.add_argument('--job', type=Path, help='JSON fields or per-profile overrides')
     group = parser.add_mutually_exclusive_group()
     group.add_argument('--message-hex')
@@ -123,8 +127,17 @@ def main():
     parser.add_argument('--q', type=int)
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
+    if args.output is None:
+        args.output=ROOT/'tb/vectors' if args.hash_backend=='shake' else ROOT/'tb/vectors/sha2'
+    manifest=args.output/'generation.json'
+    if manifest.exists() and json.loads(manifest.read_text()).get('hash_backend','shake') != args.hash_backend:
+        parser.error('--output already contains vectors for the other hash backend')
     if args.profile != 'all':
-        try: args.profile=get_profile(args.profile).name
+        try:
+            p=get_profile(args.profile,args.hash_backend)
+            args.profile=p.name
+            if p.stateful and p.h==20 and not args.include_h20_full:
+                parser.error('h20 full-tree generation is disabled; use --include-h20-full only when explicitly requested')
         except ValueError as e: parser.error(str(e))
     if not 1 <= args.workers <= 6:
         parser.error('--workers must be 1..6')
@@ -134,7 +147,7 @@ def main():
         parser.error('--message-length must be 1..87')
     defaults = json.loads((ROOT/'model/default_jobs.json').read_text())
     overrides = json.loads(args.job.read_text()) if args.job else {}
-    names = list(PROFILES) if args.profile == 'all' else [get_profile(args.profile).name]
+    names = list(profile_names(args.hash_backend,include_h20=args.include_h20_full)) if args.profile == 'all' else [args.profile]
     tasks = []
     for name in names:
         config = dict(defaults[name])
@@ -147,7 +160,7 @@ def main():
         elif args.message_length is not None:
             first = bytes.fromhex(config['message'])[0]
             config['message'] = bytes((first+i)&255 for i in range(args.message_length)).hex()
-        tasks.append((name,config,str(args.output.resolve())))
+        tasks.append((name,config,str(args.output.resolve()),args.hash_backend))
     args.output.mkdir(parents=True, exist_ok=True)
     rows=[]
     if any(get_profile(name).stateful for name in names):
@@ -162,7 +175,7 @@ def main():
     existing = json.loads(path.read_text()).get('profiles', []) if path.exists() else []
     merged={r['profile']:r for r in existing if r['profile'] in PROFILES}
     merged.update({r['profile']:r for r in rows})
-    result = dict(schema='mhbs.independent_vectors.v2',profiles=list(merged.values()),
+    result = dict(schema='mhbs.independent_vectors.v3',hash_backend=args.hash_backend,profiles=list(merged.values()),
                   python_stdlib_only=not any(get_profile(name).stateful for name in names),
                   stateful_oracle="pinned independent C; actual primitive-call counters",existing_vectors_required=False)
     path=args.output/'generation.json'

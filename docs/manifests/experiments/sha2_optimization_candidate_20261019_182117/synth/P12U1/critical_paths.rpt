@@ -1,0 +1,1825 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Mon Oct 19 18:24:11 2026
+| Host         : user-Z890-EAGLE-WIFI7 running 64-bit Ubuntu 24.04.4 LTS
+| Command      : report_timing -delay_type max -max_paths 20 -nworst 2 -sort_by group -input_pins -nets -file /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_optimization/candidate_20261019_182117/synth/P12U1/critical_paths.rpt
+| Design       : common
+| Device       : 7a200t-ffg1156
+| Speed File   : -3  PRODUCTION 1.23 2018-06-13
+| Design State : Synthesized
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (VIOLATED) :        -1.497ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/payload_mask_reg[0]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.456ns  (logic 2.886ns (25.192%)  route 8.570ns (74.808%))
+  Logic Levels:           19  (CARRY4=2 LUT1=1 LUT3=2 LUT5=2 LUT6=12)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.339     7.859    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_length[2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     7.956 r  core/lane/format_length[2]_i_9/O
+                         net (fo=2, unplaced)         0.312     8.268    core/lane/format_length[2]_i_9_n_0
+                                                                      r  core/lane/format_length[5]_i_8/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     8.365 r  core/lane/format_length[5]_i_8/O
+                         net (fo=1, unplaced)         0.301     8.666    core/lane/format_length[5]_i_8_n_0
+                                                                      r  core/lane/format_length[5]_i_7/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     8.763 r  core/lane/format_length[5]_i_7/O
+                         net (fo=1, unplaced)         0.301     9.064    core/lane/format_length[5]_i_7_n_0
+                                                                      r  core/lane/format_length[5]_i_2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     9.161 f  core/lane/format_length[5]_i_2/O
+                         net (fo=3, unplaced)         0.303     9.464    core/lane/format_length[5]_i_2_n_0
+                                                                      f  core/lane/payload_mask[0]_i_7/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     9.561 f  core/lane/payload_mask[0]_i_7/O
+                         net (fo=2, unplaced)         0.312     9.873    core/lane/payload_mask[0]_i_7_n_0
+                                                                      f  core/lane/payload_mask[15]_i_22/I0
+                         LUT1 (Prop_lut1_I0_O)        0.097     9.970 r  core/lane/payload_mask[15]_i_22/O
+                         net (fo=1, unplaced)         0.222    10.192    core/lane/payload_mask[15]_i_22_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_7/DI[0]
+                         CARRY4 (Prop_carry4_DI[0]_CO[3])
+                                                      0.411    10.603 r  core/lane/payload_mask_reg[15]_i_7/CO[3]
+                         net (fo=1, unplaced)         0.007    10.610    core/lane/payload_mask_reg[15]_i_7_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_3/CI
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.218    10.828 r  core/lane/payload_mask_reg[15]_i_3/CO[0]
+                         net (fo=12, unplaced)        0.256    11.084    core/lane/payload_mask0
+                                                                      r  core/lane/payload_mask[14]_i_3/I0
+                         LUT3 (Prop_lut3_I0_O)        0.262    11.346 f  core/lane/payload_mask[14]_i_3/O
+                         net (fo=3, unplaced)         0.319    11.665    core/lane/payload_mask[14]_i_3_n_0
+                                                                      f  core/lane/payload_mask[0]_i_3/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.762 r  core/lane/payload_mask[0]_i_3/O
+                         net (fo=1, unplaced)         0.301    12.063    core/lane/payload_mask[0]_i_3_n_0
+                                                                      r  core/lane/payload_mask[0]_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    12.160 r  core/lane/payload_mask[0]_i_1/O
+                         net (fo=1, unplaced)         0.000    12.160    core/lane/payload_mask[0]_i_1_n_0
+                         FDRE                                         r  core/lane/payload_mask_reg[0]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/payload_mask_reg[0]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/payload_mask_reg[0]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -12.160    
+  -------------------------------------------------------------------
+                         slack                                 -1.497    
+
+Slack (VIOLATED) :        -1.497ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/payload_mask_reg[0]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.456ns  (logic 2.886ns (25.192%)  route 8.570ns (74.808%))
+  Logic Levels:           19  (CARRY4=2 LUT1=1 LUT3=2 LUT5=2 LUT6=12)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.339     7.859    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_length[2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     7.956 r  core/lane/format_length[2]_i_9/O
+                         net (fo=2, unplaced)         0.312     8.268    core/lane/format_length[2]_i_9_n_0
+                                                                      r  core/lane/format_length[5]_i_8/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     8.365 r  core/lane/format_length[5]_i_8/O
+                         net (fo=1, unplaced)         0.301     8.666    core/lane/format_length[5]_i_8_n_0
+                                                                      r  core/lane/format_length[5]_i_7/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     8.763 r  core/lane/format_length[5]_i_7/O
+                         net (fo=1, unplaced)         0.301     9.064    core/lane/format_length[5]_i_7_n_0
+                                                                      r  core/lane/format_length[5]_i_2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     9.161 f  core/lane/format_length[5]_i_2/O
+                         net (fo=3, unplaced)         0.303     9.464    core/lane/format_length[5]_i_2_n_0
+                                                                      f  core/lane/payload_mask[0]_i_7/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     9.561 f  core/lane/payload_mask[0]_i_7/O
+                         net (fo=2, unplaced)         0.312     9.873    core/lane/payload_mask[0]_i_7_n_0
+                                                                      f  core/lane/payload_mask[15]_i_22/I0
+                         LUT1 (Prop_lut1_I0_O)        0.097     9.970 r  core/lane/payload_mask[15]_i_22/O
+                         net (fo=1, unplaced)         0.222    10.192    core/lane/payload_mask[15]_i_22_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_7/DI[0]
+                         CARRY4 (Prop_carry4_DI[0]_CO[3])
+                                                      0.411    10.603 f  core/lane/payload_mask_reg[15]_i_7/CO[3]
+                         net (fo=1, unplaced)         0.007    10.610    core/lane/payload_mask_reg[15]_i_7_n_0
+                                                                      f  core/lane/payload_mask_reg[15]_i_3/CI
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.218    10.828 r  core/lane/payload_mask_reg[15]_i_3/CO[0]
+                         net (fo=12, unplaced)        0.256    11.084    core/lane/payload_mask0
+                                                                      r  core/lane/payload_mask[14]_i_3/I0
+                         LUT3 (Prop_lut3_I0_O)        0.262    11.346 f  core/lane/payload_mask[14]_i_3/O
+                         net (fo=3, unplaced)         0.319    11.665    core/lane/payload_mask[14]_i_3_n_0
+                                                                      f  core/lane/payload_mask[0]_i_3/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.762 r  core/lane/payload_mask[0]_i_3/O
+                         net (fo=1, unplaced)         0.301    12.063    core/lane/payload_mask[0]_i_3_n_0
+                                                                      r  core/lane/payload_mask[0]_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    12.160 r  core/lane/payload_mask[0]_i_1/O
+                         net (fo=1, unplaced)         0.000    12.160    core/lane/payload_mask[0]_i_1_n_0
+                         FDRE                                         r  core/lane/payload_mask_reg[0]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/payload_mask_reg[0]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/payload_mask_reg[0]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -12.160    
+  -------------------------------------------------------------------
+                         slack                                 -1.497    
+
+Slack (VIOLATED) :        -1.497ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/payload_mask_reg[2]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.456ns  (logic 2.886ns (25.192%)  route 8.570ns (74.808%))
+  Logic Levels:           19  (CARRY4=2 LUT1=1 LUT3=2 LUT5=2 LUT6=12)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.339     7.859    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_length[2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     7.956 r  core/lane/format_length[2]_i_9/O
+                         net (fo=2, unplaced)         0.312     8.268    core/lane/format_length[2]_i_9_n_0
+                                                                      r  core/lane/format_length[5]_i_8/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     8.365 r  core/lane/format_length[5]_i_8/O
+                         net (fo=1, unplaced)         0.301     8.666    core/lane/format_length[5]_i_8_n_0
+                                                                      r  core/lane/format_length[5]_i_7/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     8.763 r  core/lane/format_length[5]_i_7/O
+                         net (fo=1, unplaced)         0.301     9.064    core/lane/format_length[5]_i_7_n_0
+                                                                      r  core/lane/format_length[5]_i_2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     9.161 f  core/lane/format_length[5]_i_2/O
+                         net (fo=3, unplaced)         0.303     9.464    core/lane/format_length[5]_i_2_n_0
+                                                                      f  core/lane/payload_mask[0]_i_7/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     9.561 f  core/lane/payload_mask[0]_i_7/O
+                         net (fo=2, unplaced)         0.312     9.873    core/lane/payload_mask[0]_i_7_n_0
+                                                                      f  core/lane/payload_mask[15]_i_22/I0
+                         LUT1 (Prop_lut1_I0_O)        0.097     9.970 r  core/lane/payload_mask[15]_i_22/O
+                         net (fo=1, unplaced)         0.222    10.192    core/lane/payload_mask[15]_i_22_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_7/DI[0]
+                         CARRY4 (Prop_carry4_DI[0]_CO[3])
+                                                      0.411    10.603 r  core/lane/payload_mask_reg[15]_i_7/CO[3]
+                         net (fo=1, unplaced)         0.007    10.610    core/lane/payload_mask_reg[15]_i_7_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_3/CI
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.218    10.828 r  core/lane/payload_mask_reg[15]_i_3/CO[0]
+                         net (fo=12, unplaced)        0.256    11.084    core/lane/payload_mask0
+                                                                      r  core/lane/payload_mask[14]_i_3/I0
+                         LUT3 (Prop_lut3_I0_O)        0.262    11.346 f  core/lane/payload_mask[14]_i_3/O
+                         net (fo=3, unplaced)         0.319    11.665    core/lane/payload_mask[14]_i_3_n_0
+                                                                      f  core/lane/payload_mask[2]_i_2/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.762 r  core/lane/payload_mask[2]_i_2/O
+                         net (fo=1, unplaced)         0.301    12.063    core/lane/payload_mask[2]_i_2_n_0
+                                                                      r  core/lane/payload_mask[2]_i_1/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097    12.160 r  core/lane/payload_mask[2]_i_1/O
+                         net (fo=1, unplaced)         0.000    12.160    core/lane/payload_mask[2]_i_1_n_0
+                         FDRE                                         r  core/lane/payload_mask_reg[2]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/payload_mask_reg[2]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/payload_mask_reg[2]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -12.160    
+  -------------------------------------------------------------------
+                         slack                                 -1.497    
+
+Slack (VIOLATED) :        -1.497ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/payload_mask_reg[2]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.456ns  (logic 2.886ns (25.192%)  route 8.570ns (74.808%))
+  Logic Levels:           19  (CARRY4=2 LUT1=1 LUT3=2 LUT5=2 LUT6=12)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.339     7.859    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_length[2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     7.956 r  core/lane/format_length[2]_i_9/O
+                         net (fo=2, unplaced)         0.312     8.268    core/lane/format_length[2]_i_9_n_0
+                                                                      r  core/lane/format_length[5]_i_8/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     8.365 r  core/lane/format_length[5]_i_8/O
+                         net (fo=1, unplaced)         0.301     8.666    core/lane/format_length[5]_i_8_n_0
+                                                                      r  core/lane/format_length[5]_i_7/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     8.763 r  core/lane/format_length[5]_i_7/O
+                         net (fo=1, unplaced)         0.301     9.064    core/lane/format_length[5]_i_7_n_0
+                                                                      r  core/lane/format_length[5]_i_2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097     9.161 f  core/lane/format_length[5]_i_2/O
+                         net (fo=3, unplaced)         0.303     9.464    core/lane/format_length[5]_i_2_n_0
+                                                                      f  core/lane/payload_mask[0]_i_7/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     9.561 f  core/lane/payload_mask[0]_i_7/O
+                         net (fo=2, unplaced)         0.312     9.873    core/lane/payload_mask[0]_i_7_n_0
+                                                                      f  core/lane/payload_mask[15]_i_22/I0
+                         LUT1 (Prop_lut1_I0_O)        0.097     9.970 r  core/lane/payload_mask[15]_i_22/O
+                         net (fo=1, unplaced)         0.222    10.192    core/lane/payload_mask[15]_i_22_n_0
+                                                                      r  core/lane/payload_mask_reg[15]_i_7/DI[0]
+                         CARRY4 (Prop_carry4_DI[0]_CO[3])
+                                                      0.411    10.603 f  core/lane/payload_mask_reg[15]_i_7/CO[3]
+                         net (fo=1, unplaced)         0.007    10.610    core/lane/payload_mask_reg[15]_i_7_n_0
+                                                                      f  core/lane/payload_mask_reg[15]_i_3/CI
+                         CARRY4 (Prop_carry4_CI_CO[0])
+                                                      0.218    10.828 r  core/lane/payload_mask_reg[15]_i_3/CO[0]
+                         net (fo=12, unplaced)        0.256    11.084    core/lane/payload_mask0
+                                                                      r  core/lane/payload_mask[14]_i_3/I0
+                         LUT3 (Prop_lut3_I0_O)        0.262    11.346 f  core/lane/payload_mask[14]_i_3/O
+                         net (fo=3, unplaced)         0.319    11.665    core/lane/payload_mask[14]_i_3_n_0
+                                                                      f  core/lane/payload_mask[2]_i_2/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.762 r  core/lane/payload_mask[2]_i_2/O
+                         net (fo=1, unplaced)         0.301    12.063    core/lane/payload_mask[2]_i_2_n_0
+                                                                      r  core/lane/payload_mask[2]_i_1/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097    12.160 r  core/lane/payload_mask[2]_i_1/O
+                         net (fo=1, unplaced)         0.000    12.160    core/lane/payload_mask[2]_i_1_n_0
+                         FDRE                                         r  core/lane/payload_mask_reg[2]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/payload_mask_reg[2]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/payload_mask_reg[2]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -12.160    
+  -------------------------------------------------------------------
+                         slack                                 -1.497    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_i_1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_i_1_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_i_1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_i_1_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__0/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__0/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__0/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__0_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__0/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__0/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__0
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__0/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__0/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__0/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__0_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__0/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__0/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__0
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__1/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__1_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__1/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__1/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__1
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__1/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__1/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__1/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__1_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__1/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__1/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__1
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__2/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__2/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__2_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__2/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__2/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__2
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__2/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__2/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__2/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__2_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__2/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__2/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__2
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__3/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__3/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__3/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__3_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__3/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__3/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__3
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__3/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__3/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__3/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__3_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__3/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__3/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__3
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__4/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__4/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__4/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__4_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__4/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__4/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__4
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__4/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__4/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__4/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__4_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__4/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__4/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__4
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__5/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 f  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 f  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 r  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 f  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      f  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 f  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      f  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 f  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 r  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 f  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      f  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 f  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      f  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 f  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      f  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 r  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      r  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 f  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      f  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 r  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      r  core/lane/word_control[0][7]_rep_i_1__5/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 r  core/lane/word_control[0][7]_rep_i_1__5/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__5_n_0
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__5/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__5/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__5
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+Slack (VIOLATED) :        -1.263ns  (required time - arrival time)
+  Source:                 core/lane/need_block_reg[10]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/lane/word_control_reg[0][7]_rep__5/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        11.222ns  (logic 1.801ns (16.049%)  route 9.421ns (83.951%))
+  Logic Levels:           14  (LUT3=1 LUT5=2 LUT6=11)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=28627, unset)        0.704     0.704    core/lane/clk
+                         FDRE                                         r  core/lane/need_block_reg[10]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/lane/need_block_reg[10]/Q
+                         net (fo=5, unplaced)         0.723     1.768    core/lane/need_block_reg_n_0_[10]
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_93/I0
+                         LUT6 (Prop_lut6_I0_O)        0.199     1.967 r  core/lane/leaf_reg_0_15_0_5_i_93/O
+                         net (fo=3, unplaced)         0.858     2.825    core/lane/leaf_reg_0_15_0_5_i_93_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_85/I0
+                         LUT5 (Prop_lut5_I0_O)        0.097     2.922 r  core/lane/leaf_reg_0_15_0_5_i_85/O
+                         net (fo=11, unplaced)        0.747     3.669    core/lane/leaf_reg_0_15_0_5_i_85_n_0
+                                                                      r  core/lane/leaf_reg_0_15_0_5_i_52/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     3.766 f  core/lane/leaf_reg_0_15_0_5_i_52/O
+                         net (fo=19, unplaced)        0.360     4.126    core/lane/leaf_reg_0_15_0_5_i_52_n_0
+                                                                      f  core/lane/leaf_reg_0_15_0_5_i_41/I2
+                         LUT5 (Prop_lut5_I2_O)        0.097     4.223 r  core/lane/leaf_reg_0_15_0_5_i_41/O
+                         net (fo=3, unplaced)         0.529     4.752    core/lane/leaf_reg_0_15_0_5_i_41_n_0
+                                                                      r  core/lane/schedule_cursor[0]_i_1/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     4.849 r  core/lane/schedule_cursor[0]_i_1/O
+                         net (fo=82, unplaced)        0.935     5.784    core/lane/schedule_cursor[0]_i_1_n_0
+                                                                      r  core/lane/format_address[220]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     5.881 r  core/lane/format_address[220]_i_6/O
+                         net (fo=51, unplaced)        0.594     6.475    core/lane/format_address[220]_i_6_n_0
+                                                                      r  core/lane/format_address[183]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097     6.572 f  core/lane/format_address[183]_i_6/O
+                         net (fo=2, unplaced)         0.851     7.423    core/lane/format_address[183]_i_6_n_0
+                                                                      f  core/lane/format_address[183]_i_4/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     7.520 r  core/lane/format_address[183]_i_4/O
+                         net (fo=8, unplaced)         0.878     8.398    core/lane/format_address[183]_i_4_n_0
+                                                                      r  core/lane/format_kind[3]_i_6/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     8.495 r  core/lane/format_kind[3]_i_6/O
+                         net (fo=4, unplaced)         0.535     9.030    core/lane/format_kind[3]_i_6_n_0
+                                                                      r  core/lane/word_control[0][8]_i_9/I1
+                         LUT6 (Prop_lut6_I1_O)        0.097     9.127 r  core/lane/word_control[0][8]_i_9/O
+                         net (fo=11, unplaced)        0.347     9.474    core/lane/word_control[0][8]_i_9_n_0
+                                                                      r  core/lane/word_control[0][2]_i_9/I2
+                         LUT3 (Prop_lut3_I2_O)        0.097     9.571 f  core/lane/word_control[0][2]_i_9/O
+                         net (fo=3, unplaced)         0.858    10.429    core/lane/word_control[0][2]_i_9_n_0
+                                                                      f  core/lane/word_control[0][7]_i_18/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    10.526 r  core/lane/word_control[0][7]_i_18/O
+                         net (fo=2, unplaced)         0.851    11.377    core/lane/word_control[0][7]_i_18_n_0
+                                                                      r  core/lane/word_control[0][7]_i_6/I0
+                         LUT6 (Prop_lut6_I0_O)        0.097    11.474 f  core/lane/word_control[0][7]_i_6/O
+                         net (fo=16, unplaced)        0.355    11.829    core/lane/word_control[0][7]_i_6_n_0
+                                                                      f  core/lane/word_control[0][7]_rep_i_1__5/I5
+                         LUT6 (Prop_lut6_I5_O)        0.097    11.926 f  core/lane/word_control[0][7]_rep_i_1__5/O
+                         net (fo=1, unplaced)         0.000    11.926    core/lane/word_control[0][7]_rep_i_1__5_n_0
+                         FDRE                                         f  core/lane/word_control_reg[0][7]_rep__5/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=28627, unset)        0.669    10.669    core/lane/clk
+                         FDRE                                         r  core/lane/word_control_reg[0][7]_rep__5/C
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         FDRE (Setup_fdre_C_D)        0.030    10.663    core/lane/word_control_reg[0][7]_rep__5
+  -------------------------------------------------------------------
+                         required time                         10.663    
+                         arrival time                         -11.926    
+  -------------------------------------------------------------------
+                         slack                                 -1.263    
+
+
+
+

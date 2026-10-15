@@ -1,3 +1,6 @@
+set hash_backend shake
+if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 # Reproduce the common-core OOC implementation without timing exceptions.
 if {[llength $argv]!=2} {error "Usage: implement_p4.tcl source_root output_directory"}
 set source_root [file normalize [lindex $argv 0]]
@@ -18,6 +21,9 @@ if {[file exists $settings_file]} {
     close $handle
 }
 create_project -in_memory -part $part
+set defines [list SYNTHESIS]
+if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+set_property verilog_define $defines [current_fileset]
 set f [open [file join $source_root sources.txt] r]
 set sources [split [string trim [read $f]] \n]
 close $f

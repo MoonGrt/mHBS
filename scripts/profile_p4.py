@@ -18,7 +18,11 @@ INSTRUMENT = r'''
  always @(posedge clk)if(!rst && dut.core.state!=0 && dut.core.state!=32)begin
   states[dut.core.state]++;
   if(dut.core.state==23)begin returns[dut.core.continuation]++;recipes[dut.core.task_recipe[59:56]]++;end
+`ifdef MHBS_SHA2
+  if(dut.core.pipe_mode)live[batch_live]++;
+`else
   if(dut.core.pipe_mode)live[$countones(dut.core.lane.stage_valid)]++;
+`endif
  end
  final begin
   for(integer i=0;i<128;i++)if(states[i])$display("PROFILE_STATE %0d %0d",i,states[i]);
@@ -30,6 +34,7 @@ INSTRUMENT = r'''
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash',dest='hash_backend',choices=('shake','sha2'),default='shake')
     parser.add_argument('--source', type=Path, default=ROOT)
     parser.add_argument('--output', type=Path, default=ROOT/'build/p4_profile')
     parser.add_argument('--stateful-operation',choices=('sign','keygen'),default='keygen')
@@ -44,11 +49,14 @@ def main():
     (out/'state_names.json').write_text(json.dumps(names, indent=2)+'\n')
     sources=[str(source/p) for p in (source/'sources.txt').read_text().splitlines()]
     command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal','--top-module','tb','-GPIPELINE=4','-GUNROLL=1','--Mdir',str(out/'obj'),*sources,str(out/'tb.sv')]
+    if args.hash_backend=='sha2':command.append('-DMHBS_SHA2')
+    vectors=ROOT/'tb/vectors'
+    if args.hash_backend=='sha2':vectors/='sha2'
     with (out/'compile.log').open('w') as log:subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
     results={}
     for profile,op in (('slh_128f','sign'),('xmss_h10',args.stateful_operation),('lms_h10',args.stateful_operation)):
         key=f'{profile}_{op}'
-        with (out/f'{key}.log').open('w') as log:subprocess.run([str(out/'obj/Vtb'),f'+VECTOR={ROOT}/tb/vectors/{profile}/{op}'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
+        with (out/f'{key}.log').open('w') as log:subprocess.run([str(out/'obj/Vtb'),f'+VECTOR={vectors}/{profile}/{op}'],cwd=ROOT,stdout=log,stderr=subprocess.STDOUT,check=True)
         text=(out/f'{key}.log').read_text();results[key]={}
         for kind in ('STATE','RETURN','RECIPE','LIVE'):
             records={int(i):int(n) for i,n in re.findall(rf'PROFILE_{kind} (\d+) (\d+)',text)}
@@ -57,6 +65,6 @@ def main():
         if not match:raise ValueError(f'missing pass: {key}')
         results[key]['cycles'],results[key]['hashes'],results[key]['permutations']=map(int,match.groups())
         print(key,results[key]['cycles'],flush=True)
-    (out/'profile.json').write_text(json.dumps(results,indent=2)+'\n')
+    (out/'profile.json').write_text(json.dumps(dict(hash_backend=args.hash_backend,live_metric='outstanding_contexts' if args.hash_backend=='sha2' else 'permutation_stage_occupancy',results=results),indent=2)+'\n')
 
 if __name__=='__main__':main()

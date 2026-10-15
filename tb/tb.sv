@@ -80,10 +80,15 @@ module tb;
  always @(posedge clk)begin
   if(dut.core.execution_rst)begin hashes[0]=0;perms[0]=0;end
   else begin
+`ifdef MHBS_SHA2
+   if(dut.core.lane.hash_complete_event)hashes[0]++;
+   if(dut.core.lane.compression_complete_event)perms[0]++;
+`else
    if(dut.core.lane.permutation_complete)begin
     perms[0]++;if(dut.core.lane.running_last)hashes[0]++;
    end
    if(dut.core.lane.batch_perm_done)begin perms[0]++;hashes[0]++;end
+`endif
   end
  end
  initial begin hashes[1]=0;perms[1]=0;end
@@ -151,7 +156,13 @@ module tb;
    rst=1;read_enable=0;repeat(5)tick();rst=0;
    if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
    if(fault)begin
-    if(fault==2)begin while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();end
+    if(fault==2)begin
+`ifdef MHBS_SHA2
+     while(!dut.core.pipe_mode || batch_live==0)tick();
+`else
+     while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();
+`endif
+    end
     else begin while(dut.core.state!=23)tick();end
     if(fault==3)force dut.core.state=type(dut.core.state)'(7'd127);
     else force dut.core.lane.error=1;

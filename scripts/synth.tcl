@@ -1,3 +1,6 @@
+set hash_backend shake
+if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 set package_root [file normalize [file join [file dirname [info script]] ..]]
 cd $package_root
 set p 1
@@ -12,12 +15,16 @@ if {[info exists ::env(KECCAK_LUT6)]} {set lut6 $::env(KECCAK_LUT6)}
 if {$lut6 ni {0 1}} {error "KECCAK_LUT6 must be 0 or 1"}
 set out [file join $package_root build synth P${p}U${u}]
 if {!$lut6} {append out _generic}
+if {$hash_backend eq "sha2"} {append out _sha2}
 file mkdir $out
 set archive [exec python3 [file join $package_root scripts experiment_archive.py] --begin-synthesis $out]
 set source_root [file join $archive source]
 set_param general.maxThreads 2
 create_project -in_memory -part $part
-if {$lut6} {set_property verilog_define MHBS_XILINX_LUT6 [current_fileset]}
+set defines [list SYNTHESIS]
+if {$lut6} {lappend defines MHBS_XILINX_LUT6}
+if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+set_property verilog_define $defines [current_fileset]
 set handle [open [file join $source_root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle

@@ -1,0 +1,73 @@
+{
+  "schema": "mhbs.hash_backend.tools.v1",
+  "passed": true,
+  "rtl_matches_frozen_candidate": true,
+  "tests": [
+    {
+      "log": "build/sha2_tools/shake_recipe_fixed.log",
+      "log_sha256": "381df19c571762cb505e5ae85a12fec1de36c49207be9fa440d58098d51e5aeb",
+      "pass_markers": [
+        "RECIPE_PASS cases=459 mask=ffff stream_stall_cycles=13725"
+      ]
+    },
+    {
+      "log": "build/sha2_tools/shake_pipeline.log",
+      "log_sha256": "0d8849a6e090e571971ce4b440565b78cdc85158213e47a91d8f9697b65353b8",
+      "pass_markers": [
+        "PIPELINE_PASS family=0 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=0 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=0 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=0 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=1 requests=8 returns=8 simultaneous=4 unordered=7 hashes=91 poisoned=8 poison_cycles=1109",
+        "PIPELINE_PASS family=1 requests=8 returns=8 simultaneous=4 unordered=7 hashes=91 poisoned=8 poison_cycles=1109",
+        "PIPELINE_PASS family=1 requests=8 returns=8 simultaneous=4 unordered=7 hashes=91 poisoned=8 poison_cycles=1109",
+        "PIPELINE_PASS family=1 requests=8 returns=8 simultaneous=4 unordered=7 hashes=91 poisoned=8 poison_cycles=1109",
+        "PIPELINE_PASS family=2 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=2 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=2 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389",
+        "PIPELINE_PASS family=2 requests=8 returns=8 simultaneous=4 unordered=7 hashes=33 poisoned=8 poison_cycles=389"
+      ]
+    },
+    {
+      "log": "build/sha2_tools/sha2_recipe_mask.log",
+      "log_sha256": "a8b6ce4eb01b3ecccc7e7704e706ca7f9da95c028c4e6bfc557ec131f6beadb1",
+      "pass_markers": [
+        "RECIPE_PASS cases=74 mask=101e stream_stall_cycles=0"
+      ]
+    },
+    {
+      "log": "build/sha2_tools/sha2_statistics_synthesis.log",
+      "log_sha256": "667d52749c6185069555c7efeee28afb108e952e164b0ceee2ade3f93cf85239",
+      "pass_markers": [
+        "STATISTICS_PASS P1U1"
+      ]
+    },
+    {
+      "log": "build/statistics_check/P4U1_sha2/run.log",
+      "log_sha256": "c0cf9f9126b58d270722b2b93dc45e4923296cb5e79e05184ba27e05835a0701",
+      "pass_markers": [
+        "STATISTICS_PASS P4U1"
+      ]
+    }
+  ],
+  "coordinator_static_checks": {
+    "test_cases": 87,
+    "synthesis_jobs": 6,
+    "h20_full_tasks": false,
+    "baseline_source_bound": true
+  },
+  "syntax_checks": [
+    "Python py_compile scripts/*.py",
+    "bash -n scripts/*.sh",
+    "Tcl info complete scripts/*.tcl",
+    "git diff --check"
+  ],
+  "post_freeze_harness_correction": {
+    "file": "tb/tb_recipe.sv",
+    "sha256": "7f65b582f73321fbcbe5ef67440750f0d016e6a620ab593581775a7fae36d001",
+    "reason": "Invalid-shape zero-hash rejection assertion is SHA2-only. Legacy SHAKE unit recipe does not promise zero hashes for invalid input; executor validates recipes. SHAKE normal 459 cases and non-chain captures pass.",
+    "failed_initial_check": "build/sha2_tools/shake_recipe.log",
+    "failed_initial_log_sha256": "64930d9152c44bf266c1412ae2adda6cc1058c3f0d30da6715dbcb31570f70c0",
+    "frozen_full_regression_uses": "tb/tb_fast.sv; no production RTL or full-tree harness changes"
+  }
+}

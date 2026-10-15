@@ -1,0 +1,45 @@
+--- baseline/rtl/hash/sha256.sv
++++ candidate/rtl/hash/sha256.sv
+@@ -61,21 +61,34 @@
+         endcase
+     endfunction
+ 
++    // Keep multi-operand sums in carry-save form until the state register.
++    // All arithmetic is modulo 2^32, so the top carry is deliberately dropped.
++    function automatic [63:0] carry_save(input [31:0] x, y, z);
++        carry_save={((x & y) | (x & z) | (y & z)) << 1, x ^ y ^ z};
++    endfunction
++
+     function automatic [767:0] advance_round(input [767:0] value,
+         input [6:0] round_index);
+-        reg [31:0] a, b, c, d, e, f, g, h, t1, t2, next_a, next_e;
++        reg [31:0] a, b, c, d, e, f, g, h, next_a, next_e;
+         reg [31:0] w0, w1, w9, w14, new_word;
++        reg [63:0] sum1, sum2, sum3, sum_a, sum_e, schedule_sum;
+         begin
+             {a,b,c,d,e,f,g,h} = value[767:512];
+             w0=value[511:480]; w1=value[479:448];
+             w9=value[223:192]; w14=value[63:32];
+-            t1 = h + (rotate(e,6) ^ rotate(e,11) ^ rotate(e,25)) +
+-                ((e & f) ^ (~e & g)) + constant_word(round_index) + w0;
+-            t2 = (rotate(a,2) ^ rotate(a,13) ^ rotate(a,22)) +
+-                ((a & b) ^ (a & c) ^ (b & c));
+-            next_a=t1+t2; next_e=d+t1;
+-            new_word = (rotate(w14,17) ^ rotate(w14,19) ^ (w14 >> 10)) +
+-                w9 + (rotate(w1,7) ^ rotate(w1,18) ^ (w1 >> 3)) + w0;
++            sum1=carry_save(h, rotate(e,6) ^ rotate(e,11) ^ rotate(e,25),
++                (e & f) ^ (~e & g));
++            sum2=carry_save(sum1[31:0], constant_word(round_index), w0);
++            sum3=carry_save(sum1[63:32], sum2[31:0], sum2[63:32]);
++            sum_e=carry_save(sum3[31:0], sum3[63:32], d);
++            sum_a=carry_save(sum3[31:0], sum3[63:32], rotate(a,2) ^ rotate(a,13) ^ rotate(a,22));
++            sum_a=carry_save(sum_a[31:0], sum_a[63:32], (a & b) ^ (a & c) ^ (b & c));
++            next_a=sum_a[31:0]+sum_a[63:32];
++            next_e=sum_e[31:0]+sum_e[63:32];
++            schedule_sum=carry_save(rotate(w14,17) ^ rotate(w14,19) ^ (w14 >> 10),
++                w9, rotate(w1,7) ^ rotate(w1,18) ^ (w1 >> 3));
++            schedule_sum=carry_save(schedule_sum[31:0], schedule_sum[63:32], w0);
++            new_word=schedule_sum[31:0]+schedule_sum[63:32];
+             advance_round = round_index < 64 ?
+                 {next_a,a,b,c,next_e,e,f,g,value[479:0],new_word} : value;
+         end

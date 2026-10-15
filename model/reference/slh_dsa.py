@@ -1,14 +1,14 @@
 """Small dependency-free FIPS 205 SLH-DSA reference model.
 
 The supported boundary is deterministic internal key generation, signing and
-verification for all six SLH-DSA-SHAKE parameter sets.  The implementation follows the final
+verification for all six SHAKE sets and the SHA2-128f/128s sets. It follows the final
 FIPS 205 algorithms and deliberately favors auditable byte strings over
 performance.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 from typing import Callable, Sequence
 
@@ -39,6 +39,7 @@ class SlhDsaParams:
     wots_len2: int
     wots_len: int
     m: int
+    hash_backend: str = "shake"
 
 
 SLH_DSA_SHAKE_128F = SlhDsaParams(
@@ -64,6 +65,8 @@ SLH_DSA_SHAKE_256F = SlhDsaParams("SLH-DSA-SHAKE-256f",32,68,17,4,9,35,4,16,64,3
 SLH_DSA_SHAKE_128S = SlhDsaParams("SLH-DSA-SHAKE-128s",16,63,7,9,12,14,4,16,32,3,35,30)
 SLH_DSA_SHAKE_192S = SlhDsaParams("SLH-DSA-SHAKE-192s",24,63,7,9,14,17,4,16,48,3,51,39)
 SLH_DSA_SHAKE_256S = SlhDsaParams("SLH-DSA-SHAKE-256s",32,64,8,8,14,22,4,16,64,3,67,47)
+SLH_DSA_SHA2_128F = replace(SLH_DSA_SHAKE_128F, name="SLH-DSA-SHA2-128f", hash_backend="sha2")
+SLH_DSA_SHA2_128S = replace(SLH_DSA_SHAKE_128S, name="SLH-DSA-SHA2-128s", hash_backend="sha2")
 
 
 def _to_bytes(value: int, length: int) -> bytes:
@@ -98,6 +101,23 @@ def _shake(
     return result
 
 
+def _sha256(kind: str, data: bytes, observe: Observe | None) -> bytes:
+    result = hashlib.sha256(data).digest()
+    if observe is not None:
+        observe(kind, data, result)
+    return result
+
+
+def _address_hash(params, kind, public_seed, address, message, observe):
+    encoded = _address_bytes(address)
+    if params.hash_backend == "sha2":
+        # FIPS 205 ADRSc keeps the layer/type low bytes and the 64-bit tree.
+        compressed = encoded[3:4] + encoded[8:16] + encoded[19:20] + encoded[20:32]
+        data = public_seed + bytes(64-params.n) + compressed + message
+        return _sha256(kind, data, observe)[:params.n]
+    return _shake(kind, public_seed + encoded + message, params.n, observe)
+
+
 def _prf(
     params: SlhDsaParams,
     public_seed: bytes,
@@ -107,12 +127,7 @@ def _prf(
 ) -> bytes:
     if len(public_seed) != params.n or len(secret_seed) != params.n:
         raise ValueError("SLH-DSA PRF seed length mismatch")
-    return _shake(
-        "prf",
-        public_seed + _address_bytes(address) + secret_seed,
-        params.n,
-        observe,
-    )
+    return _address_hash(params, "prf", public_seed, address, secret_seed, observe)
 
 
 def _f(
@@ -124,12 +139,7 @@ def _f(
 ) -> bytes:
     if len(message) != params.n:
         raise ValueError("SLH-DSA F input length mismatch")
-    return _shake(
-        "f",
-        public_seed + _address_bytes(address) + message,
-        params.n,
-        observe,
-    )
+    return _address_hash(params, "f", public_seed, address, message, observe)
 
 
 def _h(
@@ -141,12 +151,7 @@ def _h(
 ) -> bytes:
     if len(message) != 2 * params.n:
         raise ValueError("SLH-DSA H input length mismatch")
-    return _shake(
-        "h",
-        public_seed + _address_bytes(address) + message,
-        params.n,
-        observe,
-    )
+    return _address_hash(params, "h", public_seed, address, message, observe)
 
 
 def _t_l(
@@ -158,12 +163,7 @@ def _t_l(
 ) -> bytes:
     if len(message) % params.n:
         raise ValueError("SLH-DSA T_l input is not an n-byte array")
-    return _shake(
-        "t_l",
-        public_seed + _address_bytes(address) + message,
-        params.n,
-        observe,
-    )
+    return _address_hash(params, "t_l", public_seed, address, message, observe)
 
 
 def _prf_message(
@@ -173,6 +173,10 @@ def _prf_message(
     message: bytes,
     observe: Observe | None = None,
 ) -> bytes:
+    if params.hash_backend == "sha2":
+        key = secret_prf.ljust(64, b"\0")
+        inner = _sha256("prf_msg_inner", bytes(x ^ 0x36 for x in key) + optional_randomness + message, observe)
+        return _sha256("prf_msg_outer", bytes(x ^ 0x5c for x in key) + inner, observe)[:params.n]
     return _shake(
         "prf_msg",
         secret_prf + optional_randomness + message,
@@ -189,6 +193,12 @@ def _hash_message(
     message: bytes,
     observe: Observe | None = None,
 ) -> bytes:
+    if params.hash_backend == "sha2":
+        first = _sha256("h_msg_inner", randomizer + public_seed + public_root + message, observe)
+        seed = randomizer + public_seed + first
+        output = b"".join(_sha256("h_msg_mgf1", seed + i.to_bytes(4, "big"), observe)
+                          for i in range((params.m+31)//32))
+        return output[:params.m]
     return _shake(
         "h_msg",
         randomizer + public_seed + public_root + message,

@@ -1,3 +1,4 @@
+`ifndef MHBS_SHA2
 `timescale 1ns / 1ps
 `default_nettype none
 // ABI 4 byte recipes: scalar execution for P1, scheduled contexts for P>1.
@@ -1960,3 +1961,5 @@ module recipe #(
     endgenerate
 endmodule
 `default_nettype wire
+
+`endif // !MHBS_SHA2

@@ -363,6 +363,7 @@ def launch(args):
                     source_root=str(frozen), synthesis_run=str(source_run), configs=configs,
                     synthesis_configs=source_meta['configs'],
                     area_top='common', part=source_meta['part'], vivado=source_meta['vivado'],
+                    hash_backend=source_meta.get('hash_backend','shake'),
                     synthesis_manifest_sha256=sha(source_run/'SOURCE.json'),
                     rtl_and_dependency_sha256=source_meta['sha256'],
                     archive_directory=str(ROOT/'docs/manifests/experiments'/('pu_route_matrix_' + stamp)),

@@ -1,3 +1,6 @@
+set hash_backend shake
+if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 # One synthesis and one implementation at the explicitly requested clock.
 # No period search or timing exceptions are added.
 if {[llength $argv] != 6} {error "Usage: source_root P U output frequency_mhz threads"}
@@ -25,6 +28,9 @@ proc stage {name} {
 }
 stage synthesis
 create_project -in_memory -part $part
+set defines [list SYNTHESIS]
+if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+set_property verilog_define $defines [current_fileset]
 set fd [open [file join $root sources.txt] r]
 set sources [split [string trim [read $fd]] \n]
 close $fd
@@ -35,7 +41,7 @@ puts $fd "create_clock -name clk -period $period \[get_ports clk\]"
 close $fd
 read_xdc $constraint
 set fd [open [file join $out settings.txt] w]
-puts $fd "top=common\nPIPELINE=$p\nUNROLL=$u\nfrequency_mhz=$frequency\nperiod_ns=$period\npart=$part\nthreads=$threads\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nimplementation_count=1\nfrequency_search=none\nvivado=[version -short]"
+puts $fd "top=common\nPIPELINE=$p\nUNROLL=$u\nfrequency_mhz=$frequency\nperiod_ns=$period\nhash_backend=$hash_backend\npart=$part\nthreads=$threads\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nimplementation_count=1\nfrequency_search=none\nvivado=[version -short]"
 close $fd
 synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt \
     -max_dsp 0 -generic PIPELINE=$p -generic UNROLL=$u

@@ -1,5 +1,5 @@
 """Static product parameters. omega is bits per Winternitz digit."""
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -15,6 +15,7 @@ class Profile:
     a: int
     m: int
     target: float
+    hash_backend: str = "shake"
 
     @property
     def stateful(self):
@@ -44,7 +45,13 @@ class Profile:
 
     @property
     def typecode(self):
+        if self.hash_backend == "sha2":
+            return {10: 1, 16: 2, 20: 3}[self.h] if self.family == "xmss" else {10: 6, 15: 7, 20: 8}[self.h]
         return {10: 0x10, 16: 0x11, 20: 0x12}[self.h] if self.family == "xmss" else {10: 0x10, 15: 0x11, 20: 0x12}[self.h]
+
+    @property
+    def lmots_typecode(self):
+        return 3 if self.hash_backend == "sha2" else 0x0b
 
     @property
     def lanes(self):
@@ -68,13 +75,26 @@ PROFILES = {p.name: p for p in (
 ALIASES = {"slh": "slh_128f", "xmss": "xmss_h10", "lms": "lms_h10"}
 
 
-def get_profile(name):
+def get_profile(name, hash_backend="shake"):
+    if hash_backend not in ("shake", "sha2"):
+        raise ValueError(f"unknown hash backend: {hash_backend}")
     if "_omega" in name:
         raise ValueError("omega profiles retired; use xmss_h10/h16/h20 or lms_h10/h15/h20")
     try:
-        return PROFILES[ALIASES.get(name, name)]
+        profile = PROFILES[ALIASES.get(name, name)]
     except KeyError:
         raise ValueError(f"unknown profile: {name}") from None
+    if hash_backend == "sha2" and profile.family == "slh" and profile.n != 16:
+        raise ValueError("SHA2 supports only SLH-DSA 128f/128s and the XMSS/LMS profiles")
+    return profile if hash_backend == "shake" else replace(profile, hash_backend=hash_backend)
+
+
+def profile_names(hash_backend="shake", *, include_h20=True):
+    if hash_backend not in ("shake", "sha2"):
+        raise ValueError(f"unknown hash backend: {hash_backend}")
+    return tuple(p.name for p in PROFILES.values()
+                 if (hash_backend == "shake" or p.stateful or p.n == 16)
+                 and (include_h20 or not (p.stateful and p.h == 20)))
 
 # Stable image codes: bits 1:0 select n, bit 2 selects the small-signature set.
 SLH_PROFILE_CODES = {0:'slh_128f',1:'slh_192f',2:'slh_256f',

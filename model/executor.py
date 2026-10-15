@@ -1,16 +1,16 @@
 """Executable HBS image ABI 4: 128-bit tokens/templates, 64-bit descriptors.
 
 The interpreter executes the same five macro operations for every image. It
-does not call an algorithm oracle. hashlib supplies only the SHAKE primitive.
+does not call an algorithm oracle. hashlib supplies the hash primitives.
 Recipe shapes describe byte construction, including compound masked hashes.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import IntEnum
-import hashlib
 from typing import Callable
 from model.profiles import get_profile
+from model.hashes import block_count, digest
 
 from model.microcode import (
     StaticTaskToken as Token, TOKEN_SINGLE, TOKEN_RUN, TOKEN_LOOP, TOKEN_HALT,
@@ -129,6 +129,8 @@ class Image:
     tokens: tuple[int, ...]
     templates: tuple[int, ...]
     descriptors: tuple[int, ...]
+    # Software metadata, separate from the descriptor's height bits.
+    hash_backend: str = "shake"
 
     @property
     def n(self) -> int:
@@ -193,9 +195,9 @@ class Image:
         return tuple(expand(self.templates, objects))
 
 
-def compile_image(name: str, *, full_cache: bool = False) -> Image:
+def compile_image(name: str, *, full_cache: bool = False, hash_backend="shake") -> Image:
     """Compile one of seven static profiles; jobs are separate from images."""
-    p = get_profile(name)
+    p = get_profile(name, hash_backend)
     name, n = p.family, p.n
     records = [0] * 128
     records[1] = record(Kind.PROFILE, stateful=(int(p.stateful), 59, 1),
@@ -272,10 +274,10 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
                            cache=True, full_cache=full_cache)
         records[21] = tree(16, 7, p.h, target=2, indexing=0 if masked else 2, lookup=True)
         parts = [(Source.CONSTANT, 4, p.typecode), (Source.ROOT, n), (Source.PUBLIC, n)] \
-            if masked else [(Source.CONSTANT, 4, p.typecode), (Source.CONSTANT, 4, 0x0b),
+            if masked else [(Source.CONSTANT, 4, p.typecode), (Source.CONSTANT, 4, p.lmots_typecode),
                             (Source.IDENTIFIER, 16), (Source.ROOT, n)]
         emit(50, 64, parts)
-        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, 0x0b)])
+        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, p.lmots_typecode)])
              + [(Source.RANDOM, n)])
         if not masked:
             emit(52, 84, [(Source.CONSTANT, 4, p.typecode)])
@@ -292,12 +294,34 @@ def compile_image(name: str, *, full_cache: bool = False) -> Image:
     records[0] = record(Kind.IMAGE, version=(4, 56, 4), keygen=(0, 47, 9),
                         sign=(len(kg), 38, 9), kg_bytes=(kg_bytes, 18, 18),
                         sg_bytes=(sg_bytes, 0, 18))
-    image = Image(p.name, tuple(t.encode() for t in kg+sg), tuple(templates), tuple(records))
+    if hash_backend == "sha2":
+        # Bounds apply to individual primitive invocations of compound recipes.
+        maximum_lengths = {
+            Shape.ADDRESS_SEED: 64 + 22 + n,
+            Shape.ADDRESS_VALUE: 64 + 22 + 2*n,
+            Shape.MESSAGE_PRF: 64 + n + 87,
+            Shape.MESSAGE_DIGEST: max(3*n + 87, 2*n + 32 + 4),
+            Shape.INDEX_PRF: 96, Shape.ROOT_MESSAGE: 128 + 87,
+            Shape.MASKED_SEED: 128, Shape.MASKED_VALUE: 128,
+            Shape.PREFIX_SEED: 55, Shape.PREFIX_VALUE: 55,
+            Shape.PREFIX_MESSAGE: 54 + 87,
+            Shape.PREFIX_LIST: 22 + n*p.chains,
+            Shape.PREFIX_LEAF: 54, Shape.PREFIX_PARENT: 86,
+        }
+        for i, word in enumerate(records):
+            if word >> 60 != Kind.HASH:
+                continue
+            shape = Shape(field(word, 56, 4))
+            length = (64 + 22 + n*field(word, 40, 8)) if shape == Shape.ADDRESS_LIST else maximum_lengths[shape]
+            records[i] = (word & ~(63 << 24)) | (block_count(length, hash_backend) << 24)
+    image = Image(p.name, tuple(t.encode() for t in kg+sg), tuple(templates), tuple(records), hash_backend)
     validate(image)
     return image
 
 
 def validate(image: Image) -> None:
+    if image.hash_backend not in ('shake', 'sha2'):
+        raise ValueError('unknown hash backend')
     d = image.descriptors
     if not 2 <= len(d) <= 256 or len(image.tokens) > 384 or len(image.templates) > 64:
         raise ValueError("image storage bounds")
@@ -307,6 +331,8 @@ def validate(image: Image) -> None:
         raise ValueError("unsupported image ABI")
     if d[1] >> 60 != Kind.PROFILE or image.n not in (16, 24, 32):
         raise ValueError("unsupported node size")
+    if image.hash_backend == 'sha2' and not image.stateful and image.n != 16:
+        raise ValueError('unsupported SHA2 SLH node size')
     family = field(d[1],56,3)
     if family not in (1,2,3) or image.stateful != (family != 1) or image.omega != 4:
         raise ValueError("invalid profile identity/Winternitz width")
@@ -328,7 +354,7 @@ def validate(image: Image) -> None:
         kind = Kind(w >> 60)
         if kind == Kind.HASH:
             Shape(field(w, 56, 4))
-            if not 1 <= field(w, 32, 6) <= 49 or not 1 <= field(w, 24, 6) <= 32:
+            if not 1 <= field(w, 32, 6) <= 49 or not 1 <= field(w, 24, 6) <= (63 if image.hash_backend == 'sha2' else 32):
                 raise ValueError("recipe result/block bound")
         elif kind == Kind.CHAIN:
             for shift in (52, 44): ref(field(w, shift, 8), Kind.HASH)
@@ -413,11 +439,12 @@ class Machine:
 
     def _hash(self, rid: int, data: bytes, length: int | None = None) -> bytes:
         r = self.image.descriptors[rid]
-        if len(data)//136+1 > field(r, 24, 6):
+        blocks = block_count(len(data), self.image.hash_backend)
+        if blocks > field(r, 24, 6):
             raise ValueError("recipe exceeds block bound")
-        result = hashlib.shake_256(data).digest(length or field(r, 32, 6))
+        result = digest(data, length or field(r, 32, 6), self.image.hash_backend)
         self.hashes += 1
-        self.permutations += len(data)//136+1
+        self.permutations += blocks
         if self.observe: self.observe(rid, data, result)
         return result
 
@@ -431,6 +458,25 @@ class Machine:
         address = b"".join(be(x) for x in (layer, 0, self.scalar_tree >> 32,
             self.scalar_tree & 0xffffffff, domain, leaf, a, b))
         mask_address = b"".join(be(x) for x in (0, 0, 0, domain, leaf, a, b))
+        if self.image.hash_backend == "sha2" and not self.image.stateful:
+            compressed = address[3:4] + address[8:16] + address[19:20] + address[20:32]
+            prefix = j.public + bytes(64-self.n) + compressed
+            if shape == Shape.ADDRESS_SEED:
+                return self._hash(rid, prefix + j.secret)
+            if shape == Shape.ADDRESS_VALUE:
+                return self._hash(rid, prefix + left + (right if arity == 2 else b""))
+            if shape == Shape.ADDRESS_LIST:
+                return self._hash(rid, prefix + b"".join(values or []))
+            if shape == Shape.MESSAGE_PRF:
+                key = j.prf.ljust(64, b"\0")
+                inner = self._hash(rid, bytes(x ^ 0x36 for x in key) + j.random + self.message, 32)
+                return self._hash(rid, bytes(x ^ 0x5c for x in key) + inner, self.n)
+            if shape == Shape.MESSAGE_DIGEST:
+                random = self.values[0][:self.n]
+                inner = self._hash(rid, random + j.public + self.values[3][:self.n] + self.message, 32)
+                seed = random + j.public + inner
+                output = b"".join(self._hash(rid, seed + be(i), 32) for i in range((self.image.m+31)//32))
+                return output[:self.image.m]
         if shape == Shape.ADDRESS_SEED: data = j.public + address + j.secret
         elif shape == Shape.ADDRESS_VALUE: data = j.public + address + left + (right if arity == 2 else b"")
         elif shape == Shape.MESSAGE_PRF: data = j.prf + j.random + self.message

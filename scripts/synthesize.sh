@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+hash_backend=${HASH_BACKEND:-shake}
+case "$hash_backend" in shake|sha2) ;; *) echo "HASH_BACKEND must be shake or sha2." >&2; exit 2;; esac
+export HASH_BACKEND="$hash_backend"
+default_vectors=tb/vectors
+if [[ $hash_backend == sha2 ]]; then default_vectors+=/sha2; fi
 p=${1:-1}; u=${2:-2}
 if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then
     echo 'Usage: scripts/synthesize.sh [P] [U]' >&2; exit 2
@@ -15,6 +20,7 @@ work="build/synth/P${p}U${u}"
 lut6=${KECCAK_LUT6:-0}
 if [[ ! $lut6 =~ ^[01]$ ]]; then echo 'KECCAK_LUT6 must be 0 or 1.' >&2; exit 2; fi
 if [[ $lut6 == 0 ]]; then work+=_generic; fi
+if [[ $hash_backend == sha2 ]]; then work+=_sha2; fi
 mkdir -p "$work"
 echo "Synthesize common core P${p}U${u}; log: $work/vivado.log"
 defer_seconds=${SYNTH_DEFER_SECONDS:-${SYNTH_SKIP_SECONDS:-600}}

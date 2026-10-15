@@ -34,8 +34,13 @@ module executor #(
     wire [4:0] config_code = profile_descriptor[4:0];
     wire decoded_stateful = config_code >= 5'h18 && config_code <= 5'h1d;
     wire decoded_xmss = decoded_stateful && config_code < 5'h1b;
+`ifdef MHBS_SHA2
+    wire valid_profile=profile_descriptor[63:6]==0 && profile_descriptor[5] &&
+        (decoded_stateful || config_code==0 || config_code==4);
+`else
     wire valid_profile=profile_descriptor[63:5]==0 && (decoded_stateful
         || config_code==0 || config_code==1 || config_code==2 || config_code==4 || config_code==5 || config_code==6);
+`endif
     wire [4:0] decoded_height=(config_code==5'h18 || config_code==5'h1b) ? 5'd10
         : config_code==5'h19 ? 5'd16 : config_code==5'h1c ? 5'd15 : 5'd20;
     logic stateful, xmss, small_signature;

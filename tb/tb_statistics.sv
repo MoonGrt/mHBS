@@ -9,7 +9,13 @@ module tb_statistics #(parameter integer PIPELINE=1,UNROLL=1);
  wire [63:0] hash_count,permutation_count,batch_hashes,batch_permutations;
  integer elapsed=0,observed_permutations=0;
  // SHAKE256(public_seed || ADRS || value), all three fields 32 zero bytes.
+`ifdef MHBS_SHA2
+ localparam [255:0] EXPECTED=256'hf78eb8f0803eaa242f00491408131490213f635c8178d0113816eccd66947702;
+ localparam [63:0] REQUEST_RECIPE=(64'd10<<56)|(64'd32<<32)|(64'd63<<24);
+`else
  localparam [255:0] EXPECTED=256'h79e0588e734c8662b5c98df6a454c5155813bb2fc77c579ce637413a47b1f32b;
+ localparam [63:0] REQUEST_RECIPE={4'd0,4'd2,8'd0,8'd1,10'd0,6'd63,24'd0};
+`endif
  recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL),.SHARED_STATE(1'b1)) dut(
   .clk,.rst,.node_bytes(6'd32),.batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
   .batch_request_tag(1'b0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
@@ -21,7 +27,7 @@ module tb_statistics #(parameter integer PIPELINE=1,UNROLL=1);
 `ifndef SYNTHESIS
   .batch_hashes,.batch_permutations,
 `endif
-  .request_valid,.request_ready,.request_recipe({4'd0,4'd2,8'd0,8'd1,10'd0,6'd63,24'd0}),.request_step_recipe(64'd0),
+  .request_valid,.request_ready,.request_recipe(REQUEST_RECIPE),.request_step_recipe(64'd0),
   .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd0),.request_capture(1'b0),
   .secret_seed(256'd0),.secret_prf(256'd0),.public_seed(256'd0),.root(256'd0),.randomizer(256'd0),.identifier(128'd0),
   .message_buffer(696'd0),.message_length(7'd0),.request_layer(5'd0),.request_tree(64'd0),
@@ -34,7 +40,11 @@ module tb_statistics #(parameter integer PIPELINE=1,UNROLL=1);
  );
  always @(posedge clk)begin
   if(rst)observed_permutations=0;
+`ifdef MHBS_SHA2
+  else if(dut.compression_complete_event)observed_permutations++;
+`else
   else if(dut.permutation_complete || dut.batch_perm_done)observed_permutations++;
+`endif
  end
  task automatic check_response;
   if(!response_valid || response_value!=={136'd0,EXPECTED} || observed_permutations!=1)
@@ -45,6 +55,13 @@ module tb_statistics #(parameter integer PIPELINE=1,UNROLL=1);
 `endif
  endtask
 `ifndef SYNTHESIS
+`ifdef MHBS_SHA2
+ initial begin
+  wait(!rst);
+  dut.hash_count=64'hffffffff;
+  dut.permutation_count=64'hffffffff;
+ end
+`else
  generate if(PIPELINE==1)begin: scalar_carry
   initial begin
    wait(!rst);
@@ -58,6 +75,7 @@ module tb_statistics #(parameter integer PIPELINE=1,UNROLL=1);
    dut.scheduled_execution.fixed_context.ctx_permutation_count=64'hffffffff;
   end
  end endgenerate
+`endif
 `endif
  initial begin
   repeat(3)@(negedge clk);rst=0;

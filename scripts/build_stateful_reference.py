@@ -39,7 +39,9 @@ def build():
         patches.extend(difflib.unified_diff(old.splitlines(True),new.splitlines(True),
                                           fromfile='a/'+name,tofile='b/'+name))
     change('xmss/hash.c',lambda s:s.replace('    unsigned char buf[64];',
-        '    extern void ref_count(size_t);\n    ref_count(inlen);\n    unsigned char buf[64];',1))
+        '    extern void ref_count_hash(int, size_t);\n'
+        '    ref_count_hash(params->func == XMSS_SHA2 ? 1 : 2, inlen);\n'
+        '    unsigned char buf[64];',1))
     # Upstream erases the last-index key before using it. Keep the valid final
     # leaf available to the validation signer; exhausted indices remain rejected.
     change('xmss/xmss_core.c',lambda s:s.replace(

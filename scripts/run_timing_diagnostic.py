@@ -24,6 +24,16 @@ archive.ROOT = ROOT
 archive.ARCHIVES = ROOT/'docs/manifests/experiments'
 
 
+def recipe_name(spec):
+    if spec.get('hash_backend','shake') == 'sha2':
+        return 'rtl/hash/sha2-recipe.sv'
+    return 'rtl/hash/shake-recipe.sv' if 'rtl/hash/shake-recipe.sv' in spec['sha256'] else 'rtl/hash/recipe.sv'
+
+
+def recipe_checksum(spec):
+    return spec['sha256'][recipe_name(spec)]
+
+
 def now():
     return datetime.now(ZoneInfo('Asia/Singapore')).isoformat(timespec='seconds')
 
@@ -66,9 +76,11 @@ def freeze(source, destination, expected=None):
     return hashes
 
 
-def reusable_baseline(run, variant, period_ns, vivado_version=None):
+def reusable_baseline(run, variant, period_ns, vivado_version=None, hash_backend='shake'):
     """Reuse only measured artifacts tied to the original frozen diagnostic RTL."""
     meta = json.loads((run/'SOURCE.json').read_text())
+    if meta.get('hash_backend','shake') != hash_backend:
+        raise ValueError('Reusable baseline hash backend differs')
     state = json.loads((run/'status.json').read_text())
     if (meta.get('configuration') != 'P12U1' or meta.get('period_ns') != period_ns
             or meta.get('part') != 'xc7a200tffg1156-3' or meta.get('area_top') != 'common'):
@@ -110,10 +122,12 @@ def reusable_baseline(run, variant, period_ns, vivado_version=None):
 
 def full_sign_summary(path, candidate):
     data = json.loads(path.read_text())
+    if data.get('hash_backend','shake') != candidate.get('hash_backend','shake'):
+        raise ValueError('Validation hash backend differs from frozen candidate')
     tests = data.get('tests', [])
     if (not data.get('complete') or data.get('status') != 'passed' or data.get('failed') != 0
             or not tests or data.get('passed') != len(tests) or not data.get('source_unchanged')
-            or data.get('recipe_sha256') != candidate['sha256']['rtl/hash/recipe.sv']
+            or data.get('recipe_sha256') != recipe_checksum(candidate)
             or any(not case.get('passed') or case.get('operation') != 'sign' for case in tests)):
         raise ValueError('Complete Sign evidence did not pass or belongs to another candidate')
     manifest = Path(data['source_manifest'])
@@ -140,6 +154,8 @@ def full_sign_summary(path, candidate):
 
 def candidate_validation(path, candidate):
     data = json.loads(path.read_text())
+    if data.get('hash_backend','shake') != candidate.get('hash_backend','shake'):
+        raise ValueError('Validation hash backend differs from frozen candidate')
     recipe = data.get('candidate_recipe_sha256', data.get('recipe_sha256'))
     expected_rtl = {name: checksum for name, checksum in candidate['sha256'].items() if name.startswith('rtl/')}
     verified = False
@@ -148,8 +164,8 @@ def candidate_validation(path, candidate):
         if not isinstance(supplied, dict) or supplied != expected_rtl:
             raise ValueError('Validation complete RTL SHA set differs from frozen candidate')
         verified = True
-        recipe = recipe or supplied.get('rtl/hash/recipe.sv')
-    if recipe != expected_rtl['rtl/hash/recipe.sv']:
+        recipe = recipe or supplied.get(recipe_name(candidate))
+    if recipe != expected_rtl[recipe_name(candidate)]:
         raise ValueError('Validation recipe SHA does not match the frozen candidate')
     if data.get('source_unchanged') is False or data.get('source_mismatches'):
         raise ValueError('Validation reports changed source files')
@@ -198,7 +214,7 @@ class Runner:
         self.lock = threading.Lock()
         self.capacity_lock = threading.Lock()
         self.slots = 0
-        self.state = dict(schema='mhbs.timing_diagnostic.results.v1', started_at=now(),
+        self.state = dict(hash_backend=self.meta.get('hash_backend','shake'), schema='mhbs.timing_diagnostic.results.v1', started_at=now(),
                           updated_at=now(), pid=os.getpid(), complete=False, diagnostic_only=True,
                           configuration='P12U1', period_ns=self.period_ns, threads_per_vivado=2,
                           maximum_own_vivado=2, max_observed_main_vivado=0,
@@ -332,6 +348,7 @@ class Runner:
             start = time.monotonic()
             with (output/'vivado.log').open('w') as log:
                 process = subprocess.Popen(command, cwd=output, stdin=subprocess.DEVNULL, stdout=log,
+                                           env=dict(os.environ, HASH_BACKEND=spec.get('hash_backend', self.meta.get('hash_backend','shake'))),
                                            stderr=subprocess.STDOUT, start_new_session=True)
                 self.update(name, status='running', pid=process.pid, started_at=now(), command=command)
                 while process.poll() is None:
@@ -371,10 +388,13 @@ class Runner:
 
 
 def launch(args):
+    recipe_path = ROOT / ('rtl/hash/sha2-recipe.sv' if args.hash_backend == 'sha2' else 'rtl/hash/shake-recipe.sv')
     validation = json.loads(args.validation.read_text())
     if (validation.get('failed', 0) or validation.get('passed') is False
-            or validation.get('candidate_recipe_sha256', validation.get('recipe_sha256')) != sha(ROOT/'rtl/hash/recipe.sv')):
+            or validation.get('candidate_recipe_sha256', validation.get('recipe_sha256')) != sha(recipe_path)):
         raise ValueError('Validation failed or does not match the current candidate recipe')
+    if validation.get('hash_backend','shake') != args.hash_backend:
+        raise ValueError('Validation hash backend differs from requested backend')
     run_id = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
     run = ROOT/'build/timing_diagnostic'/run_id
     out = ROOT/'docs/manifests/experiments'/('timing_diagnostic_'+run_id)
@@ -383,11 +403,13 @@ def launch(args):
         raise RuntimeError('Vivado is required')
     version = subprocess.check_output([vivado, '-version'], text=True).strip()
     reused = reusable_baseline(args.baseline_diagnostic.resolve(), args.baseline_variant,
-                               args.period_ns, version) if args.baseline_diagnostic else None
+                               args.period_ns, version, args.hash_backend) if args.baseline_diagnostic else None
     baseline = Path(reused['source_root']) if reused else args.baseline_source.resolve()
     baseline_manifest = (args.baseline_diagnostic.resolve()/'SOURCE.json' if reused else baseline.parent/'SOURCE.json')
+    if json.loads(baseline_manifest.read_text()).get('hash_backend','shake') != args.hash_backend:
+        raise ValueError('Baseline manifest hash backend differs')
     baseline_hashes = reused['sha256'] if reused else json.loads(baseline_manifest.read_text())['sha256']
-    meta = dict(schema='mhbs.timing_diagnostic.source.v1', run_id=run_id, started_at=now(),
+    meta = dict(schema='mhbs.timing_diagnostic.source.v1', hash_backend=args.hash_backend, run_id=run_id, started_at=now(),
                 diagnostic_only=True, configuration='P12U1', period_ns=args.period_ns,
                 part='xc7a200tffg1156-3', area_top='common', vivado=vivado,
                 vivado_version=version,
@@ -398,7 +420,7 @@ def launch(args):
     for name, source in [('baseline', baseline), ('candidate', ROOT)]:
         frozen = run/name/'source'
         hashes = freeze(source, frozen, baseline_hashes if name == 'baseline' else None)
-        spec = dict(original_source=str(source), source_root=str(frozen), sha256=hashes)
+        spec = dict(hash_backend=args.hash_backend, original_source=str(source), source_root=str(frozen), sha256=hashes)
         if name == 'baseline' and reused:
             if hashes != reused['sha256']:
                 raise ValueError('Refrozen reused baseline differs from measured source')
@@ -447,6 +469,7 @@ def launch(args):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
     parser.add_argument('--launch', action='store_true')
     parser.add_argument('--run-root', type=Path)
     parser.add_argument('--period-ns', type=clock_period, default=10.0,

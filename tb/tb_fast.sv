@@ -45,9 +45,15 @@ module tb_fast #(parameter integer PIPELINE=4,UNROLL=1)(
 `endif
  assign execution_active=dut.core.state!=0 && dut.core.state!=32;
  assign execution_reset=dut.core.execution_rst;
+`ifdef MHBS_SHA2
+ assign hash_event=dut.core.lane.hash_complete_event;
+ assign permutation_event=dut.core.lane.compression_complete_event;
+ assign batch_event=0;
+`else
  assign hash_event=dut.core.lane.permutation_complete && dut.core.lane.running_last;
  assign permutation_event=dut.core.lane.permutation_complete;
  assign batch_event=dut.core.lane.batch_perm_done;
+`endif
  signature cache(.clk,.rst,.finish(done),.abort(error),.write_valid(out_valid&&job_operation==1),
   .write_data(out_data),.write_bytes(out_bytes),.read_enable(signature_read_enable),
   .read_address(signature_read_address),.read_valid(signature_read_valid),

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Compare scalar fixed/stream recipes with independent hashlib byte frames."""
-from hashlib import shake_256
+from hashlib import shake_256, sha256
 import os
 import argparse
 import json
@@ -17,6 +17,7 @@ def h(data, n=32):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
     parser.add_argument('--pipeline',type=int,default=4)
     parser.add_argument('--unroll',type=int,default=1)
     parser.add_argument('--recipe-mask',type=lambda value:int(value,0),default=0xffff,
@@ -27,6 +28,7 @@ def main():
         parser.error('--recipe-mask must be between 1 and 0xffff')
     mask_suffix = '' if args.recipe_mask == 0xffff else f'_mask{args.recipe_mask:04x}'
     work = ROOT / (f'build/recipe_check/P{args.pipeline}U{args.unroll}' + mask_suffix + ('_synthesis' if args.synthesis else ''))
+    if args.hash_backend == 'sha2': work = work.parent / (work.name + '_sha2')
     work.mkdir(parents=True, exist_ok=True)
     sk, prf, pub, root, rand, left, right = [bytes(range(k, k+32)) for k in (1, 33, 65, 97, 129, 161, 193)]
     ident = bytes(range(225, 241))
@@ -35,9 +37,47 @@ def main():
     adr = b''.join(map(be, (3, 0, 0x01234567, 0x89abcdef, 0x83, 513, 67, 0x12345678)))
     def masked(compound, leaf=513):
         return bytes(12)+b''.join(map(be, (0x83, leaf, 67, 0x12345678, compound)))
-    def frame(n, shape, arity, length, leaf=513):
+    def frame(n, shape, arity, length, leaf=513, output_bytes=0):
         adr = b''.join(map(be, (3, 0, 0x01234567, 0x89abcdef, 0x83, leaf, 67, 0x12345678)))
         fixed, hashes = shape not in (3, 4, 6, 11, 12, 13), 1
+        if args.hash_backend == 'sha2':
+            count = [0, 0]
+            last_frame_length = [0]
+            def h256(value):
+                last_frame_length[0] = len(value)
+                count[0] += 1
+                count[1] += (len(value)+9+63)//64
+                return sha256(value).digest()
+            compressed = adr[3:4]+adr[8:16]+adr[19:20]+adr[20:32]
+            prefix = pub[:n]+bytes(64-n)
+            if shape == 1: result=h256(prefix+compressed+sk[:n])
+            elif shape == 2: result=h256(prefix+compressed+left[:n]+(right[:n] if arity==2 else b''))
+            elif shape == 3:
+                key=prf[:n]+bytes(64-n)
+                inner=h256(bytes(x^0x36 for x in key)+rand[:n]+message[:length])
+                result=h256(bytes(x^0x5c for x in key)+inner)
+            elif shape == 4:
+                inner=h256(rand[:n]+pub[:n]+root[:n]+message[:length])
+                result=b''.join(h256(rand[:n]+pub[:n]+inner+be(i)) for i in range((output_bytes+31)//32))
+            elif shape == 5: result=h256(be(3,32)+prf+be(leaf,32))
+            elif shape == 6: result=h256(be(2,32)+rand+root+be(leaf,32)+message[:length])
+            elif shape == 7: result=h256(be(4,32)+sk+pub+masked(0,leaf))
+            elif shape == 8:
+                key,m0=h256(be(3,32)+pub+masked(0,leaf)),h256(be(3,32)+pub+masked(1,leaf))
+                data=be(arity-1,32)+key+bytes(a^b for a,b in zip(left,m0))
+                if arity==2:
+                    m1=h256(be(3,32)+pub+masked(2,leaf))
+                    data+=bytes(a^b for a,b in zip(right,m1))
+                result=h256(data)
+            elif shape == 9: result=h256(ident+be(leaf)+be(67,2)+b'\xff'+sk)
+            elif shape == 10: result=h256(ident+be(leaf)+be(67,2)+b'\x78'+left)
+            elif shape == 11: result=h256(ident+be(leaf)+b'\x81\x81'+rand+message[:length])
+            elif shape == 12: result=h256(prefix+compressed+b''.join(v[:n] for v in nodes[:arity]))
+            elif shape == 13: result=h256(ident+be(leaf)+b'\x80\x80'+b''.join(nodes[:arity]))
+            elif shape == 14: result=h256(ident+be(0x12345678)+b'\x82\x82'+left)
+            elif shape == 15: result=h256(ident+be(0x12345678)+b'\x83\x83'+left+right)
+            else: raise ValueError(shape)
+            return result[:output_bytes].ljust(49,b'\0'),count[0],count[1],last_frame_length[0]
         if shape == 1: data = pub[:n]+adr+sk[:n]
         elif shape == 2: data = pub[:n]+adr+left[:n]+(right[:n] if arity == 2 else b'')
         elif shape == 3: data = prf[:n]+rand[:n]+message[:length]
@@ -84,25 +124,34 @@ def main():
         cases.extend((32,shape,arity,1,leaf) for shape in (1,2,5,6,7,8,9,10,11,13,14,15)
                      for arity in ((1,2) if shape in (2,8) else (2,) if shape==15 else (67,) if shape==13 else (1,)))
     cases = [case for case in cases if args.recipe_mask & (1 << case[1])]
+    if args.hash_backend == 'sha2':
+        cases = [(n,shape,arity,length,leaf,out)
+                 for n,shape,arity,length,leaf in cases
+                 if (n==16 if shape in (1,2,3,4,12) else n==32)
+                 and (shape!=13 or arity<=67)
+                 for out in ((30,34) if shape==4 else (16,) if shape in (1,2,3,12) else (32,))]
+    else:
+        cases = [(*case,0) for case in cases]
     if not cases:
         parser.error('--recipe-mask enables no tested recipe')
     values = []
     coverage = {'cases':len(cases),'pipeline':args.pipeline,'unroll':args.unroll,
-                'recipe_mask':f'0x{args.recipe_mask:04x}','synthesis':args.synthesis,
+                'hash_backend':args.hash_backend,'recipe_mask':f'0x{args.recipe_mask:04x}','synthesis':args.synthesis,
                 'frame_lengths':{},'shapes':{},'rate_boundary_cases':{}}
-    for n, shape, arity, length, leaf in cases:
-        result, hashes, perms, frame_length = frame(n, shape, arity, length, leaf)
+    for n, shape, arity, length, leaf, output_bytes in cases:
+        result, hashes, perms, frame_length = frame(n, shape, arity, length, leaf, output_bytes)
         for key,value in (('frame_lengths',frame_length),('shapes',shape)):
             coverage[key][value] = coverage[key].get(value,0)+1
         if frame_length in (135,136,137):
             coverage['rate_boundary_cases'][frame_length] = coverage['rate_boundary_cases'].get(frame_length,0)+1
-        value = int.from_bytes(result, 'little') | n << 392 | length << 398 | shape << 405 | arity << 409 | hashes << 417 | perms << 421 | leaf << 432
-        values.append(f'{value:0113x}\n')
+        value = int.from_bytes(result, 'little') | n << 392 | length << 398 | shape << 405 | arity << 409 | hashes << 417 | perms << 421 | leaf << 432 | output_bytes << 452
+        values.append(f'{value:0115x}\n')
     vector = work / 'recipes.mem'
     vector.write_text(''.join(values))
     obj = work / 'obj'
-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/recipe.sv', 'tb/tb_recipe.sv']
+    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/shake-recipe.sv', 'rtl/hash/sha256.sv', 'rtl/hash/sha2-recipe.sv', 'tb/tb_recipe.sv']
     if args.synthesis: cmd.append('-DSYNTHESIS')
+    if args.hash_backend == 'sha2': cmd.append('-DMHBS_SHA2')
     with (work / 'compile.log').open('w') as log:
         subprocess.run(cmd, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
     result = subprocess.run([str(obj / 'Vtb_recipe'), f'+VECTOR={vector}', f'+COUNT={len(cases)}'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)

@@ -1,0 +1,82 @@
+--- baseline/rtl/hash/sha2-recipe.sv
++++ candidate/rtl/hash/sha2-recipe.sv
+@@ -61,8 +61,10 @@
+     logic [7:0] address_a[0:PIPELINE-1], seed_domain[0:PIPELINE-1], step_domain[0:PIPELINE-1];
+     logic [31:0] address_b[0:PIPELINE-1];
+     logic [4:0] iteration[0:PIPELINE-1], end_step[0:PIPELINE-1], capture_step[0:PIPELINE-1];
+-    logic [7:0] arity[0:PIPELINE-1];
+-    logic [5:0] output_bytes[0:PIPELINE-1];
++    // Variable list/result lengths belong only to the scalar request.
++    // Batch list arity is one; results need at most one MGF output block.
++    logic [7:0] scalar_arity;
++    logic [5:0] scalar_output_bytes;
+     logic [6:0] block_index[0:PIPELINE-1];
+     logic [255:0] cv[0:PIPELINE-1], digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
+     logic [DIGEST_BYTES*8-1:0] scalar_result;
+@@ -103,8 +105,8 @@
+                         7: input_length=128;
+                         9,10: input_length=55;
+                         11: input_length=13'd54+13'(message_length);
+-                        12: input_length=13'd86+{1'b0,arity[t],4'd0};
+-                        13: input_length=13'd22+{arity[t],5'd0};
++                        12: input_length=13'd86+{1'b0,(scalar_slot[t] ? scalar_arity : 8'd1),4'd0};
++                        13: input_length=13'd22+{(scalar_slot[t] ? scalar_arity : 8'd1),5'd0};
+                         14: input_length=54;
+                         15: input_length=86;
+                         default: input_length=0;
+@@ -499,7 +501,7 @@
+                 if(scalar_slot[t]) begin
+                     scalar_result<=0;
+                     for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                        if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=value[k*8+:8];
++                        if(k<32 && k<int'(scalar_output_bytes)) scalar_result[k*8+:8]<=value[k*8+:8];
+                 end
+             end
+         end
+@@ -510,10 +512,10 @@
+             busy_slot<=0; complete<=0; need_block<=0; scalar_slot<=0;
+             capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0;
+-            scalar_result<=0;
++            scalar_result<=0; scalar_output_bytes<=0; scalar_arity<=0;
+             for(integer k=0;k<PIPELINE;k=k+1) begin
+                 phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+-                arity[k]<=0; output_bytes[k]<=0;
++
+             end
+         end else begin
+             // Match the common executor's idle-tag contract: after draining a
+@@ -552,15 +554,17 @@
+                     HMAC_IN: begin digest[t]<=returned; next_hash(t,HMAC_OUT); end
+                     HMSG_IN: begin key_value[t]<=returned; next_hash(t,MGF0); end
+                     MGF0: begin
+-                        scalar_result<=0;
+-                        for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                            if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[k*8+:8];
+-                        if(output_bytes[t]>32) next_hash(t,MGF1);
++                        if(scalar_slot[t]) begin
++                            scalar_result<=0;
++                            for(integer k=0;k<DIGEST_BYTES;k=k+1)
++                                if(k<32 && k<int'(scalar_output_bytes)) scalar_result[k*8+:8]<=returned[k*8+:8];
++                        end
++                        if(scalar_slot[t] && scalar_output_bytes>32) next_hash(t,MGF1);
+                         else begin digest[t]<=returned; complete[t]<=1; end
+                     end
+                     MGF1: begin
+                         for(integer k=32;k<DIGEST_BYTES;k=k+1)
+-                            if(k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[(k-32)*8+:8];
++                            if(k<int'(scalar_output_bytes)) scalar_result[k*8+:8]<=returned[(k-32)*8+:8];
+                         complete[t]<=1;
+                     end
+                     default: finish_node(t,returned);
+@@ -582,8 +586,8 @@
+                 iteration[t]<=incoming_start; end_step[t]<=incoming_start+incoming_steps;
+                 capture_step[t]<=scalar_accept && !request_chain ? (scalar_shape==7 ? 5'd0 : 5'd1) : incoming_capture_step;
+                 capture_enable[t]<=incoming_capture;
+-                arity[t]<=scalar_accept ? request_recipe[47:40] : 8'd1;
+-                output_bytes[t]<=scalar_accept ? request_recipe[37:32] : incoming_family==0 ? 6'd16 : 6'd32;
++                if(scalar_accept) scalar_arity<=request_recipe[47:40];
++                if(scalar_accept) scalar_output_bytes<=request_recipe[37:32];
+                 if(incoming_shape==0 && incoming_no_seed) begin
+                     if(incoming_capture && incoming_capture_step==incoming_start)
+                         captured[t]<=node_result(incoming_value,incoming_family);

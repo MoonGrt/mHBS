@@ -1,3 +1,6 @@
+set hash_backend shake
+if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 # Each invocation runs in its own output directory; no shared Vivado .Xil state.
 if {[llength $argv] != 6} {error "Usage: P U common output threads part"}
 lassign $argv p u profile out threads part
@@ -12,6 +15,9 @@ set out [file normalize $out]
 file mkdir $out
 set_param general.maxThreads $threads
 create_project -in_memory -part $part
+set defines [list SYNTHESIS]
+if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+set_property verilog_define $defines [current_fileset]
 set handle [open [file join $root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
@@ -22,7 +28,7 @@ set command [list synth_design -top $top -part $part -mode out_of_context \
     -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=$p \
     -generic UNROLL=$u]
 set handle [open [file join $out settings.txt] w]
-puts $handle "top=$top\nprofile=$profile\noperation=runtime\nPIPELINE=$p\nUNROLL=$u\nSYNTHESIS=1\nMHBS_SIGNATURE_STORE=undefined (common has no signature storage)\npart=$part\nvivado=[version -short]\nthreads=$threads\nmode=out_of_context\nkeccak=generic\nclock_period_ns=6.666667\ncommand=$command"
+puts $handle "top=$top\nprofile=$profile\noperation=runtime\nPIPELINE=$p\nUNROLL=$u\nSYNTHESIS=1\nMHBS_SIGNATURE_STORE=undefined (common has no signature storage)\nhash_backend=$hash_backend\npart=$part\nvivado=[version -short]\nthreads=$threads\nmode=out_of_context\nkeccak=generic\nclock_period_ns=6.666667\ncommand=$command"
 close $handle
 {*}$command
 report_utilization -file [file join $out utilization.rpt]

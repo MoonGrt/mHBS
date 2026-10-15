@@ -63,7 +63,7 @@ class Runner:
         self.lock = threading.Lock()
         self.capacity_lock = threading.Lock()
         self.slots = 0
-        self.state = dict(started_at=now(), updated_at=now(), pid=os.getpid(), complete=False,
+        self.state = dict(hash_backend=self.meta.get('hash_backend','shake'), started_at=now(), updated_at=now(), pid=os.getpid(), complete=False,
             top='common', threads_per_vivado=2, max_total_vivado=12,
             frequency_search=False, tasks={task_name((p,u,f), self.meta.get('frequency_task_names',False)):dict(status='waiting_for_capacity',
                 target_frequency_mhz=f, target_period_ns=1000/f) for p,u,f in self.meta['targets']})
@@ -76,6 +76,7 @@ class Runner:
         write(prefix.with_suffix('.json'), dict(source=self.meta, results=self.state))
         lines = ['# 指定频率布局布线测试', '',
             f'更新时间：{self.state["updated_at"]}；状态：'+('完成' if self.state['complete'] else '后台运行')+'。', '',
+            f'Hash 后端：`{self.meta.get("hash_backend", "shake")}`。', '',
             '冻结当前RTL，common OOC，xc7a200tffg1156-3，通用Keccak；各点按指定频率重新综合，再执行opt/place/phys_opt/route。每个Vivado两线程，全机主任务最多12个。每点只检查指定目标，未进行频率搜索或新增时序例外。旧后台任务保持运行。', '',
             f'源码与{self.meta["validation_passed"]}/{self.meta["validation_passed"]}项既有验证逐文件绑定。验收范围为common核内部受约束路径；完整布线、DRC、setup/hold通过且实际时钟不低于目标才记为达到。共同核结果不代表封装顶层I/O时序。', '',
             '| 配置 | 目标 MHz | 周期 ns | 综合 Slice | 布线 Slice | WNS ns | WHS ns | 达到目标 | 状态 |',
@@ -139,6 +140,7 @@ class Runner:
                 str(self.source),str(p),str(u),str(folder),str(frequency),'2']
             with (folder/'vivado.log').open('w') as log:
                 process = subprocess.Popen(command,cwd=folder,stdin=subprocess.DEVNULL,
+                    env=dict(os.environ,HASH_BACKEND=self.meta.get('hash_backend','shake')),
                     stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
                 self.update(name,status='synthesis',pid=process.pid,command=command,started_at=now())
                 while process.poll() is None:
@@ -193,6 +195,7 @@ def launch(args):
     assert validation['complete'] and validation['passed']==validation['total'] and validation['total']>0 and not validation['failed']
     assert all(test['passed'] for test in validation['tests']) and len(validation['tests'])==validation['total']
     assert validation['source_unchanged']
+    assert validation.get('hash_backend','shake') == args.hash_backend, 'Validation backend mismatch'
     names = [n.strip() for n in (ROOT/'sources.txt').read_text().splitlines() if n.strip()]
     assert {n:sha(ROOT/n) for n in names} == validation['rtl_sha256'], 'Current RTL differs from validated RTL'
     validation_manifest = Path(validation['source_manifest'])
@@ -212,7 +215,7 @@ def launch(args):
     vivado = shutil.which('vivado')
     if not vivado:
         raise RuntimeError('Vivado not found')
-    meta = dict(run_id=run_id,started_at=now(),source_root=str(run/'source'),sha256=hashes,
+    meta = dict(hash_backend=args.hash_backend,run_id=run_id,started_at=now(),source_root=str(run/'source'),sha256=hashes,
         archive_directory=str(out),targets=targets,frequency_task_names=True,top='common',part='xc7a200tffg1156-3',
         vivado=vivado,vivado_version=subprocess.check_output([vivado,'-version'],text=True).strip(),
         threads_per_vivado=2,max_total_vivado=12,frequency_search=False,new_timing_exceptions=False,
@@ -245,6 +248,7 @@ def launch(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash',dest='hash_backend',choices=('shake','sha2'),default='shake')
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--launch',action='store_true')
     group.add_argument('--run-root',type=Path)

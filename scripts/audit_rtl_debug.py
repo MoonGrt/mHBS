@@ -61,6 +61,7 @@ def procedural_macro_lines(text):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash',dest='hash_backend',choices=('shake','sha2'),default='shake')
     parser.add_argument('--output', default='build/debug_cleanup/source_audit.json')
     parser.add_argument('--lint', action='store_true', help='Lint all four top macro views')
     args = parser.parse_args()
@@ -78,11 +79,13 @@ def main():
     verilator = os.environ.get('VERILATOR', 'verilator')
     views = []
     output = ROOT / args.output
+    if args.hash_backend=='sha2' and args.output=='build/debug_cleanup/source_audit.json': output=ROOT/'build/debug_cleanup_sha2/source_audit.json'
     output.parent.mkdir(parents=True, exist_ok=True)
     for synthesis in (False, True):
         for signature in (False, True):
             name = f'synthesis{int(synthesis)}_signature{int(signature)}'
             defines = (['-DSYNTHESIS'] if synthesis else []) + (['-DMHBS_SIGNATURE_STORE'] if signature else [])
+            if args.hash_backend=='sha2':defines.append('-DMHBS_SHA2')
             command = [verilator, '-E', '--language', '1800-2017', *defines, *sources]
             result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
             if result.returncode:
@@ -112,7 +115,7 @@ def main():
             views.append(dict(name=name, diagnostics_present=diagnostic_names,
                               signature_instance=instance, lint_passed=lint_passed,
                               preprocessed_sha256=hashlib.sha256(result.stdout.encode()).hexdigest()))
-    report = dict(passed=not failures, scope='sources.txt and four preprocessed top views',
+    report = dict(hash_backend=args.hash_backend,passed=not failures, scope='sources.txt and four preprocessed top views',
                   source_sha256={p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in sources},
                   procedural_macro_lines=placements, views=views, failures=failures)
     output.write_text(json.dumps(report, indent=2) + '\n')

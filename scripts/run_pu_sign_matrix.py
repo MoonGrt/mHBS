@@ -82,7 +82,7 @@ def launch(args):
     for name, command in [('vivado', [vivado, '-version']),
                           ('verilator', [verilator, '--version'])]:
         versions[name] = subprocess.check_output(command, text=True, timeout=30).strip()
-    metadata = dict(schema='mhbs.pu_sign_matrix.source.v1', run_id=stamp,
+    metadata = dict(schema='mhbs.pu_sign_matrix.source.v1', run_id=stamp, hash_backend=args.hash_backend,
                     started_at=now(), source_root=str(snapshot), report=str(report),
                     archive_root=str(ROOT / 'docs/manifests/experiments'),
                     base_commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'],
@@ -178,7 +178,7 @@ class Runner:
         self.capacity_lock = threading.Lock()
         self.active_syntheses = 0
         self.started = time.monotonic()
-        self.state = dict(schema='mhbs.pu_sign_matrix.results.v1', run_id=self.meta['run_id'],
+        self.state = dict(hash_backend=self.meta.get('hash_backend','shake'), schema='mhbs.pu_sign_matrix.results.v1', run_id=self.meta['run_id'],
                           started_at=now(), updated_at=now(), pid=os.getpid(), complete=False,
                           source_unchanged=None, source_manifest=str(run / 'SOURCE.json'),
                           part=PART, vivado_workers=self.meta['vivado_workers'], vivado_threads=2,
@@ -250,6 +250,7 @@ class Runner:
                  '已结束，存在失败项' if finished else '后台执行中')
         lines = ['# 三算法 Sign 的 P/U 周期与综合面积矩阵', '',
                  f'状态：{label}。更新时间：{self.state["updated_at"]}。任务通过 {counts["passed"]}/{len(tasks)}，运行 {counts["running"]}，等待 {counts["pending"]}，失败 {counts["failed"]}，取消 {counts["cancelled"]}。', '',
+                 f'Hash 后端：`{self.meta.get("hash_backend", "shake")}`。', '',
                  f'冻结源码：`{self.run / "SOURCE.json"}`。基于提交 `{self.meta["base_commit"]}` 和启动时的工作区改动，后续编辑不会改变本次测量。', '',
                  'P/U：U1=P1/2/3/4/6/8/12/24；U2=P1/2/3/4/6/12。全部使用同一组默认 Sign 输入和已有独立参考向量；XMSS/LMS 均为 h10，完整重算认证路径。每项逐拍执行生产 common，并核对输出字节、签名缓存、Hash及置换计数；周期没有外推。', '',
                  f'综合：{PART}，Vivado版本见源码清单，最多{self.meta["vivado_workers"]}个Vivado并发，每个2线程，统计关闭，通用Keccak，OOC，6.666667 ns约束。面积统一采用对应P/U的common共同核。每个P/U只综合一次，三个算法共用该面积；common含运行时Job/ROM接口，ROM和签名缓存由外部提供。', '',
@@ -360,6 +361,7 @@ class Runner:
                        '-tclargs', str(p), str(u), profile, str(output), '2', PART]
             with (output / 'vivado.log').open('w') as handle:
                 process = subprocess.Popen(command, cwd=output, stdout=handle,
+                                           env=dict(os.environ, HASH_BACKEND=self.meta.get('hash_backend','shake')),
                                            stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
                                            start_new_session=True)
                 self.update(key, 'running', pid=process.pid)
@@ -399,7 +401,10 @@ class Runner:
                 slow_opt = self.meta.get('simulation_opt_slow', '-O3')
                 env['SIM_FAST_OPT_SLOW'] = slow_opt
                 # Always use the frozen vectors, regardless of the launch shell.
-                env['VECTORS_DIR'] = str(self.source / 'tb/vectors')
+                env['HASH_BACKEND'] = self.meta.get('hash_backend', 'shake')
+                vector_root = self.source / 'tb/vectors'
+                if env['HASH_BACKEND'] == 'sha2': vector_root /= 'sha2'
+                env['VECTORS_DIR'] = str(vector_root)
                 with log.open('w') as handle:
                     process = subprocess.Popen(command, cwd=self.source, env=env,
                                                stdout=handle, stderr=subprocess.STDOUT,
@@ -414,6 +419,7 @@ class Runner:
                 cache_name = f'P{p}U{u}_fast_o3_synthesis0'
                 if slow_opt != '-O3':
                     cache_name += '_slow_' + slow_opt.removeprefix('-')
+                if self.meta.get('hash_backend','shake') == 'sha2': cache_name += '_sha2'
                 raw_log = self.source / 'build/sim' / cache_name / f'{profile}_sign.log'
                 if raw_log.exists():
                     shutil.copy2(log, output / f'{profile}_driver.log')
@@ -457,6 +463,7 @@ class Runner:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
     parser.add_argument('--launch', action='store_true')
     parser.add_argument('--run-root', type=Path)
     parser.add_argument('--render-root', type=Path, help='Render existing measured results only')

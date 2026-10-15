@@ -66,6 +66,10 @@ module tb_top_signature;
                     cursor++;
                 end
             end
+`ifdef MHBS_SHA2
+            if (dut.core.lane.hash_complete_event) observed_hashes++;
+            if (dut.core.lane.compression_complete_event) observed_permutations++;
+`else
             if (dut.core.lane.permutation_complete) begin
                 observed_permutations++;
                 if (dut.core.lane.running_last) observed_hashes++;
@@ -74,13 +78,20 @@ module tb_top_signature;
                 observed_hashes++;
                 observed_permutations++;
             end
+`endif
         end
     end
 
     initial begin
+`ifdef MHBS_SHA2
+        $readmemh("tb/vectors/sha2/slh_128f/sign/expected.mem", expected);
+        $readmemh("tb/vectors/sha2/slh_128f/sign/message.mem", message);
+        $readmemh("tb/vectors/sha2/slh_128f/sign/meta.mem", metadata);
+`else
         $readmemh("tb/vectors/slh_128f/sign/expected.mem", expected);
         $readmemh("tb/vectors/slh_128f/sign/message.mem", message);
         $readmemh("tb/vectors/slh_128f/sign/meta.mem", metadata);
+`endif
         repeat (5) tick();
         rst = 0;
         while (!done && !error) tick();

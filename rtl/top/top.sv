@@ -8,13 +8,23 @@ module top #(
     parameter [255:0] SECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7,
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
     parameter [255:0] RANDOMIZER=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
+`ifdef MHBS_SHA2
+    parameter [255:0] PUBLIC_ROOT=256'h00000000000000000000000000000000d5e607c63d3f7ff4c22b5b43c2e41109,
+`else
     parameter [255:0] PUBLIC_ROOT=256'h000000000000000000000000000000003d774653892d5f3695b370c7cdab63ff,
+`endif
     parameter [31:0] KEY_INDEX=0,
     parameter [127:0] IDENTIFIER=0,
     parameter [1:0] OPERATION=2'd1,
+`ifdef MHBS_SHA2
+    parameter PROGRAM_INIT_FILE="tb/vectors/sha2/slh_128f/sign/program.mem",
+    parameter TEMPLATE_INIT_FILE="tb/vectors/sha2/slh_128f/sign/template.mem",
+    parameter DESCRIPTOR_INIT_FILE="tb/vectors/sha2/slh_128f/sign/descriptor.mem"
+`else
     parameter PROGRAM_INIT_FILE="tb/vectors/slh_128f/sign/program.mem",
     parameter TEMPLATE_INIT_FILE="tb/vectors/slh_128f/sign/template.mem",
     parameter DESCRIPTOR_INIT_FILE="tb/vectors/slh_128f/sign/descriptor.mem"
+`endif
 )(
 `ifndef SYNTHESIS
     output logic [15:0] error_code,
