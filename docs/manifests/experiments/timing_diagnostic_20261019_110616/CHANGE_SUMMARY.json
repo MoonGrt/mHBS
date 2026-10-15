@@ -1,0 +1,83 @@
+{
+  "candidate": "registered retirement for executor rolling slot allocation",
+  "production_rtl_changed_this_step": [
+    "rtl/executor/executor.sv"
+  ],
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "ec23051de8c19b5de5a0d89b8b4023afecc624485d10a3e70ae624e1f1a49852",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "reference_diagnostic": "timing_diagnostic_20261019_103518",
+  "reference_variant": "baseline",
+  "prior_candidate": "response_scope",
+  "prior_candidate_decision": "rejected",
+  "registers_added": 0,
+  "pipeline_stages_added": 0,
+  "expected_behavior": "Only a just-retired rolling slot is delayed until the following cycle. Other idle slots can still issue on a response edge.",
+  "measurement": {
+    "configuration": "P12U1",
+    "area_top": "common",
+    "period_ns": 10.0,
+    "baseline_reused_with_source_tool_constraint_artifact_checks": true,
+    "diagnostic_only": true,
+    "timing_gain_pending": false
+  },
+  "validation_policy": {
+    "total": 43,
+    "executed": 21,
+    "reused_local_tests": 22,
+    "sign_cases": 15,
+    "hash_permutations_exact": true,
+    "byte_and_signature_cache_exact": true,
+    "cycle_change_reported": true,
+    "p1_cycles_exact": true
+  },
+  "validation_status_source": "VALIDATION_SUMMARY.json",
+  "measurement_status_source": "reports/Timing_Diagnostic_20261019_110616.json",
+  "validation_completed": {
+    "complete": true,
+    "passed": 43,
+    "total": 43,
+    "failed": 0,
+    "elapsed_seconds": 93.3860592842102,
+    "executed_tests": 21,
+    "reused_tests": 22,
+    "source_unchanged": true
+  },
+  "decision": {
+    "status": "rejected_and_reverted",
+    "reason": "User requested rollback. Same-constraint synthesis increased equivalent area and reduced worst setup slack; Sign cycles increased.",
+    "baseline": {
+      "lut": 49421.0,
+      "ff": 24865.0,
+      "bram36": 0.0,
+      "dsp": 0.0,
+      "equivalent_slice": 15463.375,
+      "wns_ns": 3.052,
+      "data_path_ns": 6.73,
+      "logic_levels": 10,
+      "source": "core/task_recipe_reg[58]/C",
+      "destination": "core/batch_issue_phase_reg/CE"
+    },
+    "candidate": {
+      "lut": 49944.0,
+      "ff": 24865.0,
+      "bram36": 0.0,
+      "dsp": 0.0,
+      "equivalent_slice": 15594.125,
+      "wns_ns": 2.86,
+      "data_path_ns": 6.804,
+      "logic_levels": 12,
+      "source": "core/fors_base_reg[5]/C",
+      "destination": "core/continuation_reg[0]/CE"
+    },
+    "restored_executor_sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63",
+    "followup_experiment": "timing_targets_20261019_120529"
+  }
+}

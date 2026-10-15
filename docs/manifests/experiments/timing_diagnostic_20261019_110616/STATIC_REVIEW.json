@@ -1,0 +1,180 @@
+{
+  "kind": "static_rtl_review_with_abstract_one_edge_slot_model",
+  "status": "passed",
+  "created_local": "2026-10-19T11:06:56.584413+08:00",
+  "source_manifest": "sources.txt",
+  "sources_txt_sha256": "6f65bb0751a90ab0462e70d0ff8726c073eb73209651d3375d83e9fc1d862808",
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "ec23051de8c19b5de5a0d89b8b4023afecc624485d10a3e70ae624e1f1a49852",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "baseline_executor": {
+    "path": "build/timing_response_scope_20261019/executor.before.sv",
+    "sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63"
+  },
+  "candidate_executor": {
+    "path": "rtl/executor/executor.sv",
+    "sha256": "ec23051de8c19b5de5a0d89b8b4023afecc624485d10a3e70ae624e1f1a49852"
+  },
+  "exact_edit_check": {
+    "passed": true,
+    "description": "Relative to the pre-qualification executor, only roll_free expression and explanatory comments changed. Prior raw-valid/mode qualification was removed. No recipe source was edited by this candidate."
+  },
+  "checks": [
+    {
+      "name": "same-edge completion and different idle-slot issue",
+      "source": "rtl/executor/executor.sv:800",
+      "result": "Retirement still clears pipe_active[pipe_tag], increments pipe_completed and writes the endpoint using the old per-slot chain index. If another slot was already idle, pipe_selected can still accept there on the same edge. Because the selected slot was idle and the retired slot active, they cannot alias under legal ownership."
+    },
+    {
+      "name": "all slots active",
+      "source": "rtl/executor/executor.sv:173",
+      "result": "roll_free is zero so pipe_selected is false. A valid completion clears its slot on that edge. The slot becomes eligible the following cycle. Final completion can still exit PIPE_ISSUE immediately via the unchanged pipe_valid/completed check."
+    },
+    {
+      "name": "tag ownership and pending intake",
+      "source": "rtl/executor/executor.sv:805",
+      "result": "pipe_active is set on the outer accepted batch request, covering both pending and running recipe contexts. It clears only on the corresponding rolling response. No selected slot overlaps a pending/running context. Recipe busy/pending/retire admission remains unchanged as an additional guard."
+    },
+    {
+      "name": "stall and ordering",
+      "result": "When ready or work is absent, no issue occurs and pipe_next_chain/prefetch do not advance. Different slot choice can change completion order, but each accepted slot records pipe_chain_index and writes back by that recorded index."
+    },
+    {
+      "name": "P1",
+      "source": "rtl/executor/executor.sv:186",
+      "result": "pipe_direct requires PIPELINE>1, so P1 never enables rolling; its scalar execution path and cycles are structurally unaffected."
+    },
+    {
+      "name": "capture behavior",
+      "source": "rtl/executor/executor.sv:970",
+      "result": "Rolling is enabled only for pipe_direct and not (macro_flags[0] && leaf_cursor==target). pipe_direct excludes indexing==1 FORS and all Verify modes. Therefore a rolling chain cannot have batch_capture_enable asserted. Capture batches retain their old nonrolling slot issue/order/readout path. No capture RAM or response consumption logic changed."
+    },
+    {
+      "name": "latency scope",
+      "result": "Only immediate reuse of the just-completed rolling slot is delayed to the next cycle. Existing idle-slot refill remains available. Nonrolling, FORS/L-tree fixed batches and P1 are structurally unchanged; actual full-job cycle changes require RTL simulation."
+    }
+  ],
+  "abstract_model": {
+    "type": "Exhaustive finite one-edge scheduling model for P<=12; selected boundary vectors for P24. Not sequential RTL formal verification.",
+    "assumptions": [
+      "A retirement tag owns an active slot.",
+      "The modeled edge is within active rolling batch mode.",
+      "work and ready are independent Boolean inputs.",
+      "Reset, entering/exiting rolling mode and recipe internals are reviewed separately in source; not modeled as a transition system."
+    ],
+    "transition": "free=~active within P bits; issue=work && ready && any(free); slot=lowest free bit; next_active=(active minus retired bit) plus issued bit.",
+    "properties": [
+      "No issue into a previously active slot",
+      "Retire and issue tags differ if both occur",
+      "Active count changes by issue minus retire",
+      "Existing idle slots permit issue despite a simultaneous completion",
+      "All-active completion becomes eligible next cycle",
+      "No issue when no work or not ready"
+    ],
+    "results": [
+      {
+        "pipeline": 1,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 12,
+        "simultaneous_retire_and_other_slot_issue": 0,
+        "all_busy_retire_cases": 4,
+        "ready_or_work_blocked_cases": 9,
+        "passed": true
+      },
+      {
+        "pipeline": 2,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 32,
+        "simultaneous_retire_and_other_slot_issue": 2,
+        "all_busy_retire_cases": 8,
+        "ready_or_work_blocked_cases": 24,
+        "passed": true
+      },
+      {
+        "pipeline": 3,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 80,
+        "simultaneous_retire_and_other_slot_issue": 9,
+        "all_busy_retire_cases": 12,
+        "ready_or_work_blocked_cases": 60,
+        "passed": true
+      },
+      {
+        "pipeline": 4,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 192,
+        "simultaneous_retire_and_other_slot_issue": 28,
+        "all_busy_retire_cases": 16,
+        "ready_or_work_blocked_cases": 144,
+        "passed": true
+      },
+      {
+        "pipeline": 6,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 1024,
+        "simultaneous_retire_and_other_slot_issue": 186,
+        "all_busy_retire_cases": 24,
+        "ready_or_work_blocked_cases": 768,
+        "passed": true
+      },
+      {
+        "pipeline": 8,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 5120,
+        "simultaneous_retire_and_other_slot_issue": 1016,
+        "all_busy_retire_cases": 32,
+        "ready_or_work_blocked_cases": 3840,
+        "passed": true
+      },
+      {
+        "pipeline": 12,
+        "active_masks": "all",
+        "exhaustive_active_masks": true,
+        "cases": 114688,
+        "simultaneous_retire_and_other_slot_issue": 24564,
+        "all_busy_retire_cases": 48,
+        "ready_or_work_blocked_cases": 86016,
+        "passed": true
+      },
+      {
+        "pipeline": 24,
+        "active_masks": "selected boundary/sparse/dense/alternating masks",
+        "exhaustive_active_masks": false,
+        "cases": 3796,
+        "simultaneous_retire_and_other_slot_issue": 852,
+        "all_busy_retire_cases": 96,
+        "ready_or_work_blocked_cases": 2847,
+        "passed": true
+      }
+    ],
+    "total_cases": 124944,
+    "passed": true
+  },
+  "structural_effect": {
+    "new_registers": 0,
+    "new_ports": 0,
+    "new_pipeline_stages": 0,
+    "single_retired_slot_reuse_deferral_cycles": 1,
+    "note": "This is a local scheduling fact, not a proved additive upper bound on whole-job runtime."
+  },
+  "not_performed": [
+    "No RTL simulation run by this reviewer",
+    "No synthesis or routing",
+    "No sequential equivalence/formal proof",
+    "No claim of measured timing/area benefit"
+  ],
+  "source_unchanged_during_review": true
+}

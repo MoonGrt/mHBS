@@ -1,0 +1,443 @@
+{
+  "kind": "read_only_static_rtl_review",
+  "status": "passed",
+  "created_local": "2026-10-19T10:34:26.083163+08:00",
+  "scope": "Executor-local qualification of the recipe batch response before batch slot scheduling. No recipe handshake logic changed.",
+  "source_manifest": "sources.txt",
+  "sources_txt_sha256": "6f65bb0751a90ab0462e70d0ff8726c073eb73209651d3375d83e9fc1d862808",
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "2294b93fd09e573a912fa083e0ef08292d575bed6bc9fef233c17649c3943f2f",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "baseline_executor": {
+    "path": "build/timing_response_scope_20261019/executor.before.sv",
+    "sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63"
+  },
+  "candidate_executor": {
+    "path": "rtl/executor/executor.sv",
+    "sha256": "2294b93fd09e573a912fa083e0ef08292d575bed6bc9fef233c17649c3943f2f"
+  },
+  "exact_edit_check": {
+    "passed": true,
+    "description": "Baseline executor transforms into current executor using only raw-valid declaration/comment/qualifier insertion and recipe instance output reconnection."
+  },
+  "mode_semantics": {
+    "pipe_mode_states": [
+      "PIPE_ISSUE",
+      "PIPE_WAIT",
+      "PIPE_VERIFY_INPUT",
+      "LT_PIPE_ISSUE",
+      "LT_PIPE_WAIT",
+      "FORS_LEFT",
+      "FORS_ISSUE",
+      "FORS_WAIT"
+    ],
+    "pipeline_guard": "PIPELINE > 1",
+    "ownership": "pipe_mode is registered by enter_state on every state transition, not a live incoming request decode. Existing phase_control_equivalence assertions check its state membership.",
+    "p1": "pipe_mode and existing recipe batch_response_valid both constant 0.",
+    "limitations": "Reasoning assumes reachable state/phase flag consistency. Direct testbench force of only one state register can violate that invariant; no claim of equivalence for such inconsistent forced states."
+  },
+  "consumer_review": [
+    {
+      "source": "rtl/executor/executor.sv:170",
+      "consumer": "roll_free -> roll_slot -> issue_slot -> batch_request_tag / pipe_selected",
+      "guard": "batch_issue_phase or batch_verify_phase implies pipe_mode. If pipe_mode=0, pipe_selected and batch_request_ready are 0. A scalar fixed intake selects incoming_tag=0 independently of issue_slot.",
+      "result": "No accepted request or state update changes outside batch mode."
+    },
+    {
+      "source": "rtl/executor/executor.sv:532",
+      "consumer": "FORS endpoint write",
+      "guard": "fors_leaves or fors_pipe implies pipe_mode, based on enter_state membership sets.",
+      "result": "Qualified and raw response valid are equal in every consuming state."
+    },
+    {
+      "source": "rtl/executor/executor.sv:536",
+      "consumer": "L-tree endpoint write",
+      "guard": "lt_pipe implies pipe_mode; actual write also requires LT_PIPE_WAIT.",
+      "result": "Write enable/data/address semantics preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:539",
+      "consumer": "Direct chain endpoint write",
+      "guard": "Explicit pipe_direct && pipe_mode.",
+      "result": "No functional change."
+    },
+    {
+      "source": "rtl/executor/executor.sv:574",
+      "consumer": "L-tree next read address via lt_batch_complete",
+      "guard": "Only LT_PIPE_WAIT consumes lt_batch_complete here; that state belongs to pipe_mode.",
+      "result": "Read address advance preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:801",
+      "consumer": "Rolling completion / pipe_active / pipe_completed / pipe_chain_index / pipe_next_chain",
+      "guard": "Explicit pipe_rolling && pipe_mode; refill additionally pipe_selected && pipe_ready.",
+      "result": "Same-edge retirement and refill preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:812",
+      "consumer": "pipe_done_mask and standalone-chain node_value",
+      "guard": "Explicit pipe_mode; response update also pipe_response_accept.",
+      "result": "Completion bookkeeping preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:1037",
+      "consumer": "PIPE_ISSUE rolling final completion",
+      "guard": "PIPE_ISSUE belongs to pipe_mode.",
+      "result": "Transition timing preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:1061",
+      "consumer": "PIPE_WAIT batch completion",
+      "guard": "PIPE_WAIT belongs to pipe_mode.",
+      "result": "Transition timing preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:1123",
+      "consumer": "FORS_WAIT batch completion",
+      "guard": "FORS_WAIT belongs to pipe_mode.",
+      "result": "Transition timing preserved."
+    },
+    {
+      "source": "rtl/executor/executor.sv:1241",
+      "consumer": "LT_PIPE_WAIT / LT_COPY layer advance",
+      "guard": "LT_PIPE_WAIT belongs to pipe_mode. In LT_COPY the state==LT_COPY disjunct makes lt_batch_complete irrelevant; subsequent LT_PIPE_WAIT-only branches test state!=LT_COPY.",
+      "result": "Odd-tail copy and layer advance preserved."
+    }
+  ],
+  "boolean_check": {
+    "method": "Exhaustive two-valued truth table",
+    "variables": [
+      "B=batch_mode",
+      "R=bridge_response",
+      "I=(recipe state==IDLE)",
+      "V=request_valid",
+      "F=scalar_fixed"
+    ],
+    "scalar_bridge": "R || (!B && I && V && F)",
+    "left": "B && !scalar_bridge",
+    "right": "B && !R",
+    "cases": 32,
+    "passed": true,
+    "rows_columns": [
+      "B",
+      "R",
+      "I",
+      "V",
+      "F",
+      "left",
+      "right"
+    ],
+    "rows": [
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        1,
+        1,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        0,
+        0,
+        1,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        0,
+        1,
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        0,
+        1,
+        1,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        0,
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        0,
+        1,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        0,
+        1,
+        1
+      ],
+      [
+        1,
+        0,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      [
+        1,
+        1,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        0,
+        1,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        1,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        1,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        1,
+        1,
+        1,
+        1,
+        1,
+        0,
+        0
+      ]
+    ],
+    "implication": "Qualifying the old batch response by the same batch_mode removes combinational dependence on incoming scalar request classification. The recipe interface itself remains unchanged."
+  },
+  "structural_effect": {
+    "new_registers": 0,
+    "new_ports": 0,
+    "new_pipeline_stages": 0,
+    "expected_added_cycles": 0,
+    "status": "Structural/manual reasoning only; cycle equality requires separate simulation evidence."
+  },
+  "not_performed": [
+    "No simulation run by this reviewer",
+    "No synthesis or placement/routing",
+    "No timing or area improvement asserted",
+    "No formal sequential-equivalence proof"
+  ],
+  "source_unchanged_during_review": true
+}

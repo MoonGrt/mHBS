@@ -981,7 +981,8 @@ module recipe #(
                 next_remainder >= stream_node_bytes ? list_cursor + 1'b1 : list_cursor;
             assign list_index1 = list_index0 + 1'b1;
             assign
-                request_ready = state == IDLE && (!scalar_fixed || (!batch_mode && engine_ready));
+                request_ready = state == IDLE && (!scalar_fixed ||
+                    (!batch_mode && request_valid && scalar_capacity));
             assign response_valid = state == RESPONSE || (state == FIXED_WAIT && engine_valid);
 
             // All sponge beats start on an eight-byte boundary. Select two words
@@ -1092,7 +1093,7 @@ module recipe #(
             wire scalar_bridge = bridge_response ||
                 (!batch_mode && state == IDLE && request_valid && scalar_fixed);
             wire engine_mode = batch_mode || scalar_bridge;
-            wire engine_ready, engine_valid;
+            wire engine_valid, scalar_capacity, batch_capacity;
             wire [255:0] engine_digest, engine_capture;
             wire [3:0] scalar_shape = request_recipe[59:56];
             wire scalar_fixed = RECIPE_MASK[scalar_shape] &&
@@ -1104,15 +1105,13 @@ module recipe #(
             wire [1:0] scalar_family = (scalar_shape == 1 || scalar_shape == 2) ?
                 2'd0 : (scalar_shape == 9 || scalar_shape == 10 || scalar_shape == 14 ||
                         scalar_shape == 15) ? 2'd2 : 2'd1;
-            assign batch_request_ready = engine_ready && !scalar_bridge;
+            assign batch_request_ready = batch_mode && !bridge_response && batch_capacity;
             assign batch_response_valid = engine_valid && !scalar_bridge;
             assign batch_read_digest = engine_digest;
             assign batch_read_capture = engine_capture;
             begin : fixed_context
                 // Scalar tag 0 and batch tags share these contexts and the
                 // existing Keccak datapath. Aliases preserve the former port widths.
-                wire incoming_valid = scalar_bridge ? state == IDLE && request_valid :
-                    batch_request_valid;
                 wire [TAG_BITS-1:0]
                     incoming_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
                 wire [4:0] incoming_steps = scalar_bridge ?
@@ -1159,7 +1158,6 @@ module recipe #(
                 logic [63:0] ctx_request_tree;
                 wire ctx_request_valid = pending_valid;
                 wire ctx_request_ready;
-                wire incoming_ready;
                 wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
                 wire [255:0] ctx_read_digest;
                 wire [255:0] ctx_read_capture;
@@ -1179,7 +1177,6 @@ module recipe #(
                 assign batch_hashes = ctx_hash_count;
                 assign batch_permutations = ctx_permutation_count;
 `endif
-                assign engine_ready = incoming_ready;
                 assign engine_valid = ctx_response_valid;
                 assign engine_digest = ctx_read_digest;
                 assign engine_capture = ctx_read_capture;
@@ -1280,22 +1277,46 @@ module recipe #(
                 wire accept = ctx_request_valid && ctx_request_ready;
                 // Reserve the pending tag before its context becomes busy. A retired
                 // context may be refilled on the same edge, but a queued tag may not.
-                // Check the scalar slot and batch slot in parallel; selecting a
-                // one-bit availability avoids scalar_bridge -> tag mux -> busy
-                // lookup on the caller's ready path. Only the existing busy bits
-                // are read; no node-data bank is replicated.
-                wire retire = ctx_response_valid && ctx_response_ready;
+                // Determine capacity independently of the request's recipe/mode.
+                // Scalar intake occurs only in IDLE, where no scalar response can
+                // retire. Batch intake uses its own response handshake for refill.
+                // Mode selection is applied once, at the public ready outputs.
+                wire queue_open = !rst && (!pending_valid || (!again && ready));
+                wire batch_retire = ctx_response_valid && batch_response_ready;
                 wire scalar_slot_available =
-                    (!busy[0] || (retire && ctx_response_tag == TAG_BITS'(0))) &&
+                    !busy[0] &&
                     (!pending_valid || ctx_request_tag != TAG_BITS'(0));
                 wire batch_slot_available = batch_request_tag < PIPELINE &&
-                    (!busy[batch_request_tag] || (retire && ctx_response_tag == batch_request_tag)) &&
+                    (!busy[batch_request_tag] || (batch_retire && ctx_response_tag == batch_request_tag)) &&
                     (!pending_valid || ctx_request_tag != batch_request_tag);
-                wire incoming_slot_available = scalar_bridge ?
-                    scalar_slot_available : batch_slot_available;
-                assign incoming_ready = !rst && engine_mode && (!pending_valid || accept) &&
-                    incoming_slot_available;
-                wire receive = incoming_valid && incoming_ready;
+                assign scalar_capacity = queue_open && scalar_slot_available;
+                assign batch_capacity = queue_open && batch_slot_available;
+                wire receive = (state == IDLE && request_valid && scalar_fixed &&
+                    !batch_mode && scalar_capacity) || (batch_request_valid && batch_request_ready);
+`ifndef SYNTHESIS
+                // Preserve even ready-without-valid behavior while changing the
+                // combinational factoring. These observers are absent in hardware.
+                wire old_retire = ctx_response_valid && ctx_response_ready;
+                wire old_scalar_slot = (!busy[0] || (old_retire && ctx_response_tag == 0)) &&
+                    (!pending_valid || ctx_request_tag != 0);
+                wire old_batch_slot = batch_request_tag < PIPELINE &&
+                    (!busy[batch_request_tag] || (old_retire && ctx_response_tag == batch_request_tag)) &&
+                    (!pending_valid || ctx_request_tag != batch_request_tag);
+                wire old_ready = !rst && engine_mode && (!pending_valid || accept) &&
+                    (scalar_bridge ? old_scalar_slot : old_batch_slot);
+                wire old_valid = scalar_bridge ? state == IDLE && request_valid : batch_request_valid;
+                always @(posedge clk) begin : debug_intake_equivalence
+                    if (!rst) begin
+                        if (request_ready !== (state == IDLE &&
+                            (!scalar_fixed || (!batch_mode && old_ready))))
+                            $fatal(1, "scalar intake ready changed");
+                        if (batch_request_ready !== (old_ready && !scalar_bridge))
+                            $fatal(1, "batch intake ready changed");
+                        if (receive !== (old_valid && old_ready))
+                            $fatal(1, "context intake handshake changed");
+                    end
+                end
+`endif
                 always_ff @(posedge clk) begin
                     if (rst) pending_valid <= 0;
                     else begin
@@ -1657,8 +1678,21 @@ module recipe #(
             logic [4:0] stage_base[0:PIPELINE-1];
             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
             logic sent;
-            wire recycle = stage_valid[PIPELINE-1] &&
-                stage_base[PIPELINE-1] + ROUNDS < 24;
+            // The penultimate stage already knows whether this traversal is the
+            // last. Register that decision alongside the final stage's metadata,
+            // before it drives the 1600-bit loop mux and first Keccak round.
+            logic recycle;
+            always_ff @(posedge clk)
+                if (rst) recycle <= 0;
+                else recycle <= stage_valid[PIPELINE-2] &&
+                    stage_base[PIPELINE-2] + ROUNDS < 24;
+`ifndef SYNTHESIS
+            always @(posedge clk) begin : debug_recycle_equivalence
+                if (!rst && recycle !== (stage_valid[PIPELINE-1] &&
+                    stage_base[PIPELINE-1] + ROUNDS < 24))
+                    $fatal(1, "registered recycle decision changed");
+            end
+`endif
             wire ready = !rst && !recycle;
             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
             wire normal_valid = hash_state == HASH_RUN && !sent;

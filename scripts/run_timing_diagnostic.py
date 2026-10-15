@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Freeze two P12U1 variants and diagnose paths with a relaxed 50 ns clock."""
+"""Freeze two P12U1 variants and diagnose paths with a configurable relaxed clock."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
@@ -29,6 +30,13 @@ def now():
 
 def sha(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def clock_period(value):
+    period = float(value)
+    if not math.isfinite(period) or period <= 0:
+        raise ValueError('Clock period must be finite and positive')
+    return period
 
 
 def write(path, data):
@@ -58,13 +66,13 @@ def freeze(source, destination, expected=None):
     return hashes
 
 
-def reusable_baseline(run, variant, vivado_version=None):
+def reusable_baseline(run, variant, period_ns, vivado_version=None):
     """Reuse only measured artifacts tied to the original frozen diagnostic RTL."""
     meta = json.loads((run/'SOURCE.json').read_text())
     state = json.loads((run/'status.json').read_text())
-    if (meta.get('configuration') != 'P12U1' or meta.get('period_ns') != 50.0
+    if (meta.get('configuration') != 'P12U1' or meta.get('period_ns') != period_ns
             or meta.get('part') != 'xc7a200tffg1156-3' or meta.get('area_top') != 'common'):
-        raise ValueError('Reusable baseline must be common P12U1 at 50 ns on the same device')
+        raise ValueError(f'Reusable baseline must be common P12U1 at {period_ns:g} ns on the same device')
     if vivado_version is not None and meta.get('vivado_version') != vivado_version:
         raise ValueError('Reusable baseline Vivado version differs')
     spec = meta['variants'][variant]
@@ -88,9 +96,10 @@ def reusable_baseline(run, variant, vivado_version=None):
             raise ValueError(f'Reusable baseline artifact checksum mismatch: {name}')
         files[name] = checksum
     settings = dict(line.split('=', 1) for line in (output/'settings.txt').read_text().splitlines() if '=' in line)
-    if any(settings.get(key) != value for key, value in
-           {'PIPELINE': '12', 'UNROLL': '1', 'period_ns': '50.0', 'threads': '2',
-            'mode': 'out_of_context', 'timing_driven': 'default', 'new_timing_exceptions': 'none'}.items()):
+    if (clock_period(settings.get('period_ns', 'nan')) != period_ns or
+            any(settings.get(key) != value for key, value in
+           {'PIPELINE': '12', 'UNROLL': '1', 'threads': '2',
+            'mode': 'out_of_context', 'timing_driven': 'default', 'new_timing_exceptions': 'none'}.items())):
         raise ValueError('Reusable baseline synthesis settings differ')
     if utilization(output/'utilization.rpt') != task.get('area') or timing(output/'timing.rpt') != task.get('timing'):
         raise ValueError('Reusable baseline reports disagree with its recorded measurements')
@@ -183,13 +192,15 @@ class Runner:
     def __init__(self, run):
         self.run = run
         self.meta = json.loads((run/'SOURCE.json').read_text())
+        # Existing experiments always retain their recorded clock, regardless of CLI defaults.
+        self.period_ns = clock_period(self.meta['period_ns'])
         self.out = Path(self.meta['archive_directory'])
         self.lock = threading.Lock()
         self.capacity_lock = threading.Lock()
         self.slots = 0
         self.state = dict(schema='mhbs.timing_diagnostic.results.v1', started_at=now(),
                           updated_at=now(), pid=os.getpid(), complete=False, diagnostic_only=True,
-                          configuration='P12U1', period_ns=50.0, threads_per_vivado=2,
+                          configuration='P12U1', period_ns=self.period_ns, threads_per_vivado=2,
                           maximum_own_vivado=2, max_observed_main_vivado=0,
                           no_simulation_launched=True, no_routing_launched=True,
                           candidate_full_sign_measured=False,
@@ -235,7 +246,7 @@ class Runner:
         write(prefix.with_suffix('.json'), dict(source=self.meta, results=self.state, validation=validation))
         lines = ['# P12U1 低频综合关键路径诊断', '',
                  f'更新时间：{self.state["updated_at"]}；状态：{"结束" if self.state["complete"] else "后台运行"}。', '',
-                 f'两版本均使用 common、xc7a200tffg1156-3、P12U1、50 ns（20 MHz）诊断约束、默认时序驱动综合和通用 Keccak；每个 Vivado 两线程，本次最多{self.state["maximum_own_vivado"]}个新综合并发，全机主 Vivado 达到12个时等待。未启动仿真或布局布线。', '',
+                 f'两版本均使用 common、xc7a200tffg1156-3、P12U1、{self.period_ns:g} ns（{1000/self.period_ns:g} MHz）诊断约束、默认时序驱动综合和通用 Keccak；每个 Vivado 两线程，本次最多{self.state["maximum_own_vivado"]}个新综合并发，全机主 Vivado 达到12个时等待。未启动仿真或布局布线。', '',
                  '**本次只定位组合路径和比较低频综合映射；面积、WNS不能作为原高频约束的验收结果，不计算频率上限或ATP。** '+sign_note, '',
                  '| 版本 | LUT | FF | 等效 Slice | WNS ns | 数据路径 ns | 逻辑级数 | 综合耗时 s | 状态 |',
                  '|---|---:|---:|---:|---:|---:|---:|---:|---|']
@@ -317,7 +328,7 @@ class Runner:
             output.mkdir(parents=True, exist_ok=True)
             command = [self.meta['vivado'], '-mode', 'batch', '-nolog', '-nojournal', '-notrace',
                        '-source', str(source/'scripts/diagnose_timing.tcl'), '-tclargs',
-                       str(source), '12', '1', str(output), '50.0']
+                       str(source), '12', '1', str(output), str(self.period_ns)]
             start = time.monotonic()
             with (output/'vivado.log').open('w') as log:
                 process = subprocess.Popen(command, cwd=output, stdin=subprocess.DEVNULL, stdout=log,
@@ -329,7 +340,8 @@ class Runner:
                     except subprocess.TimeoutExpired:
                         self.update(name, seconds=time.monotonic()-start,
                                     analysis_deferred=time.monotonic()-start >= 600)
-            if process.returncode or 'MHBS_TIMING_DIAGNOSTIC_PASS P12U1 period_ns=50.0' not in (output/'vivado.log').read_text(errors='replace'):
+            marker = f'MHBS_TIMING_DIAGNOSTIC_PASS P12U1 period_ns={self.period_ns}'
+            if process.returncode or marker not in (output/'vivado.log').read_text(errors='replace').splitlines():
                 raise RuntimeError(f'Vivado exit {process.returncode}; see {output / "vivado.log"}')
             unchanged = all(sha(source/path) == value for path, value in spec['sha256'].items())
             if not unchanged:
@@ -370,12 +382,13 @@ def launch(args):
     if not vivado:
         raise RuntimeError('Vivado is required')
     version = subprocess.check_output([vivado, '-version'], text=True).strip()
-    reused = reusable_baseline(args.baseline_diagnostic.resolve(), args.baseline_variant, version) if args.baseline_diagnostic else None
+    reused = reusable_baseline(args.baseline_diagnostic.resolve(), args.baseline_variant,
+                               args.period_ns, version) if args.baseline_diagnostic else None
     baseline = Path(reused['source_root']) if reused else args.baseline_source.resolve()
     baseline_manifest = (args.baseline_diagnostic.resolve()/'SOURCE.json' if reused else baseline.parent/'SOURCE.json')
     baseline_hashes = reused['sha256'] if reused else json.loads(baseline_manifest.read_text())['sha256']
     meta = dict(schema='mhbs.timing_diagnostic.source.v1', run_id=run_id, started_at=now(),
-                diagnostic_only=True, configuration='P12U1', period_ns=50.0,
+                diagnostic_only=True, configuration='P12U1', period_ns=args.period_ns,
                 part='xc7a200tffg1156-3', area_top='common', vivado=vivado,
                 vivado_version=version,
                 archive_directory=str(out), baseline_manifest=str(baseline_manifest),
@@ -436,9 +449,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--launch', action='store_true')
     parser.add_argument('--run-root', type=Path)
+    parser.add_argument('--period-ns', type=clock_period, default=10.0,
+                        help='Clock period for a new experiment (default: 10 ns / 100 MHz); --run-root uses its frozen SOURCE.json')
     parser.add_argument('--baseline-source', type=Path, default=ROOT/'build/pu_sign_matrix/20261015_152159/source')
     parser.add_argument('--baseline-diagnostic', type=Path,
-                        help='Reuse a completed same-source P12U1/50ns diagnostic baseline; no baseline synthesis launched')
+                        help='Reuse a completed P12U1 diagnostic at the same clock period; no baseline synthesis launched')
     parser.add_argument('--baseline-variant', choices=('baseline', 'candidate'), default='candidate')
     parser.add_argument('--validation', type=Path, default=ROOT/'build/timing_latency_20261015/ready_simplify/VALIDATION.json')
     parser.add_argument('--attach-sign-validation', type=Path,

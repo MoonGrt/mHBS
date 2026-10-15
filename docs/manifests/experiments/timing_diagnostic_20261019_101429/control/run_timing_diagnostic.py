@@ -1,0 +1,470 @@
+#!/usr/bin/env python3
+"""Freeze two P12U1 variants and diagnose paths with a relaxed 50 ns clock."""
+import argparse
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+import hashlib
+import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from zoneinfo import ZoneInfo
+
+ROOT = Path(os.environ.get('MHBS_DIAGNOSTIC_WORKSPACE', Path(__file__).resolve().parents[1])).resolve()
+import experiment_archive as archive
+from run_pu_sign_matrix import utilization
+from report_timing_focus import timing
+
+archive.ROOT = ROOT
+archive.ARCHIVES = ROOT/'docs/manifests/experiments'
+
+
+def now():
+    return datetime.now(ZoneInfo('Asia/Singapore')).isoformat(timespec='seconds')
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def write(path, data):
+    archive.atomic(Path(path), json.dumps(data, ensure_ascii=False, indent=2)+'\n')
+
+
+def live_vivado():
+    lines = subprocess.check_output(['ps', '-eo', 'comm=,args='], text=True).splitlines()
+    return [fields[1] for line in lines if len(fields := line.split(None, 1)) == 2
+            and fields[0] == 'vivado' and '/bin/unwrapped/lnx64.o/vivado -mode batch' in fields[1]]
+
+
+def freeze(source, destination, expected=None):
+    names = [name.strip() for name in (source/'sources.txt').read_text().splitlines() if name.strip()]
+    hashes = {}
+    for name in [*names, 'sources.txt', 'scripts/diagnose_timing.tcl']:
+        origin = ROOT/name if name == 'scripts/diagnose_timing.tcl' else source/name
+        before = sha(origin)
+        if expected and name != 'scripts/diagnose_timing.tcl' and expected.get(name) != before:
+            raise ValueError(f'Baseline source checksum mismatch: {name}')
+        target = destination/name
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(origin, target)
+        if sha(origin) != before or sha(target) != before:
+            raise RuntimeError(f'Source changed while freezing {name}')
+        hashes[name] = before
+    return hashes
+
+
+def reusable_baseline(run, variant, vivado_version=None):
+    """Reuse only measured artifacts tied to the original frozen diagnostic RTL."""
+    meta = json.loads((run/'SOURCE.json').read_text())
+    state = json.loads((run/'status.json').read_text())
+    if (meta.get('configuration') != 'P12U1' or meta.get('period_ns') != 50.0
+            or meta.get('part') != 'xc7a200tffg1156-3' or meta.get('area_top') != 'common'):
+        raise ValueError('Reusable baseline must be common P12U1 at 50 ns on the same device')
+    if vivado_version is not None and meta.get('vivado_version') != vivado_version:
+        raise ValueError('Reusable baseline Vivado version differs')
+    spec = meta['variants'][variant]
+    task = state['variants'][variant]
+    source = Path(spec['source_root'])
+    if task.get('status') != 'passed' or not task.get('source_unchanged'):
+        raise ValueError('Reusable baseline synthesis has not passed its source audit')
+    if not all(sha(source/name) == checksum for name, checksum in spec['sha256'].items()):
+        raise ValueError('Reusable baseline frozen source checksum mismatch')
+    if spec['sha256'].get('scripts/diagnose_timing.tcl') != sha(ROOT/'scripts/diagnose_timing.tcl'):
+        raise ValueError('Diagnostic Tcl differs; baseline must be synthesized again')
+    output = source.parent/'synth/P12U1/common'
+    artifact_hashes = json.loads((Path(meta['archive_directory'])/'ARTIFACTS.json').read_text())['sha256']
+    files = {}
+    for name in ('utilization.rpt', 'hierarchical.rpt', 'timing.rpt', 'critical_paths.rpt',
+                 'settings.txt', 'diagnostic_clock.xdc', 'vivado.log', 'synthesized.dcp'):
+        checksum = sha(output/name)
+        expected = (task.get('checkpoint_sha256') if name == 'synthesized.dcp'
+                    else artifact_hashes.get(f'{variant}/synth/P12U1/common/{name}'))
+        if checksum != expected:
+            raise ValueError(f'Reusable baseline artifact checksum mismatch: {name}')
+        files[name] = checksum
+    settings = dict(line.split('=', 1) for line in (output/'settings.txt').read_text().splitlines() if '=' in line)
+    if any(settings.get(key) != value for key, value in
+           {'PIPELINE': '12', 'UNROLL': '1', 'period_ns': '50.0', 'threads': '2',
+            'mode': 'out_of_context', 'timing_driven': 'default', 'new_timing_exceptions': 'none'}.items()):
+        raise ValueError('Reusable baseline synthesis settings differ')
+    if utilization(output/'utilization.rpt') != task.get('area') or timing(output/'timing.rpt') != task.get('timing'):
+        raise ValueError('Reusable baseline reports disagree with its recorded measurements')
+    return dict(diagnostic_root=str(run), variant=variant, source_root=str(source),
+                source_manifest_sha256=sha(run/'SOURCE.json'), status_sha256=sha(run/'status.json'),
+                output=str(output), sha256=spec['sha256'], artifact_sha256=files, measurement=task)
+
+
+def full_sign_summary(path, candidate):
+    data = json.loads(path.read_text())
+    tests = data.get('tests', [])
+    if (not data.get('complete') or data.get('status') != 'passed' or data.get('failed') != 0
+            or not tests or data.get('passed') != len(tests) or not data.get('source_unchanged')
+            or data.get('recipe_sha256') != candidate['sha256']['rtl/hash/recipe.sv']
+            or any(not case.get('passed') or case.get('operation') != 'sign' for case in tests)):
+        raise ValueError('Complete Sign evidence did not pass or belongs to another candidate')
+    manifest = Path(data['source_manifest'])
+    if sha(manifest) != data['source_manifest_sha256']:
+        raise ValueError('Complete Sign source manifest checksum mismatch')
+    source_meta = json.loads(manifest.read_text())
+    source = Path(source_meta['source_root'])
+    for name, checksum in candidate['sha256'].items():
+        if name.startswith('rtl/') or name == 'sources.txt':
+            if source_meta['sha256'].get(name) != checksum or sha(source/name) != checksum:
+                raise ValueError(f'Complete Sign frozen RTL differs: {name}')
+    for case in tests:
+        for log in case.get('logs', []):
+            if sha(Path(log['path'])) != log['sha256']:
+                raise ValueError('Complete Sign log checksum mismatch')
+    return dict(source_validation=str(path.resolve()), validation_sha256=sha(path),
+                source_manifest=str(manifest), source_manifest_sha256=sha(manifest),
+                recipe_sha256=data['recipe_sha256'], passed=len(tests), failed=0,
+                source_unchanged=True, all_counts_equal_baseline=data.get('all_counts_equal_baseline'),
+                scope=data.get('validation_scope'),
+                tests=[{key: case[key] for key in ('configuration', 'profile', 'operation', 'passed',
+                       'counts_equal_baseline', 'metrics', 'baseline_metrics') if key in case} for case in tests])
+
+
+def candidate_validation(path, candidate):
+    data = json.loads(path.read_text())
+    recipe = data.get('candidate_recipe_sha256', data.get('recipe_sha256'))
+    expected_rtl = {name: checksum for name, checksum in candidate['sha256'].items() if name.startswith('rtl/')}
+    verified = False
+    if 'rtl_sha256' in data:
+        supplied = data['rtl_sha256']
+        if not isinstance(supplied, dict) or supplied != expected_rtl:
+            raise ValueError('Validation complete RTL SHA set differs from frozen candidate')
+        verified = True
+        recipe = recipe or supplied.get('rtl/hash/recipe.sv')
+    if recipe != expected_rtl['rtl/hash/recipe.sv']:
+        raise ValueError('Validation recipe SHA does not match the frozen candidate')
+    if data.get('source_unchanged') is False or data.get('source_mismatches'):
+        raise ValueError('Validation reports changed source files')
+    if data.get('source_manifest'):
+        manifest = Path(data['source_manifest'])
+        if sha(manifest) != data.get('source_manifest_sha256'):
+            raise ValueError('Validation source manifest checksum mismatch')
+        source_meta = json.loads(manifest.read_text())
+        for name, checksum in candidate['sha256'].items():
+            if name.startswith('rtl/') or name == 'sources.txt':
+                if source_meta['sha256'].get(name) != checksum:
+                    raise ValueError(f'Validation source differs from candidate: {name}')
+        verified = True
+    tests = data.get('tests', [])
+    complete = data.get('complete', data.get('passed') is True)
+    failed = data.get('failed', sum(case.get('passed') is False for case in tests))
+    status = ('failed' if failed or data.get('status') == 'failed'
+              else 'passed' if complete and verified else 'pending')
+    summary = dict(data)
+    summary.update(source_validation=str(path.resolve()), validation_sha256=sha(path),
+                   candidate_recipe_sha256=recipe, candidate_source_sha256=candidate['sha256'],
+                   complete=complete, status=status,
+                   source_verified=verified, source_binding='complete_rtl' if verified else 'recipe_only',
+                   reported_passed=data.get('passed'), passed=data.get('passed') if verified else 0, failed=failed,
+                   total=data.get('total', len(tests)),
+                   scope=data.get('validation_scope', 'Local recipe/chain-control validation; no complete Sign evidence attached'),
+                   tests=[{key: value for key, value in case.items() if key not in ('logs', 'command')}
+                          for case in tests])
+    return summary
+
+
+def sign_sample(metrics):
+    """Accept dict/list metrics only when they identify one Sign sample."""
+    records = [metrics] if isinstance(metrics, dict) else metrics if isinstance(metrics, list) else []
+    signs = [record for record in records if isinstance(record, dict) and record.get('operation', 1) == 1]
+    return signs[0] if len(signs) == 1 else {}
+
+
+class Runner:
+    def __init__(self, run):
+        self.run = run
+        self.meta = json.loads((run/'SOURCE.json').read_text())
+        self.out = Path(self.meta['archive_directory'])
+        self.lock = threading.Lock()
+        self.capacity_lock = threading.Lock()
+        self.slots = 0
+        self.state = dict(schema='mhbs.timing_diagnostic.results.v1', started_at=now(),
+                          updated_at=now(), pid=os.getpid(), complete=False, diagnostic_only=True,
+                          configuration='P12U1', period_ns=50.0, threads_per_vivado=2,
+                          maximum_own_vivado=2, max_observed_main_vivado=0,
+                          no_simulation_launched=True, no_routing_launched=True,
+                          candidate_full_sign_measured=False,
+                          variants={name: dict(status='waiting_for_capacity') for name in self.meta['variants']})
+        for name, spec in self.meta['variants'].items():
+            if spec.get('reused_synthesis'):
+                self.state['variants'][name] = dict(spec['reused_synthesis']['measurement'],
+                    reused_synthesis=True, new_synthesis_seconds=0.0,
+                    reused_from=spec['reused_synthesis']['diagnostic_root']+'/'+spec['reused_synthesis']['variant'])
+        self.state['maximum_own_vivado'] = sum(t['status'] != 'passed' for t in self.state['variants'].values())
+
+    def publish(self, archive_only=False):
+        self.state['updated_at'] = now()
+        prefix = self.out/'reports'/('Timing_Diagnostic_'+self.meta['run_id'])
+        fmt = lambda value, digits=3: '—' if value is None else f'{value:,.{digits}f}'
+        validation = json.loads((self.out/'VALIDATION_SUMMARY.json').read_text())
+        if self.meta.get('validation_source'):
+            try:
+                refreshed = candidate_validation(Path(self.meta['validation_source']), self.meta['variants']['candidate'])
+                if validation.get('full_sign'):
+                    refreshed['full_sign'] = validation['full_sign']
+                validation = refreshed
+            except OSError as error:
+                validation = dict(validation, status='pending', source_verified=False, passed=0, refresh_error=str(error))
+            except (ValueError, KeyError) as error:
+                validation = dict(validation, status='source_mismatch', source_verified=False, passed=0, refresh_error=str(error))
+            write(self.out/'VALIDATION_SUMMARY.json', validation)
+        source_verified = validation.get('source_verified', bool(validation.get('full_sign')))
+        sign = validation.get('full_sign') if source_verified else None
+        sign_configs = '/'.join(sorted({case['configuration'] for case in sign['tests']})) if sign else ''
+        sign_note = (f'已补充同一候选冻结RTL的完整 Sign 实测：{sign_configs}，{sign["passed"]} 项全通过；'
+                     + ('周期、总周期、Hash/置换计数与对应基线逐项相同。' if sign.get('all_counts_equal_baseline') else '周期及工作量详见验证摘要。')
+                     if sign else f'候选验证状态：{validation.get("status", "见摘要")}；'
+                     f'通过数 {validation.get("passed", "未知")} / {validation.get("total", "未知")}。'
+                     '仅按验证摘要已完成项报告，周期增幅及Hash/置换计数逐项列出，不预先假定周期一致。')
+        measured_signs = [case for case in validation.get('tests', [])
+                          if source_verified and case.get('kind') == 'sign' and case.get('passed')]
+        self.state['candidate_full_sign_measured'] = bool(sign or measured_signs)
+        # The launch-time SOURCE.json remains immutable when later evidence is attached.
+        if not archive_only:
+            write(self.run/'status.json', self.state)
+        write(self.out/'status.json', self.state)
+        write(prefix.with_suffix('.json'), dict(source=self.meta, results=self.state, validation=validation))
+        lines = ['# P12U1 低频综合关键路径诊断', '',
+                 f'更新时间：{self.state["updated_at"]}；状态：{"结束" if self.state["complete"] else "后台运行"}。', '',
+                 f'两版本均使用 common、xc7a200tffg1156-3、P12U1、50 ns（20 MHz）诊断约束、默认时序驱动综合和通用 Keccak；每个 Vivado 两线程，本次最多{self.state["maximum_own_vivado"]}个新综合并发，全机主 Vivado 达到12个时等待。未启动仿真或布局布线。', '',
+                 '**本次只定位组合路径和比较低频综合映射；面积、WNS不能作为原高频约束的验收结果，不计算频率上限或ATP。** '+sign_note, '',
+                 '| 版本 | LUT | FF | 等效 Slice | WNS ns | 数据路径 ns | 逻辑级数 | 综合耗时 s | 状态 |',
+                 '|---|---:|---:|---:|---:|---:|---:|---:|---|']
+        for name, task in self.state['variants'].items():
+            area, path = task.get('area', {}), task.get('timing', {})
+            status = task['status'] + ('；分析延后，综合继续后台' if task.get('analysis_deferred') else '')
+            if task.get('reused_synthesis'):
+                status += '；复用已校验结果（本轮未重跑）'
+            lines.append('| '+' | '.join([name, fmt(area.get('lut'), 0), fmt(area.get('ff'), 0),
+                fmt(area.get('equivalent_slice')), fmt(path.get('wns_ns')), fmt(path.get('data_path_ns')),
+                fmt(path.get('logic_levels'), 0), fmt(task.get('seconds'), 1), status])+' |')
+        lines += ['', '## 关键路径', '']
+        for name, task in self.state['variants'].items():
+            path = task.get('timing', {})
+            lines += [f'- **{name}**：`{path.get("source", "待综合完成")}` → `{path.get("destination", "待综合完成")}`。']
+            if task.get('error'):
+                lines += [f'  错误：{task["error"]}']
+            if task.get('reused_synthesis'):
+                lines += [f'  复用来源：`{task["reused_from"]}`；耗时列为原始测量耗时，本轮新增综合耗时为0。']
+        if measured_signs:
+            lines += ['', '## 本轮候选已完成 Sign 验证', '',
+                      '| 测试 | 基线周期 | 实测周期 | 周期增加 | 增幅 % | Hash/置换相同 |',
+                      '|---|---:|---:|---:|---:|---|']
+            for case in measured_signs:
+                sample = sign_sample(case.get('metrics'))
+                reference = sign_sample(case.get('baseline_metrics'))
+                old_cycles, new_cycles = reference.get('cycles'), sample.get('cycles')
+                delta = new_cycles-old_cycles if old_cycles is not None and new_cycles is not None else None
+                percent = delta/old_cycles*100 if delta is not None and old_cycles else None
+                workload_known = all(row.get(key) is not None for row in (sample, reference)
+                                     for key in ('hashes', 'permutations'))
+                workload_equal = (all(sample[key] == reference[key] for key in ('hashes', 'permutations'))
+                                  if workload_known else '待测')
+                lines.append('| '+' | '.join([case.get('name', '—'),
+                    fmt(old_cycles, 0), fmt(new_cycles, 0), fmt(delta, 0), fmt(percent),
+                    str(workload_equal)])+' |')
+        lines += ['', '每版目录保存冻结RTL压缩包、SOURCE.json逐文件SHA、综合日志、hierarchical.rpt、timing.rpt和前20条关键路径报告。缺项在ARTIFACTS.json明确列出，后台完成后自动补齐；原始DCP留在build运行目录。', '',
+                  f'运行目录：`{self.run}`。', '']
+        archive.atomic(prefix.with_suffix('.md'), '\n'.join(lines))
+        missing = {}
+        for name, spec in self.meta['variants'].items():
+            base = self.run/name/'synth/P12U1/common'
+            dest = self.out/name/'synth/P12U1/common'
+            for path in base.glob('*'):
+                if path.is_file() and path.suffix in ('.rpt', '.log', '.json', '.txt', '.xdc'):
+                    archive.copy_changed(path, dest/path.name)
+            missing[name] = [file for file in ('hierarchical.rpt', 'timing.rpt', 'critical_paths.rpt', 'vivado.log')
+                             if not (dest/file).exists()]
+        if (self.run/'runner.log').exists():
+            archive.copy_changed(self.run/'runner.log', self.out/'runner.log')
+        checks = {str(path.relative_to(self.out)): sha(path) for path in self.out.rglob('*')
+                  if path.is_file() and path.name != 'ARTIFACTS.json' and not path.name.endswith('.tmp')}
+        write(self.out/'ARTIFACTS.json', dict(updated_at=now(), complete=self.state['complete'],
+              missing=missing, omitted_details=['sim', 'validation'], sha256=checks))
+        archive.index()
+
+    def update(self, name, **values):
+        with self.lock:
+            self.state['variants'][name].update(values)
+            self.state['max_observed_main_vivado'] = max(self.state['max_observed_main_vivado'], len(live_vivado()))
+            self.publish()
+
+    def reserve(self):
+        while True:
+            with self.capacity_lock:
+                commands = live_vivado()
+                outside = sum(str(self.run) not in command for command in commands)
+                if len(commands) < 12 and outside+self.slots < 12:
+                    self.slots += 1
+                    return
+            time.sleep(3)
+
+    def execute_one(self, name):
+        self.reserve()
+        try:
+            spec = self.meta['variants'][name]
+            source = Path(spec['source_root'])
+            output = self.run/name/'synth/P12U1/common'
+            output.mkdir(parents=True, exist_ok=True)
+            command = [self.meta['vivado'], '-mode', 'batch', '-nolog', '-nojournal', '-notrace',
+                       '-source', str(source/'scripts/diagnose_timing.tcl'), '-tclargs',
+                       str(source), '12', '1', str(output), '50.0']
+            start = time.monotonic()
+            with (output/'vivado.log').open('w') as log:
+                process = subprocess.Popen(command, cwd=output, stdin=subprocess.DEVNULL, stdout=log,
+                                           stderr=subprocess.STDOUT, start_new_session=True)
+                self.update(name, status='running', pid=process.pid, started_at=now(), command=command)
+                while process.poll() is None:
+                    try:
+                        process.wait(timeout=30)
+                    except subprocess.TimeoutExpired:
+                        self.update(name, seconds=time.monotonic()-start,
+                                    analysis_deferred=time.monotonic()-start >= 600)
+            if process.returncode or 'MHBS_TIMING_DIAGNOSTIC_PASS P12U1 period_ns=50.0' not in (output/'vivado.log').read_text(errors='replace'):
+                raise RuntimeError(f'Vivado exit {process.returncode}; see {output / "vivado.log"}')
+            unchanged = all(sha(source/path) == value for path, value in spec['sha256'].items())
+            if not unchanged:
+                raise RuntimeError('Frozen diagnostic source changed')
+            self.update(name, status='passed', seconds=time.monotonic()-start, finished_at=now(),
+                        area=utilization(output/'utilization.rpt'), timing=timing(output/'timing.rpt'),
+                        source_unchanged=True, analysis_deferred=False,
+                        checkpoint_sha256=sha(output/'synthesized.dcp'))
+        except Exception as error:
+            self.update(name, status='failed', finished_at=now(), error=str(error))
+        finally:
+            with self.capacity_lock:
+                self.slots -= 1
+
+    def execute(self):
+        with self.lock:
+            self.publish()
+        write(self.run/'INITIAL_PUBLICATION.json', dict(completed_at=now(), pid=os.getpid()))
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            list(pool.map(self.execute_one, [name for name, task in self.state['variants'].items()
+                                           if task['status'] != 'passed']))
+        with self.lock:
+            self.state.update(complete=True, finished_at=now(),
+                              passed=all(t['status'] == 'passed' for t in self.state['variants'].values()))
+            self.publish()
+        return 0 if self.state['passed'] else 1
+
+
+def launch(args):
+    validation = json.loads(args.validation.read_text())
+    if (validation.get('failed', 0) or validation.get('passed') is False
+            or validation.get('candidate_recipe_sha256', validation.get('recipe_sha256')) != sha(ROOT/'rtl/hash/recipe.sv')):
+        raise ValueError('Validation failed or does not match the current candidate recipe')
+    run_id = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
+    run = ROOT/'build/timing_diagnostic'/run_id
+    out = ROOT/'docs/manifests/experiments'/('timing_diagnostic_'+run_id)
+    vivado = shutil.which(os.environ.get('VIVADO', 'vivado'))
+    if not vivado:
+        raise RuntimeError('Vivado is required')
+    version = subprocess.check_output([vivado, '-version'], text=True).strip()
+    reused = reusable_baseline(args.baseline_diagnostic.resolve(), args.baseline_variant, version) if args.baseline_diagnostic else None
+    baseline = Path(reused['source_root']) if reused else args.baseline_source.resolve()
+    baseline_manifest = (args.baseline_diagnostic.resolve()/'SOURCE.json' if reused else baseline.parent/'SOURCE.json')
+    baseline_hashes = reused['sha256'] if reused else json.loads(baseline_manifest.read_text())['sha256']
+    meta = dict(schema='mhbs.timing_diagnostic.source.v1', run_id=run_id, started_at=now(),
+                diagnostic_only=True, configuration='P12U1', period_ns=50.0,
+                part='xc7a200tffg1156-3', area_top='common', vivado=vivado,
+                vivado_version=version,
+                archive_directory=str(out), baseline_manifest=str(baseline_manifest),
+                baseline_manifest_sha256=sha(baseline_manifest),
+                validation_source=str(args.validation.resolve()),
+                candidate_full_sign_measured=False, variants={})
+    for name, source in [('baseline', baseline), ('candidate', ROOT)]:
+        frozen = run/name/'source'
+        hashes = freeze(source, frozen, baseline_hashes if name == 'baseline' else None)
+        spec = dict(original_source=str(source), source_root=str(frozen), sha256=hashes)
+        if name == 'baseline' and reused:
+            if hashes != reused['sha256']:
+                raise ValueError('Refrozen reused baseline differs from measured source')
+            spec['reused_synthesis'] = reused
+            for file, checksum in reused['artifact_sha256'].items():
+                target = run/name/'synth/P12U1/common'/file
+                archive.copy_changed(Path(reused['output'])/file, target)
+                if sha(target) != checksum:
+                    raise ValueError(f'Reused artifact changed during copying: {file}')
+        meta['variants'][name] = spec
+        write(run/name/'SOURCE.json', spec)
+        write(out/name/'SOURCE.json', spec)
+        archive.pack_rtl(frozen, out/name/'rtl.tar.gz', hashes)
+        archive.copy_changed(frozen/'scripts/diagnose_timing.tcl', out/name/'diagnose_timing.tcl')
+    summary = candidate_validation(args.validation, meta['variants']['candidate'])
+    write(out/'VALIDATION_SUMMARY.json', summary)
+    write(run/'SOURCE.json', meta)
+    write(out/'SOURCE.json', meta)
+    for name in ('run_timing_diagnostic.py', 'experiment_archive.py', 'run_pu_sign_matrix.py', 'report_timing_focus.py'):
+        archive.copy_changed(ROOT/'scripts'/name, run/'control'/name)
+        archive.copy_changed(run/'control'/name, out/'control'/name)
+    controls = {p.name: sha(p) for p in (run/'control').glob('*.py')}
+    write(run/'CONTROL_SOURCE.json', controls)
+    write(out/'CONTROL_SOURCE.json', controls)
+    env = os.environ.copy()
+    env['MHBS_DIAGNOSTIC_WORKSPACE'] = str(ROOT)
+    with (run/'runner.log').open('w') as log:
+        process = subprocess.Popen([sys.executable, str(run/'control/run_timing_diagnostic.py'), '--run-root', str(run)],
+                                   cwd=ROOT, env=env, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
+                                   start_new_session=True)
+    result = dict(pid=process.pid, root=str(run), report=str(out/'reports'/('Timing_Diagnostic_'+run_id+'.md')))
+    write(run/'LAUNCH.json', result)
+    deadline = time.monotonic()+30
+    report = out/'reports'/('Timing_Diagnostic_'+run_id+'.md')
+    while True:
+        code = process.poll()
+        ready = all(path.exists() for path in (run/'INITIAL_PUBLICATION.json', run/'status.json',
+                                               report, out/'ARTIFACTS.json'))
+        if ready and (code is None or (code == 0 and json.loads((run/'status.json').read_text()).get('complete'))):
+            break
+        if code is not None or time.monotonic() > deadline:
+            raise RuntimeError(f'Runner initial publication failed; see {run / "runner.log"}')
+        time.sleep(0.1)
+    print(json.dumps(result, indent=2))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--launch', action='store_true')
+    parser.add_argument('--run-root', type=Path)
+    parser.add_argument('--baseline-source', type=Path, default=ROOT/'build/pu_sign_matrix/20261015_152159/source')
+    parser.add_argument('--baseline-diagnostic', type=Path,
+                        help='Reuse a completed same-source P12U1/50ns diagnostic baseline; no baseline synthesis launched')
+    parser.add_argument('--baseline-variant', choices=('baseline', 'candidate'), default='candidate')
+    parser.add_argument('--validation', type=Path, default=ROOT/'build/timing_latency_20261015/ready_simplify/VALIDATION.json')
+    parser.add_argument('--attach-sign-validation', type=Path,
+                        help='Bind complete Sign evidence to an existing candidate and refresh only its archive')
+    args = parser.parse_args()
+    if args.launch == bool(args.run_root):
+        parser.error('Choose --launch or --run-root')
+    if args.baseline_diagnostic and not args.launch:
+        parser.error('--baseline-diagnostic requires --launch')
+    if args.attach_sign_validation:
+        if not args.run_root or args.launch:
+            parser.error('--attach-sign-validation requires --run-root without --launch')
+        runner = Runner(args.run_root.resolve())
+        evidence = full_sign_summary(args.attach_sign_validation.resolve(), runner.meta['variants']['candidate'])
+        summary_path = runner.out/'VALIDATION_SUMMARY.json'
+        summary = json.loads(summary_path.read_text())
+        summary.update(full_sign=evidence, candidate_full_sign_measured=True,
+                       scope='Local recipe/chain-control validation plus attached complete Sign evidence')
+        write(summary_path, summary)
+        runner.state = json.loads((runner.run/'status.json').read_text())
+        runner.publish(archive_only=True)
+        print(json.dumps(dict(archive=str(runner.out), complete_sign_cases=evidence['passed'],
+                              no_tasks_launched=True), indent=2))
+        return 0
+    return launch(args) if args.launch else Runner(args.run_root.resolve()).execute()
+
+
+if __name__ == '__main__':
+    sys.exit(main())

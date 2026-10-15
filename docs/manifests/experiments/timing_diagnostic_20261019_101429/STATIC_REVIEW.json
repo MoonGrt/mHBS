@@ -1,0 +1,83 @@
+{
+  "status": "passed",
+  "reviewer": "independent ready_path_review agent",
+  "scope": "Read-only review of the actual recipe.sv diff against recipe.before.sv, with independent Boolean and metadata-transition exhaustion.",
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "sources_sha256": "6f65bb0751a90ab0462e70d0ff8726c073eb73209651d3375d83e9fc1d862808",
+  "baseline_recipe_sha256": "237bb8f37774bfad5447830a8493da86b5148a9e4eb644429572dca4280647f1",
+  "candidate_recipe_sha256": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+  "production_files_modified_by_reviewer": [],
+  "findings": [],
+  "checks": [
+    {
+      "name": "scalar intake factoring",
+      "status": "passed",
+      "evidence": "A scalar fixed handshake requires IDLE, request_valid, !batch_mode and scalar_fixed. IDLE excludes FIXED_WAIT, so old ctx_response_ready cannot retire scalar tag 0. Keeping !busy[0] is exact at this handshake."
+    },
+    {
+      "name": "batch intake factoring",
+      "status": "passed",
+      "evidence": "A public batch ready requires batch_mode and !bridge_response. Here scalar_bridge is false, so old ctx_response_ready equals batch_response_ready. Same-edge retire/refill remains in batch_slot_available."
+    },
+    {
+      "name": "pending reservation and queue refill",
+      "status": "passed",
+      "evidence": "Both tag exclusion predicates remain unchanged. ctx_request_ready retains the original engine_mode gate through ctx_perm_ready. Under an enabled public intake, !pending_valid||accept factors to !pending_valid||(!again&&ready)."
+    },
+    {
+      "name": "no valid/no mode and invalid combinations",
+      "status": "passed",
+      "evidence": "The exact new OR form of receive and both public ready outputs match the prior equations over 786432 combinations. No busy/pending-idle invariant or valid-only assumption was used."
+    },
+    {
+      "name": "registered recycle alignment",
+      "status": "passed",
+      "evidence": "In scheduled_execution P>1, stage P-1 always advances valid from P-2 and copies base from P-2 when valid. The added recycle flop uses the identical prior P-2 valid/base, so it equals the original final-stage predicate after every edge. Reset clears both valid and recycle; held base on bubbles is irrelevant."
+    },
+    {
+      "name": "legal parameter coverage",
+      "status": "passed",
+      "evidence": "The register-transition predicate was exhausted for every 5-bit prior base and held final base, valid and reset, across all 22 legal P>1/U pairs. ROUNDS=24 yields constant-zero recycle. P1 scalar execution is unchanged."
+    },
+    {
+      "name": "cycle and interface structure",
+      "status": "passed",
+      "evidence": "Only a precomputed control register is introduced; no request/data/response pipeline stage or port changes. Existing final metadata, permutation stage data updates, mode arbitration, streaming absorb and capture writes are untouched."
+    },
+    {
+      "name": "debug observers",
+      "status": "passed",
+      "evidence": "Legacy ready/receive and recycle observers are entirely under ifndef SYNTHESIS, check at posedge outside reset and do not drive functional signals."
+    }
+  ],
+  "independent_proof": {
+    "script": "build/timing_recycle_ready_20261019/check_boolean_equivalence.py",
+    "script_sha256": "eaf2b20fb34202ffbdd7ec529a05fc7131162b0578322901ad4c006d48847d29",
+    "summary": "build/timing_recycle_ready_20261019/BOOLEAN_EQUIVALENCE.json",
+    "summary_sha256": "83270b6ff190093f88d4dfe9f57330b4c695ee10c51782a8f564c13a4112d8bd",
+    "ready_receive_cases": 786432,
+    "recycle_legal_configurations": 22,
+    "recycle_metadata_transition_cases": 90112
+  },
+  "validation_pending_external_to_review": [
+    "Recipe byte/hash regression in normal and SYNTHESIS views",
+    "Pipeline out-of-order, same-edge refill, capture/backpressure regression",
+    "Integrated Sign output/cache/count/cycle comparison",
+    "Measured synthesis/timing comparison"
+  ],
+  "limitations": [
+    "two-state only; X/Z propagation is not exhaustively proved",
+    "equation proof is manually tied to inspected RTL, not parser-based equivalence",
+    "does not replace full hash/output/signature-cache simulation or routed STA"
+  ],
+  "conclusion": "No functional issue found in the reviewed change. The equations support unchanged two-state handshakes and cycle latency; runtime regressions and measured timing remain separate evidence."
+}

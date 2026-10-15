@@ -1,0 +1,31 @@
+{
+  "candidate": "registered_recycle_and_independent_intake_capacity",
+  "baseline": "timing_diagnostic_20261015_164939/candidate",
+  "routed_evidence": "timing_targets_20261015_170517",
+  "modified_rtl": [
+    "rtl/hash/recipe.sv"
+  ],
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "changes": [
+    "根据倒数第二级stage_valid/stage_base提前登记recycle，和末级数据同拍到达，无新增数据寄存级。",
+    "标量与批量入口分别计算队列和槽容量；只在外层ready施加模式条件，消除ready链中重复scalar_bridge/engine_mode译码。",
+    "新增仿真等价断言，SYNTHESIS视图裁剪；P1标量分支与模块接口不变。"
+  ],
+  "expected_cycle_change": 0,
+  "validation_total": 40,
+  "quick_validation_passed": 22,
+  "scope": "same-device common OOC P12U1 50ns diagnostic; no new route/frequency search",
+  "remaining_risks": [
+    "recycle寄存器仍有宽数据选择扇出，物理分布改善必须由后续布局布线确认。",
+    "P4U2历史布线因拥塞失败，本候选尚不能据此声称已达90MHz。"
+  ]
+}

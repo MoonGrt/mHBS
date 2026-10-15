@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-"""Freeze validated RTL and dispatch four explicitly requested fixed-clock routes."""
+"""Freeze validated RTL and dispatch explicitly requested fixed-clock routes."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import shutil
+import re
 import subprocess
 import sys
 import threading
@@ -22,6 +24,22 @@ from run_pu_route_matrix import live_vivado, resources, route_status
 archive.ROOT = ROOT
 archive.ARCHIVES = ROOT/'docs/manifests/experiments'
 TARGETS = [(1, 1, 125), (4, 1, 130), (4, 2, 90), (12, 1, 135)]
+
+
+def parse_target(value):
+    match = re.fullmatch(r'P(\d+)U(\d+):([\d.]+)', value, re.I)
+    if not match:
+        raise argparse.ArgumentTypeError('Expected P12U1:125')
+    p, u = map(int, match.groups()[:2])
+    frequency = float(match[3])
+    if p < 1 or u < 1 or p*u > 24 or 24 % (p*u) or not math.isfinite(frequency) or frequency <= 0:
+        raise argparse.ArgumentTypeError('Invalid P/U or frequency')
+    return p, u, frequency
+
+
+def task_name(target, include_frequency):
+    p, u, frequency = target
+    return f'P{p}U{u}' + (f'_{frequency:g}MHz' if include_frequency else '')
 
 
 def now():
@@ -47,7 +65,7 @@ class Runner:
         self.slots = 0
         self.state = dict(started_at=now(), updated_at=now(), pid=os.getpid(), complete=False,
             top='common', threads_per_vivado=2, max_total_vivado=12,
-            frequency_search=False, tasks={f'P{p}U{u}':dict(status='waiting_for_capacity',
+            frequency_search=False, tasks={task_name((p,u,f), self.meta.get('frequency_task_names',False)):dict(status='waiting_for_capacity',
                 target_frequency_mhz=f, target_period_ns=1000/f) for p,u,f in self.meta['targets']})
 
     def publish(self):
@@ -56,10 +74,10 @@ class Runner:
         write(self.run/'status.json', self.state)
         write(self.out/'status.json', self.state)
         write(prefix.with_suffix('.json'), dict(source=self.meta, results=self.state))
-        lines = ['# 指定频率四点布局布线', '',
+        lines = ['# 指定频率布局布线测试', '',
             f'更新时间：{self.state["updated_at"]}；状态：'+('完成' if self.state['complete'] else '后台运行')+'。', '',
             '冻结当前RTL，common OOC，xc7a200tffg1156-3，通用Keccak；各点按指定频率重新综合，再执行opt/place/phys_opt/route。每个Vivado两线程，全机主任务最多12个。每点只检查指定目标，未进行频率搜索或新增时序例外。旧后台任务保持运行。', '',
-            '源码与32/32项验证逐文件绑定。验收范围为common核内部受约束路径；完整布线、DRC、setup/hold通过且实际时钟不低于目标才记为达到。共同核结果不代表封装顶层I/O时序。', '',
+            f'源码与{self.meta["validation_passed"]}/{self.meta["validation_passed"]}项既有验证逐文件绑定。验收范围为common核内部受约束路径；完整布线、DRC、setup/hold通过且实际时钟不低于目标才记为达到。共同核结果不代表封装顶层I/O时序。', '',
             '| 配置 | 目标 MHz | 周期 ns | 综合 Slice | 布线 Slice | WNS ns | WHS ns | 达到目标 | 状态 |',
             '|---|---:|---:|---:|---:|---:|---:|---|---|']
         fmt = lambda v: '—' if v is None else f'{v:,.3f}'
@@ -110,7 +128,7 @@ class Runner:
 
     def execute_one(self, target):
         p,u,frequency = target
-        name = f'P{p}U{u}'
+        name = task_name(target, self.meta.get('frequency_task_names',False))
         folder = self.run/'jobs'/name
         folder.mkdir(parents=True,exist_ok=True)
         self.reserve()
@@ -159,20 +177,28 @@ class Runner:
         with self.lock:
             self.publish()
             write(self.run/'INITIAL_PUBLICATION.json',dict(pid=os.getpid(),at=now()))
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=min(12,len(self.meta['targets']))) as pool:
             list(pool.map(self.execute_one,self.meta['targets']))
         with self.lock:
             self.state.update(complete=True,finished_at=now())
             self.publish()
 
 
-def launch():
-    validation_path = ROOT/'build/timing_format_20261015/VALIDATION.json'
+def launch(args):
+    targets = args.target or TARGETS
+    if len(set(targets)) != len(targets):
+        raise ValueError('Duplicate P/U/frequency target')
+    validation_path = args.validation.resolve()
     validation = json.loads(validation_path.read_text())
-    assert validation['complete'] and validation['passed']==validation['total']==32 and not validation['failed']
+    assert validation['complete'] and validation['passed']==validation['total'] and validation['total']>0 and not validation['failed']
+    assert all(test['passed'] for test in validation['tests']) and len(validation['tests'])==validation['total']
     assert validation['source_unchanged']
     names = [n.strip() for n in (ROOT/'sources.txt').read_text().splitlines() if n.strip()]
     assert {n:sha(ROOT/n) for n in names} == validation['rtl_sha256'], 'Current RTL differs from validated RTL'
+    validation_manifest = Path(validation['source_manifest'])
+    assert sha(validation_manifest)==validation['source_manifest_sha256']
+    validated_sources = json.loads(validation_manifest.read_text())['sha256']
+    assert all(sha(ROOT/n)==validated_sources[n] for n in [*names,'sources.txt'])
     run_id = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
     run = ROOT/'build/timing_targets'/run_id
     out = ROOT/'docs/manifests/experiments'/('timing_targets_'+run_id)
@@ -187,12 +213,12 @@ def launch():
     if not vivado:
         raise RuntimeError('Vivado not found')
     meta = dict(run_id=run_id,started_at=now(),source_root=str(run/'source'),sha256=hashes,
-        archive_directory=str(out),targets=TARGETS,top='common',part='xc7a200tffg1156-3',
+        archive_directory=str(out),targets=targets,frequency_task_names=True,top='common',part='xc7a200tffg1156-3',
         vivado=vivado,vivado_version=subprocess.check_output([vivado,'-version'],text=True).strip(),
         threads_per_vivado=2,max_total_vivado=12,frequency_search=False,new_timing_exceptions=False,
         validation_source=str(validation_path),validation_sha256=sha(validation_path),
         validation_source_manifest_sha256=validation['source_manifest_sha256'],
-        validation_passed=32,explicit_user_authorization=True)
+        validation_passed=validation['passed'],explicit_user_authorization=True)
     for base in (run,out):
         write(base/'SOURCE.json',meta)
         for name in ('run_timing_targets.py','route_common_target.tcl','experiment_archive.py','run_pu_route_matrix.py'):
@@ -201,6 +227,7 @@ def launch():
     summary = dict(validation)
     summary['tests'] = [{k:v for k,v in t.items() if k not in ('logs','command')} for t in validation['tests']]
     write(out/'VALIDATION_SUMMARY.json',summary)
+    archive.copy_changed(validation_manifest,out/'VALIDATION_SOURCE.json')
     archive.pack_rtl(run/'source',out/'rtl.tar.gz',hashes)
     env = dict(os.environ,MHBS_TARGET_WORKSPACE=str(ROOT))
     with (run/'runner.log').open('w') as log:
@@ -221,5 +248,7 @@ if __name__ == '__main__':
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument('--launch',action='store_true')
     group.add_argument('--run-root',type=Path)
+    parser.add_argument('--target',action='append',type=parse_target,help='Repeat P12U1:125 for each requested frequency/configuration')
+    parser.add_argument('--validation',type=Path,default=ROOT/'build/timing_format_20261015/VALIDATION.json')
     args = parser.parse_args()
-    launch() if args.launch else Runner(args.run_root.resolve()).execute()
+    launch(args) if args.launch else Runner(args.run_root.resolve()).execute()

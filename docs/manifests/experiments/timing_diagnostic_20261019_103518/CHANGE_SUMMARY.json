@@ -1,0 +1,76 @@
+{
+  "candidate": "executor-local batch response qualification",
+  "production_rtl_changed_this_step": [
+    "rtl/executor/executor.sv"
+  ],
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/recipe.sv": "62b778d2001a2ceeff47553bfbf550272fa1516b1f5c2b33c729b92fbd36f2e3",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "2294b93fd09e573a912fa083e0ef08292d575bed6bc9fef233c17649c3943f2f",
+    "rtl/top/top.sv": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "registers_added": 0,
+  "pipeline_stages_added": 0,
+  "validation": {
+    "passed": 43,
+    "total": 43,
+    "executed": 21,
+    "reused": 22,
+    "elapsed_seconds": 90.10880327224731,
+    "complete_sign_count": 15,
+    "all_sign_metrics_equal_baseline": true,
+    "source_unchanged": true
+  },
+  "measurement": {
+    "configuration": "P12U1",
+    "area_top": "common",
+    "period_ns": 10.0,
+    "both_variants_resynthesized": true,
+    "diagnostic_only": true,
+    "timing_gain_pending": false
+  },
+  "baseline_executor_sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63",
+  "validation_json": "build/timing_response_scope_20261019/VALIDATION.json",
+  "validation_json_sha256": "21ab8d1f7bb77e1eaba4b2a8ff70e6a7fb0f8ceee2a5e51a49d9f0e2b8d40fbd",
+  "notes": [
+    "22 local tests reused only after dependency checks; all full-core tests rerun.",
+    "Prior 50 ns measurements are historical context, not a same-constraint comparison with this run.",
+    "Current measurement status and results are maintained in reports/Timing_Diagnostic_20261019_103518.json."
+  ],
+  "decision": {
+    "status": "rejected",
+    "reason": "At the same 10 ns constraint, area increased and worst setup slack decreased.",
+    "area_slice_delta": 348.0,
+    "area_percent": 2.2504789543033032,
+    "wns_delta_ns": -0.029,
+    "baseline": {
+      "lut": 49421.0,
+      "ff": 24865.0,
+      "bram36": 0.0,
+      "dsp": 0.0,
+      "equivalent_slice": 15463.375,
+      "wns_ns": 3.052,
+      "data_path_ns": 6.73,
+      "logic_levels": 10,
+      "source": "core/task_recipe_reg[58]/C",
+      "destination": "core/batch_issue_phase_reg/CE"
+    },
+    "candidate": {
+      "lut": 50811.0,
+      "ff": 24869.0,
+      "bram36": 0.0,
+      "dsp": 0.0,
+      "equivalent_slice": 15811.375,
+      "wns_ns": 3.023,
+      "data_path_ns": 6.936,
+      "logic_levels": 10,
+      "source": "core/read_addresses.address_reg[6]/C",
+      "destination": "core/lane/scheduled_execution.staged_data_reg[98]/D"
+    },
+    "production_action": "Reverted only executor response qualification; next experiment starts from this run baseline."
+  }
+}
