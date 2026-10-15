@@ -1,0 +1,302 @@
+{
+  "schema": "mhbs.format_control.review.v1",
+  "method": "static_review",
+  "dynamic_test_pass_claimed": false,
+  "production_rtl_modified_by_review": false,
+  "full_rtl_source_sha256": "f2202fc0c5573f8693161e7d91cac9947080d4c859bf1f2e667d3f2ebd04c014",
+  "full_rtl_source_hash_method": "SHA256 of sorted path + NUL + file SHA256 + newline for every sources.txt entry; source list verified to include every rtl/**/*.sv file",
+  "sources_txt_sha256": "6f65bb0751a90ab0462e70d0ff8726c073eb73209651d3375d83e9fc1d862808",
+  "files": [
+    {
+      "path": "rtl/hash/keccak.sv",
+      "sha256": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769"
+    },
+    {
+      "path": "rtl/hash/recipe.sv",
+      "sha256": "237bb8f37774bfad5447830a8493da86b5148a9e4eb644429572dca4280647f1"
+    },
+    {
+      "path": "rtl/memory/value.sv",
+      "sha256": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9"
+    },
+    {
+      "path": "rtl/memory/signature.sv",
+      "sha256": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149"
+    },
+    {
+      "path": "rtl/executor/sequencer.sv",
+      "sha256": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8"
+    },
+    {
+      "path": "rtl/executor/executor.sv",
+      "sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63"
+    },
+    {
+      "path": "rtl/top/top.sv",
+      "sha256": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23"
+    },
+    {
+      "path": "rtl/top/common.sv",
+      "sha256": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+    }
+  ],
+  "baseline_recipe": {
+    "path": "build/timing_format_20261015/recipe.before.sv",
+    "sha256": "f4701b7991c9e0d0e2452cb6ff34291165a69c51a6a5b66dd5859c199c3f523a"
+  },
+  "conclusion": "No new functional or cycle mismatch identified for defined legal requests obeying the existing shared-batch-field contract. Predecoded first/successor formats and feedback-required state are aligned with the corresponding old metadata updates. This is static review, not an RTL simulation or formal-equivalence pass.",
+  "checks": [
+    {
+      "topic": "normalized request intake and simultaneous receive/accept",
+      "result": "consistent",
+      "reason": "First phase and its format controls are registered from the same incoming normalized operands and on exactly the receive edge as all existing pending fields. Concurrent accept consumes old pending metadata under nonblocking assignment semantics while receive replaces the queue entry. No ready/valid predicate or queue latency was changed.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1232
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1303
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1315
+        }
+      ]
+    },
+    {
+      "topic": "continuous phase advancement and cached successor",
+      "result": "consistent",
+      "reason": "accept caches format(advance(first_phase)); on a feedback launch phase becomes next_phase and the cache becomes format(advance(next_phase)). Thus the cached controls describe the block launched when that newly installed phase returns, with no one-phase offset. Helper advance_phase preserves the exact original priority, including non-one-hot encodings at the combinational-expression level.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1215
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1544
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1572
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1576
+        }
+      ]
+    },
+    {
+      "topic": "feedback decision and 5-bit arithmetic",
+      "result": "consistent",
+      "reason": "feedback_required is installed as !new_node_phase || new_more_steps on accept and every again update. more_steps is retained, so non-node phases keep its exact old state and malformed step/start combinations do not introduce a new inferred iteration comparison. next_more_steps uses the same 5-bit iteration + 1-bit one comparison against 5-bit steps as the previous update; the comparison is one bit. The static invariant is scoped to accepted/live contexts, not reset idle metadata.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1259
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1543
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1574
+        },
+        {
+          "file": "build/timing_format_20261015/recipe.before.sv",
+          "line": 1520
+        }
+      ]
+    },
+    {
+      "topic": "reset and zero-step requests",
+      "result": "consistent",
+      "reason": "Reset clears pending_valid, busy, complete, and feedback_required. New phase/format metadata need no reset because a request receive and then accept initialize them before any valid use; permutation valid/tag pipeline reset prevents stale returns. A zero_request completes without submitting a permutation exactly as before, so initialized feedback metadata is inert.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1300
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1331
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1333
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1522
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1553
+        }
+      ]
+    },
+    {
+      "topic": "same-edge completion, response retirement, and tag reuse",
+      "result": "consistent",
+      "reason": "A returning busy tag cannot already be the pending tag. A new incoming request may reserve a retiring tag, but that request is first stored in pending registers; its context metadata is overwritten on the following accept edge. Existing pending-tag conflict prevention, retirement priority, busy ownership, response publication, and capture writes are unchanged.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1288
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1291
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1531
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1483
+        }
+      ]
+    },
+    {
+      "topic": "public fields and capture lifetime",
+      "result": "consistent_under_existing_batch_contract",
+      "reason": "Feedback metadata is initially computed from accepted request family/shape/pair and later from the shared batch fields. Equivalence therefore assumes the existing required invariant that family, shape, pair, layer/tree/domain remain fixed while a batch has live contexts, and that captured values are consumed before those contexts are reused. The executor satisfies this job/batch contract. Mixing differing public fields within a live batch was already unsupported and is not claimed equivalent. Key/digest/captured banks and all their write predicates are unchanged.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1547
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1544
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1507
+        }
+      ]
+    },
+    {
+      "topic": "formatter equivalence and expression sizes",
+      "result": "consistent_for_defined_inputs",
+      "reason": "format_controls returns exactly {two,prf,seed}; each member is one bit and all phase inputs are 7 bits, shape inputs 4 bits, kind inputs 2 bits. The LMS conditional kind==2 && shape!=14 && shape!=15 is identical to the prior lms_chain test. Helper no_seed/pair_nodes use 2-state bit arguments, so X propagation can differ on uninitialized/unknown invalid controls; defined legal handshake values are unchanged.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1221
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1229
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1343
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1367
+        }
+      ]
+    },
+    {
+      "topic": "cycle and P1 impact",
+      "result": "no_change_identified_by_static_review",
+      "reason": "No new valid stage, acceptance rule, completion rule, iteration advance, or permutation request is introduced. The control registers are filled on existing receive/accept/feedback edges. All additions are in scheduled_execution.fixed_context; the P1 scalar branch is unchanged. This is a structural argument, not a measured-cycle claim.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1269
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1333
+        },
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1571
+        }
+      ]
+    },
+    {
+      "topic": "debug assertions",
+      "result": "present",
+      "reason": "SYNTHESIS-excluded independent always block checks first phase/format only while pending_valid and checks feedback decision/format on valid permutation returns. Assertions cover phase-cache alignment without adding synthesizable functionality.",
+      "refs": [
+        {
+          "file": "rtl/hash/recipe.sv",
+          "line": 1477
+        }
+      ]
+    }
+  ],
+  "static_algebra_enumeration": {
+    "method": "Python Boolean/arithmetic enumeration, not RTL simulation",
+    "passed": true,
+    "formatter_cases": 16384,
+    "feedback_transition_cases": 8192,
+    "scope": "All 7-bit phase encodings, all 4-bit shapes, both pair values and all 2-bit kinds for formatter expressions; all old/new node flags, more flags, 5-bit iterations and 5-bit totals for feedback cache update. Width model is explicit 5-bit wrapping addition."
+  },
+  "illustrative_phase_sequences": {
+    "xmss_unpaired": [
+      4,
+      8,
+      16,
+      4,
+      8,
+      16,
+      4
+    ],
+    "xmss_paired": [
+      4,
+      8,
+      32,
+      16,
+      4,
+      8,
+      32
+    ],
+    "xmss_seed": [
+      1,
+      4,
+      8,
+      16,
+      4,
+      8,
+      16
+    ],
+    "slh_seed": [
+      1,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ],
+    "lms_seed": [
+      1,
+      2,
+      2,
+      2,
+      2,
+      2,
+      2
+    ]
+  },
+  "expected_register_growth_before_synthesis": {
+    "expression": "10 + 4*PIPELINE",
+    "P4": 26,
+    "P12": 58,
+    "note": "7-bit first phase plus 3-bit first format, and per-slot 3-bit successor format plus 1-bit feedback decision. Actual synthesis may share or remove constant controls; no area measurement claimed."
+  },
+  "unchanged_known_interface_boundary": {
+    "topic": "paired XMSS capture_now concurrent with new right_write on the single captured-bank write port",
+    "status": "pre-existing and unreachable through current executor; untouched by this diff",
+    "evidence": "build/timing_latency_20261015/validation/INTAKE_REVIEW.json"
+  }
+}

@@ -351,46 +351,40 @@ module recipe #(
             // Select a source and a small word address BEFORE the wide data mux.
             // All recipes share the same message/seed selectors instead of each
             // recipe instantiating its own variable 64-bit extraction network.
-            function automatic [63:0] source_word(input [5:0] index, input bit lms_only);
-                reg [12:0] control;
-                reg [2:0] source;
+            // Prepare the next eight-byte beat's small selectors while emitting
+            // the current beat. START provides the first selectors; backpressure
+            // holds both selectors and position without another data stage.
+            logic [12:0] source_control[0:1];
+            wire [12:0] following_position = position + 13'(stream_advance);
+            for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                always_ff @(posedge clk)
+                    if (!rst) begin
+                        if (state == START && hash_ready)
+                            source_control[word_slot] <= decode_source(
+                                6'(word_slot), word_slot != 0, shapes, node_words
+                            );
+                        else if (state == STREAM && stream_accept)
+                            source_control[word_slot] <= decode_source(
+                                following_position[8:3] + 6'(word_slot), word_slot != 0, shapes, node_words
+                            );
+                    end
+            end
+            function automatic [63:0] source_word(input [12:0] control);
                 reg [5:0] selected_index;
                 reg [63:0] literal;
                 begin
-                    control = decode_source(index, lms_only, shapes, node_words);
-                    source = control[8:6];
                     selected_index = control[5:0];
-                    // Scalar has no registered source-control boundary: emit the
-                    // small prefix constants directly, avoiding encode/decode muxes.
-                    literal = 0;
-                    (* parallel_case *) case (1'b1)
-                        shapes[MESSAGE_PRF], shapes[MESSAGE_DIGEST]: begin end
-                        shapes[ROOT_MESSAGE]:
-                        if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
-                            if (index == 3) literal = 64'h0200000000000000;
-                            else if (index == 15) literal = {be32(leaf), 32'd0};
-                        end
-                        shapes[PREFIX_MESSAGE], shapes[ADDRESS_LIST]: begin end
-                        shapes[PREFIX_LIST]:
-                        if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
-                            case (index)
-                                0: literal = identifier[63:0];
-                                1: literal = identifier[127:64];
-                                2: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
-                                3: literal = list_data0[79:16];
-                                default: literal = 0;
-                            endcase
-                        end
-                        default: begin end
-                    endcase
-                    case (source)
-                        1: source_word = node_word(secret_prf, selected_index);
-                        2: source_word = node_word(randomizer, selected_index);
-                        3: source_word = node_word(public_seed, selected_index);
-                        4: source_word = node_word(root, selected_index);
+                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+                    // Source-range decoding bounds live node reads to four words;
+                    // ADDRESS_LIST body beats use list_window instead.
+                    case (control[8:6])
+                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
+                        4: source_word = node_word_indexed(root, selected_index[1:0]);
                         5: source_word = message_word(selected_index);
-                        6: source_word = node_word(address, selected_index);
-                        7: source_word = node_word(list_data0, selected_index);
+                        6: source_word = node_word_indexed(address, selected_index[1:0]);
+                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
                         default: source_word = literal;
                     endcase
                 end
@@ -412,14 +406,12 @@ module recipe #(
                  {64'd0, list_word_window[63:0]}) : {64'd0, node_word(
                 list_data0, {4'd0, list_remainder[4:3]}
             )};
-            wire [5:0] stream_word_index = position[8:3];
             logic [127:0] stream_payload;
-            logic [191:0] source_window;
+            logic [127:0] source_window;
             always_comb begin
                 source_window = {
-                    source_word(stream_word_index + 6'd2, 1'b1),
-                    source_word(stream_word_index + 6'd1, 1'b1),
-                    source_word(stream_word_index, 1'b0)
+                    source_word(source_control[1]),
+                    source_word(source_control[0])
                 };
                 stream_payload = {64'd0, source_window[63:0]};
                 if (shapes[PREFIX_MESSAGE]) begin
@@ -432,7 +424,7 @@ module recipe #(
                     stream_payload = list_window;
             end
 
-            integer i, absolute;
+            integer i;
             always @* begin
                 address = make_address(request_layer, request_tree, leaf, address_domain, a, b);
                 masked_address = {
@@ -602,16 +594,20 @@ module recipe #(
                 endcase
                 fast_block[1087] = 1'b1;
             end
+            // Share one remaining-length subtraction across the eight output
+            // bytes instead of adding position to each byte's comparison index.
+            wire [12:0] remaining_bytes = input_length - position;
+            wire padding_reached = position > input_length;
+            wire partial_beat = remaining_bytes < 8;
             always_comb begin
-                stream_data = stream_payload;
-                for (i = 0; i < 16; i = i + 1) begin
-                    absolute = position + i;
-                    if ((i < 8) && beat * 16 + stream_half * 8 + i < 136) begin
-                        if (absolute >= input_length) stream_data[i*8+:8] = 0;
-                        if (absolute == input_length) stream_data[i*8+:8] = 8'h1f;
-                        if (stream_last && beat * 16 + stream_half * 8 + i == 135)
-                            stream_data[i*8+7] = 1'b1;
-                    end else stream_data[i*8+:8] = 0;
+                stream_data = {64'd0, stream_payload[63:0]};
+                for (i = 0; i < 8; i = i + 1) begin
+                    if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
+                        stream_data[i*8+:8] = 0;
+                    if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
+                        stream_data[i*8+:8] = 8'h1f;
+                    if (beat == 8 && stream_last && i == 7)
+                        stream_data[i*8+7] = 1'b1;
                 end
             end
 
@@ -1115,37 +1111,55 @@ module recipe #(
             begin : fixed_context
                 // Scalar tag 0 and batch tags share these contexts and the
                 // existing Keccak datapath. Aliases preserve the former port widths.
-                wire ctx_request_valid = scalar_bridge ? state == IDLE && request_valid :
+                wire incoming_valid = scalar_bridge ? state == IDLE && request_valid :
                     batch_request_valid;
-                wire ctx_request_ready;
                 wire [TAG_BITS-1:0]
-                    ctx_request_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
-                wire [4:0] ctx_request_steps = scalar_bridge ?
+                    incoming_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
+                wire [4:0] incoming_steps = scalar_bridge ?
                     (request_chain ? request_steps : 5'd0) : batch_steps;
-                wire [4:0] ctx_request_capture_after = scalar_bridge ?
+                wire [4:0] incoming_capture_after = scalar_bridge ?
                     (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) :
                     batch_capture_after;
-                wire ctx_request_capture = scalar_bridge ? request_capture : batch_capture_enable;
-                wire [1:0] ctx_request_family = scalar_bridge ? scalar_family : batch_family;
-                wire ctx_request_no_seed = scalar_bridge ? scalar_no_seed : batch_no_seed;
-                wire [3:0] ctx_request_start = scalar_bridge ? 4'd0 : batch_start;
-                wire [255:0] ctx_request_initial_value = scalar_bridge ?
+                wire incoming_capture = scalar_bridge ? request_capture : batch_capture_enable;
+                wire [1:0] incoming_family = scalar_bridge ? scalar_family : batch_family;
+                wire incoming_no_seed = scalar_bridge ? scalar_no_seed : batch_no_seed;
+                wire [3:0] incoming_start = scalar_bridge ? 4'd0 : batch_start;
+                wire [255:0] incoming_initial_value = scalar_bridge ?
                     (scalar_shape == 5 ? 256'(secret_prf) : 256'(request_left)) :
                     batch_initial_value;
-                wire [3:0] ctx_request_fixed_shape = scalar_bridge ?
+                wire [3:0] incoming_fixed_shape = scalar_bridge ?
                     (request_chain ? 4'd0 : scalar_shape) : batch_fixed_shape;
-                wire ctx_request_pair = scalar_bridge ? request_recipe[47:40] == 2 : batch_pair;
-                wire [255:0] ctx_request_right = scalar_bridge ? 256'(request_right) : batch_right;
+                wire incoming_pair = scalar_bridge ? request_recipe[47:40] == 2 : batch_pair;
+                wire [255:0] incoming_right = scalar_bridge ? 256'(request_right) : batch_right;
                 wire [255:0] ctx_secret_seed = 256'(secret_seed);
                 wire [255:0] ctx_public_seed = 256'(public_seed);
-                wire [19:0] ctx_request_leaf = scalar_bridge ? request_leaf : batch_leaf;
-                wire [7:0] ctx_request_a = scalar_bridge ? 8'(request_a) : batch_a;
-                wire [31:0] ctx_request_b = scalar_bridge ? request_b : batch_b;
+                wire [19:0] incoming_leaf = scalar_bridge ? request_leaf : batch_leaf;
+                wire [7:0] incoming_a = scalar_bridge ? 8'(request_a) : batch_a;
+                wire [31:0] incoming_b = scalar_bridge ? request_b : batch_b;
                 wire [7:0]
-                    ctx_seed_domain = scalar_bridge ? request_recipe[55:48] : batch_seed_domain;
-                wire [7:0] ctx_step_domain = scalar_bridge ?
+                    incoming_seed_domain = scalar_bridge ? request_recipe[55:48] : batch_seed_domain;
+                wire [7:0] incoming_step_domain = scalar_bridge ?
                     (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) :
                     batch_step_domain;
+                // One request register separates caller controls/endpoint RAM from
+                // fixed formatting plus the first Keccak round. Feedback bypasses it.
+                logic pending_valid;
+                logic [TAG_BITS-1:0] ctx_request_tag;
+                logic [4:0] ctx_request_steps, ctx_request_capture_after;
+                logic ctx_request_capture, ctx_request_no_seed, ctx_request_pair;
+                logic [1:0] ctx_request_family;
+                logic [3:0] ctx_request_start, ctx_request_fixed_shape;
+                logic [6:0] ctx_first_phase;
+                logic [2:0] ctx_first_format;
+                logic [255:0] ctx_request_initial_value, ctx_request_right;
+                logic [19:0] ctx_request_leaf;
+                logic [7:0] ctx_request_a, ctx_seed_domain, ctx_step_domain;
+                logic [31:0] ctx_request_b;
+                logic [4:0] ctx_request_layer;
+                logic [63:0] ctx_request_tree;
+                wire ctx_request_valid = pending_valid;
+                wire ctx_request_ready;
+                wire incoming_ready;
                 wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
                 wire [255:0] ctx_read_digest;
                 wire [255:0] ctx_read_capture;
@@ -1165,7 +1179,7 @@ module recipe #(
                 assign batch_hashes = ctx_hash_count;
                 assign batch_permutations = ctx_permutation_count;
 `endif
-                assign engine_ready = ctx_request_ready;
+                assign engine_ready = incoming_ready;
                 assign engine_valid = ctx_response_valid;
                 assign engine_digest = ctx_read_digest;
                 assign engine_capture = ctx_read_capture;
@@ -1176,9 +1190,9 @@ module recipe #(
                 assign batch_response_digest = engine_digest;
                 assign batch_response_capture = engine_capture;
 
-                wire [255:0] seed_address = make_address(request_layer, request_tree,
+                wire [255:0] seed_address = make_address(ctx_request_layer, ctx_request_tree,
                     {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
-                wire [255:0] step_address = make_address(request_layer, request_tree,
+                wire [255:0] step_address = make_address(ctx_request_layer, ctx_request_tree,
                     {12'd0, ctx_request_leaf}, ctx_step_domain, {24'd0, ctx_request_a}, ctx_request_b);
                 wire [255:0] address[0:PIPELINE-1];
                 logic [4:0]
@@ -1193,12 +1207,39 @@ module recipe #(
                 // They avoid decoding an encoded RAM output and then decoding next_phase.
                 localparam [6:0] SEED = 7'b0000001, STEP = 7'b0000010, KEY = 7'b0000100,
                     MASK = 7'b0001000, FINAL = 7'b0010000, MASK1 = 7'b0100000, SINGLE = 7'b1000000;
+                function automatic [6:0] starting_phase(input [3:0] shape,
+                    input bit no_seed, input [1:0] kind);
+                    starting_phase = shape == 8 ? KEY : shape == 7 ? SEED :
+                        shape != 0 ? SINGLE : !no_seed ? SEED : kind == 1 ? KEY : STEP;
+                endfunction
+                function automatic [6:0] advance_phase(input [6:0] current_phase,
+                    input bit pair_nodes, input [1:0] kind);
+                    advance_phase = current_phase[2] ? MASK : current_phase[3] ?
+                        (pair_nodes ? MASK1 : FINAL) : current_phase[5] ? FINAL :
+                        kind == 1 ? KEY : STEP;
+                endfunction
+                function automatic [2:0] format_controls(input [6:0] selected_phase,
+                    input [3:0] shape, input bit pair_nodes, input [1:0] kind);
+                    reg seed, prf, two;
+                    begin
+                        seed = selected_phase[0] || shape == 7;
+                        prf = selected_phase[2] || selected_phase[3] || selected_phase[5];
+                        two = kind == 1 ? seed || (pair_nodes && !prf) :
+                            kind == 2 && shape != 14 && shape != 15 ? 1'b0 : pair_nodes;
+                        format_controls = {two, prf, seed};
+                    end
+                endfunction
+                wire [6:0] incoming_phase = starting_phase(incoming_fixed_shape,
+                    incoming_no_seed, incoming_family);
                 wire [1:0] family[0:PIPELINE-1];
                 wire [3:0] fixed_shape[0:PIPELINE-1];
                 wire [PIPELINE-1:0] paired;
                 logic [3:0] shared_shape;
                 logic shared_pair;
                 logic [6:0] phase[0:PIPELINE-1];
+                // Prepare the next block's small format controls when a phase
+                // starts, before its permutation returns to the shared formatter.
+                logic [2:0] feedback_format[0:PIPELINE-1];
                 (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
                 logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
                 assign ctx_read_digest = initial_pending[ctx_read_tag] ? key_value[ctx_read_tag] :
@@ -1207,24 +1248,84 @@ module recipe #(
                     (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
                      captured[ctx_read_tag]) : 256'd0;
                 wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
-                logic [PIPELINE-1:0] node_phase, more_steps;
+                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
                 wire node_done = node_phase[t];
-                wire again = ctx_perm_done && (!node_done || more_steps[t]);
+                wire again = ctx_perm_done && feedback_required[t];
                 wire capture_now = ctx_perm_done && node_done && capture_enable[t] &&
                     iteration[t] == capture_after[t];
-                wire [6:0] next_phase = phase[t][2] ? MASK : phase[t][3] ?
-                    (paired[t] ? MASK1 : FINAL) : phase[t][5] ? FINAL : family[t] == 1 ? KEY : STEP;
+                wire [6:0] next_phase = advance_phase(phase[t], paired[t], family[t]);
+                wire next_node_phase = next_phase[0] || next_phase[1] || next_phase[4] ||
+                    next_phase[6];
+                wire next_more_steps = node_done ? iteration[t] + 1'b1 < steps[t] : more_steps[t];
                 wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
                 logic [255:0] next_address;
                 always_comb begin
                     next_address = address[t];
                     if (!preserve_counter) next_address[224+:32] = be32({27'd0, next_step});
                 end
-                assign ctx_request_ready = !rst && !again && ctx_perm_ready &&
-                    ctx_request_tag < PIPELINE &&
-                    (!busy[ctx_request_tag] || (ctx_response_valid && ctx_response_ready &&
-                                                ctx_response_tag == ctx_request_tag));
+                // Intake has already reserved an in-range idle tag. The pending
+                // tag remains idle until this launch, so do not repeat its lookup
+                // on the downstream-ready path that also permits queue refill.
+                assign ctx_request_ready = !rst && !again && ctx_perm_ready;
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_pending_reservation
+                    if (!rst && pending_valid) begin
+                        if (ctx_request_tag >= PIPELINE)
+                            $fatal(1, "pending request tag out of range");
+                        else if (busy[ctx_request_tag] !== 1'b0)
+                            $fatal(1, "pending request tag was not reserved idle");
+                    end
+                end
+`endif
                 wire accept = ctx_request_valid && ctx_request_ready;
+                // Reserve the pending tag before its context becomes busy. A retired
+                // context may be refilled on the same edge, but a queued tag may not.
+                // Check the scalar slot and batch slot in parallel; selecting a
+                // one-bit availability avoids scalar_bridge -> tag mux -> busy
+                // lookup on the caller's ready path. Only the existing busy bits
+                // are read; no node-data bank is replicated.
+                wire retire = ctx_response_valid && ctx_response_ready;
+                wire scalar_slot_available =
+                    (!busy[0] || (retire && ctx_response_tag == TAG_BITS'(0))) &&
+                    (!pending_valid || ctx_request_tag != TAG_BITS'(0));
+                wire batch_slot_available = batch_request_tag < PIPELINE &&
+                    (!busy[batch_request_tag] || (retire && ctx_response_tag == batch_request_tag)) &&
+                    (!pending_valid || ctx_request_tag != batch_request_tag);
+                wire incoming_slot_available = scalar_bridge ?
+                    scalar_slot_available : batch_slot_available;
+                assign incoming_ready = !rst && engine_mode && (!pending_valid || accept) &&
+                    incoming_slot_available;
+                wire receive = incoming_valid && incoming_ready;
+                always_ff @(posedge clk) begin
+                    if (rst) pending_valid <= 0;
+                    else begin
+                        if (accept) pending_valid <= 0;
+                        if (receive) begin
+                            pending_valid <= 1;
+                            ctx_request_tag <= incoming_tag;
+                            ctx_request_steps <= incoming_steps;
+                            ctx_request_capture_after <= incoming_capture_after;
+                            ctx_request_capture <= incoming_capture;
+                            ctx_request_family <= incoming_family;
+                            ctx_request_no_seed <= incoming_no_seed;
+                            ctx_request_start <= incoming_start;
+                            ctx_request_initial_value <= incoming_initial_value;
+                            ctx_request_fixed_shape <= incoming_fixed_shape;
+                            ctx_request_pair <= incoming_pair;
+                            ctx_first_phase <= incoming_phase;
+                            ctx_first_format <= format_controls(incoming_phase,
+                                incoming_fixed_shape, incoming_pair, incoming_family);
+                            ctx_request_right <= incoming_right;
+                            ctx_request_leaf <= incoming_leaf;
+                            ctx_request_a <= incoming_a;
+                            ctx_request_b <= incoming_b;
+                            ctx_seed_domain <= incoming_seed_domain;
+                            ctx_step_domain <= incoming_step_domain;
+                            ctx_request_layer <= request_layer;
+                            ctx_request_tree <= request_tree;
+                        end
+                    end
+                end
                 wire [3:0] requested_shape = ctx_request_fixed_shape;
                 wire requested_pair = ctx_request_pair;
                 wire zero_request = ctx_request_no_seed && ctx_request_steps == 0 &&
@@ -1234,10 +1335,12 @@ module recipe #(
                 wire [255:0] block_address = again ? next_address :
                     ctx_request_no_seed ? step_address : seed_address;
                 wire [1:0] block_family = again ? family[t] : ctx_request_family;
-                wire [6:0] first_phase = requested_shape == 8 ? KEY :
-                    requested_shape == 7 ? SEED : requested_shape != 0 ? SINGLE :
-                    !ctx_request_no_seed ? SEED : ctx_request_family == 1 ? KEY : STEP;
+                wire [6:0] first_phase = ctx_first_phase;
+                wire first_node_phase = first_phase[0] || first_phase[1] || first_phase[6];
+                wire first_more_steps = ctx_request_no_seed ? ctx_request_steps > 1 :
+                    ctx_request_steps != 0;
                 wire [6:0] block_phase = again ? next_phase : first_phase;
+                wire [2:0] block_format = again ? feedback_format[t] : ctx_first_format;
                 wire [3:0] block_step = again ? next_step[3:0] : ctx_request_start;
                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
                 wire block_pair = again ? paired[t] : requested_pair;
@@ -1252,8 +1355,8 @@ module recipe #(
                 begin : formatter
                     // Keep each byte placement independent of the family mux.
                     // Only the final, mutually exclusive layout enables merge nodes.
-                    wire seed = block_phase[0] || block_shape == 7;
-                    wire prf = block_phase[2] || block_phase[3] || block_phase[5];
+                    wire seed = block_format[0];
+                    wire prf = block_format[1];
                     wire xmss = block_family == 1;
                     wire lms = block_family == 2;
                     wire lms_node = lms && (block_shape == 14 || block_shape == 15);
@@ -1261,8 +1364,7 @@ module recipe #(
                     wire node16 = node_bytes == 16;
                     wire node24 = node_bytes == 24;
                     wire node32 = !node16 && !node24;
-                    wire two = xmss ? seed || (block_pair && !prf) :
-                        lms_chain ? 1'b0 : block_pair;
+                    wire two = block_format[2];
                     wire [255:0] masked_address = {
                         be32(block_phase[3] ? 32'd1 : block_phase[5] ? 32'd2 : 32'd0),
                         block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
@@ -1334,15 +1436,60 @@ module recipe #(
                 end
                 assign ctx_perm_state = unified_state;
                 assign ctx_perm_tag   = again ? t : ctx_request_tag;
+                // Register response selection before it fans out through retire,
+                // caller ready and executor transitions. Reuse the stall-hold
+                // registers; digest/capture data stay in their existing banks.
                 logic response_held;
-                logic [TAG_BITS-1:0] held_tag;
-                assign ctx_response_valid = |complete;
+                logic [TAG_BITS-1:0] held_tag, next_response_tag;
+                logic [PIPELINE-1:0] waiting_responses;
+                assign ctx_response_valid = response_held;
+                assign ctx_response_tag = held_tag;
                 always_comb begin
-                    ctx_response_tag = 0;
+                    waiting_responses = complete;
+                    // The published response owns this slot until consumption.
+                    // Excluding it independently of ready keeps backpressure out
+                    // of the next-tag priority encoder.
+                    if (response_held) waiting_responses[held_tag] = 1'b0;
+                    next_response_tag = 0;
                     for (integer j = PIPELINE - 1; j >= 0; j = j - 1)
-                    if (complete[j]) ctx_response_tag = TAG_BITS'(j);
-                    if (response_held) ctx_response_tag = held_tag;
+                        if (waiting_responses[j]) next_response_tag = TAG_BITS'(j);
                 end
+                always_ff @(posedge clk) begin
+                    if (rst) begin
+                        response_held <= 0;
+                        held_tag <= 0;
+                    end else if (!response_held || ctx_response_ready) begin
+                        response_held <= |waiting_responses;
+                        held_tag <= next_response_tag;
+                    end
+                end
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_response_selection
+                    if (!rst && response_held) begin
+                        if (held_tag >= PIPELINE)
+                            $fatal(1, "published response tag out of range");
+                        else if (!complete[held_tag] || !busy[held_tag])
+                            $fatal(1, "published response does not own a completed slot");
+                    end
+                end
+`endif
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_format_controls
+                    if (!rst) begin
+                        if (pending_valid && (ctx_first_phase !== starting_phase(requested_shape,
+                            ctx_request_no_seed, ctx_request_family) || ctx_first_format !==
+                            format_controls(first_phase, requested_shape, requested_pair, ctx_request_family)))
+                            $fatal(1, "registered request format differs from its recipe");
+                        if (ctx_perm_done) begin
+                            if (feedback_required[t] !== (!node_done || more_steps[t]))
+                                $fatal(1, "registered feedback decision differs from its context");
+                            if (feedback_format[t] !== format_controls(next_phase,
+                                fixed_shape[t], paired[t], family[t]))
+                                $fatal(1, "registered feedback format differs from its phase");
+                        end
+                    end
+                end
+`endif
                 // A KEY return always feeds MASK immediately, so feedback priority excludes
                 // accepting an initial value on the same edge. Each bank has one write port.
                 wire key_return = ctx_perm_done && phase[t][2];
@@ -1372,21 +1519,15 @@ module recipe #(
                     if (rst) begin
                         node_phase <= 0;
                         more_steps <= 0;
+                        feedback_required <= 0;
                         initial_pending <= 0;
                         capture_initial <= 0;
                         captured_valid <= 0;
-                        response_held <= 0;
-                        held_tag <= 0;
                         busy <= 0;
                         complete <= 0;
                         capture_enable <= 0;
                         preserve_counter <= 0;
                     end else begin
-                        if (ctx_response_valid && !ctx_response_ready && !response_held) begin
-                            response_held <= 1;
-                            held_tag <= ctx_response_tag;
-                        end
-                        if (ctx_response_valid && ctx_response_ready) response_held <= 0;
                         if (ctx_response_valid && ctx_response_ready) begin
                             complete[ctx_response_tag] <= 0;
                             busy[ctx_response_tag] <= 0;
@@ -1397,10 +1538,12 @@ module recipe #(
                             iteration[ctx_request_tag] <= ctx_request_no_seed ?
                                 {1'b0, ctx_request_start} + 1'b1 : 5'd0;
                             phase[ctx_request_tag] <= first_phase;
-                            node_phase[ctx_request_tag] <= first_phase[0] || first_phase[1] ||
-                                first_phase[6];
-                            more_steps[ctx_request_tag] <= ctx_request_no_seed ?
-                                ctx_request_steps > 1 : ctx_request_steps != 0;
+                            node_phase[ctx_request_tag] <= first_node_phase;
+                            more_steps[ctx_request_tag] <= first_more_steps;
+                            feedback_required[ctx_request_tag] <= !first_node_phase || first_more_steps;
+                            feedback_format[ctx_request_tag] <= format_controls(
+                                advance_phase(first_phase, requested_pair, ctx_request_family),
+                                requested_shape, requested_pair, ctx_request_family);
                             if (busy == 0) begin
                                 shared_shape <= requested_shape;
                                 shared_pair <= requested_pair;
@@ -1427,9 +1570,12 @@ module recipe #(
                             if (digest_write) initial_pending[t] <= 0;
                             if (again) begin
                                 phase[t] <= next_phase;
-                                node_phase[t] <= next_phase[0] || next_phase[1] || next_phase[4] ||
-                                    next_phase[6];
-                                if (node_done) more_steps[t] <= iteration[t] + 1'b1 < steps[t];
+                                node_phase[t] <= next_node_phase;
+                                feedback_required[t] <= !next_node_phase || next_more_steps;
+                                feedback_format[t] <= format_controls(
+                                    advance_phase(next_phase, paired[t], family[t]),
+                                    fixed_shape[t], paired[t], family[t]);
+                                if (node_done) more_steps[t] <= next_more_steps;
                                 if (node_done) iteration[t] <= iteration[t] + 1'b1;
                             end else complete[t] <= 1;
                         end
@@ -1446,8 +1592,8 @@ module recipe #(
                     always_ff @(posedge clk)
                         if (!rst && accept) begin
                             if (busy == 0) begin
-                                layer  <= request_layer;
-                                tree   <= request_tree;
+                                layer  <= ctx_request_layer;
+                                tree   <= ctx_request_tree;
                                 domain <= ctx_step_domain;
                                 kind   <= ctx_request_family;
                             end
@@ -1458,7 +1604,7 @@ module recipe #(
 `ifndef SYNTHESIS
                     always @(posedge clk)
                         if (!rst && accept && |busy) begin
-                            if (request_layer != layer || request_tree != tree ||
+                            if (ctx_request_layer != layer || ctx_request_tree != tree ||
                                 ctx_request_family != kind || ctx_step_domain != domain ||
                                 requested_shape != shared_shape || requested_pair != shared_pair)
                                 $fatal(1, "shared coordinates changed before contexts drained");
@@ -1507,7 +1653,7 @@ module recipe #(
             // P1's iterative datapath lives only in scalar_execution.
             localparam integer ROUNDS = UNROLL * PIPELINE;
             logic [1599:0] state_reg[0:PIPELINE-1];
-            logic [PIPELINE-1:0] stage_valid;
+            logic [PIPELINE-1:0] stage_valid, stage_fixed;
             logic [4:0] stage_base[0:PIPELINE-1];
             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
             logic sent;
@@ -1517,24 +1663,26 @@ module recipe #(
             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
             wire normal_valid = hash_state == HASH_RUN && !sent;
             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
-            wire [1599:0] issue_state = engine_mode ? batch_perm_state : sponge_state;
+            wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
             wire [1599:0] finished_state = state_reg[PIPELINE-1];
             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
                 wire [1599:0] rounds[0:UNROLL];
                 wire [4:0] start_round;
                 wire [TAG_BITS-1:0] source_tag;
-                wire source_valid;
+                wire source_valid, source_fixed;
                 if (s == 0) begin : input_stage
                     assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
                     assign source_valid = recycle || issue_valid;
+                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : engine_mode;
                 end else begin : following_stage
                     assign rounds[0] = state_reg[s-1];
                     assign start_round = stage_base[s-1];
                     assign source_tag = stage_tag[s-1];
                     assign source_valid = stage_valid[s-1];
+                    assign source_fixed = stage_fixed[s-1];
                 end
                 for (genvar r = 0; r < UNROLL; r = r + 1) begin : unrolled
                     // verilog_format: off
@@ -1562,17 +1710,18 @@ module recipe #(
                         if (source_valid) begin
                             stage_base[s] <= start_round;
                             stage_tag[s]  <= source_tag;
+                            stage_fixed[s] <= source_fixed;
                         end
                     end
                 end
             end
             assign batch_perm_ready = engine_mode && ready;
-            assign batch_perm_done = engine_mode && finished;
+            assign batch_perm_done = finished && stage_fixed[PIPELINE-1];
             assign batch_perm_digest = finished_state;
             assign batch_perm_result_tag = stage_tag[PIPELINE-1];
             if (SHARED_STATE) assign sponge_state = finished_state;
             assign advanced_state = finished_state;
-            assign round_complete = !engine_mode && finished;
+            assign round_complete = finished && !stage_fixed[PIPELINE-1];
             assign round_update = hash_state == HASH_RUN && round_complete;
             always_ff @(posedge clk) begin
                 if (rst) sent <= 0;

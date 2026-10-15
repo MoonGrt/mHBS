@@ -1,0 +1,738 @@
+diff --git a/docs/manifests/experiments/INDEX.md b/docs/manifests/experiments/INDEX.md
+index 28bc6cc..4812a4c 100644
+--- a/docs/manifests/experiments/INDEX.md
++++ b/docs/manifests/experiments/INDEX.md
+@@ -84,5 +84,6 @@
+ | pu_sign_matrix_20261015_121959 | [PU_Sign_Matrix_20261015_121959](pu_sign_matrix_20261015_121959/reports/PU_Sign_Matrix_20261015_121959.md) | [证据](pu_sign_matrix_20261015_121959/ARTIFACTS.json) |
+ | pu_sign_matrix_20261015_123235 | [PU_Sign_Matrix_20261015_123235](pu_sign_matrix_20261015_123235/reports/PU_Sign_Matrix_20261015_123235.md) | [证据](pu_sign_matrix_20261015_123235/ARTIFACTS.json) |
+ | pu_route_matrix_20261015_130642 | [PU_Route_Matrix_20261015_130642](pu_route_matrix_20261015_130642/reports/PU_Route_Matrix_20261015_130642.md) | [证据](pu_route_matrix_20261015_130642/ARTIFACTS.json) |
++| pu_route_matrix_20261015_151321 | [PU_Route_Matrix_20261015_151321](pu_route_matrix_20261015_151321/reports/PU_Route_Matrix_20261015_151321.md) | [证据](pu_route_matrix_20261015_151321/ARTIFACTS.json) |
+ 
+ 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。
+diff --git a/rtl/hash/recipe.sv b/rtl/hash/recipe.sv
+index d7425e3..9005789 100644
+--- a/rtl/hash/recipe.sv
++++ b/rtl/hash/recipe.sv
+@@ -351,46 +351,40 @@ module recipe #(
+             // Select a source and a small word address BEFORE the wide data mux.
+             // All recipes share the same message/seed selectors instead of each
+             // recipe instantiating its own variable 64-bit extraction network.
+-            function automatic [63:0] source_word(input [5:0] index, input bit lms_only);
+-                reg [12:0] control;
+-                reg [2:0] source;
++            // Prepare the next eight-byte beat's small selectors while emitting
++            // the current beat. START provides the first selectors; backpressure
++            // holds both selectors and position without another data stage.
++            logic [12:0] source_control[0:1];
++            wire [12:0] following_position = position + 13'(stream_advance);
++            for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
++                always_ff @(posedge clk)
++                    if (!rst) begin
++                        if (state == START && hash_ready)
++                            source_control[word_slot] <= decode_source(
++                                6'(word_slot), word_slot != 0, shapes, node_words
++                            );
++                        else if (state == STREAM && stream_accept)
++                            source_control[word_slot] <= decode_source(
++                                following_position[8:3] + 6'(word_slot), word_slot != 0, shapes, node_words
++                            );
++                    end
++            end
++            function automatic [63:0] source_word(input [12:0] control);
+                 reg [5:0] selected_index;
+                 reg [63:0] literal;
+                 begin
+-                    control = decode_source(index, lms_only, shapes, node_words);
+-                    source = control[8:6];
+                     selected_index = control[5:0];
+-                    // Scalar has no registered source-control boundary: emit the
+-                    // small prefix constants directly, avoiding encode/decode muxes.
+-                    literal = 0;
+-                    (* parallel_case *) case (1'b1)
+-                        shapes[MESSAGE_PRF], shapes[MESSAGE_DIGEST]: begin end
+-                        shapes[ROOT_MESSAGE]:
+-                        if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
+-                            if (index == 3) literal = 64'h0200000000000000;
+-                            else if (index == 15) literal = {be32(leaf), 32'd0};
+-                        end
+-                        shapes[PREFIX_MESSAGE], shapes[ADDRESS_LIST]: begin end
+-                        shapes[PREFIX_LIST]:
+-                        if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
+-                            case (index)
+-                                0: literal = identifier[63:0];
+-                                1: literal = identifier[127:64];
+-                                2: literal = {list_data0[15:0], 16'h8080, be32(leaf)};
+-                                3: literal = list_data0[79:16];
+-                                default: literal = 0;
+-                            endcase
+-                        end
+-                        default: begin end
+-                    endcase
+-                    case (source)
+-                        1: source_word = node_word(secret_prf, selected_index);
+-                        2: source_word = node_word(randomizer, selected_index);
+-                        3: source_word = node_word(public_seed, selected_index);
+-                        4: source_word = node_word(root, selected_index);
++                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
++                    // Source-range decoding bounds live node reads to four words;
++                    // ADDRESS_LIST body beats use list_window instead.
++                    case (control[8:6])
++                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
++                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
++                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
++                        4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+-                        6: source_word = node_word(address, selected_index);
+-                        7: source_word = node_word(list_data0, selected_index);
++                        6: source_word = node_word_indexed(address, selected_index[1:0]);
++                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -412,14 +406,12 @@ module recipe #(
+                  {64'd0, list_word_window[63:0]}) : {64'd0, node_word(
+                 list_data0, {4'd0, list_remainder[4:3]}
+             )};
+-            wire [5:0] stream_word_index = position[8:3];
+             logic [127:0] stream_payload;
+-            logic [191:0] source_window;
++            logic [127:0] source_window;
+             always_comb begin
+                 source_window = {
+-                    source_word(stream_word_index + 6'd2, 1'b1),
+-                    source_word(stream_word_index + 6'd1, 1'b1),
+-                    source_word(stream_word_index, 1'b0)
++                    source_word(source_control[1]),
++                    source_word(source_control[0])
+                 };
+                 stream_payload = {64'd0, source_window[63:0]};
+                 if (shapes[PREFIX_MESSAGE]) begin
+@@ -432,7 +424,7 @@ module recipe #(
+                     stream_payload = list_window;
+             end
+ 
+-            integer i, absolute;
++            integer i;
+             always @* begin
+                 address = make_address(request_layer, request_tree, leaf, address_domain, a, b);
+                 masked_address = {
+@@ -602,16 +594,20 @@ module recipe #(
+                 endcase
+                 fast_block[1087] = 1'b1;
+             end
++            // Share one remaining-length subtraction across the eight output
++            // bytes instead of adding position to each byte's comparison index.
++            wire [12:0] remaining_bytes = input_length - position;
++            wire padding_reached = position > input_length;
++            wire partial_beat = remaining_bytes < 8;
+             always_comb begin
+-                stream_data = stream_payload;
+-                for (i = 0; i < 16; i = i + 1) begin
+-                    absolute = position + i;
+-                    if ((i < 8) && beat * 16 + stream_half * 8 + i < 136) begin
+-                        if (absolute >= input_length) stream_data[i*8+:8] = 0;
+-                        if (absolute == input_length) stream_data[i*8+:8] = 8'h1f;
+-                        if (stream_last && beat * 16 + stream_half * 8 + i == 135)
+-                            stream_data[i*8+7] = 1'b1;
+-                    end else stream_data[i*8+:8] = 0;
++                stream_data = {64'd0, stream_payload[63:0]};
++                for (i = 0; i < 8; i = i + 1) begin
++                    if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
++                        stream_data[i*8+:8] = 0;
++                    if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
++                        stream_data[i*8+:8] = 8'h1f;
++                    if (beat == 8 && stream_last && i == 7)
++                        stream_data[i*8+7] = 1'b1;
+                 end
+             end
+ 
+@@ -1115,37 +1111,53 @@ module recipe #(
+             begin : fixed_context
+                 // Scalar tag 0 and batch tags share these contexts and the
+                 // existing Keccak datapath. Aliases preserve the former port widths.
+-                wire ctx_request_valid = scalar_bridge ? state == IDLE && request_valid :
++                wire incoming_valid = scalar_bridge ? state == IDLE && request_valid :
+                     batch_request_valid;
+-                wire ctx_request_ready;
+                 wire [TAG_BITS-1:0]
+-                    ctx_request_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
+-                wire [4:0] ctx_request_steps = scalar_bridge ?
++                    incoming_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
++                wire [4:0] incoming_steps = scalar_bridge ?
+                     (request_chain ? request_steps : 5'd0) : batch_steps;
+-                wire [4:0] ctx_request_capture_after = scalar_bridge ?
++                wire [4:0] incoming_capture_after = scalar_bridge ?
+                     (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) :
+                     batch_capture_after;
+-                wire ctx_request_capture = scalar_bridge ? request_capture : batch_capture_enable;
+-                wire [1:0] ctx_request_family = scalar_bridge ? scalar_family : batch_family;
+-                wire ctx_request_no_seed = scalar_bridge ? scalar_no_seed : batch_no_seed;
+-                wire [3:0] ctx_request_start = scalar_bridge ? 4'd0 : batch_start;
+-                wire [255:0] ctx_request_initial_value = scalar_bridge ?
++                wire incoming_capture = scalar_bridge ? request_capture : batch_capture_enable;
++                wire [1:0] incoming_family = scalar_bridge ? scalar_family : batch_family;
++                wire incoming_no_seed = scalar_bridge ? scalar_no_seed : batch_no_seed;
++                wire [3:0] incoming_start = scalar_bridge ? 4'd0 : batch_start;
++                wire [255:0] incoming_initial_value = scalar_bridge ?
+                     (scalar_shape == 5 ? 256'(secret_prf) : 256'(request_left)) :
+                     batch_initial_value;
+-                wire [3:0] ctx_request_fixed_shape = scalar_bridge ?
++                wire [3:0] incoming_fixed_shape = scalar_bridge ?
+                     (request_chain ? 4'd0 : scalar_shape) : batch_fixed_shape;
+-                wire ctx_request_pair = scalar_bridge ? request_recipe[47:40] == 2 : batch_pair;
+-                wire [255:0] ctx_request_right = scalar_bridge ? 256'(request_right) : batch_right;
++                wire incoming_pair = scalar_bridge ? request_recipe[47:40] == 2 : batch_pair;
++                wire [255:0] incoming_right = scalar_bridge ? 256'(request_right) : batch_right;
+                 wire [255:0] ctx_secret_seed = 256'(secret_seed);
+                 wire [255:0] ctx_public_seed = 256'(public_seed);
+-                wire [19:0] ctx_request_leaf = scalar_bridge ? request_leaf : batch_leaf;
+-                wire [7:0] ctx_request_a = scalar_bridge ? 8'(request_a) : batch_a;
+-                wire [31:0] ctx_request_b = scalar_bridge ? request_b : batch_b;
++                wire [19:0] incoming_leaf = scalar_bridge ? request_leaf : batch_leaf;
++                wire [7:0] incoming_a = scalar_bridge ? 8'(request_a) : batch_a;
++                wire [31:0] incoming_b = scalar_bridge ? request_b : batch_b;
+                 wire [7:0]
+-                    ctx_seed_domain = scalar_bridge ? request_recipe[55:48] : batch_seed_domain;
+-                wire [7:0] ctx_step_domain = scalar_bridge ?
++                    incoming_seed_domain = scalar_bridge ? request_recipe[55:48] : batch_seed_domain;
++                wire [7:0] incoming_step_domain = scalar_bridge ?
+                     (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) :
+                     batch_step_domain;
++                // One request register separates caller controls/endpoint RAM from
++                // fixed formatting plus the first Keccak round. Feedback bypasses it.
++                logic pending_valid;
++                logic [TAG_BITS-1:0] ctx_request_tag;
++                logic [4:0] ctx_request_steps, ctx_request_capture_after;
++                logic ctx_request_capture, ctx_request_no_seed, ctx_request_pair;
++                logic [1:0] ctx_request_family;
++                logic [3:0] ctx_request_start, ctx_request_fixed_shape;
++                logic [255:0] ctx_request_initial_value, ctx_request_right;
++                logic [19:0] ctx_request_leaf;
++                logic [7:0] ctx_request_a, ctx_seed_domain, ctx_step_domain;
++                logic [31:0] ctx_request_b;
++                logic [4:0] ctx_request_layer;
++                logic [63:0] ctx_request_tree;
++                wire ctx_request_valid = pending_valid;
++                wire ctx_request_ready;
++                wire incoming_ready;
+                 wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
+                 wire [255:0] ctx_read_digest;
+                 wire [255:0] ctx_read_capture;
+@@ -1165,7 +1177,7 @@ module recipe #(
+                 assign batch_hashes = ctx_hash_count;
+                 assign batch_permutations = ctx_permutation_count;
+ `endif
+-                assign engine_ready = ctx_request_ready;
++                assign engine_ready = incoming_ready;
+                 assign engine_valid = ctx_response_valid;
+                 assign engine_digest = ctx_read_digest;
+                 assign engine_capture = ctx_read_capture;
+@@ -1176,9 +1188,9 @@ module recipe #(
+                 assign batch_response_digest = engine_digest;
+                 assign batch_response_capture = engine_capture;
+ 
+-                wire [255:0] seed_address = make_address(request_layer, request_tree,
++                wire [255:0] seed_address = make_address(ctx_request_layer, ctx_request_tree,
+                     {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
+-                wire [255:0] step_address = make_address(request_layer, request_tree,
++                wire [255:0] step_address = make_address(ctx_request_layer, ctx_request_tree,
+                     {12'd0, ctx_request_leaf}, ctx_step_domain, {24'd0, ctx_request_a}, ctx_request_b);
+                 wire [255:0] address[0:PIPELINE-1];
+                 logic [4:0]
+@@ -1225,6 +1237,41 @@ module recipe #(
+                     (!busy[ctx_request_tag] || (ctx_response_valid && ctx_response_ready &&
+                                                 ctx_response_tag == ctx_request_tag));
+                 wire accept = ctx_request_valid && ctx_request_ready;
++                // Reserve the pending tag before its context becomes busy. A retired
++                // context may be refilled on the same edge, but a queued tag may not.
++                assign incoming_ready = !rst && engine_mode && (!pending_valid || accept) &&
++                    incoming_tag < PIPELINE &&
++                    (!busy[incoming_tag] || (ctx_response_valid && ctx_response_ready &&
++                                             ctx_response_tag == incoming_tag)) &&
++                    (!pending_valid || ctx_request_tag != incoming_tag);
++                wire receive = incoming_valid && incoming_ready;
++                always_ff @(posedge clk) begin
++                    if (rst) pending_valid <= 0;
++                    else begin
++                        if (accept) pending_valid <= 0;
++                        if (receive) begin
++                            pending_valid <= 1;
++                            ctx_request_tag <= incoming_tag;
++                            ctx_request_steps <= incoming_steps;
++                            ctx_request_capture_after <= incoming_capture_after;
++                            ctx_request_capture <= incoming_capture;
++                            ctx_request_family <= incoming_family;
++                            ctx_request_no_seed <= incoming_no_seed;
++                            ctx_request_start <= incoming_start;
++                            ctx_request_initial_value <= incoming_initial_value;
++                            ctx_request_fixed_shape <= incoming_fixed_shape;
++                            ctx_request_pair <= incoming_pair;
++                            ctx_request_right <= incoming_right;
++                            ctx_request_leaf <= incoming_leaf;
++                            ctx_request_a <= incoming_a;
++                            ctx_request_b <= incoming_b;
++                            ctx_seed_domain <= incoming_seed_domain;
++                            ctx_step_domain <= incoming_step_domain;
++                            ctx_request_layer <= request_layer;
++                            ctx_request_tree <= request_tree;
++                        end
++                    end
++                end
+                 wire [3:0] requested_shape = ctx_request_fixed_shape;
+                 wire requested_pair = ctx_request_pair;
+                 wire zero_request = ctx_request_no_seed && ctx_request_steps == 0 &&
+@@ -1446,8 +1493,8 @@ module recipe #(
+                     always_ff @(posedge clk)
+                         if (!rst && accept) begin
+                             if (busy == 0) begin
+-                                layer  <= request_layer;
+-                                tree   <= request_tree;
++                                layer  <= ctx_request_layer;
++                                tree   <= ctx_request_tree;
+                                 domain <= ctx_step_domain;
+                                 kind   <= ctx_request_family;
+                             end
+@@ -1458,7 +1505,7 @@ module recipe #(
+ `ifndef SYNTHESIS
+                     always @(posedge clk)
+                         if (!rst && accept && |busy) begin
+-                            if (request_layer != layer || request_tree != tree ||
++                            if (ctx_request_layer != layer || ctx_request_tree != tree ||
+                                 ctx_request_family != kind || ctx_step_domain != domain ||
+                                 requested_shape != shared_shape || requested_pair != shared_pair)
+                                 $fatal(1, "shared coordinates changed before contexts drained");
+@@ -1507,7 +1554,7 @@ module recipe #(
+             // P1's iterative datapath lives only in scalar_execution.
+             localparam integer ROUNDS = UNROLL * PIPELINE;
+             logic [1599:0] state_reg[0:PIPELINE-1];
+-            logic [PIPELINE-1:0] stage_valid;
++            logic [PIPELINE-1:0] stage_valid, stage_fixed;
+             logic [4:0] stage_base[0:PIPELINE-1];
+             logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
+             logic sent;
+@@ -1517,24 +1564,26 @@ module recipe #(
+             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+             wire normal_valid = hash_state == HASH_RUN && !sent;
+             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+-            wire [1599:0] issue_state = engine_mode ? batch_perm_state : sponge_state;
++            wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
+             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+                 wire [4:0] start_round;
+                 wire [TAG_BITS-1:0] source_tag;
+-                wire source_valid;
++                wire source_valid, source_fixed;
+                 if (s == 0) begin : input_stage
+                     assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
+                     assign source_valid = recycle || issue_valid;
++                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : engine_mode;
+                 end else begin : following_stage
+                     assign rounds[0] = state_reg[s-1];
+                     assign start_round = stage_base[s-1];
+                     assign source_tag = stage_tag[s-1];
+                     assign source_valid = stage_valid[s-1];
++                    assign source_fixed = stage_fixed[s-1];
+                 end
+                 for (genvar r = 0; r < UNROLL; r = r + 1) begin : unrolled
+                     // verilog_format: off
+@@ -1562,17 +1611,18 @@ module recipe #(
+                         if (source_valid) begin
+                             stage_base[s] <= start_round;
+                             stage_tag[s]  <= source_tag;
++                            stage_fixed[s] <= source_fixed;
+                         end
+                     end
+                 end
+             end
+             assign batch_perm_ready = engine_mode && ready;
+-            assign batch_perm_done = engine_mode && finished;
++            assign batch_perm_done = finished && stage_fixed[PIPELINE-1];
+             assign batch_perm_digest = finished_state;
+             assign batch_perm_result_tag = stage_tag[PIPELINE-1];
+             if (SHARED_STATE) assign sponge_state = finished_state;
+             assign advanced_state = finished_state;
+-            assign round_complete = !engine_mode && finished;
++            assign round_complete = finished && !stage_fixed[PIPELINE-1];
+             assign round_update = hash_state == HASH_RUN && round_complete;
+             always_ff @(posedge clk) begin
+                 if (rst) sent <= 0;
+diff --git a/scripts/coordinate_timing_focus.py b/scripts/coordinate_timing_focus.py
+index a06a727..3bf7494 100644
+--- a/scripts/coordinate_timing_focus.py
++++ b/scripts/coordinate_timing_focus.py
+@@ -36,6 +36,38 @@ def native_vivado():
+     return result
+ 
+ 
++def measurement_gate(meta, baseline, tasks):
++    """Keep functional correctness separate from optional performance budgets."""
++    reference = baseline.get('tasks', {})
++    signs = [f'sim/{cfg}/{profile}' for cfg in CONFIGS for profile in PROFILES]
++    if any(tasks.get(k, {}).get('status') == 'failed' for k in signs):
++        return 'blocked_by_functional_failure'
++    if not all(tasks.get(k, {}).get('status') == 'passed' for k in signs):
++        return 'waiting_for_twelve_sign_cases'
++    if not all(reference.get(k, {}).get('status') == 'passed' for k in signs):
++        return 'waiting_for_baseline_sign_cases'
++    if not all(tasks[k].get(field) is not None
++               and tasks[k][field] == reference[k].get(field)
++               for k in signs for field in ('hashes', 'permutations')):
++        return 'blocked_by_workload_change'
++    for key in signs:
++        for field in ('cycles', 'total_cycles'):
++            old, new = reference[key].get(field), tasks[key].get(field)
++            if old is None or new is None or old <= 0:
++                return 'blocked_by_missing_cycle_measurement'
++            if meta.get('allow_cycle_changes', False):
++                if (new-old)*100 > old*meta.get('max_cycle_increase_pct', 5.0):
++                    return 'blocked_by_cycle_budget'
++            elif new != old:
++                return 'blocked_by_cycle_change'
++    synths = [f'synth/{cfg}/common' for cfg in CONFIGS]
++    if any(tasks.get(k, {}).get('status') == 'failed' for k in synths):
++        return 'blocked_by_synthesis_failure'
++    # Area budgets are reported independently. A slow synthesis must not hold
++    # up routing of completed points; each route waits for its own exact DCP.
++    return None
++
++
+ def main():
+     parser = argparse.ArgumentParser(description=__doc__)
+     parser.add_argument('--run-root', type=Path, required=True)
+@@ -53,17 +85,9 @@ def main():
+             candidate = Path(stage['run'])
+             candidate_state = read(candidate/'status.json')
+             tasks = candidate_state.get('tasks', {})
+-            signs = [f'sim/{cfg}/{profile}' for cfg in CONFIGS for profile in PROFILES]
+-            if any(tasks.get(k, {}).get('status') == 'failed' for k in signs):
+-                stage['automatic_routing_status'] = 'blocked_by_functional_failure'
+-                continue
+-            if not all(tasks.get(k, {}).get('status') == 'passed' for k in signs):
+-                stage['automatic_routing_status'] = 'waiting_for_twelve_sign_cases'
+-                continue
+-            equal = all(tasks[k].get(field) == baseline.get('tasks', {}).get(k, {}).get(field)
+-                        for k in signs for field in ('cycles', 'total_cycles', 'hashes', 'permutations'))
+-            if not equal:
+-                stage['automatic_routing_status'] = 'blocked_by_cycle_or_workload_change'
++            gate = measurement_gate(meta, baseline, tasks)
++            if gate:
++                stage['automatic_routing_status'] = gate
+                 continue
+             evidence = [read(run/'validation'/(name+'.json'))
+                         for name in stage.get('required_validation', [])]
+@@ -101,7 +125,8 @@ def main():
+                 stage['automatic_routing_status'] = 'waiting_for_vivado_capacity'
+                 continue
+             command = ['python3', str(ROOT/'scripts/run_pu_route_matrix.py'), '--launch',
+-                       '--authorize-routing', '--synthesis-run', str(candidate), '--configs', *CONFIGS]
++                       '--authorize-routing', '--synthesis-run', str(candidate), '--configs', *CONFIGS,
++                       '--max-implementations', str(meta.get('route_max_implementations', 6))]
+             launched = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
+             (run/(stage['name']+'_route_launch.log')).write_text(launched.stdout+launched.stderr)
+             if launched.returncode:
+diff --git a/scripts/report_timing_focus.py b/scripts/report_timing_focus.py
+index 2175273..acc56d5 100644
+--- a/scripts/report_timing_focus.py
++++ b/scripts/report_timing_focus.py
+@@ -54,16 +54,44 @@ def fmt(value, precision=3):
+     return '—' if value is None else f'{value:,.{precision}f}'
+ 
+ 
++def change_pct(old, new):
++    return None if old is None or new is None or old <= 0 else (new-old)/old*100
++
++
++def compare_sign(meta, old, new, cfg, profile):
++    comparable = old.get('status') == new.get('status') == 'passed'
++    workload_equal = (all(new.get(k) is not None and new[k] == old.get(k)
++                          for k in ('hashes', 'permutations')) if comparable else None)
++    changes = {k: change_pct(old.get(k), new.get(k)) for k in ('cycles', 'total_cycles')}
++    measured = comparable and all(value is not None for value in changes.values())
++    cycle_equal = all(new[k] == old[k] for k in changes) if measured else None
++    cycle_allowed = (all((new[k]-old[k])*100 <= old[k]*meta.get('max_cycle_increase_pct', 5.0)
++                         for k in changes) if meta.get('allow_cycle_changes', False)
++                     else cycle_equal) if measured else None
++    return dict(configuration=cfg, profile=profile, status=new.get('status', 'pending'),
++                workload_equal=workload_equal, cycle_equal=cycle_equal,
++                cycle_budget_passed=cycle_allowed, cycle_change_pct=changes['cycles'],
++                total_cycle_change_pct=changes['total_cycles'], baseline_cycles=old.get('cycles'),
++                cycles=new.get('cycles'), hashes=new.get('hashes'), permutations=new.get('permutations'))
++
++
+ def publish(run):
+     meta = read(run/'EXPERIMENT.json')
+     out = ROOT/'docs/manifests/experiments'/meta['experiment']
+-    prefix = out/'reports/Timing_Focus_P1_P4_P12_20261015'
++    report_name = meta.get('report_name', 'Timing_Focus_P1_P4_P12_20261015')
++    if Path(report_name).name != report_name:
++        raise ValueError('report_name must be a filename stem within this experiment reports directory')
++    prefix = out/'reports'/report_name
+     baseline = Path(meta['baseline_run'])
+     base = read(baseline/'status.json')
+     base_route = read(Path(meta['baseline_route'])/'status.json') if meta.get('baseline_route') else {}
+     result = dict(updated_at=stamp(), baseline_run=str(baseline), baseline_route=meta.get('baseline_route'),
+                   scope='common OOC, xc7a200tffg1156-3, generic Keccak, two Vivado threads',
+-                  acceptance='Byte-identical outputs/signature cache; exact cycles/hashes/permutations; routed setup/hold and ATP',
++                  acceptance='Byte-identical outputs/signature cache; exact hashes/permutations; separate cycle/area budgets; routed setup/hold and ATP',
++                  allow_cycle_changes=meta.get('allow_cycle_changes', False),
++                  max_cycle_increase_pct=meta.get('max_cycle_increase_pct', 5.0) if meta.get('allow_cycle_changes', False) else 0.0,
++                  max_area_increase_pct=meta.get('max_area_increase_pct'),
++                  route_max_implementations=meta.get('route_max_implementations', 6),
+                   candidate_rtl_is_provisional=True, h20_full_keygen_sign_run=False, stages=[])
+     result['validation'] = {p.stem: read(p) for p in (run/'validation').glob('*.json')}
+     for cfg in CONFIGS:
+@@ -83,11 +111,16 @@ def publish(run):
+     result['working_rtl_matches_candidate'] = bool(current_hashes) and all(
+         (ROOT/name).exists() and hashlib.sha256((ROOT/name).read_bytes()).hexdigest() == value
+         for name, value in current_hashes.items())
++    cycle_policy = (f'周期与总周期增幅各不超过 {result["max_cycle_increase_pct"]:g}%，独立报告变化'
++                    if result['allow_cycle_changes'] else '周期与总周期必须逐项相同')
++    area_policy = (f'综合面积增幅警示线为 {result["max_area_increase_pct"]:g}%，超限单列并以实测时序/ATP取舍，不阻塞其他点布线'
++                   if result['max_area_increase_pct'] is not None else '未指定综合面积增幅门限')
+     lines = ['# P1U1 / P4U1 / P4U2 / P12U1 布线时序优化', '',
+              f'更新时间：{result["updated_at"]}。本轮由用户明确授权布局布线；候选选择尚待实测。', '',
+-             f'工作区候选：`{current["name"]}`；与冻结 RTL 逐字节一致：`{result["working_rtl_matches_candidate"]}`。候选01/02/03是逐步试验记录，未将其综合改善直接当作布线收益。', '',
+-             '保持标准参数、单 Hash lane、模块接口和执行周期。面积采用对应配置 common；使用通用 Keccak、同器件和默认时序驱动综合，不增加时序例外。综合约束沿用 6.666667 ns；布线起点 U1=150 MHz、U2=100 MHz。', '',
+-             '综合 WNS 只用于筛选，不能视为布线频率。布线搜索使用 0.1 ns 周期网格及相邻失败证据；报告实际 STA 频率。原长耗时综合继续后台，缺项保持空白，不借用其他配置。', '',
++             f'工作区候选：`{current["name"]}`；与冻结 RTL 逐字节一致：`{result["working_rtl_matches_candidate"]}`。综合结果和布线结果分别报告。', '',
++             '保持标准参数、单 Hash lane和模块接口。面积采用对应配置 common；使用通用 Keccak、同器件和默认时序驱动综合，不增加时序例外。综合约束沿用 6.666667 ns；布线起点 U1=150 MHz、U2=100 MHz。', '',
++             f'验收预算：{cycle_policy}；{area_policy}。Hash/置换计数及逐字节输出必须一致；周期、面积超限属于性能预算问题，单独列出。', '',
++             f'综合 WNS 只用于筛选，不能视为布线频率。本轮配置的基线及候选搜索预算均为最多 {result["route_max_implementations"]} 次独立实现，每轮做 0.1 ns STA 网格扫描并保留相邻失败证据；报告该搜索预算下实测闭合频率，不称全局最高频率。原长耗时综合继续后台，缺项保持空白，不借用其他配置。', '',
+              '## 基线瓶颈', '',
+              '| 配置 | 综合 WNS ns | 数据路径 ns | 逻辑级数 | 关键路径 |',
+              '|---|---:|---:|---:|---|']
+@@ -95,12 +128,10 @@ def publish(run):
+     for cfg in CONFIGS:
+         t = timing(baseline/'synth'/cfg/'common/timing.rpt')
+         baseline_rows[cfg] = t
+-        label = ('FORS 索引算术与动态摘要选择' if cfg == 'P1U1' else
+-                 '端点读址、RAM 与首轮 Keccak' if cfg == 'P4U1' else
+-                 '链索引、步数选择与首轮 Keccak' if cfg == 'P12U1' else
+-                 '原综合未完成' if not t else t.get('source', ''))
++        label = ('`' + t.get('source', '—').replace('|', '\\|') + '` → `'
++                 + t.get('destination', '—').replace('|', '\\|') + '`') if t else '尚无时序报告'
+         lines.append(f'| {cfg} | {fmt(t.get("wns_ns"))} | {fmt(t.get("data_path_ns"))} | {fmt(t.get("logic_levels"),0)} | {label} |')
+-    lines += ['', '前三个已完成基线的前100条setup路径显示：P1U1有51条起于FORS组索引，P4U1有87条起于端点读址，P12U1有96条起于链游标。基线DCP只读扫描及源码/检查点校验见 baseline/paths；未更改约束。', '',
++    lines += ['', '上述关键路径直接提取自本轮冻结基线的综合 timing.rpt；未完成项留空，不沿用其他候选的路径归因。', '',
+               '## 候选与功能验证', '']
+     for stage in meta['stages']:
+         candidate = Path(stage['run'])
+@@ -112,22 +143,22 @@ def publish(run):
+             for profile in PROFILES:
+                 key = f'sim/{cfg}/{profile}'
+                 old, new = base.get('tasks', {}).get(key, {}), state.get('tasks', {}).get(key, {})
+-                passed = new.get('status') == 'passed'
+-                equal = passed and old.get('status') == 'passed' and all(
+-                    new.get(k) == old.get(k) for k in ('cycles', 'total_cycles', 'hashes', 'permutations'))
+-                validation.append(dict(configuration=cfg, profile=profile, status=new.get('status', 'pending'),
+-                                       workload_equal=equal if passed else None,
+-                                       cycles=new.get('cycles'), hashes=new.get('hashes'), permutations=new.get('permutations')))
++                validation.append(compare_sign(meta, old, new, cfg, profile))
+         data = dict(name=stage['name'], run=str(candidate), route=stage.get('route'),
+                     automatic_routing_status=stage.get('automatic_routing_status'),
+                     description=stage['description'], counts=state.get('counts', {}), validation=validation,
+-                    exact_sign_cases=sum(v['workload_equal'] is True for v in validation),
++                    functional_sign_cases=sum(v['workload_equal'] is True for v in validation),
++                    exact_sign_cases=sum(v['workload_equal'] is True and v['cycle_equal'] is True for v in validation),
++                    cycle_budget_cases=sum(v['cycle_budget_passed'] is True for v in validation),
+                     functional_regression=any(v['status'] == 'failed' or v['workload_equal'] is False for v in validation),
++                    cycle_budget_exceeded=any(v['cycle_budget_passed'] is False for v in validation),
+                     synthesis={}, routing=route.get('tasks', {}), route_results=route.get('results', []))
+         lines += [f'### {stage["name"]}', '', stage['description'], '',
+-                  f'逐字节输出、签名缓存及工作量核对：{data["exact_sign_cases"]}/12 项完成且与基线周期、Hash、置换计数完全一致。状态：`{data["counts"]}`。', '']
++                  f'逐字节输出、签名缓存及Hash/置换工作量核对：{data["functional_sign_cases"]}/12 项通过；周期完全相同 {data["exact_sign_cases"]}/12 项，满足周期预算 {data["cycle_budget_cases"]}/12 项。状态：`{data["counts"]}`。', '']
+         if data['functional_regression']:
+-            lines += ['**功能或周期检查失败，本候选不得用于最终验收。**', '']
++            lines += ['**功能或Hash/置换工作量检查失败，本候选不得用于最终验收。**', '']
++        if data['cycle_budget_exceeded']:
++            lines += ['**周期预算超限：自动布线门禁不通过；此项单独列为性能问题。**', '']
+         stage_out = out/'candidates'/stage['name']
+         if frozen_meta:
+             pack_rtl(Path(frozen_meta['source_root']), stage_out/'rtl.tar.gz', frozen_meta['sha256'])
+@@ -138,21 +169,34 @@ def publish(run):
+         for cfg in CONFIGS:
+             task = state.get('tasks', {}).get(f'synth/{cfg}/common', {})
+             t = timing(candidate/'synth'/cfg/'common/timing.rpt')
++            old_area = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('area') or {}
++            old_status = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('status')
++            old_slice = old_area.get('equivalent_slice') if old_status == 'passed' else None
++            new_slice = (task.get('area') or {}).get('equivalent_slice') if task.get('status') == 'passed' else None
++            area_change = change_pct(old_slice, new_slice)
++            area_limit = result['max_area_increase_pct']
++            area_allowed = ((new_slice-old_slice)*100 <= old_slice*area_limit
++                            if area_change is not None and area_limit is not None else None)
+             data['synthesis'][cfg] = dict(status=task.get('status', 'pending'),
+                                            analysis_deferred=task.get('analysis_deferred', False),
+-                                           seconds=task.get('seconds'), area=task.get('area'), timing=t)
++                                           seconds=task.get('seconds'), area=task.get('area'), timing=t,
++                                           area_change_pct=area_change, area_budget_passed=area_allowed)
++        data['area_budget_exceeded'] = any(t['area_budget_passed'] is False for t in data['synthesis'].values())
++        if data['area_budget_exceeded']:
++            lines += ['**综合面积预算超限：此项单独警示，不阻塞布线；最终结合实测时序和ATP取舍。**', '']
+         result['stages'].append(data)
+     lines += ['## 综合对照', '',
+               '| 候选 | 配置 | 等效 Slice | 面积变化 | WNS ns | WNS 改善 ns | 级数 | 综合耗时 s | 状态 |',
+               '|---|---|---:|---:|---:|---:|---:|---:|---|']
+     for stage in result['stages']:
+         for cfg, task in stage['synthesis'].items():
+-            old = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('area', {}).get('equivalent_slice')
+-            new = (task.get('area') or {}).get('equivalent_slice')
+-            delta = None if old is None or new is None else (new/old-1)*100
++            new = (task.get('area') or {}).get('equivalent_slice') if task['status'] == 'passed' else None
++            delta = task['area_change_pct']
+             t, bt = task['timing'], baseline_rows[cfg]
+             gain = t['wns_ns']-bt['wns_ns'] if 'wns_ns' in t and 'wns_ns' in bt else None
+             state = 'analysis_deferred（继续后台）' if task['analysis_deferred'] else task['status']
++            if task['area_budget_passed'] is False:
++                state += '；面积预算超限'
+             lines.append('| ' + ' | '.join([stage['name'], cfg, fmt(new), fmt(delta)+'%' if delta is not None else '—',
+                          fmt(t.get('wns_ns')), fmt(gain), fmt(t.get('logic_levels'),0), fmt(task.get('seconds'),1),state])+' |')
+     lines += ['', '## 布线对照', '',
+@@ -167,7 +211,7 @@ def publish(run):
+             gain = None if old_hz is None or new_hz is None else (new_hz/old_hz-1)*100
+             progress = new.get('status', '等待功能检查/尚未启动')
+             if not new:
+-                progress = stage.get('automatic_routing_status') or ('归因测量；不启动布线' if stage['name'].startswith('01_') else progress)
++                progress = stage.get('automatic_routing_status') or progress
+             if stage.get('route'):
+                 attempt = read(Path(stage['route'])/'route'/cfg/'attempts.json').get('attempts', [])
+                 if attempt and new.get('status') != 'passed':
+@@ -176,8 +220,8 @@ def publish(run):
+                          fmt(gain)+'%' if gain is not None else '—',fmt(new.get('routed_area', {}).get('equivalent_slice')),progress])+' |')
+     for profile, title in zip(PROFILES, ('SLH-DSA 128f', 'XMSS h10', 'LMS h10')):
+         lines += ['', f'## {title} Sign 实测布线 ATP', '',
+-                  '| 候选 | 配置 | 周期 | 基线 ATP Slice·ms | 候选 ATP Slice·ms | ATP 变化 |',
+-                  '|---|---|---:|---:|---:|---:|']
++                  '| 候选 | 配置 | 基线周期 | 候选周期 | 周期变化 | 周期预算 | 基线 ATP Slice·ms | 候选 ATP Slice·ms | ATP 变化 |',
++                  '|---|---|---:|---:|---:|---|---:|---:|---:|']
+         for stage in result['stages']:
+             for cfg in CONFIGS:
+                 old = next((r for r in base_route.get('results', []) if r['configuration'] == cfg and r['profile'] == profile), {})
+@@ -185,7 +229,10 @@ def publish(run):
+                 old_atp, new_atp = old.get('atp_slice_ms'), new.get('atp_slice_ms')
+                 delta = None if old_atp is None or new_atp is None else (new_atp/old_atp-1)*100
+                 case = next(v for v in stage['validation'] if v['configuration'] == cfg and v['profile'] == profile)
+-                lines.append('| ' + ' | '.join([stage['name'],cfg,fmt(case['cycles'],0),fmt(old_atp),fmt(new_atp),
++                budget = '通过' if case['cycle_budget_passed'] is True else '超限' if case['cycle_budget_passed'] is False else '待测'
++                cycle_delta = case['cycle_change_pct']
++                lines.append('| ' + ' | '.join([stage['name'],cfg,fmt(case['baseline_cycles'],0),fmt(case['cycles'],0),
++                             fmt(cycle_delta)+'%' if cycle_delta is not None else '—',budget,fmt(old_atp),fmt(new_atp),
+                              fmt(delta)+'%' if delta is not None else '—'])+' |')
+     lines += ['', '## 附加验证摘要', '']
+     for name, evidence in result['validation'].items():
+diff --git a/tb/tb_pipeline.sv b/tb/tb_pipeline.sv
+index 3296efa..6a3a84e 100644
+--- a/tb/tb_pipeline.sv
++++ b/tb/tb_pipeline.sv
+@@ -8,18 +8,20 @@ module tb_pipeline;
+  logic [1:0] tag=0,family;
+  wire [1:0] response_tag;
+  logic [4:0] steps=0,capture_after=0;
+- logic no_seed=0;
+- logic [7:0] a=0;
+- logic [255:0] initial_value=0,secret_seed,public_seed;
++ logic no_seed=0,capture_enable=1,pair=0;
++ logic [3:0] start=0,fixed_shape=0;
++ logic [7:0] a=0,seed_domain=8'h83,step_domain=8'h83;
++ logic [31:0] b=0;
++ logic [255:0] initial_value=0,right_value=0,secret_seed,public_seed;
+  logic [127:0] identifier;
+  wire [255:0] digest,capture;
+  wire [63:0] hashes,permutations;
+  recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),.SHARED_STATE(1'b1)) dut(
+   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
+-  .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(1'b1),
+-  .batch_leaf(leaf),.batch_a(a),.batch_b(32'd0),.batch_family(family),.batch_no_seed(no_seed),
+-  .batch_start(4'd0),.batch_initial_value(initial_value),.batch_fixed_shape(4'd0),.batch_pair(1'b0),.batch_right(256'd0),
+-  .batch_seed_domain(8'h83),.batch_step_domain(8'h83),.batch_response_valid(response_valid),.batch_response_ready(ready_response),
++  .batch_request_tag(tag),.batch_steps(steps),.batch_capture_after(capture_after),.batch_capture_enable(capture_enable),
++  .batch_leaf(leaf),.batch_a(a),.batch_b(b),.batch_family(family),.batch_no_seed(no_seed),
++  .batch_start(start),.batch_initial_value(initial_value),.batch_fixed_shape(fixed_shape),.batch_pair(pair),.batch_right(right_value),
++  .batch_seed_domain(seed_domain),.batch_step_domain(step_domain),.batch_response_valid(response_valid),.batch_response_ready(ready_response),
+   .batch_response_tag(response_tag),.batch_response_digest(),.batch_response_capture(),.batch_read_tag(response_tag),
+   .batch_read_digest(digest),.batch_read_capture(capture),
+ `ifndef SYNTHESIS
+@@ -47,21 +49,43 @@ module tb_pipeline;
+ `endif
+  logic [778:0] vectors[0:7];
+  integer slot_row[0:3];integer expected_hashes,cycles=0,same_edge=0,non_order=0,retired=0;
+- logic [19:0] leaf=20'd513;
++ logic [19:0] leaf=20'd513,job_leaf=20'd513;
++ logic poison_active=0;
++ integer poisoned_requests=0,poison_cycles=0;
+  string vector_file;integer family_arg;
+  task automatic tick;
+   @(posedge clk);#1;cycles++;if(cycles>10000)$fatal(1,"timeout");
+  endtask
++ // Request-only fields may change immediately after ready/valid acceptance.
++ // Job inputs (seeds, identifier, node size, layer and tree) remain stable.
++ always @(posedge clk)begin
++  if(!rst && poison_active && !valid)poison_cycles++;
++ end
+  task automatic select_row(input integer row,input integer slot);
++  poison_active=0;family=2'(family_arg);leaf=job_leaf;
++  capture_enable=1;start=0;fixed_shape=0;pair=0;b=0;right_value=0;
++  seed_domain=8'h83;step_domain=8'h83;
+   tag=2'(slot);a=8'(row+1);initial_value=vectors[row][767:512];
+   steps=vectors[row][772:768];capture_after=vectors[row][777:773];no_seed=vectors[row][778];
+  endtask
++ task automatic poison_request;
++  if(valid)$fatal(1,"poisoning an unaccepted request");
++  tag=~tag;steps=~steps;capture_after=~capture_after;capture_enable=~capture_enable;
++  leaf=~leaf;a=~a;b=~b;family=~family;no_seed=~no_seed;
++  start=~start;initial_value=~initial_value;fixed_shape=~fixed_shape;
++  pair=~pair;right_value=~right_value;seed_domain=~seed_domain;step_domain=~step_domain;
++  poison_active=1;poisoned_requests++;
++  // Keep invalid poisoned fields across an actual edge, including the next
++  // cycle in which an accepted request may enter its first permutation.
++  tick();
++ endtask
+  task automatic check_response(input integer row);
+-  if(digest!==vectors[row][511:256] || capture!==vectors[row][255:0])$fatal(1,"family %0d row %0d digest/capture",family,row);
++  if(digest!==vectors[row][511:256] || capture!==vectors[row][255:0])$fatal(1,"family %0d row %0d digest/capture",family_arg,row);
+  endtask
+  initial begin
+   if(!$value$plusargs("VECTOR=%s",vector_file) || !$value$plusargs("FAMILY=%d",family_arg) || !$value$plusargs("HASHES=%d",expected_hashes))$fatal(1,"arguments");
+-  if($value$plusargs("LEAF=%d",leaf))begin end
++  if($value$plusargs("LEAF=%d",job_leaf))begin end
++  leaf=job_leaf;
+   family=2'(family_arg);$readmemh(vector_file,vectors);
+   for(integer k=0;k<32;k++)begin secret_seed[k*8+:8]=8'(k+1);public_seed[k*8+:8]=8'(k+65);end
+   for(integer k=0;k<16;k++)identifier[k*8+:8]=8'(k+225);
+@@ -69,7 +93,7 @@ module tb_pipeline;
+   for(integer row=0;row<4;row++)begin
+    select_row(row,row);valid=1;
+    do begin @(negedge clk);end while(!ready);
+-   slot_row[row]=row;tick();valid=0;
++   slot_row[row]=row;tick();valid=0;poison_request();
+   end
+   // Captures remain readable while every completion is held unconsumed.
+   repeat(40)tick();
+@@ -86,17 +110,19 @@ module tb_pipeline;
+     @(negedge clk);
+     if(refill && ready)begin same_edge++;slot_row[slot]=next_row;refill=0;end
+     tick();ready_response=0;
+-    if(!refill)valid=0;
+-    else begin
++    if(!refill)begin
++     valid=0;if(retired<4)poison_request();
++    end else begin
+      do begin @(negedge clk);end while(!ready);
+-     slot_row[slot]=next_row;tick();valid=0;
++     slot_row[slot]=next_row;tick();valid=0;poison_request();
+     end
+     retired++;
+    end
+   end
+   repeat(4)tick();
+   if(response_valid || !same_edge || !non_order || hashes!=expected_hashes || permutations!=hashes)$fatal(1,"coverage/counts %0d %0d %0d/%0d",same_edge,non_order,hashes,expected_hashes);
+-  $display("PIPELINE_PASS family=%0d requests=8 returns=8 simultaneous=%0d unordered=%0d hashes=%0d",family,same_edge,non_order,hashes);$finish;
++  if(poisoned_requests!=8 || poison_cycles<8)$fatal(1,"poison coverage %0d/%0d",poisoned_requests,poison_cycles);
++  $display("PIPELINE_PASS family=%0d requests=8 returns=8 simultaneous=%0d unordered=%0d hashes=%0d poisoned=%0d poison_cycles=%0d",family_arg,same_edge,non_order,hashes,poisoned_requests,poison_cycles);$finish;
+  end
+ endmodule
+ `default_nettype wire

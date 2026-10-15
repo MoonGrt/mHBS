@@ -65,9 +65,19 @@ module executor #(
         FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
     } state_t;
     state_t state, continuation;
+    logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
     task automatic enter_state(input state_t next_state);
         begin
             state <= next_state;
+            // Prepare interface controls with the state transition, so binary
+            // state decoding does not cross recipe ready and return to prefetch.
+            lane_request_active <= next_state == HASH_ISSUE;
+            batch_issue_phase <= PIPELINE > 1 && (next_state == PIPE_ISSUE ||
+                next_state == LT_PIPE_ISSUE || next_state == FORS_ISSUE);
+            batch_verify_phase <= PIPELINE > 1 && next_state == PIPE_VERIFY_INPUT;
+            pipe_response_accept <= PIPELINE > 1 && (next_state == PIPE_ISSUE ||
+                next_state == PIPE_WAIT || next_state == PIPE_VERIFY_INPUT ||
+                next_state == LT_PIPE_WAIT || next_state == FORS_WAIT);
             // Decode the destination on the transition edge, before these
             // shared phase controls fan out through the recipe formatter.
             // IDLE membership is empty, so the reset transition clears all four.
@@ -276,7 +286,7 @@ module executor #(
     // verilog_format: on
     wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
-    assign pipe_selected=PIPELINE>1 && (state==PIPE_ISSUE || state==LT_PIPE_ISSUE || state==FORS_ISSUE || (state==PIPE_VERIFY_INPUT && verify_valid))
+    assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
     // verilog_format: off
     recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
@@ -302,14 +312,14 @@ module executor #(
         .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
         .batch_b({11'd0, batch_address}),
         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
-        .batch_response_valid(pipe_valid),.batch_response_ready(pipe_mode && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT)),.batch_response_tag(pipe_tag),
+        .batch_response_valid(pipe_valid),.batch_response_ready(pipe_response_accept),.batch_response_tag(pipe_tag),
         .batch_response_digest(),.batch_response_capture(),
         // Direct writeback and deferred consumption never overlap.
         // Select their tag before reading the context RAM, removing a
         // second 256-bit digest/key read port and its output selectors.
         .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
         .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
-        .request_valid(state==HASH_ISSUE),
+        .request_valid(lane_request_active),
         .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
         .request_chain(task_chain), .request_steps(task_steps),
         .request_capture_after(task_capture_after),
@@ -608,6 +618,16 @@ module executor #(
     // Every state transition prepares these flags on the same edge.
     always @(posedge clk) begin : phase_control_equivalence
         if (!rst) begin
+            if (lane_request_active !== (state == HASH_ISSUE))
+                $fatal(1, "registered scalar request differs from execution state");
+            if (batch_issue_phase !== (PIPELINE > 1 && (state == PIPE_ISSUE ||
+                state == LT_PIPE_ISSUE || state == FORS_ISSUE)))
+                $fatal(1, "registered batch request differs from execution state");
+            if (batch_verify_phase !== (PIPELINE > 1 && state == PIPE_VERIFY_INPUT))
+                $fatal(1, "registered batch verify differs from execution state");
+            if (pipe_response_accept !== (pipe_mode && state != LT_PIPE_ISSUE &&
+                (!fors_pipe || state == FORS_WAIT)))
+                $fatal(1, "registered batch response ready differs from execution state");
             if (fors_pipe !== (PIPELINE > 1 &&
                 (state == FORS_LEFT || state == FORS_ISSUE || state == FORS_WAIT)))
                 $fatal(1, "registered FORS phase differs from execution state");
@@ -786,7 +806,7 @@ module executor #(
                 end
             end
             if (pipe_mode) begin
-                if(pipe_valid && state!=LT_PIPE_ISSUE && (!fors_pipe || state==FORS_WAIT))begin
+                if(pipe_valid && pipe_response_accept)begin
                     pipe_done_mask[pipe_tag] <= 1;
                     if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
                         node_value <= pipe_read_result;

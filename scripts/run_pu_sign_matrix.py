@@ -42,6 +42,9 @@ def atomic_write(path, text):
 
 
 def launch(args):
+    slow_opt = os.environ.get('SIM_FAST_OPT_SLOW', '-O3')
+    if slow_opt not in ('-O0', '-O1', '-O2', '-O3', '-Os'):
+        raise ValueError('SIM_FAST_OPT_SLOW must be -O0, -O1, -O2, -O3 or -Os')
     configs = args.configs or CONFIGS
     stamp = datetime.now(ZoneInfo('Asia/Singapore')).strftime('%Y%m%d_%H%M%S')
     run = ROOT / 'build/pu_sign_matrix' / stamp
@@ -88,7 +91,7 @@ def launch(args):
                     area_top='common', area_scope='One shared common core per P/U',
                     vivado_workers=args.vivado_workers, vivado_threads=2,
                     vivado_headroom=args.vivado_headroom,
-                    simulation_workers=args.sim_workers, versions=versions,
+                    simulation_workers=args.sim_workers, simulation_opt_slow=slow_opt, versions=versions,
                     synthesis_skip_seconds=args.synth_skip_seconds,
                     synthesis_capacity_runs=[str(p.resolve()) for p in args.synth_capacity_run],
                     vivado=vivado, verilator=verilator, sha256=checksums)
@@ -180,6 +183,7 @@ class Runner:
                           source_unchanged=None, source_manifest=str(run / 'SOURCE.json'),
                           part=PART, vivado_workers=self.meta['vivado_workers'], vivado_threads=2,
                           simulation_synthesis_macro=False, synthesis_synthesis_macro=True,
+                          simulation_opt_slow=self.meta.get('simulation_opt_slow', '-O3'),
                           synthesis_mode='OOC, generic Keccak, no DSP', routed_sta=False,
                           clock_period_ns=6.666667, tasks={}, results=[])
         self.state.update(area_top='common', area_scope='One shared common core per P/U')
@@ -392,6 +396,8 @@ class Runner:
                 env['VERILATOR'] = self.meta['verilator']
                 env.pop('PROFILE_ENABLE', None)
                 env['SIM_SYNTHESIS']='0'
+                slow_opt = self.meta.get('simulation_opt_slow', '-O3')
+                env['SIM_FAST_OPT_SLOW'] = slow_opt
                 # Always use the frozen vectors, regardless of the launch shell.
                 env['VECTORS_DIR'] = str(self.source / 'tb/vectors')
                 with log.open('w') as handle:
@@ -405,8 +411,10 @@ class Runner:
                         os.killpg(process.pid, signal.SIGKILL)
                         process.wait()
                         raise RuntimeError('Simulation exceeded 6 hours')
-                raw_log = (self.source / 'build/sim' / f'P{p}U{u}_fast_o3_synthesis0'
-                           / f'{profile}_sign.log')
+                cache_name = f'P{p}U{u}_fast_o3_synthesis0'
+                if slow_opt != '-O3':
+                    cache_name += '_slow_' + slow_opt.removeprefix('-')
+                raw_log = self.source / 'build/sim' / cache_name / f'{profile}_sign.log'
                 if raw_log.exists():
                     shutil.copy2(log, output / f'{profile}_driver.log')
                     shutil.copy2(raw_log, log)
@@ -414,7 +422,7 @@ class Runner:
                 match = re.search(rf'STATEFUL_PASS P{p}U{u} op=1 cycles=(\d+) total=(\d+) '
                                   r'hashes=(\d+) permutations=(\d+).*?seconds=([\d.e+]+)', text)
                 if code or not match:
-                    raise RuntimeError(f'Simulation exit={code}; see {log}; compile log in frozen source/build/sim/P{p}U{u}_fast_o3')
+                    raise RuntimeError(f'Simulation exit={code}; see {log}; compile log in {raw_log.parent / "compile.log"}')
                 values = match.groups()
                 self.update(key, 'passed', finished_at=now(),
                             task_seconds=time.monotonic() - start,

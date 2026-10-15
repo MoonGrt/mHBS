@@ -54,16 +54,44 @@ def fmt(value, precision=3):
     return '—' if value is None else f'{value:,.{precision}f}'
 
 
+def change_pct(old, new):
+    return None if old is None or new is None or old <= 0 else (new-old)/old*100
+
+
+def compare_sign(meta, old, new, cfg, profile):
+    comparable = old.get('status') == new.get('status') == 'passed'
+    workload_equal = (all(new.get(k) is not None and new[k] == old.get(k)
+                          for k in ('hashes', 'permutations')) if comparable else None)
+    changes = {k: change_pct(old.get(k), new.get(k)) for k in ('cycles', 'total_cycles')}
+    measured = comparable and all(value is not None for value in changes.values())
+    cycle_equal = all(new[k] == old[k] for k in changes) if measured else None
+    cycle_allowed = (all((new[k]-old[k])*100 <= old[k]*meta.get('max_cycle_increase_pct', 5.0)
+                         for k in changes) if meta.get('allow_cycle_changes', False)
+                     else cycle_equal) if measured else None
+    return dict(configuration=cfg, profile=profile, status=new.get('status', 'pending'),
+                workload_equal=workload_equal, cycle_equal=cycle_equal,
+                cycle_budget_passed=cycle_allowed, cycle_change_pct=changes['cycles'],
+                total_cycle_change_pct=changes['total_cycles'], baseline_cycles=old.get('cycles'),
+                cycles=new.get('cycles'), hashes=new.get('hashes'), permutations=new.get('permutations'))
+
+
 def publish(run):
     meta = read(run/'EXPERIMENT.json')
     out = ROOT/'docs/manifests/experiments'/meta['experiment']
-    prefix = out/'reports/Timing_Focus_P1_P4_P12_20261015'
+    report_name = meta.get('report_name', 'Timing_Focus_P1_P4_P12_20261015')
+    if Path(report_name).name != report_name:
+        raise ValueError('report_name must be a filename stem within this experiment reports directory')
+    prefix = out/'reports'/report_name
     baseline = Path(meta['baseline_run'])
     base = read(baseline/'status.json')
     base_route = read(Path(meta['baseline_route'])/'status.json') if meta.get('baseline_route') else {}
     result = dict(updated_at=stamp(), baseline_run=str(baseline), baseline_route=meta.get('baseline_route'),
                   scope='common OOC, xc7a200tffg1156-3, generic Keccak, two Vivado threads',
-                  acceptance='Byte-identical outputs/signature cache; exact cycles/hashes/permutations; routed setup/hold and ATP',
+                  acceptance='Byte-identical outputs/signature cache; exact hashes/permutations; separate cycle/area budgets; routed setup/hold and ATP',
+                  allow_cycle_changes=meta.get('allow_cycle_changes', False),
+                  max_cycle_increase_pct=meta.get('max_cycle_increase_pct', 5.0) if meta.get('allow_cycle_changes', False) else 0.0,
+                  max_area_increase_pct=meta.get('max_area_increase_pct'),
+                  route_max_implementations=meta.get('route_max_implementations', 6),
                   candidate_rtl_is_provisional=True, h20_full_keygen_sign_run=False, stages=[])
     result['validation'] = {p.stem: read(p) for p in (run/'validation').glob('*.json')}
     for cfg in CONFIGS:
@@ -83,11 +111,16 @@ def publish(run):
     result['working_rtl_matches_candidate'] = bool(current_hashes) and all(
         (ROOT/name).exists() and hashlib.sha256((ROOT/name).read_bytes()).hexdigest() == value
         for name, value in current_hashes.items())
+    cycle_policy = (f'周期与总周期增幅各不超过 {result["max_cycle_increase_pct"]:g}%，独立报告变化'
+                    if result['allow_cycle_changes'] else '周期与总周期必须逐项相同')
+    area_policy = (f'综合面积增幅警示线为 {result["max_area_increase_pct"]:g}%，超限单列并以实测时序/ATP取舍，不阻塞其他点布线'
+                   if result['max_area_increase_pct'] is not None else '未指定综合面积增幅门限')
     lines = ['# P1U1 / P4U1 / P4U2 / P12U1 布线时序优化', '',
              f'更新时间：{result["updated_at"]}。本轮由用户明确授权布局布线；候选选择尚待实测。', '',
-             f'工作区候选：`{current["name"]}`；与冻结 RTL 逐字节一致：`{result["working_rtl_matches_candidate"]}`。候选01/02/03是逐步试验记录，未将其综合改善直接当作布线收益。', '',
-             '保持标准参数、单 Hash lane、模块接口和执行周期。面积采用对应配置 common；使用通用 Keccak、同器件和默认时序驱动综合，不增加时序例外。综合约束沿用 6.666667 ns；布线起点 U1=150 MHz、U2=100 MHz。', '',
-             '综合 WNS 只用于筛选，不能视为布线频率。布线搜索使用 0.1 ns 周期网格及相邻失败证据；报告实际 STA 频率。原长耗时综合继续后台，缺项保持空白，不借用其他配置。', '',
+             f'工作区候选：`{current["name"]}`；与冻结 RTL 逐字节一致：`{result["working_rtl_matches_candidate"]}`。综合结果和布线结果分别报告。', '',
+             '保持标准参数、单 Hash lane和模块接口。面积采用对应配置 common；使用通用 Keccak、同器件和默认时序驱动综合，不增加时序例外。综合约束沿用 6.666667 ns；布线起点 U1=150 MHz、U2=100 MHz。', '',
+             f'验收预算：{cycle_policy}；{area_policy}。Hash/置换计数及逐字节输出必须一致；周期、面积超限属于性能预算问题，单独列出。', '',
+             f'综合 WNS 只用于筛选，不能视为布线频率。本轮配置的基线及候选搜索预算均为最多 {result["route_max_implementations"]} 次独立实现，每轮做 0.1 ns STA 网格扫描并保留相邻失败证据；报告该搜索预算下实测闭合频率，不称全局最高频率。原长耗时综合继续后台，缺项保持空白，不借用其他配置。', '',
              '## 基线瓶颈', '',
              '| 配置 | 综合 WNS ns | 数据路径 ns | 逻辑级数 | 关键路径 |',
              '|---|---:|---:|---:|---|']
@@ -95,12 +128,10 @@ def publish(run):
     for cfg in CONFIGS:
         t = timing(baseline/'synth'/cfg/'common/timing.rpt')
         baseline_rows[cfg] = t
-        label = ('FORS 索引算术与动态摘要选择' if cfg == 'P1U1' else
-                 '端点读址、RAM 与首轮 Keccak' if cfg == 'P4U1' else
-                 '链索引、步数选择与首轮 Keccak' if cfg == 'P12U1' else
-                 '原综合未完成' if not t else t.get('source', ''))
+        label = ('`' + t.get('source', '—').replace('|', '\\|') + '` → `'
+                 + t.get('destination', '—').replace('|', '\\|') + '`') if t else '尚无时序报告'
         lines.append(f'| {cfg} | {fmt(t.get("wns_ns"))} | {fmt(t.get("data_path_ns"))} | {fmt(t.get("logic_levels"),0)} | {label} |')
-    lines += ['', '前三个已完成基线的前100条setup路径显示：P1U1有51条起于FORS组索引，P4U1有87条起于端点读址，P12U1有96条起于链游标。基线DCP只读扫描及源码/检查点校验见 baseline/paths；未更改约束。', '',
+    lines += ['', '上述关键路径直接提取自本轮冻结基线的综合 timing.rpt；未完成项留空，不沿用其他候选的路径归因。', '',
               '## 候选与功能验证', '']
     for stage in meta['stages']:
         candidate = Path(stage['run'])
@@ -112,22 +143,22 @@ def publish(run):
             for profile in PROFILES:
                 key = f'sim/{cfg}/{profile}'
                 old, new = base.get('tasks', {}).get(key, {}), state.get('tasks', {}).get(key, {})
-                passed = new.get('status') == 'passed'
-                equal = passed and old.get('status') == 'passed' and all(
-                    new.get(k) == old.get(k) for k in ('cycles', 'total_cycles', 'hashes', 'permutations'))
-                validation.append(dict(configuration=cfg, profile=profile, status=new.get('status', 'pending'),
-                                       workload_equal=equal if passed else None,
-                                       cycles=new.get('cycles'), hashes=new.get('hashes'), permutations=new.get('permutations')))
+                validation.append(compare_sign(meta, old, new, cfg, profile))
         data = dict(name=stage['name'], run=str(candidate), route=stage.get('route'),
                     automatic_routing_status=stage.get('automatic_routing_status'),
                     description=stage['description'], counts=state.get('counts', {}), validation=validation,
-                    exact_sign_cases=sum(v['workload_equal'] is True for v in validation),
+                    functional_sign_cases=sum(v['workload_equal'] is True for v in validation),
+                    exact_sign_cases=sum(v['workload_equal'] is True and v['cycle_equal'] is True for v in validation),
+                    cycle_budget_cases=sum(v['cycle_budget_passed'] is True for v in validation),
                     functional_regression=any(v['status'] == 'failed' or v['workload_equal'] is False for v in validation),
+                    cycle_budget_exceeded=any(v['cycle_budget_passed'] is False for v in validation),
                     synthesis={}, routing=route.get('tasks', {}), route_results=route.get('results', []))
         lines += [f'### {stage["name"]}', '', stage['description'], '',
-                  f'逐字节输出、签名缓存及工作量核对：{data["exact_sign_cases"]}/12 项完成且与基线周期、Hash、置换计数完全一致。状态：`{data["counts"]}`。', '']
+                  f'逐字节输出、签名缓存及Hash/置换工作量核对：{data["functional_sign_cases"]}/12 项通过；周期完全相同 {data["exact_sign_cases"]}/12 项，满足周期预算 {data["cycle_budget_cases"]}/12 项。状态：`{data["counts"]}`。', '']
         if data['functional_regression']:
-            lines += ['**功能或周期检查失败，本候选不得用于最终验收。**', '']
+            lines += ['**功能或Hash/置换工作量检查失败，本候选不得用于最终验收。**', '']
+        if data['cycle_budget_exceeded']:
+            lines += ['**周期预算超限：自动布线门禁不通过；此项单独列为性能问题。**', '']
         stage_out = out/'candidates'/stage['name']
         if frozen_meta:
             pack_rtl(Path(frozen_meta['source_root']), stage_out/'rtl.tar.gz', frozen_meta['sha256'])
@@ -138,21 +169,34 @@ def publish(run):
         for cfg in CONFIGS:
             task = state.get('tasks', {}).get(f'synth/{cfg}/common', {})
             t = timing(candidate/'synth'/cfg/'common/timing.rpt')
+            old_area = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('area') or {}
+            old_status = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('status')
+            old_slice = old_area.get('equivalent_slice') if old_status == 'passed' else None
+            new_slice = (task.get('area') or {}).get('equivalent_slice') if task.get('status') == 'passed' else None
+            area_change = change_pct(old_slice, new_slice)
+            area_limit = result['max_area_increase_pct']
+            area_allowed = ((new_slice-old_slice)*100 <= old_slice*area_limit
+                            if area_change is not None and area_limit is not None else None)
             data['synthesis'][cfg] = dict(status=task.get('status', 'pending'),
                                            analysis_deferred=task.get('analysis_deferred', False),
-                                           seconds=task.get('seconds'), area=task.get('area'), timing=t)
+                                           seconds=task.get('seconds'), area=task.get('area'), timing=t,
+                                           area_change_pct=area_change, area_budget_passed=area_allowed)
+        data['area_budget_exceeded'] = any(t['area_budget_passed'] is False for t in data['synthesis'].values())
+        if data['area_budget_exceeded']:
+            lines += ['**综合面积预算超限：此项单独警示，不阻塞布线；最终结合实测时序和ATP取舍。**', '']
         result['stages'].append(data)
     lines += ['## 综合对照', '',
               '| 候选 | 配置 | 等效 Slice | 面积变化 | WNS ns | WNS 改善 ns | 级数 | 综合耗时 s | 状态 |',
               '|---|---|---:|---:|---:|---:|---:|---:|---|']
     for stage in result['stages']:
         for cfg, task in stage['synthesis'].items():
-            old = base.get('tasks', {}).get(f'synth/{cfg}/common', {}).get('area', {}).get('equivalent_slice')
-            new = (task.get('area') or {}).get('equivalent_slice')
-            delta = None if old is None or new is None else (new/old-1)*100
+            new = (task.get('area') or {}).get('equivalent_slice') if task['status'] == 'passed' else None
+            delta = task['area_change_pct']
             t, bt = task['timing'], baseline_rows[cfg]
             gain = t['wns_ns']-bt['wns_ns'] if 'wns_ns' in t and 'wns_ns' in bt else None
             state = 'analysis_deferred（继续后台）' if task['analysis_deferred'] else task['status']
+            if task['area_budget_passed'] is False:
+                state += '；面积预算超限'
             lines.append('| ' + ' | '.join([stage['name'], cfg, fmt(new), fmt(delta)+'%' if delta is not None else '—',
                          fmt(t.get('wns_ns')), fmt(gain), fmt(t.get('logic_levels'),0), fmt(task.get('seconds'),1),state])+' |')
     lines += ['', '## 布线对照', '',
@@ -167,7 +211,7 @@ def publish(run):
             gain = None if old_hz is None or new_hz is None else (new_hz/old_hz-1)*100
             progress = new.get('status', '等待功能检查/尚未启动')
             if not new:
-                progress = stage.get('automatic_routing_status') or ('归因测量；不启动布线' if stage['name'].startswith('01_') else progress)
+                progress = stage.get('automatic_routing_status') or progress
             if stage.get('route'):
                 attempt = read(Path(stage['route'])/'route'/cfg/'attempts.json').get('attempts', [])
                 if attempt and new.get('status') != 'passed':
@@ -176,8 +220,8 @@ def publish(run):
                          fmt(gain)+'%' if gain is not None else '—',fmt(new.get('routed_area', {}).get('equivalent_slice')),progress])+' |')
     for profile, title in zip(PROFILES, ('SLH-DSA 128f', 'XMSS h10', 'LMS h10')):
         lines += ['', f'## {title} Sign 实测布线 ATP', '',
-                  '| 候选 | 配置 | 周期 | 基线 ATP Slice·ms | 候选 ATP Slice·ms | ATP 变化 |',
-                  '|---|---|---:|---:|---:|---:|']
+                  '| 候选 | 配置 | 基线周期 | 候选周期 | 周期变化 | 周期预算 | 基线 ATP Slice·ms | 候选 ATP Slice·ms | ATP 变化 |',
+                  '|---|---|---:|---:|---:|---|---:|---:|---:|']
         for stage in result['stages']:
             for cfg in CONFIGS:
                 old = next((r for r in base_route.get('results', []) if r['configuration'] == cfg and r['profile'] == profile), {})
@@ -185,7 +229,10 @@ def publish(run):
                 old_atp, new_atp = old.get('atp_slice_ms'), new.get('atp_slice_ms')
                 delta = None if old_atp is None or new_atp is None else (new_atp/old_atp-1)*100
                 case = next(v for v in stage['validation'] if v['configuration'] == cfg and v['profile'] == profile)
-                lines.append('| ' + ' | '.join([stage['name'],cfg,fmt(case['cycles'],0),fmt(old_atp),fmt(new_atp),
+                budget = '通过' if case['cycle_budget_passed'] is True else '超限' if case['cycle_budget_passed'] is False else '待测'
+                cycle_delta = case['cycle_change_pct']
+                lines.append('| ' + ' | '.join([stage['name'],cfg,fmt(case['baseline_cycles'],0),fmt(case['cycles'],0),
+                             fmt(cycle_delta)+'%' if cycle_delta is not None else '—',budget,fmt(old_atp),fmt(new_atp),
                              fmt(delta)+'%' if delta is not None else '—'])+' |')
     lines += ['', '## 附加验证摘要', '']
     for name, evidence in result['validation'].items():

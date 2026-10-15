@@ -36,6 +36,38 @@ def native_vivado():
     return result
 
 
+def measurement_gate(meta, baseline, tasks):
+    """Keep functional correctness separate from optional performance budgets."""
+    reference = baseline.get('tasks', {})
+    signs = [f'sim/{cfg}/{profile}' for cfg in CONFIGS for profile in PROFILES]
+    if any(tasks.get(k, {}).get('status') == 'failed' for k in signs):
+        return 'blocked_by_functional_failure'
+    if not all(tasks.get(k, {}).get('status') == 'passed' for k in signs):
+        return 'waiting_for_twelve_sign_cases'
+    if not all(reference.get(k, {}).get('status') == 'passed' for k in signs):
+        return 'waiting_for_baseline_sign_cases'
+    if not all(tasks[k].get(field) is not None
+               and tasks[k][field] == reference[k].get(field)
+               for k in signs for field in ('hashes', 'permutations')):
+        return 'blocked_by_workload_change'
+    for key in signs:
+        for field in ('cycles', 'total_cycles'):
+            old, new = reference[key].get(field), tasks[key].get(field)
+            if old is None or new is None or old <= 0:
+                return 'blocked_by_missing_cycle_measurement'
+            if meta.get('allow_cycle_changes', False):
+                if (new-old)*100 > old*meta.get('max_cycle_increase_pct', 5.0):
+                    return 'blocked_by_cycle_budget'
+            elif new != old:
+                return 'blocked_by_cycle_change'
+    synths = [f'synth/{cfg}/common' for cfg in CONFIGS]
+    if any(tasks.get(k, {}).get('status') == 'failed' for k in synths):
+        return 'blocked_by_synthesis_failure'
+    # Area budgets are reported independently. A slow synthesis must not hold
+    # up routing of completed points; each route waits for its own exact DCP.
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run-root', type=Path, required=True)
@@ -53,17 +85,9 @@ def main():
             candidate = Path(stage['run'])
             candidate_state = read(candidate/'status.json')
             tasks = candidate_state.get('tasks', {})
-            signs = [f'sim/{cfg}/{profile}' for cfg in CONFIGS for profile in PROFILES]
-            if any(tasks.get(k, {}).get('status') == 'failed' for k in signs):
-                stage['automatic_routing_status'] = 'blocked_by_functional_failure'
-                continue
-            if not all(tasks.get(k, {}).get('status') == 'passed' for k in signs):
-                stage['automatic_routing_status'] = 'waiting_for_twelve_sign_cases'
-                continue
-            equal = all(tasks[k].get(field) == baseline.get('tasks', {}).get(k, {}).get(field)
-                        for k in signs for field in ('cycles', 'total_cycles', 'hashes', 'permutations'))
-            if not equal:
-                stage['automatic_routing_status'] = 'blocked_by_cycle_or_workload_change'
+            gate = measurement_gate(meta, baseline, tasks)
+            if gate:
+                stage['automatic_routing_status'] = gate
                 continue
             evidence = [read(run/'validation'/(name+'.json'))
                         for name in stage.get('required_validation', [])]
@@ -101,7 +125,8 @@ def main():
                 stage['automatic_routing_status'] = 'waiting_for_vivado_capacity'
                 continue
             command = ['python3', str(ROOT/'scripts/run_pu_route_matrix.py'), '--launch',
-                       '--authorize-routing', '--synthesis-run', str(candidate), '--configs', *CONFIGS]
+                       '--authorize-routing', '--synthesis-run', str(candidate), '--configs', *CONFIGS,
+                       '--max-implementations', str(meta.get('route_max_implementations', 6))]
             launched = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
             (run/(stage['name']+'_route_launch.log')).write_text(launched.stdout+launched.stderr)
             if launched.returncode:

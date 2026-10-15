@@ -1,0 +1,158 @@
+{
+  "schema": "mhbs.interface_control.review.v1",
+  "method": "static_review",
+  "dynamic_test_pass_claimed": false,
+  "production_rtl_modified_by_review": false,
+  "full_rtl_source_sha256": "9ad612b1b030c3e00b74548ef58d2b9f423bb785fd7d50fac7b1257892acb127",
+  "full_rtl_source_hash_method": "SHA256 of sorted path + NUL + file SHA256 + newline for every sources.txt entry; source list verified to include every rtl/**/*.sv file",
+  "files": [
+    {
+      "path": "rtl/hash/keccak.sv",
+      "sha256": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769"
+    },
+    {
+      "path": "rtl/hash/recipe.sv",
+      "sha256": "f4701b7991c9e0d0e2452cb6ff34291165a69c51a6a5b66dd5859c199c3f523a"
+    },
+    {
+      "path": "rtl/memory/value.sv",
+      "sha256": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9"
+    },
+    {
+      "path": "rtl/memory/signature.sv",
+      "sha256": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149"
+    },
+    {
+      "path": "rtl/executor/sequencer.sv",
+      "sha256": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8"
+    },
+    {
+      "path": "rtl/executor/executor.sv",
+      "sha256": "a5e9591734f5af4461ebccac8b0acf79c5a7aa5ecc5e428634c34efbff9f3c63"
+    },
+    {
+      "path": "rtl/top/top.sv",
+      "sha256": "dd764e9f28115b553b6f136481420d5f7725e9f0c791f70f61c4329e14406e23"
+    },
+    {
+      "path": "rtl/top/common.sv",
+      "sha256": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+    }
+  ],
+  "sources_txt_sha256": "6f65bb0751a90ab0462e70d0ff8726c073eb73209651d3375d83e9fc1d862808",
+  "conclusion": "No new functional/timing-cycle mismatch identified in the four predecoded interface flags for legal transitions from reset. All state writes use enter_state; added flag writes share the same NBA edge and ordering. This is a static review, not a dynamic regression pass.",
+  "checks": [
+    {
+      "topic": "all transitions and reset",
+      "result": "consistent",
+      "reason": "Only RTL assignment to state is state<=next_state in enter_state. Reset invokes enter_state(IDLE), clearing all four flags. Multiple task calls, if present on one edge, share ordering for state and all flags. Hold cycles retain both state and flags.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 71
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 733
+        }
+      ]
+    },
+    {
+      "topic": "domain changes",
+      "result": "consistent",
+      "reason": "New flags depend only on next_state and compile-time PIPELINE, so Job/indexing/family updates cannot create a one-cycle mismatch. P1 retains scalar request flag and compiles batch flags to false.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 74
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 75
+        }
+      ]
+    },
+    {
+      "topic": "PIPE_VERIFY_INPUT",
+      "result": "consistent",
+      "reason": "batch_verify_phase is asserted exactly in PIPE_VERIFY_INPUT; request still requires verify_valid. Response consumption remains enabled as in the original expression. External verify_ready is unchanged.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 289
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 77
+        }
+      ]
+    },
+    {
+      "topic": "FORS/L-tree input and response separation",
+      "result": "consistent",
+      "reason": "FORS_LEFT: request phase false, response false; FORS_ISSUE: request phase true, response false; FORS_WAIT: request phase false, response true. LT_PIPE_ISSUE: request true, response false; LT_PIPE_WAIT: request false, response true. All remaining operand/expected-slot predicates are unchanged.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 78
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 315
+        }
+      ]
+    },
+    {
+      "topic": "completion consumption",
+      "result": "consistent",
+      "reason": "Recipe response_ready and executor done-mask bookkeeping now share pipe_response_accept. Outer pipe_mode is redundant but consistent; no response is consumed without matching completion bookkeeping.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 809
+        }
+      ]
+    },
+    {
+      "topic": "existing illegal-state test",
+      "result": "compatible_by_static_inspection",
+      "reason": "tb/tb.sv fault=3 waits for state23 (HASH_WAIT) before forcing127. All four new flags are false in HASH_WAIT and remain false under the forced invalid state; fail() enters FAILED and asserts abort. Thus new equivalence assertions do not preempt this specific existing diagnostic test. An arbitrary future force from an active issuing phase could deliberately violate the duplicated-state invariant and trigger an assertion; that would require corresponding fault-test handling.",
+      "refs": [
+        {
+          "file": "tb/tb.sv",
+          "line": 156
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 454
+        },
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 926
+        }
+      ]
+    },
+    {
+      "topic": "equivalence assertions",
+      "result": "present",
+      "reason": "SYNTHESIS-excluded phase_control_equivalence checks all four new flags against original state predicates each clock.",
+      "refs": [
+        {
+          "file": "rtl/executor/executor.sv",
+          "line": 619
+        }
+      ]
+    }
+  ],
+  "static_state_set_check": {
+    "passed": true,
+    "cases": 384,
+    "scope": "All 128 state encodings for PIPELINE=1/4/12: old response-ready membership equals new predecoded membership. This is Boolean enumeration, not RTL simulation."
+  },
+  "reviewed_registers": [
+    "lane_request_active",
+    "batch_issue_phase",
+    "batch_verify_phase",
+    "pipe_response_accept"
+  ]
+}
