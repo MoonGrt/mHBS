@@ -1,0 +1,368 @@
+--- T2/rtl/executor/executor.sv
++++ U3_reuse_sponge_capacity/rtl/executor/executor.sv
+@@ -71,6 +71,7 @@
+     } state_t;
+     state_t state, continuation;
+     logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
++    logic direct_writeback_phase;
+     task automatic enter_state(input state_t next_state);
+         begin
+             state <= next_state;
+@@ -95,6 +96,12 @@
+             lt_pipe <= PIPELINE > 1 && (next_state == LT_PIPE_ISSUE || next_state == LT_PIPE_WAIT);
+             fors_leaves <= PIPELINE > 1 && indexing == 1 && !verifying &&
+                 (next_state == PIPE_ISSUE || next_state == PIPE_WAIT);
++            // Direct-result ownership is stable for the whole batch. Prepare
++            // it at the same transition edge as request/response controls;
++            // algorithm and operation decoding no longer crosses RAM writes.
++            direct_writeback_phase <= PIPELINE > 1 && pipe_direct &&
++                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
++                 next_state == PIPE_VERIFY_INPUT);
+         end
+     endtask
+     // Abort outstanding execution on an error. The autonomous wrapper halts
+@@ -555,45 +562,107 @@
+         end
+     endtask
+ 
++    // A response belongs to exactly one writeback phase. Authentication and
++    // stack writes intentionally meet in PUSH_NODE; authenticate first, then
++    // PUSH_STACK commits the remaining node through this same write port.
++    wire write_auth = auth_write;
++    wire write_stack = stack_write && !auth_write;
++    wire write_fors = (fors_leaves || fors_pipe) && pipe_valid &&
++        (fors_leaves || state == FORS_WAIT);
++    wire write_ltree = lt_pipe && pipe_valid && state == LT_PIPE_WAIT;
++    wire write_direct = direct_writeback_phase && pipe_valid;
++    wire write_chain = state == CHAIN_STORE && indexing != 1;
++    wire write_scalar_ltree = PIPELINE == 1 && state == LT_STORE;
++    wire write_copy = state == LT_COPY;
++    wire write_root = root_write;
++    wire write_auth_from_ram = write_auth && (state == FORS_AUTH0 || state == FORS_AUTH1);
++    wire write_node = write_stack || (write_auth && !write_auth_from_ram);
++    wire write_from_ram = write_copy || write_auth_from_ram;
++    wire write_response = write_fors || write_ltree || write_direct;
++    wire write_result = write_chain || write_scalar_ltree;
++    wire [INDEX_BITS-1:0] direct_write_address = pipe_rolling
++        ? pipe_chain_index[pipe_tag] : chain_cursor + INDEX_BITS'(pipe_tag);
++    // Form a parallel mux from mutually exclusive owners. Grouping identical
++    // data sources avoids repeating the 256-bit response and node selectors.
+     always_comb begin
+-        endpoint_write = 0;
+-        endpoint_address = chain_cursor;
+-        endpoint_data = result[W-1:0];
++        endpoint_write = write_auth || write_stack || write_response ||
++            write_result || write_copy || write_root;
++        endpoint_address =
++            ({INDEX_BITS{write_auth}} & (INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level))) |
++            ({INDEX_BITS{write_stack}} & (INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level))) |
++            ({INDEX_BITS{write_fors}} & (INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_offset) + INDEX_BITS'(pipe_tag))) |
++            ({INDEX_BITS{write_ltree}} & ((lt_cursor >> 1) + INDEX_BITS'(pipe_tag))) |
++            ({INDEX_BITS{write_direct}} & direct_write_address) |
++            ({INDEX_BITS{write_chain}} & chain_cursor) |
++            ({INDEX_BITS{write_scalar_ltree || write_copy}} & (lt_cursor >> 1)) |
++            ({INDEX_BITS{write_root}} & INDEX_BITS'(group_index));
++        endpoint_data =
++            ({W{write_node}} & node_value) |
++            ({W{write_from_ram}} & endpoint_value0) |
++            ({W{write_response}} & pipe_response_result) |
++            ({W{write_result}} & result[W-1:0]) |
++            ({W{write_root}} & route_value[W-1:0]);
++    end
++`ifndef SYNTHESIS
++    // Keep the old priority form as a simulation-only equivalence oracle.
++    logic reference_endpoint_write;
++    logic [INDEX_BITS-1:0] reference_endpoint_address;
++    logic [W-1:0] reference_endpoint_data;
++    always_comb begin
++        reference_endpoint_write = 0;
++        reference_endpoint_address = chain_cursor;
++        reference_endpoint_data = result[W-1:0];
+         if (auth_write) begin
+-            endpoint_write = 1;
+-            endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
+-            endpoint_data = auth_write_data;
++            reference_endpoint_write = 1;
++            reference_endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
++            reference_endpoint_data = auth_write_data;
+         end else if (stack_write) begin
+-            endpoint_write = 1;
+-            endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
+-            endpoint_data = node_value;
++            reference_endpoint_write = 1;
++            reference_endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
++            reference_endpoint_data = node_value;
+         end else if (fors_leaves || fors_pipe) begin
+-            endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
+-            endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_response_result;
++            reference_endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
++            reference_endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
++            reference_endpoint_data = pipe_response_result;
+         end else if (lt_pipe) begin
+-            endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
+-            endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_response_result;
++            reference_endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
++            reference_endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
++            reference_endpoint_data = pipe_response_result;
+         end else if (pipe_direct && pipe_mode) begin
+-            endpoint_write = pipe_valid;
+-            endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_response_result;
++            reference_endpoint_write = pipe_valid;
++            reference_endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
++            reference_endpoint_data = pipe_response_result;
+         end else if (state == CHAIN_STORE && indexing != 1) begin
+-            endpoint_write = 1;
++            reference_endpoint_write = 1;
+         end else if (PIPELINE == 1 && state == LT_STORE) begin
+-            endpoint_write = 1;
+-            endpoint_address = lt_cursor >> 1;
++            reference_endpoint_write = 1;
++            reference_endpoint_address = lt_cursor >> 1;
+         end else if (state == LT_COPY) begin
+-            endpoint_write = 1;
+-            endpoint_address = lt_cursor >> 1;
+-            endpoint_data = endpoint_value0;
++            reference_endpoint_write = 1;
++            reference_endpoint_address = lt_cursor >> 1;
++            reference_endpoint_data = endpoint_value0;
+         end else if (root_write) begin
+-            endpoint_write = 1;
+-            endpoint_address = INDEX_BITS'(group_index);
+-            endpoint_data = route_value[W-1:0];
++            reference_endpoint_write = 1;
++            reference_endpoint_address = INDEX_BITS'(group_index);
++            reference_endpoint_data = route_value[W-1:0];
+         end
+     end
++
++    always @(posedge clk) begin : debug_writeback_ownership
++        if (!execution_rst) begin
++            if (!$onehot0({write_auth, write_stack, write_fors, write_ltree,
++                write_direct, write_chain, write_scalar_ltree, write_copy, write_root}))
++                $fatal(1, "multiple workspace write owners");
++            if (direct_writeback_phase !== (pipe_mode && pipe_direct &&
++                !fors_leaves && !fors_pipe && !lt_pipe))
++                $fatal(1, "registered direct writeback ownership differs from phase");
++            if (endpoint_write !== reference_endpoint_write ||
++                (endpoint_write && (endpoint_address !== reference_endpoint_address ||
++                 endpoint_data !== reference_endpoint_data)))
++                $fatal(1, "workspace write differs from priority reference");
++        end
++    end
++`endif
+ 
+     generate
+         begin : read_addresses
+--- T2/rtl/hash/shake-recipe.sv
++++ U3_reuse_sponge_capacity/rtl/hash/shake-recipe.sv
+@@ -1281,9 +1281,6 @@
+                 logic [3:0] shared_shape;
+                 logic shared_pair;
+                 logic [6:0] phase[0:PIPELINE-1];
+-                // Prepare the next block's small format controls when a phase
+-                // starts, before its permutation returns to the shared formatter.
+-                logic [2:0] feedback_format[0:PIPELINE-1];
+                 (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
+                 logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
+                 assign ctx_read_digest = initial_pending[ctx_read_tag] ? key_value[ctx_read_tag] :
+@@ -1317,12 +1314,39 @@
+                 wire prefetch_context = stage_valid[PIPELINE-2] &&
+                     stage_fixed[PIPELINE-2] && stage_base[PIPELINE-2] + ROUNDS >= 24;
+                 logic [255:0] return_key, return_digest, return_captured, return_address;
++                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
++                logic [6:0] return_phase, return_next_phase;
++                logic [2:0] return_format;
++                logic [4:0] return_next_step;
++                logic return_node_phase, return_feedback_required, return_next_more_steps;
++                logic return_capture, return_initial_pending, return_capture_initial;
++                // Context control is stable from dispatch through the final round.
++                // Read it beside the operands, before the returned tag can fan out
++                // through phase decode, counter arithmetic and the block formatter.
++                // One prepared format replaces the per-slot feedback format bank.
+                 always_ff @(posedge clk)
+                     if (prefetch_context) begin
+                         return_key <= key_value[prefetch_tag];
+                         return_digest <= digest[prefetch_tag];
+                         return_captured <= captured[prefetch_tag];
+                         return_address <= address[prefetch_tag];
++                        return_phase <= phase[prefetch_tag];
++                        return_next_phase <= advance_phase(phase[prefetch_tag],
++                            paired[prefetch_tag], family[prefetch_tag]);
++                        return_format <= format_controls(advance_phase(phase[prefetch_tag],
++                            paired[prefetch_tag], family[prefetch_tag]),
++                            fixed_shape[prefetch_tag], paired[prefetch_tag], family[prefetch_tag]);
++                        return_node_phase <= node_phase[prefetch_tag];
++                        return_feedback_required <= feedback_required[prefetch_tag];
++                        return_next_step <= node_phase[prefetch_tag] ? iteration[prefetch_tag] :
++                            iteration[prefetch_tag] - 1'b1;
++                        return_next_more_steps <= node_phase[prefetch_tag] ?
++                            iteration[prefetch_tag] + 1'b1 < steps[prefetch_tag] :
++                            more_steps[prefetch_tag];
++                        return_capture <= capture_enable[prefetch_tag] &&
++                            iteration[prefetch_tag] == capture_after[prefetch_tag];
++                        return_initial_pending <= initial_pending[prefetch_tag];
++                        return_capture_initial <= capture_initial[prefetch_tag];
+                     end
+ `ifndef SYNTHESIS
+                 always @(posedge clk) begin : debug_operand_prefetch
+@@ -1334,19 +1358,27 @@
+                         if (return_key !== key_value[t] || return_digest !== digest[t] ||
+                             return_captured !== captured[t])
+                             $fatal(1, "prefetched context operand changed before return");
++                        if (return_phase !== phase[t] || return_node_phase !== node_phase[t] ||
++                            return_feedback_required !== feedback_required[t] ||
++                            return_next_phase !== advance_phase(phase[t], paired[t], family[t]) ||
++                            return_next_step !== (node_phase[t] ? iteration[t] : iteration[t] - 1'b1) ||
++                            return_next_more_steps !== (node_phase[t] ?
++                                iteration[t] + 1'b1 < steps[t] : more_steps[t]) ||
++                            return_capture !== (capture_enable[t] && iteration[t] == capture_after[t]) ||
++                            return_initial_pending !== initial_pending[t] ||
++                            return_capture_initial !== capture_initial[t])
++                            $fatal(1, "prefetched context control changed before return");
+                     end
+                 end
+ `endif
+-                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
+-                wire node_done = node_phase[t];
+-                wire again = ctx_perm_done && feedback_required[t];
+-                wire capture_now = ctx_perm_done && node_done && capture_enable[t] &&
+-                    iteration[t] == capture_after[t];
+-                wire [6:0] next_phase = advance_phase(phase[t], paired[t], family[t]);
++                wire node_done = return_node_phase;
++                wire again = ctx_perm_done && return_feedback_required;
++                wire capture_now = ctx_perm_done && node_done && return_capture;
++                wire [6:0] next_phase = return_next_phase;
+                 wire next_node_phase = next_phase[0] || next_phase[1] || next_phase[4] ||
+                     next_phase[6];
+-                wire next_more_steps = node_done ? iteration[t] + 1'b1 < steps[t] : more_steps[t];
+-                wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
++                wire next_more_steps = return_next_more_steps;
++                wire [4:0] next_step = return_next_step;
+                 logic [255:0] next_address;
+                 always_comb begin
+                     next_address = return_address;
+@@ -1463,13 +1495,13 @@
+                 wire first_more_steps = ctx_request_no_seed ? ctx_request_steps > 1 :
+                     ctx_request_steps != 0;
+                 wire [6:0] block_phase = again ? next_phase : first_phase;
+-                wire [2:0] block_format = again ? feedback_format[t] : ctx_first_format;
++                wire [2:0] block_format = again ? return_format : ctx_first_format;
+                 wire [3:0] block_step = again ? next_step[3:0] : ctx_request_start;
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
+                 wire [255:0] block_value = again ?
+-                    (phase[t][5] ? return_digest :
+-                     phase[t][3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                    (return_phase[5] ? return_digest :
++                     return_phase[3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                 wire [255:0]
+@@ -1647,7 +1679,7 @@
+                         if (ctx_perm_done) begin
+                             if (feedback_required[t] !== (!node_done || more_steps[t]))
+                                 $fatal(1, "registered feedback decision differs from its context");
+-                            if (feedback_format[t] !== format_controls(next_phase,
++                            if (return_format !== format_controls(next_phase,
+                                 fixed_shape[t], paired[t], family[t]))
+                                 $fatal(1, "registered feedback format differs from its phase");
+                         end
+@@ -1656,17 +1688,17 @@
+ `endif
+                 // A KEY return always feeds MASK immediately, so feedback priority excludes
+                 // accepting an initial value on the same edge. Each bank has one write port.
+-                wire key_return = ctx_perm_done && phase[t][2];
+-                wire initial_transfer = key_return && initial_pending[t];
++                wire key_return = ctx_perm_done && return_phase[2];
++                wire initial_transfer = key_return && return_initial_pending;
+                 wire key_write = key_return || (accept && ctx_request_no_seed);
+                 wire [TAG_BITS-1:0] key_write_tag = key_return ? t : ctx_request_tag;
+                 wire [255:0] key_write_data = key_return ? ctx_perm_digest[255:0] :
+                     ctx_request_initial_value;
+-                wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
++                wire mask_left = ctx_perm_done && paired[t] && return_phase[3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+                 wire [255:0] digest_write_data = initial_transfer ? return_key :
+                     mask_left ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+-                wire capture_transfer = initial_transfer && capture_initial[t];
++                wire capture_transfer = initial_transfer && return_capture_initial;
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+@@ -1705,9 +1737,6 @@
+                             node_phase[ctx_request_tag] <= first_node_phase;
+                             more_steps[ctx_request_tag] <= first_more_steps;
+                             feedback_required[ctx_request_tag] <= !first_node_phase || first_more_steps;
+-                            feedback_format[ctx_request_tag] <= format_controls(
+-                                advance_phase(first_phase, requested_pair, ctx_request_family),
+-                                requested_shape, requested_pair, ctx_request_family);
+                             if (busy == 0) begin
+                                 shared_shape <= requested_shape;
+                                 shared_pair <= requested_pair;
+@@ -1736,9 +1765,6 @@
+                                 phase[t] <= next_phase;
+                                 node_phase[t] <= next_node_phase;
+                                 feedback_required[t] <= !next_node_phase || next_more_steps;
+-                                feedback_format[t] <= format_controls(
+-                                    advance_phase(next_phase, paired[t], family[t]),
+-                                    fixed_shape[t], paired[t], family[t]);
+                                 if (node_done) more_steps[t] <= next_more_steps;
+                                 if (node_done) iteration[t] <= iteration[t] + 1'b1;
+                             end else complete[t] <= 1;
+@@ -1846,7 +1872,8 @@
+             // This elastic register also holds a request while the round pipeline
+             // recycles. Its valid bit owns the data across stalls and reset.
+             logic launch_valid, launch_fixed;
+-            logic [1599:0] launch_state;
++            logic [1087:0] launch_state;
++            wire [511:0] launch_capacity = launch_fixed ? 512'd0 : sponge_state[1599:1088];
+             logic [TAG_BITS-1:0] launch_tag;
+             wire launch_ready = !rst && (!launch_valid || ready);
+             always_ff @(posedge clk) begin
+@@ -1861,7 +1888,33 @@
+             end
+             // Invalid data need not hold or reset. Retain only a blocked request.
+             always_ff @(posedge clk)
+-                if (launch_ready) launch_state <= issue_state;
++                if (launch_ready) launch_state <= issue_state[1087:0];
++`ifndef SYNTHESIS
++            // Original elastic capacity snapshot is an independent simulation oracle.
++            logic [511:0] debug_launch_capacity_snapshot;
++            longint unsigned debug_launch_fixed_consumed = 0;
++            longint unsigned debug_launch_stream_consumed = 0;
++            longint unsigned debug_launch_stream_stalls = 0;
++            longint unsigned debug_launch_stream_nonzero = 0;
++            longint unsigned debug_launch_reset_pending = 0;
++            always @(posedge clk) begin : debug_launch_capacity_reuse
++                if (launch_ready) debug_launch_capacity_snapshot <= issue_state[1599:1088];
++                if (rst && launch_valid) debug_launch_reset_pending++;
++                if (!rst && launch_valid) begin
++                    if (launch_capacity !== debug_launch_capacity_snapshot)
++                        $fatal(1, "live sponge capacity differs from original elastic launch snapshot");
++                    if (launch_fixed && !recycle) debug_launch_fixed_consumed++;
++                    if (!launch_fixed) begin
++                        if (recycle) debug_launch_stream_stalls++;
++                        else debug_launch_stream_consumed++;
++                        if (|launch_capacity) debug_launch_stream_nonzero++;
++                    end
++                end
++            end
++            final $display("LAUNCH_CAPACITY_ORACLE fixed=%0d stream=%0d stalled=%0d nonzero=%0d reset_pending=%0d",
++                debug_launch_fixed_consumed, debug_launch_stream_consumed,
++                debug_launch_stream_stalls, debug_launch_stream_nonzero, debug_launch_reset_pending);
++`endif
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+@@ -1869,7 +1922,7 @@
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid, source_fixed;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : launch_state;
++                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : {launch_capacity, launch_state};
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : launch_tag;
+                     assign source_valid = recycle || launch_valid;

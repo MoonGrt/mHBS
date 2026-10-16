@@ -1,0 +1,38 @@
+--- C2/rtl/executor/executor.sv
++++ R1/rtl/executor/executor.sv
+@@ -290,6 +290,12 @@
+     );
+     // verilog_format: on
+     wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
++    // Response consumption already has a registered phase flag. Direct
++    // writeback needs the published response tag; deferred reads use pipe_pair.
++    // Avoid decoding indexing/algorithm/direct mode on the context RAM address.
++    wire [TAG_BITS-1:0] context_read_tag = state == FORS_PICK ?
++        TAG_BITS'(target-fors_base-21'(fors_offset)) :
++        pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
+     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
+         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
+@@ -322,7 +328,7 @@
+         // Direct writeback and deferred consumption never overlap.
+         // Select their tag before reading the context RAM, removing a
+         // second 256-bit digest/key read port and its output selectors.
+-        .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
++        .batch_read_tag(context_read_tag),
+         .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+         .request_valid(lane_request_active),
+         .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
+--- C2/rtl/hash/shake-recipe.sv
++++ R1/rtl/hash/shake-recipe.sv
+@@ -1159,7 +1159,10 @@
+                 logic [63:0] ctx_request_tree;
+                 wire ctx_request_valid = pending_valid;
+                 wire ctx_request_ready;
+-                wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
++                // Scalar result data are consumed only in FIXED_WAIT. An
++                // incoming scalar recipe must not select the asynchronous RAM
++                // read address used by a concurrently visible batch response.
++                wire [TAG_BITS-1:0] ctx_read_tag = bridge_response ? TAG_BITS'(0) : batch_read_tag;
+                 wire [255:0] ctx_read_digest;
+                 wire [255:0] ctx_read_capture;
+                 wire ctx_response_valid;

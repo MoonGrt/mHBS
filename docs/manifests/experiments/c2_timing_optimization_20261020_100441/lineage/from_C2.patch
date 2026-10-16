@@ -1,0 +1,441 @@
+--- C2/rtl/executor/executor.sv
++++ R5/rtl/executor/executor.sv
+@@ -130,9 +130,20 @@
+     logic [20:0] fors_base;
+     logic [9:0] fors_digest_offset;
+     logic [13:0] fors_target_prefetch;
+-    wire fors_target_group = target >= fors_base && target < fors_base + 21'(fors_total);
+-    wire fors_target_wave=fors_target_group && target>=fors_base+21'(fors_offset)
+-        && target<fors_base+21'(fors_offset)+21'(PIPELINE);
++    // A FORS microgroup keeps target/base stable while leaves and parents run.
++    // Prepare its unsigned relative index on the existing setup edge. The
++    // consumer then compares a bounded five-bit index instead of cascading
++    // two full-width additions and a full-width range comparison.
++    logic [20:0] fors_target_delta;
++    wire fors_target_group = fors_target_delta < {16'd0, fors_total};
++    wire [5:0] fors_wave_end = {1'b0, fors_offset} + 6'(PIPELINE);
++    wire fors_target_wave = fors_target_group &&
++        fors_target_delta[4:0] >= fors_offset &&
++        {1'b0, fors_target_delta[4:0]} < fors_wave_end;
++    wire [4:0] fors_capture_tag = fors_target_delta[4:0] - fors_offset;
++    // Four-leaf microgroups have a four-aligned base. One shared root-index
++    // addition also supplies its final leaf by restoring the two low bits.
++    wire [20:0] fors_root_index = (fors_base >> 2) + 21'(fors_root_cursor);
+     wire [4:0] fors_outputs = fors_total >> (fors_level ? 2 : 1);
+     wire sign_only = stateful && !verifying && standalone_chain && macro_flags[2];
+     logic [4:0] layer;
+@@ -181,7 +192,7 @@
+     logic [  TAG_BITS-1:0] pipe_issue_slot;
+     logic [COUNT_BITS-1:0] pipe_pair;
+     logic [PIPE_BATCH-1:0] pipe_done_mask, pipe_expected_mask;
+-    wire [255:0] pipe_read_result, pipe_read_capture;
++    wire [255:0] pipe_read_result, pipe_read_capture, pipe_response_result;
+     logic [7:0] pipe_seed_domain, pipe_step_domain;
+     // Stateful endpoint batches use the same single write port as SLH WOTS.
+     // Sign-only and verification batches retain their CHAIN_STORE path.
+@@ -290,6 +301,12 @@
+     );
+     // verilog_format: on
+     wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
++    // Response consumption already has a registered phase flag. Direct
++    // writeback needs the published response tag; deferred reads use pipe_pair.
++    // Avoid decoding indexing/algorithm/direct mode on the context RAM address.
++    wire [TAG_BITS-1:0] context_read_tag = state == FORS_PICK ?
++        TAG_BITS'(fors_capture_tag) :
++        pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
+     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
+         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
+@@ -318,11 +335,11 @@
+         .batch_b({11'd0, batch_address}),
+         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
+         .batch_response_valid(pipe_valid),.batch_response_ready(pipe_response_accept),.batch_response_tag(pipe_tag),
+-        .batch_response_digest(),.batch_response_capture(),
++        .batch_response_digest(pipe_response_result),.batch_response_capture(),
+         // Direct writeback and deferred consumption never overlap.
+         // Select their tag before reading the context RAM, removing a
+         // second 256-bit digest/key read port and its output selectors.
+-        .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
++        .batch_read_tag(context_read_tag),
+         .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+         .request_valid(lane_request_active),
+         .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
+@@ -384,10 +401,22 @@
+             end
+         end
+     endfunction
+-    // Checksum and scalar setup retain their shared selector. Batch requests
+-    // use the next chain/digit prepared on the preceding acceptance edge.
+-    wire [7:0] digit_index = state == TRANSFORM ? transform_index : chain_cursor;
+-    wire [4:0] shared_digit = digit(digit_index);
++    // Scalar setup uses the chain digit; batch requests use a digit prepared
++    // on the preceding acceptance edge. The checksum loop only visits message
++    // digits, so it bypasses the state/index/checksum-digit selection network.
++    wire [4:0] shared_digit = digit(chain_cursor);
++    wire [3:0] transform_digit = value[2][{(transform_index[5:0] ^ 6'd1), 2'b0}+:4];
++    wire [3:0] checksum_increment = ~transform_digit;
++`ifndef SYNTHESIS
++    always @(posedge clk) begin : debug_checksum_increment
++        if (!execution_rst && state == TRANSFORM && descriptor[59:56] == 1) begin
++            if (transform_index >= LEN1 || {1'b0, transform_digit} !== digit(transform_index))
++                $fatal(1, "checksum loop exceeded message digits");
++            if ({1'b0, checksum_increment} !== 5'd15 - digit(transform_index))
++                $fatal(1, "checksum nibble complement changed its value");
++        end
++    end
++`endif
+     wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
+     wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
+     genvar fb;
+@@ -532,15 +561,15 @@
+         end else if (fors_leaves || fors_pipe) begin
+             endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
+             endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (lt_pipe) begin
+             endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
+             endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (pipe_direct && pipe_mode) begin
+             endpoint_write = pipe_valid;
+             endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (state == CHAIN_STORE && indexing != 1) begin
+             endpoint_write = 1;
+         end else if (PIPELINE == 1 && state == LT_STORE) begin
+@@ -578,7 +607,7 @@
+                     else address <= 0;
+                 end else if (state == LT_COPY) address <= 0;
+                 else if (state == FORS_LEAF_NEXT)
+-                    address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((target-fors_base)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++                    address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_target_delta ^ 21'd1) : INDEX_BITS'(FORS_SCRATCH);
+                 else if(state==FORS_AUTH0 || state==FORS_BEGIN || state==FORS_AUTH1 || state==FORS_LEVEL)
+                     address <= INDEX_BITS'(FORS_SCRATCH);
+                 else if (state == FORS_ISSUE && pipe_ready)
+@@ -588,7 +617,7 @@
+                         address<=INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(PIPELINE))<<1);
+                     else if (fors_level) address <= INDEX_BITS'(FORS_SCRATCH);
+                     else
+-                        address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(((target-fors_base)>>1)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
++                        address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((fors_target_delta >> 1) ^ 21'd1) : INDEX_BITS'(FORS_SCRATCH);
+                 end else if (state == FORS_ROOT_NEXT)
+                     address <= INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
+             end
+@@ -620,6 +649,15 @@
+             if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
+                 if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
+         end
++    // These invariants justify the bounded FORS range and leaf-index logic.
++    always @(posedge clk) begin : debug_fors_relative_index
++        if (!execution_rst && state == FORS_PICK) begin
++            if (fors_base[1:0] != 0 || fors_total == 0 || fors_total > FORS_BATCH)
++                $fatal(1, "invalid FORS microgroup geometry");
++            if (fors_target_delta !== target - fors_base)
++                $fatal(1, "FORS target-relative index changed inside a microgroup");
++        end
++    end
+     // Every state transition prepares these flags on the same edge.
+     always @(posedge clk) begin : phase_control_equivalence
+         if (!rst) begin
+@@ -773,6 +811,7 @@
+             fors_level <= 0;
+             fors_roots_pending <= 0;
+             fors_base <= 0;
++            fors_target_delta <= 0;
+             fors_digest_offset <= 0;
+             fors_target_prefetch <= 0;
+             pipe_cache_valid <= 0;
+@@ -814,7 +853,7 @@
+                 if(pipe_valid && pipe_response_accept)begin
+                     pipe_done_mask[pipe_tag] <= 1;
+                     if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
+-                        node_value <= pipe_read_result;
++                        node_value <= pipe_response_result;
+                 end
+             end
+             case (state)
+@@ -964,6 +1003,7 @@
+                     else begin
+                         if (PIPELINE > 1 && indexing == 1 && !verifying) begin
+                             fors_base <= leaf_cursor;
++                            fors_target_delta <= target - leaf_cursor;
+                             fors_offset <= 0;
+                             fors_roots_pending <= 0;
+                             fors_total<=((21'd1<<tree_height)-leaf_cursor)<FORS_BATCH ? 5'((21'd1<<tree_height)-leaf_cursor) : 5'(FORS_BATCH);
+@@ -1147,8 +1187,8 @@
+                 FORS_PUSH: begin
+                     node_value <= endpoint_value0;
+                     node_level <= 2;
+-                    node_index <= (fors_base >> 2) + 21'(fors_root_cursor);
+-                    leaf_cursor <= fors_base + (21'(fors_root_cursor) << 2) + 3;
++                    node_index <= fors_root_index;
++                    leaf_cursor <= {fors_root_index[18:0], 2'b11};
+                     fors_roots_pending <= 1;
+                     pipe_cache_valid <= 0;
+                     pipe_batch_used <= 0;
+@@ -1407,7 +1447,7 @@
+                         scalar_tree <= scalar_tree >> descriptor[43:40];
+                         complete_macro();
+                     end else if (descriptor[59:56] == 1) begin
+-                        checksum <= checksum + chain_max - shared_digit;
++                        checksum <= checksum + {8'd0, checksum_increment};
+                         if (transform_index + 1 == LEN1) complete_macro();
+                         else transform_index <= transform_index + 1'b1;
+                     end else fail();
+--- C2/rtl/hash/shake-recipe.sv
++++ R5/rtl/hash/shake-recipe.sv
+@@ -963,12 +963,19 @@
+             wire [DIGEST_BYTES*8-1:0] digest;
+             wire completed = finish_valid;
+             assign response_value = bridge_response ?
+-                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, engine_digest[N*8-1:0]} : digest;
+-            assign response_capture = engine_capture[N*8-1:0];
++                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, published_digest[N*8-1:0]} : digest;
++            assign response_capture = bridge_response ? published_capture[N*8-1:0] :
++                engine_capture[N*8-1:0];
+             wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes + 32 : 22;
+             logic staged_valid, staged_last;
+             logic [127:0] staged_data;
+-            wire stream_accept = !staged_valid || block_ready;
++            logic fetched_valid;
++            logic [127:0] fetched_source, fetched_list;
++            logic fetched_use_list, fetched_prefix_head, fetched_prefix_tail;
++            logic fetched_padding, fetched_partial, fetched_rate_tail, fetched_last;
++            logic [3:0] fetched_remaining;
++            wire output_accept = !staged_valid || block_ready;
++            wire stream_accept = !fetched_valid || output_accept;
+             // Emit sixteen bytes per cycle, then eight bytes at the end of the rate.
+             // One cursor supplies source selection, padding and the final-block test.
+             logic [12:0] position;
+@@ -1044,42 +1051,50 @@
+             // A fixed two-node window supports both aligned SLH and the LMS prefix.
+             wire [127:0] list_window = (RECIPE_MASK[PREFIX_LIST] && list_remainder[1]) ?
+                 list_word_window[143:16] : list_word_window[127:0];
+-            logic [127:0] stream_payload;
+-            logic [191:0] source_window;
+-            always_comb begin
+-                source_window = {
+-                    source_word(source_control[2]),
+-                    source_word(source_control[1]),
+-                    source_word(source_control[0])
+-                };
+-                stream_payload = source_window[127:0];
+-                if (shapes[PREFIX_MESSAGE]) begin
+-                    stream_payload = source_window[143:16];
+-                    if (position == 0) stream_payload = identifier;
+-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+-                end else
+-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+-                    stream_payload = list_window;
+-            end
+-
+-            // One remaining-length subtractor serves every byte of the beat. A
+-            // byte-local position adder otherwise replicates a wide carry chain.
++            wire [191:0] source_window = {
++                source_word(source_control[2]),
++                source_word(source_control[1]),
++                source_word(source_control[0])
++            };
++            // The RAM-to-window stage retains only the selected portions of
++            // adjacent nodes. Cursor/source controls advance on its own handshake;
++            // padding and the source/list merge run in the following stage.
+             wire [12:0] remaining_bytes = input_length - position;
+             wire padding_reached = position > input_length;
+             wire partial_beat = remaining_bytes < 16;
+-            // Only the last eight-byte beat consumes this flag. Exactly eight bytes
+-            // remaining requires another rate block for SHAKE's delimiter.
+             wire stream_last = padding_reached || remaining_bytes < 8;
++            always_ff @(posedge clk) begin
++                if (rst) fetched_valid <= 0;
++                else if (stream_accept) begin
++                    fetched_valid <= STREAM_ENABLE && state == STREAM;
++                    if (STREAM_ENABLE && state == STREAM) begin
++                        fetched_source <= shapes[PREFIX_MESSAGE] ?
++                            source_window[143:16] : source_window[127:0];
++                        fetched_list <= list_window;
++                        fetched_use_list <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                            position >= prefix_bytes;
++                        fetched_prefix_head <= shapes[PREFIX_MESSAGE] && position == 0;
++                        fetched_prefix_tail <= shapes[PREFIX_MESSAGE] && position == 16;
++                        fetched_padding <= padding_reached;
++                        fetched_partial <= partial_beat;
++                        fetched_remaining <= remaining_bytes[3:0];
++                        fetched_rate_tail <= beat == 8;
++                        fetched_last <= stream_last;
++                    end
++                end
++            end
+             always_comb begin
+-                stream_data = stream_payload;
++                stream_data = fetched_use_list ? fetched_list : fetched_source;
++                if (fetched_prefix_head) stream_data = identifier;
++                else if (fetched_prefix_tail) stream_data[47:0] = {16'h8181, be32(leaf)};
+                 for (integer i = 0; i < 16; i++) begin
+-                    if (padding_reached || (partial_beat && remaining_bytes[3:0] <= 4'(i)))
++                    if (fetched_padding || (fetched_partial && fetched_remaining <= 4'(i)))
+                         stream_data[i*8+:8] = 0;
+-                    if (!padding_reached && partial_beat && remaining_bytes[3:0] == 4'(i))
++                    if (!fetched_padding && fetched_partial && fetched_remaining == 4'(i))
+                         stream_data[i*8+:8] = 8'h1f;
+-                    if (beat == 8) begin
++                    if (fetched_rate_tail) begin
+                         if (i >= 8) stream_data[i*8+:8] = 0;
+-                        else if (i == 7 && stream_last) stream_data[i*8+7] = 1'b1;
++                        else if (i == 7 && fetched_last) stream_data[i*8+7] = 1'b1;
+                     end
+                 end
+             end
+@@ -1093,9 +1108,13 @@
+             // The response remains in its context until the caller consumes it.
+             wire scalar_bridge = bridge_response ||
+                 (!batch_mode && state == IDLE && request_valid && scalar_fixed);
+-            wire engine_mode = batch_mode || scalar_bridge;
++            // The intake register owns a newly accepted scalar request before
++            // it is dispatched from FIXED_WAIT. Keep incoming recipe decoding
++            // out of the datapath-mode and downstream-capacity feedback cone.
++            wire engine_mode = batch_mode || bridge_response;
+             wire engine_valid, scalar_capacity, batch_capacity;
+             wire [255:0] engine_digest, engine_capture;
++            wire [255:0] published_digest, published_capture;
+             wire [3:0] scalar_shape = request_recipe[59:56];
+             wire scalar_fixed = RECIPE_MASK[scalar_shape] &&
+                 (scalar_shape == 1 || scalar_shape == 2 || scalar_shape == 5 || scalar_shape == 7 ||
+@@ -1107,7 +1126,10 @@
+                 2'd0 : (scalar_shape == 9 || scalar_shape == 10 || scalar_shape == 14 ||
+                         scalar_shape == 15) ? 2'd2 : 2'd1;
+             assign batch_request_ready = batch_mode && !bridge_response && batch_capacity;
+-            assign batch_response_valid = engine_valid && !scalar_bridge;
++            // Only an accepted scalar request owns the response port. Decoding
++            // an incoming request here would put recipe selection back into
++            // the rolling scheduler's retire/free-slot/ready feedback path.
++            assign batch_response_valid = engine_valid && !bridge_response;
+             assign batch_read_digest = engine_digest;
+             assign batch_read_capture = engine_capture;
+             begin : fixed_context
+@@ -1159,12 +1181,14 @@
+                 logic [63:0] ctx_request_tree;
+                 wire ctx_request_valid = pending_valid;
+                 wire ctx_request_ready;
+-                wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
++                // Scalar result data are consumed only in FIXED_WAIT. An
++                // incoming scalar recipe must not select the asynchronous RAM
++                // read address used by a concurrently visible batch response.
++                wire [TAG_BITS-1:0] ctx_read_tag = bridge_response ? TAG_BITS'(0) : batch_read_tag;
+                 wire [255:0] ctx_read_digest;
+                 wire [255:0] ctx_read_capture;
+                 wire ctx_response_valid;
+-                wire ctx_response_ready = scalar_bridge ? state == FIXED_WAIT && response_ready :
+-                    batch_response_ready;
++                wire ctx_response_ready = bridge_response ? response_ready : batch_response_ready;
+                 logic [TAG_BITS-1:0] ctx_response_tag;
+                 wire ctx_perm_valid;
+                 wire ctx_perm_ready = batch_perm_ready;
+@@ -1185,8 +1209,8 @@
+                 assign batch_perm_valid = ctx_perm_valid;
+                 assign batch_perm_state = ctx_perm_state;
+                 assign batch_perm_tag = ctx_perm_tag;
+-                assign batch_response_digest = engine_digest;
+-                assign batch_response_capture = engine_capture;
++                assign batch_response_digest = published_digest;
++                assign batch_response_capture = published_capture;
+ 
+                 wire [255:0] seed_address = make_address(ctx_request_layer, ctx_request_tree,
+                     {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
+@@ -1329,11 +1353,21 @@
+                 wire old_batch_slot = batch_request_tag < PIPELINE &&
+                     (!busy[batch_request_tag] || (old_retire && ctx_response_tag == batch_request_tag)) &&
+                     (!pending_valid || ctx_request_tag != batch_request_tag);
+-                wire old_ready = !rst && engine_mode && (!pending_valid || accept) &&
++                wire old_ready = !rst && (batch_mode || scalar_bridge) && (!pending_valid || accept) &&
+                     (scalar_bridge ? old_scalar_slot : old_batch_slot);
+                 wire old_valid = scalar_bridge ? state == IDLE && request_valid : batch_request_valid;
+                 always @(posedge clk) begin : debug_intake_equivalence
+                     if (!rst) begin
++                        if (state == IDLE && request_valid && request_ready &&
++                            scalar_fixed && !batch_mode &&
++                            (pending_valid || |busy || ctx_response_valid))
++                            $fatal(1, "scalar intake before batch contexts drained");
++                        if (batch_response_valid !== (engine_valid && !scalar_bridge))
++                            $fatal(1, "accepted response ownership changed batch valid");
++                        if ((ctx_response_valid && ctx_response_ready) !==
++                            (ctx_response_valid && (scalar_bridge ?
++                                state == FIXED_WAIT && response_ready : batch_response_ready)))
++                            $fatal(1, "accepted response ownership changed retirement");
+                         if (request_ready !== (state == IDLE &&
+                             (!scalar_fixed || (!batch_mode && old_ready))))
+                             $fatal(1, "scalar intake ready changed");
+@@ -1489,9 +1523,12 @@
+                 // registers; digest/capture data stay in their existing banks.
+                 logic response_held;
+                 logic [TAG_BITS-1:0] held_tag, next_response_tag;
++                logic [255:0] held_digest, held_capture;
+                 logic [PIPELINE-1:0] waiting_responses;
+                 assign ctx_response_valid = response_held;
+                 assign ctx_response_tag = held_tag;
++                assign published_digest = held_digest;
++                assign published_capture = held_capture;
+                 always_comb begin
+                     waiting_responses = complete;
+                     // The published response owns this slot until consumption.
+@@ -1509,6 +1546,17 @@
+                     end else if (!response_held || ctx_response_ready) begin
+                         response_held <= |waiting_responses;
+                         held_tag <= next_response_tag;
++                        // Completion is visible after its bank write commits.
++                        // Publish payload and tag on the same edge, retaining
++                        // both under backpressure. Workspace writes now start
++                        // at these registers rather than an asynchronous RAM.
++                        if (|waiting_responses) begin
++                            held_digest <= initial_pending[next_response_tag] ?
++                                key_value[next_response_tag] : digest[next_response_tag];
++                            held_capture <= !captured_valid[next_response_tag] ? 256'd0 :
++                                capture_initial[next_response_tag] ? key_value[next_response_tag] :
++                                captured[next_response_tag];
++                        end
+                     end
+                 end
+ `ifndef SYNTHESIS
+@@ -1518,6 +1566,14 @@
+                             $fatal(1, "published response tag out of range");
+                         else if (!complete[held_tag] || !busy[held_tag])
+                             $fatal(1, "published response does not own a completed slot");
++                        else begin
++                            if (held_digest !== (initial_pending[held_tag] ?
++                                key_value[held_tag] : digest[held_tag]))
++                                $fatal(1, "published digest differs from its completed slot");
++                            if (held_capture !== (!captured_valid[held_tag] ? 256'd0 :
++                                capture_initial[held_tag] ? key_value[held_tag] : captured[held_tag]))
++                                $fatal(1, "published capture differs from its completed slot");
++                        end
+                     end
+                 end
+ `endif
+@@ -1926,7 +1982,13 @@
+                     error <= 0;
+                     beat <= 0;
+                 end else begin
+-                    if (STREAM_ENABLE && staged_valid && block_ready) staged_valid <= 0;
++                    if (STREAM_ENABLE && output_accept) begin
++                        staged_valid <= fetched_valid;
++                        if (fetched_valid) begin
++                            staged_data <= stream_data;
++                            staged_last <= fetched_last;
++                        end
++                    end
+                     case (state)
+                         IDLE:
+                         if (request_valid && request_ready) begin
+@@ -1949,10 +2011,6 @@
+                         STREAM:
+                         if (STREAM_ENABLE && stream_accept) begin
+                             position <= position + 13'(stream_advance);
+-                            staged_data <= stream_data;
+-                            staged_valid <= 1;
+-                            staged_last <= stream_last;
+-                            if (beat == 8) staged_data[127:64] <= 0;
+                             begin
+                                 if (position < prefix_bytes) begin
+                                     if (position + stream_advance >= prefix_bytes)

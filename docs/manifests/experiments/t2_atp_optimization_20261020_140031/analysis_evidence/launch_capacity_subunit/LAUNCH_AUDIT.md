@@ -1,0 +1,11 @@
+# Launch capacity reuse audit
+
+The standalone patch removes only the scheduled executor's 512-bit elastic capacity register. The 1088-bit rate register and valid/fixed/tag metadata retain their existing edge behavior. Fixed requests provide zero capacity. Stream requests read the stable sponge capacity until launch consumption. Recycle keeps its original full last-stage source. P1 is unchanged.
+
+For a legal mutually exclusive fixed/stream caller, stream intake occurs after fixed contexts drain. Stream absorption/clear precedes HASH_RUN; launch acceptance sets sent, which prevents another stream issue until completion. No sponge write or independent pipeline result can change capacity between acceptance and first-stage consumption. SHARED_STATE=0 holds its private sponge until round completion; SHARED_STATE=1 holds the last-stage sponge because no prior request is in flight. Reset flushes valid metadata and suppresses assertions, so data need not reset. Mid-stream batch_mode changes that overlap operations violate the existing scheduling contract and are outside the equivalence claim.
+
+The simulation-only oracle retains the exact original capacity snapshot under launch_ready and compares it on every valid launch cycle. Five tests pass: P4/P12 with shared state, P4 with private state, P2U12 single-traversal behavior, and P4 reset while a stream launch is pending followed by replay. Total 2295 independent hashlib recipe cases. Each test covers 914 stream permutation launches, including 549 with nonzero capacity. No legal stream launch was blocked by recycle; production-stream backpressure is covered separately. Reset-pending coverage is 1.
+
+Potential timing cost: launch_fixed now controls capacity gating. For SHARED_STATE=1 the expression can simplify to `(recycle || !launch_fixed) ? finished_capacity : 0`; synthesis determines area and actual critical path. No physical benefit is claimed before measurement.
+
+Priority publication was audited independently and is not included in this patch: whole-mask next state must preserve original clear, accept-zero set, completion set order and register priority(next_mask) on the same edge. P2/P4/P12 exhaustive 1,385,320 transition combinations pass.

@@ -1,0 +1,56 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -1872,7 +1872,8 @@
+             // This elastic register also holds a request while the round pipeline
+             // recycles. Its valid bit owns the data across stalls and reset.
+             logic launch_valid, launch_fixed;
+-            logic [1599:0] launch_state;
++            logic [1087:0] launch_state;
++            wire [511:0] launch_capacity = launch_fixed ? 512'd0 : sponge_state[1599:1088];
+             logic [TAG_BITS-1:0] launch_tag;
+             wire launch_ready = !rst && (!launch_valid || ready);
+             always_ff @(posedge clk) begin
+@@ -1887,7 +1888,33 @@
+             end
+             // Invalid data need not hold or reset. Retain only a blocked request.
+             always_ff @(posedge clk)
+-                if (launch_ready) launch_state <= issue_state;
++                if (launch_ready) launch_state <= issue_state[1087:0];
++`ifndef SYNTHESIS
++            // Original elastic capacity snapshot is an independent simulation oracle.
++            logic [511:0] debug_launch_capacity_snapshot;
++            longint unsigned debug_launch_fixed_consumed = 0;
++            longint unsigned debug_launch_stream_consumed = 0;
++            longint unsigned debug_launch_stream_stalls = 0;
++            longint unsigned debug_launch_stream_nonzero = 0;
++            longint unsigned debug_launch_reset_pending = 0;
++            always @(posedge clk) begin : debug_launch_capacity_reuse
++                if (launch_ready) debug_launch_capacity_snapshot <= issue_state[1599:1088];
++                if (rst && launch_valid) debug_launch_reset_pending++;
++                if (!rst && launch_valid) begin
++                    if (launch_capacity !== debug_launch_capacity_snapshot)
++                        $fatal(1, "live sponge capacity differs from original elastic launch snapshot");
++                    if (launch_fixed && !recycle) debug_launch_fixed_consumed++;
++                    if (!launch_fixed) begin
++                        if (recycle) debug_launch_stream_stalls++;
++                        else debug_launch_stream_consumed++;
++                        if (|launch_capacity) debug_launch_stream_nonzero++;
++                    end
++                end
++            end
++            final $display("LAUNCH_CAPACITY_ORACLE fixed=%0d stream=%0d stalled=%0d nonzero=%0d reset_pending=%0d",
++                debug_launch_fixed_consumed, debug_launch_stream_consumed,
++                debug_launch_stream_stalls, debug_launch_stream_nonzero, debug_launch_reset_pending);
++`endif
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+@@ -1895,7 +1922,7 @@
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid, source_fixed;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : launch_state;
++                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : {launch_capacity, launch_state};
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     assign source_tag = recycle ? stage_tag[PIPELINE-1] : launch_tag;
+                     assign source_valid = recycle || launch_valid;

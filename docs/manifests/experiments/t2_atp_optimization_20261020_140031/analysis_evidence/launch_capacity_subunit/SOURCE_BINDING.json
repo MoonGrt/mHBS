@@ -1,0 +1,27 @@
+{
+  "evidence_type": "source-bound recipe module independent KAT and dynamic snapshot oracle",
+  "target_experiment": "t2_atp_optimization_20261020_140031",
+  "target_manifest_sha256": "393c81467f0d44109705f289b1f040a8b15bf34e72b0d72b3e37be24c6d8934d",
+  "tested_recipe_sha256": "322ad5acd18b2dabd8a6fd62267523cec204fa464b8cdb4fb83fb120306b4028",
+  "frozen_recipe_sha256": "322ad5acd18b2dabd8a6fd62267523cec204fa464b8cdb4fb83fb120306b4028",
+  "recipe_exact_match": true,
+  "tested_rtl_matches_frozen": {
+    "rtl/hash/keccak.sv": true,
+    "rtl/hash/shake-recipe.sv": true,
+    "rtl/hash/sha256.sv": true,
+    "rtl/hash/sha2-recipe.sv": true
+  },
+  "testbench_adaptations": [
+    "tb_recipe adds SHARED_STATE parameter; test tool supplies it",
+    "tb_recipe_reset additionally resets one valid pending stream launch then replays request"
+  ],
+  "tests": 5,
+  "independent_recipe_cases": 2295,
+  "scope": "recipe module only: serialized hashlib outputs, captures, Hash/permutation counts, capacity snapshot equality, shared/private sponge, P2/P4/P12, reset replay",
+  "not_claimed": [
+    "complete executor/common RTL equivalence",
+    "complete Sign correctness or cycle measurements",
+    "synthesis or routed timing benefit"
+  ],
+  "full_candidate_acceptance": "Use separately source-bound U3 six full Sign and 76 extra regressions; this subunit result does not replace them."
+}

@@ -1,0 +1,101 @@
+--- rtl/executor/executor.sv
++++ rtl/executor/executor.sv
+@@ -183,6 +183,10 @@
+     // the shared workspace write-enable/address/data selection path.
+     logic [20:0] target_at_level;
+     logic auth_node_match, node_below_root;
++    // The parent-path decision is stable while parent setup formats its task.
++    // Shadow it with the node coordinate to keep a wide equality comparison
++    // out of the shared state/clear enables without inserting a controller beat.
++    logic target_parent_match;
+     wire [20:0] tree_target = stateful ? {1'b0, job_index[19:0]}
+         : descriptor[37:36] == 1 ? {7'd0, fors_target_prefetch} : {1'b0, scalar_leaf};
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+@@ -815,6 +819,8 @@
+                 $fatal(1, "tree target coordinate is not aligned with node level");
+             if (auth_node_match !== (node_index == (target_at_level ^ 21'd1)))
+                 $fatal(1, "authentication-node match is not aligned with node index");
++            if (target_parent_match !== (node_index[20:1] == target_at_level[20:1]))
++                $fatal(1, "target-parent match is not aligned with node index");
+             if (node_below_root !== (node_level < tree_height))
+                 $fatal(1, "tree height eligibility is not aligned with node level");
+         end
+@@ -1158,6 +1164,7 @@
+                     target <= tree_target;
+                     target_at_level <= tree_target;
+                     auth_node_match <= {1'b0, job_index[19:0]} == (tree_target ^ 21'd1);
++                    target_parent_match <= {1'b0, job_index[19:1]} == tree_target[20:1];
+                     node_below_root <= {descriptor[39], descriptor[43:40]} != 0;
+                     leaf_cursor <= verifying ? scalar_leaf : 0;
+                     chain_cursor <= 0;
+@@ -1356,6 +1363,7 @@
+                     node_level <= 2;
+                     target_at_level <= target >> 2;
+                     auth_node_match <= fors_root_index == ((target >> 2) ^ 21'd1);
++                    target_parent_match <= fors_root_index[20:1] == {2'b0, target[20:3]};
+                     node_below_root <= 5'd2 < tree_height;
+                     node_index <= fors_root_index;
+                     leaf_cursor <= {fors_root_index[18:0], 2'b11};
+@@ -1407,6 +1415,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+@@ -1415,6 +1424,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+@@ -1505,6 +1515,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         enter_state(PUSH_NODE);
+                     end
+@@ -1528,6 +1539,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         enter_state(PUSH_NODE);
+                     end
+@@ -1544,6 +1556,7 @@
+                     node_level <= 0;
+                     target_at_level <= target;
+                     auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);
++                    target_parent_match <= verifying || leaf_cursor[20:1] == target[20:1];
+                     node_below_root <= tree_height != 0;
+                     node_index <= verifying ? target : leaf_cursor;
+                     enter_state(PUSH_NODE);
+@@ -1568,12 +1581,13 @@
+                     end
+                 end
+                 PARENT_SETUP: begin
+-                    if(!verifying && macro_flags[3] && (node_index>>1)==(target_at_level>>1)) begin
++                    if(!verifying && macro_flags[3] && target_parent_match) begin
+                         node_value <= 0;
+                         node_index <= node_index >> 1;
+                         node_level <= node_level + 1'b1;
+                         target_at_level <= target_at_level >> 1;
+                         auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
++                        target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                         node_below_root <= node_level + 5'd1 < tree_height;
+                         enter_state(PUSH_NODE);
+                     end else begin
+@@ -1593,6 +1607,7 @@
+                     node_level <= node_level + 1'b1;
+                     target_at_level <= target_at_level >> 1;
+                     auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
++                    target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                     node_below_root <= node_level + 5'd1 < tree_height;
+                     enter_state(PUSH_NODE);
+                 end

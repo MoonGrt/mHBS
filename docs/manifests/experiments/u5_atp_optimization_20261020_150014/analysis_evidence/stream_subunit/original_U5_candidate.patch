@@ -1,0 +1,68 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -973,8 +973,8 @@
+             logic staged_valid, staged_last;
+             logic [127:0] staged_data;
+             logic fetched_valid;
+-            logic [127:0] fetched_source, fetched_list;
+-            logic fetched_use_list, fetched_prefix_head, fetched_prefix_tail;
++            logic [127:0] fetched_payload;
++            logic fetched_prefix_head, fetched_prefix_tail;
+             logic fetched_padding, fetched_partial, fetched_rate_tail, fetched_last;
+             logic [3:0] fetched_remaining;
+             wire output_accept = !staged_valid || block_ready;
+@@ -1075,7 +1075,7 @@
+                 if (!rst && state == STREAM && stream_accept && shapes[ADDRESS_LIST] &&
+                     position < prefix_bytes) begin
+                     // Check only words contributing input bytes to the prefix
+-                    // beat. Full list beats use fetched_list, and the last rate
++                    // beat. Full list beats use the list window, and the last rate
+                     // beat has no second word.
+                     for (integer i = 0; i < 2; i++) begin
+                         if ((i == 0 || beat != 8) && position + 13'(8 * i) < input_length &&
+@@ -1090,11 +1090,12 @@
+                 else if (stream_accept) begin
+                     fetched_valid <= STREAM_ENABLE && state == STREAM;
+                     if (STREAM_ENABLE && state == STREAM) begin
+-                        fetched_source <= shapes[PREFIX_MESSAGE] ?
+-                            source_window[143:16] : source_window[127:0];
+-                        fetched_list <= list_window;
+-                        fetched_use_list <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
+-                            position >= prefix_bytes;
++                        // Only one source is live for this beat. Capture the
++                        // selected 16-byte window once instead of retaining
++                        // both candidate windows until the padding stage.
++                        fetched_payload <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                            position >= prefix_bytes ? list_window :
++                            shapes[PREFIX_MESSAGE] ? source_window[143:16] : source_window[127:0];
+                         fetched_prefix_head <= shapes[PREFIX_MESSAGE] && position == 0;
+                         fetched_prefix_tail <= shapes[PREFIX_MESSAGE] && position == 16;
+                         fetched_padding <= padding_reached;
+@@ -1105,8 +1106,26 @@
+                     end
+                 end
+             end
++`ifndef SYNTHESIS
++            // Retain the former two-window stage as an independent simulation
++            // oracle. It observes exactly the same fetch handshake and stall.
++            logic [127:0] debug_fetched_source, debug_fetched_list;
++            logic debug_fetched_use_list;
++            always_ff @(posedge clk) begin : debug_stream_payload_snapshot
++                if (!rst && stream_accept && STREAM_ENABLE && state == STREAM) begin
++                    debug_fetched_source <= shapes[PREFIX_MESSAGE] ?
++                        source_window[143:16] : source_window[127:0];
++                    debug_fetched_list <= list_window;
++                    debug_fetched_use_list <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                        position >= prefix_bytes;
++                end
++                if (!rst && fetched_valid && fetched_payload !==
++                    (debug_fetched_use_list ? debug_fetched_list : debug_fetched_source))
++                    $fatal(1, "selected stream payload differs from original two-window stage");
++            end
++`endif
+             always_comb begin
+-                stream_data = fetched_use_list ? fetched_list : fetched_source;
++                stream_data = fetched_payload;
+                 if (fetched_prefix_head) stream_data = identifier;
+                 else if (fetched_prefix_tail) stream_data[47:0] = {16'h8181, be32(leaf)};
+                 for (integer i = 0; i < 16; i++) begin

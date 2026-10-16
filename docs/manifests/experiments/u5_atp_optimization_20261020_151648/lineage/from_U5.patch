@@ -1,0 +1,133 @@
+--- U5/rtl/hash/shake-recipe.sv
++++ V7_direct_stream_permutation/rtl/hash/shake-recipe.sv
+@@ -1304,7 +1304,7 @@
+                             prefetch_tag <= stage_tag[PIPELINE-3];
+                 end else begin : input_read_address
+                     wire source_valid = recycle || launch_valid;
+-                    wire source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
++                    wire source_fixed = recycle ? stage_fixed[PIPELINE-1] : 1'b1;
+                     wire [4:0] source_base = recycle ?
+                         stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                     always_ff @(posedge clk)
+@@ -1884,55 +1884,56 @@
+             wire ready = !rst && !recycle;
+             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+             wire normal_valid = hash_state == HASH_RUN && !sent;
+-            wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+-            wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
+-            wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
++            // A streaming block already resides in sponge_state when HASH_RUN
++            // starts. It can use the existing retained-state/recycle input path
++            // directly; only fixed formatting needs the elastic launch stage.
++            wire issue_valid = engine_mode && batch_perm_valid;
+             // Finish context lookup and block formatting before the first round.
+             // This elastic register also holds a request while the round pipeline
+             // recycles. Its valid bit owns the data across stalls and reset.
+-            logic launch_valid, launch_fixed;
++            logic launch_valid;
+             logic [1087:0] launch_state;
+-            wire [511:0] launch_capacity = launch_fixed ? 512'd0 : sponge_state[1599:1088];
+             logic [TAG_BITS-1:0] launch_tag;
+             wire launch_ready = !rst && (!launch_valid || ready);
++            // Recycled work and a previously buffered fixed request retain
++            // priority. Legal mode transitions drain fixed work before absorb.
++            wire stream_issue = !engine_mode && normal_valid && ready && !launch_valid;
+             always_ff @(posedge clk) begin
+                 if (rst) launch_valid <= 0;
+                 else if (launch_ready) begin
+                     launch_valid <= issue_valid;
+-                    if (issue_valid) begin
+-                        launch_fixed <= engine_mode;
+-                        launch_tag <= issue_tag;
+-                    end
++                    if (issue_valid) launch_tag <= batch_perm_tag;
+                 end
+             end
+             // Invalid data need not hold or reset. Retain only a blocked request.
+             always_ff @(posedge clk)
+-                if (launch_ready) launch_state <= issue_state[1087:0];
++                if (launch_ready) launch_state <= batch_perm_state[1087:0];
+ `ifndef SYNTHESIS
+-            // Original elastic capacity snapshot is an independent simulation oracle.
+-            logic [511:0] debug_launch_capacity_snapshot;
+             longint unsigned debug_launch_fixed_consumed = 0;
+-            longint unsigned debug_launch_stream_consumed = 0;
+-            longint unsigned debug_launch_stream_stalls = 0;
+-            longint unsigned debug_launch_stream_nonzero = 0;
++            longint unsigned debug_direct_stream_consumed = 0;
++            longint unsigned debug_direct_stream_nonzero = 0;
+             longint unsigned debug_launch_reset_pending = 0;
+-            always @(posedge clk) begin : debug_launch_capacity_reuse
+-                if (launch_ready) debug_launch_capacity_snapshot <= issue_state[1599:1088];
++            always @(posedge clk) begin : debug_direct_stream_input
+                 if (rst && launch_valid) debug_launch_reset_pending++;
+-                if (!rst && launch_valid) begin
+-                    if (launch_capacity !== debug_launch_capacity_snapshot)
+-                        $fatal(1, "live sponge capacity differs from original elastic launch snapshot");
+-                    if (launch_fixed && !recycle) debug_launch_fixed_consumed++;
+-                    if (!launch_fixed) begin
+-                        if (recycle) debug_launch_stream_stalls++;
+-                        else debug_launch_stream_consumed++;
+-                        if (|launch_capacity) debug_launch_stream_nonzero++;
+-                    end
+-                end
+-            end
+-            final $display("LAUNCH_CAPACITY_ORACLE fixed=%0d stream=%0d stalled=%0d nonzero=%0d reset_pending=%0d",
+-                debug_launch_fixed_consumed, debug_launch_stream_consumed,
+-                debug_launch_stream_stalls, debug_launch_stream_nonzero, debug_launch_reset_pending);
++                if (!rst) begin
++                    if (launch_valid && !recycle) debug_launch_fixed_consumed++;
++                    if (stream_issue) begin
++                        debug_direct_stream_consumed++;
++                        if (|sponge_state[1599:1088]) debug_direct_stream_nonzero++;
++                        if (|stage_valid)
++                            $fatal(1, "stream permutation started before prior work drained");
++                        if (|state_write_enable)
++                            $fatal(1, "stream permutation overlaps an absorb write");
++                        if (stages[0].rounds[0] !== sponge_state)
++                            $fatal(1, "direct stream input differs from completed absorb state");
++                    end
++                    if (launch_ready && issue_valid && |batch_perm_state[1599:1088])
++                        $fatal(1, "fixed launch contains a nonzero capacity");
++                end
++            end
++            final $display("DIRECT_STREAM_ORACLE fixed=%0d stream=%0d nonzero=%0d reset_pending=%0d",
++                debug_launch_fixed_consumed, debug_direct_stream_consumed,
++                debug_direct_stream_nonzero, debug_launch_reset_pending);
+ `endif
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+@@ -1941,11 +1942,20 @@
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid, source_fixed;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : {launch_capacity, launch_state};
++                    if (SHARED_STATE) begin : shared_stream_input
++                        // Absorbed streaming state and recycled state occupy
++                        // the same retained register, so one mux handles both.
++                        assign rounds[0] = (recycle || stream_issue) ?
++                            finished_state : {512'd0, launch_state};
++                    end else begin : private_stream_input
++                        assign rounds[0] = recycle ? finished_state : stream_issue ?
++                            sponge_state : {512'd0, launch_state};
++                    end
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+-                    assign source_tag = recycle ? stage_tag[PIPELINE-1] : launch_tag;
+-                    assign source_valid = recycle || launch_valid;
+-                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
++                    assign source_tag = recycle ? stage_tag[PIPELINE-1] :
++                        stream_issue ? TAG_BITS'(0) : launch_tag;
++                    assign source_valid = recycle || launch_valid || stream_issue;
++                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : !stream_issue;
+                 end else begin : following_stage
+                     assign rounds[0] = state_reg[s-1];
+                     assign start_round = stage_base[s-1];
+@@ -1998,7 +2008,7 @@
+             always_ff @(posedge clk) begin
+                 if (rst) sent <= 0;
+                 else if (!engine_mode) begin
+-                    if (normal_valid && launch_ready) sent <= 1;
++                    if (stream_issue) sent <= 1;
+                     if (finished) sent <= 0;
+                 end
+             end

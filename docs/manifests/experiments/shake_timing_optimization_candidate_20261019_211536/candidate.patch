@@ -1,0 +1,104 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -1282,7 +1282,7 @@
+                 // Scalar intake occurs only in IDLE, where no scalar response can
+                 // retire. Batch intake uses its own response handshake for refill.
+                 // Mode selection is applied once, at the public ready outputs.
+-                wire queue_open = !rst && (!pending_valid || (!again && ready));
++                wire queue_open = !rst && (!pending_valid || (!again && ctx_perm_ready));
+                 wire batch_retire = ctx_response_valid && batch_response_ready;
+                 wire scalar_slot_available =
+                     !busy[0] &&
+@@ -1700,6 +1700,26 @@
+             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+             wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
+             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
++            // Finish context lookup and block formatting before the first round.
++            // This elastic register also holds a request while the round pipeline
++            // recycles. Its valid bit owns the data across stalls and reset.
++            logic launch_valid, launch_fixed;
++            logic [1599:0] launch_state;
++            logic [TAG_BITS-1:0] launch_tag;
++            wire launch_ready = !rst && (!launch_valid || ready);
++            always_ff @(posedge clk) begin
++                if (rst) launch_valid <= 0;
++                else if (launch_ready) begin
++                    launch_valid <= issue_valid;
++                    if (issue_valid) begin
++                        launch_fixed <= engine_mode;
++                        launch_tag <= issue_tag;
++                    end
++                end
++            end
++            // Invalid data need not hold or reset. Retain only a blocked request.
++            always_ff @(posedge clk)
++                if (launch_ready) launch_state <= issue_state;
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                 wire [1599:0] rounds[0:UNROLL];
+@@ -1707,11 +1727,11 @@
+                 wire [TAG_BITS-1:0] source_tag;
+                 wire source_valid, source_fixed;
+                 if (s == 0) begin : input_stage
+-                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : issue_state;
++                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : launch_state;
+                     assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+-                    assign source_tag = recycle ? stage_tag[PIPELINE-1] : issue_tag;
+-                    assign source_valid = recycle || issue_valid;
+-                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : engine_mode;
++                    assign source_tag = recycle ? stage_tag[PIPELINE-1] : launch_tag;
++                    assign source_valid = recycle || launch_valid;
++                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
+                 end else begin : following_stage
+                     assign rounds[0] = state_reg[s-1];
+                     assign start_round = stage_base[s-1];
+@@ -1726,17 +1746,20 @@
+                     // verilog_format: on
+                 end
+                 for (genvar w = 0; w < 25; w = w + 1) begin : words
+-                    always_ff @(posedge clk)
+-                        if (!rst) begin
+-                            if ((SHARED_STATE && s == PIPELINE - 1) &&
+-                                         state_write_enable[w])
+-                                state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
+-                            // Intermediate data is live only when stage_valid is set.
+-                            // Let bubbles advance without a wide valid-controlled hold;
+-                            // the final bank must retain the sponge and returned digest.
+-                            else if (s < PIPELINE - 1 || source_valid)
+-                                state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
+-                        end
++                    if (s < PIPELINE - 1) begin : advancing
++                        // Reset flushes metadata. Intermediate data can advance
++                        // through reset and bubbles without a global enable net.
++                        always_ff @(posedge clk)
++                            state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
++                    end else begin : retained
++                        always_ff @(posedge clk)
++                            if (!rst) begin
++                                if (SHARED_STATE && state_write_enable[w])
++                                    state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
++                                else if (source_valid)
++                                    state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
++                            end
++                    end
+                 end
+                 always_ff @(posedge clk) begin
+                     if (rst) stage_valid[s] <= 0;
+@@ -1750,7 +1773,7 @@
+                     end
+                 end
+             end
+-            assign batch_perm_ready = engine_mode && ready;
++            assign batch_perm_ready = engine_mode && launch_ready;
+             assign batch_perm_done = finished && stage_fixed[PIPELINE-1];
+             assign batch_perm_digest = finished_state;
+             assign batch_perm_result_tag = stage_tag[PIPELINE-1];
+@@ -1761,7 +1784,7 @@
+             always_ff @(posedge clk) begin
+                 if (rst) sent <= 0;
+                 else if (!engine_mode) begin
+-                    if (normal_valid && ready) sent <= 1;
++                    if (normal_valid && launch_ready) sent <= 1;
+                     if (finished) sent <= 0;
+                 end
+             end

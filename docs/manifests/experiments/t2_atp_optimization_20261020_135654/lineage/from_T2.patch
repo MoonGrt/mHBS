@@ -1,0 +1,156 @@
+--- T2/rtl/hash/shake-recipe.sv
++++ U1_prefetched_return_control/rtl/hash/shake-recipe.sv
+@@ -1281,9 +1281,6 @@
+                 logic [3:0] shared_shape;
+                 logic shared_pair;
+                 logic [6:0] phase[0:PIPELINE-1];
+-                // Prepare the next block's small format controls when a phase
+-                // starts, before its permutation returns to the shared formatter.
+-                logic [2:0] feedback_format[0:PIPELINE-1];
+                 (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
+                 logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
+                 assign ctx_read_digest = initial_pending[ctx_read_tag] ? key_value[ctx_read_tag] :
+@@ -1317,12 +1314,39 @@
+                 wire prefetch_context = stage_valid[PIPELINE-2] &&
+                     stage_fixed[PIPELINE-2] && stage_base[PIPELINE-2] + ROUNDS >= 24;
+                 logic [255:0] return_key, return_digest, return_captured, return_address;
++                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
++                logic [6:0] return_phase, return_next_phase;
++                logic [2:0] return_format;
++                logic [4:0] return_next_step;
++                logic return_node_phase, return_feedback_required, return_next_more_steps;
++                logic return_capture, return_initial_pending, return_capture_initial;
++                // Context control is stable from dispatch through the final round.
++                // Read it beside the operands, before the returned tag can fan out
++                // through phase decode, counter arithmetic and the block formatter.
++                // One prepared format replaces the per-slot feedback format bank.
+                 always_ff @(posedge clk)
+                     if (prefetch_context) begin
+                         return_key <= key_value[prefetch_tag];
+                         return_digest <= digest[prefetch_tag];
+                         return_captured <= captured[prefetch_tag];
+                         return_address <= address[prefetch_tag];
++                        return_phase <= phase[prefetch_tag];
++                        return_next_phase <= advance_phase(phase[prefetch_tag],
++                            paired[prefetch_tag], family[prefetch_tag]);
++                        return_format <= format_controls(advance_phase(phase[prefetch_tag],
++                            paired[prefetch_tag], family[prefetch_tag]),
++                            fixed_shape[prefetch_tag], paired[prefetch_tag], family[prefetch_tag]);
++                        return_node_phase <= node_phase[prefetch_tag];
++                        return_feedback_required <= feedback_required[prefetch_tag];
++                        return_next_step <= node_phase[prefetch_tag] ? iteration[prefetch_tag] :
++                            iteration[prefetch_tag] - 1'b1;
++                        return_next_more_steps <= node_phase[prefetch_tag] ?
++                            iteration[prefetch_tag] + 1'b1 < steps[prefetch_tag] :
++                            more_steps[prefetch_tag];
++                        return_capture <= capture_enable[prefetch_tag] &&
++                            iteration[prefetch_tag] == capture_after[prefetch_tag];
++                        return_initial_pending <= initial_pending[prefetch_tag];
++                        return_capture_initial <= capture_initial[prefetch_tag];
+                     end
+ `ifndef SYNTHESIS
+                 always @(posedge clk) begin : debug_operand_prefetch
+@@ -1334,19 +1358,27 @@
+                         if (return_key !== key_value[t] || return_digest !== digest[t] ||
+                             return_captured !== captured[t])
+                             $fatal(1, "prefetched context operand changed before return");
++                        if (return_phase !== phase[t] || return_node_phase !== node_phase[t] ||
++                            return_feedback_required !== feedback_required[t] ||
++                            return_next_phase !== advance_phase(phase[t], paired[t], family[t]) ||
++                            return_next_step !== (node_phase[t] ? iteration[t] : iteration[t] - 1'b1) ||
++                            return_next_more_steps !== (node_phase[t] ?
++                                iteration[t] + 1'b1 < steps[t] : more_steps[t]) ||
++                            return_capture !== (capture_enable[t] && iteration[t] == capture_after[t]) ||
++                            return_initial_pending !== initial_pending[t] ||
++                            return_capture_initial !== capture_initial[t])
++                            $fatal(1, "prefetched context control changed before return");
+                     end
+                 end
+ `endif
+-                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
+-                wire node_done = node_phase[t];
+-                wire again = ctx_perm_done && feedback_required[t];
+-                wire capture_now = ctx_perm_done && node_done && capture_enable[t] &&
+-                    iteration[t] == capture_after[t];
+-                wire [6:0] next_phase = advance_phase(phase[t], paired[t], family[t]);
++                wire node_done = return_node_phase;
++                wire again = ctx_perm_done && return_feedback_required;
++                wire capture_now = ctx_perm_done && node_done && return_capture;
++                wire [6:0] next_phase = return_next_phase;
+                 wire next_node_phase = next_phase[0] || next_phase[1] || next_phase[4] ||
+                     next_phase[6];
+-                wire next_more_steps = node_done ? iteration[t] + 1'b1 < steps[t] : more_steps[t];
+-                wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
++                wire next_more_steps = return_next_more_steps;
++                wire [4:0] next_step = return_next_step;
+                 logic [255:0] next_address;
+                 always_comb begin
+                     next_address = return_address;
+@@ -1463,13 +1495,13 @@
+                 wire first_more_steps = ctx_request_no_seed ? ctx_request_steps > 1 :
+                     ctx_request_steps != 0;
+                 wire [6:0] block_phase = again ? next_phase : first_phase;
+-                wire [2:0] block_format = again ? feedback_format[t] : ctx_first_format;
++                wire [2:0] block_format = again ? return_format : ctx_first_format;
+                 wire [3:0] block_step = again ? next_step[3:0] : ctx_request_start;
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
+                 wire [255:0] block_value = again ?
+-                    (phase[t][5] ? return_digest :
+-                     phase[t][3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                    (return_phase[5] ? return_digest :
++                     return_phase[3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                 wire [255:0]
+@@ -1647,7 +1679,7 @@
+                         if (ctx_perm_done) begin
+                             if (feedback_required[t] !== (!node_done || more_steps[t]))
+                                 $fatal(1, "registered feedback decision differs from its context");
+-                            if (feedback_format[t] !== format_controls(next_phase,
++                            if (return_format !== format_controls(next_phase,
+                                 fixed_shape[t], paired[t], family[t]))
+                                 $fatal(1, "registered feedback format differs from its phase");
+                         end
+@@ -1656,17 +1688,17 @@
+ `endif
+                 // A KEY return always feeds MASK immediately, so feedback priority excludes
+                 // accepting an initial value on the same edge. Each bank has one write port.
+-                wire key_return = ctx_perm_done && phase[t][2];
+-                wire initial_transfer = key_return && initial_pending[t];
++                wire key_return = ctx_perm_done && return_phase[2];
++                wire initial_transfer = key_return && return_initial_pending;
+                 wire key_write = key_return || (accept && ctx_request_no_seed);
+                 wire [TAG_BITS-1:0] key_write_tag = key_return ? t : ctx_request_tag;
+                 wire [255:0] key_write_data = key_return ? ctx_perm_digest[255:0] :
+                     ctx_request_initial_value;
+-                wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
++                wire mask_left = ctx_perm_done && paired[t] && return_phase[3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+                 wire [255:0] digest_write_data = initial_transfer ? return_key :
+                     mask_left ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+-                wire capture_transfer = initial_transfer && capture_initial[t];
++                wire capture_transfer = initial_transfer && return_capture_initial;
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+@@ -1705,9 +1737,6 @@
+                             node_phase[ctx_request_tag] <= first_node_phase;
+                             more_steps[ctx_request_tag] <= first_more_steps;
+                             feedback_required[ctx_request_tag] <= !first_node_phase || first_more_steps;
+-                            feedback_format[ctx_request_tag] <= format_controls(
+-                                advance_phase(first_phase, requested_pair, ctx_request_family),
+-                                requested_shape, requested_pair, ctx_request_family);
+                             if (busy == 0) begin
+                                 shared_shape <= requested_shape;
+                                 shared_pair <= requested_pair;
+@@ -1736,9 +1765,6 @@
+                                 phase[t] <= next_phase;
+                                 node_phase[t] <= next_node_phase;
+                                 feedback_required[t] <= !next_node_phase || next_more_steps;
+-                                feedback_format[t] <= format_controls(
+-                                    advance_phase(next_phase, paired[t], family[t]),
+-                                    fixed_shape[t], paired[t], family[t]);
+                                 if (node_done) more_steps[t] <= next_more_steps;
+                                 if (node_done) iteration[t] <= iteration[t] + 1'b1;
+                             end else complete[t] <= 1;

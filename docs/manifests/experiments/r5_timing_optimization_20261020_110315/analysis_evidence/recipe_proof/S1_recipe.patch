@@ -1,0 +1,88 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -1033,7 +1033,11 @@
+                         4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+                         6: source_word = node_word_indexed(address, selected_index[1:0]);
+-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        // A scheduled ADDRESS_LIST can cross its prefix only for
++                        // 24-byte nodes: the last prefix beat needs the first list
++                        // word. Later list words use list_window, so no indexed
++                        // endpoint-word mux is live on this source path.
++                        7: source_word = list_data0[63:0];
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -1063,6 +1067,21 @@
+             wire padding_reached = position > input_length;
+             wire partial_beat = remaining_bytes < 16;
+             wire stream_last = padding_reached || remaining_bytes < 8;
++`ifndef SYNTHESIS
++            always @(posedge clk) begin : debug_prefix_list_word
++                if (!rst && state == STREAM && stream_accept && shapes[ADDRESS_LIST] &&
++                    position < prefix_bytes) begin
++                    // Check only words contributing input bytes to the prefix
++                    // beat. Full list beats use fetched_list, and the last rate
++                    // beat has no second word.
++                    for (integer i = 0; i < 2; i++) begin
++                        if ((i == 0 || beat != 8) && position + 13'(8 * i) < input_length &&
++                            source_control[i][8:6] == 3'd7 && source_control[i][5:0] != 0)
++                            $fatal(1, "prefix beat requested a list word beyond the first");
++                    end
++                end
++            end
++`endif
+             always_ff @(posedge clk) begin
+                 if (rst) fetched_valid <= 0;
+                 else if (stream_accept) begin
+@@ -1525,19 +1544,31 @@
+                 logic [TAG_BITS-1:0] held_tag, next_response_tag;
+                 logic [255:0] held_digest, held_capture;
+                 logic [PIPELINE-1:0] waiting_responses;
++                // Completion and publication own separate lifetimes. The slot
++                // remains complete/busy until retirement, while this queue bit
++                // is removed as soon as its response payload is published.
++                logic [PIPELINE-1:0] awaiting_response;
++                wire publish_response = !response_held || ctx_response_ready;
+                 assign ctx_response_valid = response_held;
+                 assign ctx_response_tag = held_tag;
+                 assign published_digest = held_digest;
+                 assign published_capture = held_capture;
+                 always_comb begin
+-                    waiting_responses = complete;
+-                    // The published response owns this slot until consumption.
+-                    // Excluding it independently of ready keeps backpressure out
+-                    // of the next-tag priority encoder.
+-                    if (response_held) waiting_responses[held_tag] = 1'b0;
++                    waiting_responses = awaiting_response;
+                     next_response_tag = 0;
+                     for (integer j = PIPELINE - 1; j >= 0; j = j - 1)
+                         if (waiting_responses[j]) next_response_tag = TAG_BITS'(j);
++                end
++                always_ff @(posedge clk) begin
++                    if (rst) awaiting_response <= 0;
++                    else begin
++                        if (publish_response && |waiting_responses)
++                            awaiting_response[next_response_tag] <= 0;
++                        if (accept && zero_request)
++                            awaiting_response[ctx_request_tag] <= 1;
++                        if (ctx_perm_done && !again)
++                            awaiting_response[t] <= 1;
++                    end
+                 end
+                 always_ff @(posedge clk) begin
+                     if (rst) begin
+@@ -1561,6 +1592,13 @@
+                 end
+ `ifndef SYNTHESIS
+                 always @(posedge clk) begin : debug_response_selection
++                    if (!rst) begin
++                        for (integer j = 0; j < PIPELINE; j++) begin
++                            if (awaiting_response[j] !==
++                                (complete[j] && !(response_held && held_tag == TAG_BITS'(j))))
++                                $fatal(1, "response queue differs from completion ownership");
++                        end
++                    end
+                     if (!rst && response_held) begin
+                         if (held_tag >= PIPELINE)
+                             $fatal(1, "published response tag out of range");

@@ -1,0 +1,55 @@
+--- S4/rtl/hash/shake-recipe.sv
++++ T1_local_context_reads/rtl/hash/shake-recipe.sv
+@@ -1296,7 +1296,24 @@
+                 // A slot has one permutation in flight; its operands stay live
+                 // from dispatch until this return. Only the new digest depends
+                 // on the final round, so context RAM need not follow its tag.
+-                wire [TAG_BITS-1:0] prefetch_tag = stage_tag[PIPELINE-2];
++                // Position the context read address near its operand banks.
++                // Its last-traversal enable differs from the generic round tag,
++                // so synthesis keeps this register independent of that tag.
++                logic [TAG_BITS-1:0] prefetch_tag;
++                if (PIPELINE > 2) begin : local_read_address
++                    always_ff @(posedge clk)
++                        if (stage_valid[PIPELINE-3] && stage_fixed[PIPELINE-3] &&
++                            stage_base[PIPELINE-3] + ROUNDS >= 24)
++                            prefetch_tag <= stage_tag[PIPELINE-3];
++                end else begin : input_read_address
++                    wire source_valid = recycle || launch_valid;
++                    wire source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
++                    wire [4:0] source_base = recycle ?
++                        stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
++                    always_ff @(posedge clk)
++                        if (source_valid && source_fixed && source_base + ROUNDS >= 24)
++                            prefetch_tag <= recycle ? stage_tag[PIPELINE-1] : launch_tag;
++                end
+                 wire prefetch_context = stage_valid[PIPELINE-2] &&
+                     stage_fixed[PIPELINE-2] && stage_base[PIPELINE-2] + ROUNDS >= 24;
+                 logic [255:0] return_key, return_digest, return_captured, return_address;
+@@ -1309,6 +1326,8 @@
+                     end
+ `ifndef SYNTHESIS
+                 always @(posedge clk) begin : debug_operand_prefetch
++                    if (!rst && prefetch_context && prefetch_tag !== stage_tag[PIPELINE-2])
++                        $fatal(1, "local context read address lost its round tag");
+                     if (!rst && ctx_perm_done) begin
+                         if (return_address !== address[t])
+                             $fatal(1, "prefetched address changed before return");
+@@ -1645,14 +1664,14 @@
+                     ctx_request_initial_value;
+                 wire mask_left = ctx_perm_done && paired[t] && phase[t][3];
+                 wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+-                wire [255:0] digest_write_data = initial_transfer ? key_value[t] :
+-                    mask_left ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
++                wire [255:0] digest_write_data = initial_transfer ? return_key :
++                    mask_left ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+                 wire capture_transfer = initial_transfer && capture_initial[t];
+                 wire right_write = accept && requested_pair && requested_shape == 8;
+                 wire captured_write = capture_now || capture_transfer || right_write;
+                 wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+                 wire [255:0] captured_write_data = right_write ? ctx_request_right :
+-                    capture_transfer ? key_value[t] : ctx_perm_digest[255:0];
++                    capture_transfer ? return_key : ctx_perm_digest[255:0];
+                 always_ff @(posedge clk) begin
+                     if (!rst) begin
+                         if (key_write) key_value[key_write_tag] <= key_write_data;

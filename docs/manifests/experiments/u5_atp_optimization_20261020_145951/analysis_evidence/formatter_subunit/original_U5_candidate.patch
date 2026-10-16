@@ -1,0 +1,52 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -1540,7 +1540,7 @@
+                     wire [175:0] node_prefix = {
+                         block_shape == 14 ? 16'h8282 : 16'h8383,block_address[255:224],identifier
+                     };
+-                    logic [1087:0] slh16, slh24, slh32, xmss32, chain32, parent32;
++                    logic [1087:0] slh16, slh24, node32_layout, chain32, parent32;
+                     always_comb begin
+                         slh16 = 0;
+                         slh16[511:0] = {block_value[127:0],block_address,ctx_public_seed[127:0]};
+@@ -1554,20 +1554,17 @@
+                             slh24[831:640] = block_right[191:0];
+                             slh24[839:832] = 8'h1f;
+                         end else slh24[647:640] = 8'h1f;
+-                        slh32 = 0;
+-                        slh32[767:0] = {block_value,block_address,ctx_public_seed};
++                        // SHAKE SLH n=32 and XMSS use the same 32-byte
++                        // value/right placement and identical suffix positions.
++                        // Select differing fields once, before shared placement.
++                        node32_layout = 0;
++                        node32_layout[255:0] = xmss ? {xmss_domain,248'd0} : ctx_public_seed;
++                        node32_layout[511:256] = xmss ? xmss_key : block_address;
++                        node32_layout[767:512] = xmss ? xmss_value : block_value;
+                         if (two) begin
+-                            slh32[1023:768] = block_right;
+-                            slh32[1031:1024] = 8'h1f;
+-                        end else slh32[775:768] = 8'h1f;
+-                        xmss32 = 0;
+-                        xmss32[255:248] = xmss_domain;
+-                        xmss32[511:256] = xmss_key;
+-                        xmss32[767:512] = xmss_value;
+-                        if (two) begin
+-                            xmss32[1023:768] = xmss_right;
+-                            xmss32[1031:1024] = 8'h1f;
+-                        end else xmss32[775:768] = 8'h1f;
++                            node32_layout[1023:768] = xmss ? xmss_right : block_right;
++                            node32_layout[1031:1024] = 8'h1f;
++                        end else node32_layout[775:768] = 8'h1f;
+                         chain32 = 0;
+                         chain32[183:0] = chain_prefix;
+                         chain32[439:184] = block_value;
+@@ -1583,8 +1580,7 @@
+                     wire [1087:0] payload =
+                         ({1088{node16}} & slh16) |
+                         ({1088{node24}} & slh24) |
+-                        ({1088{node32 && !xmss && !lms}} & slh32) |
+-                        ({1088{node32 && xmss}} & xmss32) |
++                        ({1088{node32 && !lms}} & node32_layout) |
+                         ({1088{node32 && lms_chain}} & chain32) |
+                         ({1088{node32 && lms_node}} & parent32);
+                     assign unified_state = {512'd0, 1'b1, payload[1086:0]};

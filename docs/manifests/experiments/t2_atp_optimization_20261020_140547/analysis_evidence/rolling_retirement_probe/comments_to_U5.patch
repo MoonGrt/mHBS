@@ -1,0 +1,13 @@
+--- probe/rtl/executor/executor.sv
++++ U5/rtl/executor/executor.sv
+@@ -197,8 +197,8 @@
+     logic [4:0] batch_digit_prefetch;
+     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
+     logic [TAG_BITS-1:0] roll_slot;
+-    // Consume only registered retirement. A returning slot becomes eligible
+-    // on the next edge, separating response valid/tag from issue arbitration.
++    // Retired slots become available through the registered ownership bitmap.
++    // Keep response-valid out of the allocator -> request-tag -> ready loop.
+     wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
+     always_comb begin
+         roll_slot = 0;

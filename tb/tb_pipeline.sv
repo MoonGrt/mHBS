@@ -19,7 +19,7 @@ module tb_pipeline #(parameter integer PIPELINE=4,UNROLL=1);
   family_arg==0 ? 6'd16 :
 `endif
   6'd32;
- wire [255:0] digest,capture;
+ wire [255:0] digest,capture,response_digest,response_capture;
  wire [63:0] hashes,permutations;
  recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(PIPELINE),.UNROLL(UNROLL),.SHARED_STATE(1'b1)) dut(
   .clk,.rst,.batch_mode(1'b1),.batch_request_valid(valid),.batch_request_ready(ready),
@@ -27,7 +27,7 @@ module tb_pipeline #(parameter integer PIPELINE=4,UNROLL=1);
   .batch_leaf(leaf),.batch_a(a),.batch_b(b),.batch_family(family),.batch_no_seed(no_seed),
   .batch_start(start),.batch_initial_value(initial_value),.batch_fixed_shape(fixed_shape),.batch_pair(pair),.batch_right(right_value),
   .batch_seed_domain(seed_domain),.batch_step_domain(step_domain),.batch_response_valid(response_valid),.batch_response_ready(ready_response),
-  .batch_response_tag(response_tag),.batch_response_digest(),.batch_response_capture(),.batch_read_tag(response_tag),
+  .batch_response_tag(response_tag),.batch_response_digest(response_digest),.batch_response_capture(response_capture),.batch_read_tag(response_tag),
   .batch_read_digest(digest),.batch_read_capture(capture),
 `ifndef SYNTHESIS
   .batch_hashes(hashes),.batch_permutations(permutations),
@@ -99,6 +99,7 @@ module tb_pipeline #(parameter integer PIPELINE=4,UNROLL=1);
  endtask
  task automatic check_response(input integer row);
   if(digest!==vectors[row][511:256] || capture!==vectors[row][255:0])$fatal(1,"family %0d row %0d digest/capture",family_arg,row);
+  if(response_digest!==vectors[row][511:256] || response_capture!==vectors[row][255:0])$fatal(1,"family %0d row %0d published digest/capture",family_arg,row);
  endtask
  initial begin
   if(!$value$plusargs("VECTOR=%s",vector_file) || !$value$plusargs("FAMILY=%d",family_arg) || !$value$plusargs("HASHES=%d",expected_hashes))$fatal(1,"arguments");

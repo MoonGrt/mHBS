@@ -132,6 +132,26 @@ SHA2 formatter采用共享64位／128位固定窗口，已完成P1U1/P4U1/P12U1�
 
 后续又完成五组SHA2面积／时序候选（共45项Sign、15次common综合），均未降低三个算法在本轮三点中的最佳固定100MHz假设ATP，因此当前RTL仍保留上述固定窗口版本。候选的面积／路径取舍、未采用原因及完整证据见[五候选对照](docs/manifests/experiments/sha2_optimization_candidate_20261019_184135/reports/SHA2_Five_Candidate_Review_20261019.md)。
 
+2026-10-19 SHAKE 时序候选及其固定目标布线保留为历史证据，见[时序架构对照](docs/manifests/experiments/shake_timing_optimization_candidate_20261019_213301/reports/SHAKE_Timing_Architecture_20261019.md)与[固定目标报告](docs/manifests/experiments/timing_targets_20261019_213925/reports/Timing_Targets_20261019_213925.md)。
+
+2026-10-20 从冻结 C2 继续优化的结果已完成：[C2 后续对照](docs/manifests/experiments/c2_timing_optimization_20261020_100009/reports/C2_Timing_Progress_20261020.md)。其中 R5 是唯一让 P12U1／P4U1 均通过 130 MHz 布线的候选；R1 在 P4U1 同频率下的面积与 ATP 更低，保留为对照。两者均未通过 150 MHz，不能把失败 WNS 外推为已验证频率。
+
+以冻结 R5 为基线的四版候选已经完成：S1 删除无效端点字选择、拆分响应队列并维护树目标的当前层坐标；S2 提前登记相邻 RAM 地址与认证判断；S3 使用直接登记阶段的 recipe 状态编码；S4 并行选择预先配对的主／邻地址。S4 的 common 实际布线闭合频率为 P12U1 139.9972 MHz、P4U1 149.9925 MHz，成为本轮两配置的共同基线；P12U1 的 150 MHz 尝试仍差0.063 ns。完整历史对照见[R5 后续报告](docs/manifests/experiments/r5_timing_optimization_20261020_110128/reports/R5_Timing_Progress_20261020.md)。
+
+从 S4 出发的 T1／T2／T3 已完成比较，剩余两项 T3 布线按用户要求停止。T2 将完成结果先写入既有 bitmap/count，再推进批次，周期增幅最高约0.183%；它的 P12U1 和 P4U1 均在实际6.667 ns（149.9925 MHz）约束下通过布线 STA，160 MHz 尝试未通过。T2 的 P12U1 三项布线 ATP 比 S4 各自最佳降低约6.5%～6.6%，P4U1 则增加约2.0%～2.1%；同一份 RTL 选择 T2。历史证据见[S4 后续报告](docs/manifests/experiments/s4_timing_optimization_20261020_115725/reports/S4_Timing_Progress_20261020.md)。
+
+随后以冻结 T2 为基线测量返回控制预取、平坦写回选择、sponge 容量复用、响应队首预计算与滚动槽回收五项组合，见[T2 面积与延迟对照](docs/manifests/experiments/t2_atp_optimization_20261020_135654/reports/T2_ATP_Progress_20261020.md)。该轮U5候选的P12U1/P4U1等效综合Slice为15,957.875/9,577.500，比T2减少0.71%/4.42%；诊断路径为5.259/4.680 ns，周期增幅0.061%～0.214%。U4保留为P12固定频率ATP对照。`python3 scripts/run_t2_atp_optimization.py --launch-candidate --label <候选名>` 默认仅执行六项完整 Sign 和两项100 MHz common诊断综合；`python3 scripts/validate_t2_atp_candidate.py --run-root <运行目录>` 运行补充验证，`python3 scripts/report_t2_atp_optimization.py` 更新对照。候选未进行布局布线，100 MHz ATP 为假设频率下的辅助指标，不代表实际频率提高。实现保持通用 P/U、单 Hash lane 与原数据接口，P1仍用标量路径；h20完整树继续停止。
+
+最新工作区保留U5后续的V8候选，见[八候选实测对照](docs/manifests/experiments/u5_atp_optimization_20261020_145923/reports/U5_ATP_Progress_20261020.md)及[架构取舍](docs/manifests/experiments/u5_atp_optimization_20261020_152253/reports/U5_ATP_Architecture_20261020.md)。同口径100 MHz common综合：P12U1为15,749.375等效Slice、P4U1为9,559.500，比U5减少1.306565%/0.187940%；周期完全不变。P12诊断路径5.259→5.190 ns，P4为4.680→5.198 ns回退。V2保留为P4固定频率ATP更优对照。全部48项Sign、608组补充验证通过；没有重新布线，实际频率与布线ATP未知。`python3 scripts/run_u5_atp_optimization.py --launch-candidate --label <候选名>`默认只运行六Sign和两项100 MHz综合，`python3 scripts/report_u5_atp_optimization.py`刷新源码绑定汇总。
+
+`scripts/run_shake_timing_optimization.py --launch-baseline` 冻结当前源码，后台运行两配置六项 Sign 和100 MHz诊断综合；后续用 `--launch-candidate --baseline-run <基线目录>` 冻结候选，显式增加 `--route --route-mhz 150` 才运行布线。`scripts/report_shake_timing_optimization.py --watch` 更新本轮对照。综合路径延迟不换算为实测频率。
+
+C2 后续实验使用 `scripts/run_c2_timing_optimization.py --launch-candidate --label <候选名>`，强制核验冻结 C2 的源码和实测工作量；诊断完成后显式执行 `--route-existing <运行目录> --route-mhz 150 130`，只为该冻结候选追加布线。`scripts/report_c2_timing_optimization.py --watch` 汇总结果。每个 Vivado 两线程、最多十二个进程，异常长任务保留后台运行。
+
+R5 后续实验使用 `scripts/run_r5_timing_optimization.py --launch-candidate --label <候选名>` 和 `scripts/report_r5_timing_optimization.py --watch`。该入口严格绑定 R5 的源码、六项 Sign、两项诊断及 130／150 MHz 布线证据；`--route-existing <运行目录> --route-mhz <明确目标>` 仅为已通过验证的同一冻结候选追加布线，默认测量仍只做诊断综合。
+
+S4 后续实验使用 `scripts/run_s4_timing_optimization.py --launch-candidate --label <候选名>` 和 `scripts/report_s4_timing_optimization.py --watch`，先执行六项 Sign与两项100 MHz诊断。显式 `--route-existing <运行目录> --route-mhz <目标>` 为同一冻结候选追加布线；实际STA闭合与名义目标精确匹配分开记录，ATP按实际周期计算。每个P/U与自身最高已验证的S4频率比较，不从失败WNS外推Fmax。
+
 SHAKE 综合默认使用通用 Keccak 表达式，报告位于 `build/synth/PxUy_generic/`。`KECCAK_LUT6=1 bash scripts/synthesize.sh 12 1` 可比较 Xilinx 专用映射：定义 `MHBS_XILINX_LUT6`，将旋转后的三个 Theta XOR 与 Chi 合并为一个六输入 LUT，INIT 为 `64'h6666966996696666`，报告位于 `build/synth/PxUy/`。本轮两个配置的通用映射均优于显式 LUT6 映射，因此通用映射为默认。未定义该宏时，RTL 可继续由其他工具读取。
 
 共同核面积包含控制器、算法数据存储与 Hash lane，ROM 和完整签名缓存由外部提供。生产 `top` 内含这些 ROM，并可启用完整签名缓存，面积口径不同。

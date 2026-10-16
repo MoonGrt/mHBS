@@ -1,0 +1,1257 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Tue Oct 20 13:58:51 2026
+| Host         : user-Z890-EAGLE-WIFI7 running 64-bit Ubuntu 24.04.4 LTS
+| Command      : report_timing -delay_type max -max_paths 20 -nworst 2 -sort_by group -input_pins -nets -file /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/t2_atp_optimization/candidate_20261020_135654/synth/P4U1/critical_paths.rpt
+| Design       : common
+| Device       : 7a200t-ffg1156
+| Speed File   : -3  PRODUCTION 1.23 2018-06-13
+| Design State : Synthesized
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (MET) :             4.724ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.959ns  (logic 0.980ns (19.762%)  route 3.979ns (80.238%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DPRA1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][255]
+                                                                      r  core/endpoints/value0[255]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[255]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[255]
+                                                                      r  core/endpoints_i_293/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_293/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[0].regular.words_reg_0_63_255_255
+                                                                      r  core/lane/endpoints_i_10/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_10/O
+                         net (fo=4, unplaced)         0.246     5.663    core/endpoints/banks[0].regular.words_reg_0_63_255_255/D
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_255_255/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246    10.387    core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP
+  -------------------------------------------------------------------
+                         required time                         10.387    
+                         arrival time                          -5.663    
+  -------------------------------------------------------------------
+                         slack                                  4.724    
+
+Slack (MET) :             4.724ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.959ns  (logic 0.980ns (19.762%)  route 3.979ns (80.238%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DPRA1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][255]
+                                                                      r  core/endpoints/value0[255]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[255]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[255]
+                                                                      r  core/endpoints_i_293/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_293/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[0].regular.words_reg_0_63_255_255
+                                                                      r  core/lane/endpoints_i_10/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_10/O
+                         net (fo=4, unplaced)         0.246     5.663    core/endpoints/banks[0].regular.words_reg_0_63_255_255/D
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_255_255/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246    10.387    core/endpoints/banks[0].regular.words_reg_0_63_255_255/DP
+  -------------------------------------------------------------------
+                         required time                         10.387    
+                         arrival time                          -5.663    
+  -------------------------------------------------------------------
+                         slack                                  4.724    
+
+Slack (MET) :             4.724ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.959ns  (logic 0.980ns (19.762%)  route 3.979ns (80.238%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DPRA1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][255]
+                                                                      r  core/endpoints/value0[255]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[255]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[255]
+                                                                      r  core/endpoints_i_293/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_293/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[0].regular.words_reg_0_63_255_255
+                                                                      r  core/lane/endpoints_i_10/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_10/O
+                         net (fo=4, unplaced)         0.246     5.663    core/endpoints/banks[1].regular.words_reg_0_63_255_255/D
+                         RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[1].regular.words_reg_0_63_255_255/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246    10.387    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP
+  -------------------------------------------------------------------
+                         required time                         10.387    
+                         arrival time                          -5.663    
+  -------------------------------------------------------------------
+                         slack                                  4.724    
+
+Slack (MET) :             4.724ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.959ns  (logic 0.980ns (19.762%)  route 3.979ns (80.238%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DPRA1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][255]
+                                                                      r  core/endpoints/value0[255]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[255]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[255]
+                                                                      r  core/endpoints_i_293/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_293/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[0].regular.words_reg_0_63_255_255
+                                                                      r  core/lane/endpoints_i_10/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_10/O
+                         net (fo=4, unplaced)         0.246     5.663    core/endpoints/banks[1].regular.words_reg_0_63_255_255/D
+                         RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[1].regular.words_reg_0_63_255_255/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246    10.387    core/endpoints/banks[1].regular.words_reg_0_63_255_255/DP
+  -------------------------------------------------------------------
+                         required time                         10.387    
+                         arrival time                          -5.663    
+  -------------------------------------------------------------------
+                         slack                                  4.724    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_201_203/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_201_203/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_201_203/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][202]
+                                                                      r  core/endpoints/value0[202]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[202]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[202]
+                                                                      r  core/endpoints_i_454/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 f  core/endpoints_i_454/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_201_203_1
+                                                                      f  core/lane/endpoints_i_63/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     5.417 r  core/lane/endpoints_i_63/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_201_203/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_201_203/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_201_203/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_201_203/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_201_203/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][202]
+                                                                      r  core/endpoints/value0[202]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[202]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[202]
+                                                                      r  core/endpoints_i_454/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 f  core/endpoints_i_454/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_201_203_1
+                                                                      f  core/lane/endpoints_i_63/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     5.417 r  core/lane/endpoints_i_63/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_201_203/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_201_203/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_201_203/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_204_206/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_204_206/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_204_206/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][205]
+                                                                      r  core/endpoints/value0[205]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[205]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[205]
+                                                                      r  core/endpoints_i_444/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_444/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_204_206_1
+                                                                      r  core/lane/endpoints_i_60/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_60/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_204_206/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_204_206/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_204_206/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_204_206/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_204_206/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][205]
+                                                                      r  core/endpoints/value0[205]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[205]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[205]
+                                                                      r  core/endpoints_i_444/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_444/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_204_206_1
+                                                                      r  core/lane/endpoints_i_60/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_60/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_204_206/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_204_206/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_204_206/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_210_212/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_210_212/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_210_212/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][211]
+                                                                      r  core/endpoints/value0[211]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[211]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[211]
+                                                                      r  core/endpoints_i_426/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_426/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_210_212_1
+                                                                      r  core/lane/endpoints_i_54/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_54/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_210_212/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_210_212/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_210_212/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_210_212/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_210_212/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][211]
+                                                                      r  core/endpoints/value0[211]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[211]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[211]
+                                                                      r  core/endpoints_i_426/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_426/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_210_212_1
+                                                                      r  core/lane/endpoints_i_54/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_54/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_210_212/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_210_212/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_210_212/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_216_218/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_216_218/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_216_218/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][217]
+                                                                      r  core/endpoints/value0[217]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[217]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[217]
+                                                                      r  core/endpoints_i_409/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 f  core/endpoints_i_409/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_216_218_1
+                                                                      f  core/lane/endpoints_i_48/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     5.417 r  core/lane/endpoints_i_48/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_216_218/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_216_218/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_216_218/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_216_218/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_216_218/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][217]
+                                                                      r  core/endpoints/value0[217]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[217]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[217]
+                                                                      r  core/endpoints_i_409/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 f  core/endpoints_i_409/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_216_218_1
+                                                                      f  core/lane/endpoints_i_48/I4
+                         LUT6 (Prop_lut6_I4_O)        0.097     5.417 r  core/lane/endpoints_i_48/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_216_218/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_216_218/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_216_218/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_219_221/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_219_221/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_219_221/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][220]
+                                                                      r  core/endpoints/value0[220]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[220]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[220]
+                                                                      r  core/endpoints_i_399/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_399/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_219_221_1
+                                                                      r  core/lane/endpoints_i_45/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_45/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_219_221/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_219_221/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_219_221/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_219_221/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_219_221/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][220]
+                                                                      r  core/endpoints/value0[220]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[220]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[220]
+                                                                      r  core/endpoints_i_399/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_399/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_219_221_1
+                                                                      r  core/lane/endpoints_i_45/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_45/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_219_221/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_219_221/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_219_221/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_228_230/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_228_230/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_228_230/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][229]
+                                                                      r  core/endpoints/value0[229]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[229]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[229]
+                                                                      r  core/endpoints_i_372/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_372/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_228_230_1
+                                                                      r  core/lane/endpoints_i_36/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_36/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_228_230/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_228_230/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_228_230/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_228_230/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_228_230/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][229]
+                                                                      r  core/endpoints/value0[229]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[229]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[229]
+                                                                      r  core/endpoints_i_372/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_372/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_228_230_1
+                                                                      r  core/lane/endpoints_i_36/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_36/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_228_230/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_228_230/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_228_230/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_243_245/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_243_245/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_243_245/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][244]
+                                                                      r  core/endpoints/value0[244]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[244]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[244]
+                                                                      r  core/endpoints_i_327/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_327/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_243_245_1
+                                                                      r  core/lane/endpoints_i_21/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_21/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_243_245/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_243_245/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_243_245/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_243_245/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_243_245/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][244]
+                                                                      r  core/endpoints/value0[244]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[244]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[244]
+                                                                      r  core/endpoints_i_327/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_327/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_243_245_1
+                                                                      r  core/lane/endpoints_i_21/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_21/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_243_245/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_243_245/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_243_245/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 r  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_246_248/ADDRB1
+                                                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][247]
+                                                                      r  core/endpoints/value0[247]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[247]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[247]
+                                                                      r  core/endpoints_i_318/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_318/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_246_248_1
+                                                                      r  core/lane/endpoints_i_18/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_18/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_246_248/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_246_248/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+Slack (MET) :             4.733ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[2]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@5.000ns period=10.000ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            10.000ns  (clk rise@10.000ns - clk rise@0.000ns)
+  Data Path Delay:        4.946ns  (logic 0.980ns (19.814%)  route 3.966ns (80.186%))
+  Logic Levels:           5  (LUT3=2 LUT6=2 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 10.669 - 10.000 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=18513, unset)        0.704     0.704    core/clk
+                         FDRE                                         r  core/read_addresses.address_reg[2]/C
+  -------------------------------------------------------------------    -------------------
+                         FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/read_addresses.address_reg[2]/Q
+                         net (fo=2, unplaced)         0.530     1.627    core/endpoints/read0[2]
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/I0
+                         LUT3 (Prop_lut3_I0_O)        0.199     1.826 f  core/endpoints/banks[1].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, unplaced)       0.963     2.789    core/endpoints/banks[1].regular.words_reg_0_63_246_248/ADDRB1
+                                                                      f  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/RADR1
+                         RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     2.886 r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/O
+                         net (fo=2, unplaced)         0.522     3.408    core/endpoints/bank_value[1][247]
+                                                                      r  core/endpoints/value0[247]_INST_0/I0
+                         LUT3 (Prop_lut3_I0_O)        0.097     3.505 r  core/endpoints/value0[247]_INST_0/O
+                         net (fo=8, unplaced)         0.878     4.383    core/endpoint_value0[247]
+                                                                      r  core/endpoints_i_318/I3
+                         LUT6 (Prop_lut6_I3_O)        0.097     4.480 r  core/endpoints_i_318/O
+                         net (fo=1, unplaced)         0.840     5.320    core/lane/banks[1].regular.words_reg_0_63_246_248_1
+                                                                      r  core/lane/endpoints_i_18/I2
+                         LUT6 (Prop_lut6_I2_O)        0.097     5.417 r  core/lane/endpoints_i_18/O
+                         net (fo=2, unplaced)         0.233     5.650    core/endpoints/banks[0].regular.words_reg_0_63_246_248/DIB
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)       10.000    10.000 r  
+                                                      0.000    10.000 r  clk (IN)
+                         net (fo=18513, unset)        0.669    10.669    core/endpoints/banks[0].regular.words_reg_0_63_246_248/WCLK
+                         RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/CLK
+                         clock pessimism              0.000    10.669    
+                         clock uncertainty           -0.035    10.633    
+                         RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.250    10.383    core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB
+  -------------------------------------------------------------------
+                         required time                         10.383    
+                         arrival time                          -5.650    
+  -------------------------------------------------------------------
+                         slack                                  4.733    
+
+
+
+

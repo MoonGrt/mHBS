@@ -78,7 +78,7 @@ class Runner:
             f'更新时间：{self.state["updated_at"]}；状态：'+('完成' if self.state['complete'] else '后台运行')+'。', '',
             f'Hash 后端：`{self.meta.get("hash_backend", "shake")}`。', '',
             '冻结当前RTL，common OOC，xc7a200tffg1156-3，通用Keccak；各点按指定频率重新综合，再执行opt/place/phys_opt/route。每个Vivado两线程，全机主任务最多12个。每点只检查指定目标，未进行频率搜索或新增时序例外。旧后台任务保持运行。', '',
-            f'源码与{self.meta["validation_passed"]}/{self.meta["validation_passed"]}项既有验证逐文件绑定。验收范围为common核内部受约束路径；完整布线、DRC、setup/hold通过且实际时钟不低于目标才记为达到。共同核结果不代表封装顶层I/O时序。', '',
+            f'源码与{self.meta["validation_passed"]}/{self.meta["validation_passed"]}项既有验证逐文件绑定。验收范围为common核内部受约束路径；完整布线、DRC、setup/hold通过才记为标称目标闭合。Vivado时钟周期以0.001 ns量化，周期比较容许半个量化单位；JSON另列严格数值判定和实际频率。共同核结果不代表封装顶层I/O时序。', '',
             '| 配置 | 目标 MHz | 周期 ns | 综合 Slice | 布线 Slice | WNS ns | WHS ns | 达到目标 | 状态 |',
             '|---|---:|---:|---:|---:|---:|---:|---|---|']
         fmt = lambda v: '—' if v is None else f'{v:,.3f}'
@@ -160,8 +160,13 @@ class Runner:
             unchanged = all(sha(self.source/f)==h for f,h in self.meta['sha256'].items())
             if not unchanged:
                 raise RuntimeError('Frozen source checksum changed')
-            met = (result['setup_hold_met'] and result['drc_errors']==0 and routing['passed']
-                   and result['actual_period_ns'] <= 1000/frequency+1e-6)
+            physical_pass = result['setup_hold_met'] and result['drc_errors']==0 and routing['passed']
+            result['actual_frequency_mhz'] = 1000/result['actual_period_ns']
+            result['strict_frequency_target_met'] = bool(physical_pass and
+                result['actual_period_ns'] <= 1000/frequency+1e-6)
+            result['clock_quantization_tolerance_ns'] = 0.0005
+            met = bool(physical_pass and
+                abs(result['actual_period_ns']-1000/frequency) <= 0.0005+1e-9)
             self.update(name,status='passed' if met else 'target_not_met',meets_target=met,
                 finished_at=now(),seconds=time.monotonic()-start,analysis_deferred=False,
                 result=result,route_status=routing,source_unchanged=True,
@@ -192,10 +197,11 @@ def launch(args):
         raise ValueError('Duplicate P/U/frequency target')
     validation_path = args.validation.resolve()
     validation = json.loads(validation_path.read_text())
+    validation['total'] = validation.get('total', validation.get('total_planned'))
     assert validation['complete'] and validation['passed']==validation['total'] and validation['total']>0 and not validation['failed']
     assert all(test['passed'] for test in validation['tests']) and len(validation['tests'])==validation['total']
     assert validation['source_unchanged']
-    assert validation.get('hash_backend','shake') == args.hash_backend, 'Validation backend mismatch'
+    assert validation.get('hash_backend','shake') in (args.hash_backend, 'shake_and_sha2'), 'Validation backend mismatch'
     names = [n.strip() for n in (ROOT/'sources.txt').read_text().splitlines() if n.strip()]
     assert {n:sha(ROOT/n) for n in names} == validation['rtl_sha256'], 'Current RTL differs from validated RTL'
     validation_manifest = Path(validation['source_manifest'])

@@ -1,0 +1,173 @@
+--- C2/rtl/executor/executor.sv
++++ R3/rtl/executor/executor.sv
+@@ -181,7 +181,7 @@
+     logic [  TAG_BITS-1:0] pipe_issue_slot;
+     logic [COUNT_BITS-1:0] pipe_pair;
+     logic [PIPE_BATCH-1:0] pipe_done_mask, pipe_expected_mask;
+-    wire [255:0] pipe_read_result, pipe_read_capture;
++    wire [255:0] pipe_read_result, pipe_read_capture, pipe_response_result;
+     logic [7:0] pipe_seed_domain, pipe_step_domain;
+     // Stateful endpoint batches use the same single write port as SLH WOTS.
+     // Sign-only and verification batches retain their CHAIN_STORE path.
+@@ -290,6 +290,12 @@
+     );
+     // verilog_format: on
+     wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
++    // Response consumption already has a registered phase flag. Direct
++    // writeback needs the published response tag; deferred reads use pipe_pair.
++    // Avoid decoding indexing/algorithm/direct mode on the context RAM address.
++    wire [TAG_BITS-1:0] context_read_tag = state == FORS_PICK ?
++        TAG_BITS'(target-fors_base-21'(fors_offset)) :
++        pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
+     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
+         && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
+@@ -318,11 +324,11 @@
+         .batch_b({11'd0, batch_address}),
+         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
+         .batch_response_valid(pipe_valid),.batch_response_ready(pipe_response_accept),.batch_response_tag(pipe_tag),
+-        .batch_response_digest(),.batch_response_capture(),
++        .batch_response_digest(pipe_response_result),.batch_response_capture(),
+         // Direct writeback and deferred consumption never overlap.
+         // Select their tag before reading the context RAM, removing a
+         // second 256-bit digest/key read port and its output selectors.
+-        .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
++        .batch_read_tag(context_read_tag),
+         .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
+         .request_valid(lane_request_active),
+         .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
+@@ -532,15 +538,15 @@
+         end else if (fors_leaves || fors_pipe) begin
+             endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
+             endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (lt_pipe) begin
+             endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
+             endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (pipe_direct && pipe_mode) begin
+             endpoint_write = pipe_valid;
+             endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
+-            endpoint_data = pipe_read_result;
++            endpoint_data = pipe_response_result;
+         end else if (state == CHAIN_STORE && indexing != 1) begin
+             endpoint_write = 1;
+         end else if (PIPELINE == 1 && state == LT_STORE) begin
+@@ -814,7 +820,7 @@
+                 if(pipe_valid && pipe_response_accept)begin
+                     pipe_done_mask[pipe_tag] <= 1;
+                     if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
+-                        node_value <= pipe_read_result;
++                        node_value <= pipe_response_result;
+                 end
+             end
+             case (state)
+--- C2/rtl/hash/shake-recipe.sv
++++ R3/rtl/hash/shake-recipe.sv
+@@ -963,8 +963,9 @@
+             wire [DIGEST_BYTES*8-1:0] digest;
+             wire completed = finish_valid;
+             assign response_value = bridge_response ?
+-                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, engine_digest[N*8-1:0]} : digest;
+-            assign response_capture = engine_capture[N*8-1:0];
++                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, published_digest[N*8-1:0]} : digest;
++            assign response_capture = bridge_response ? published_capture[N*8-1:0] :
++                engine_capture[N*8-1:0];
+             wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes + 32 : 22;
+             logic staged_valid, staged_last;
+             logic [127:0] staged_data;
+@@ -1093,9 +1094,13 @@
+             // The response remains in its context until the caller consumes it.
+             wire scalar_bridge = bridge_response ||
+                 (!batch_mode && state == IDLE && request_valid && scalar_fixed);
+-            wire engine_mode = batch_mode || scalar_bridge;
++            // The intake register owns a newly accepted scalar request before
++            // it is dispatched from FIXED_WAIT. Keep incoming recipe decoding
++            // out of the datapath-mode and downstream-capacity feedback cone.
++            wire engine_mode = batch_mode || bridge_response;
+             wire engine_valid, scalar_capacity, batch_capacity;
+             wire [255:0] engine_digest, engine_capture;
++            wire [255:0] published_digest, published_capture;
+             wire [3:0] scalar_shape = request_recipe[59:56];
+             wire scalar_fixed = RECIPE_MASK[scalar_shape] &&
+                 (scalar_shape == 1 || scalar_shape == 2 || scalar_shape == 5 || scalar_shape == 7 ||
+@@ -1159,7 +1164,10 @@
+                 logic [63:0] ctx_request_tree;
+                 wire ctx_request_valid = pending_valid;
+                 wire ctx_request_ready;
+-                wire [TAG_BITS-1:0] ctx_read_tag = scalar_bridge ? TAG_BITS'(0) : batch_read_tag;
++                // Scalar result data are consumed only in FIXED_WAIT. An
++                // incoming scalar recipe must not select the asynchronous RAM
++                // read address used by a concurrently visible batch response.
++                wire [TAG_BITS-1:0] ctx_read_tag = bridge_response ? TAG_BITS'(0) : batch_read_tag;
+                 wire [255:0] ctx_read_digest;
+                 wire [255:0] ctx_read_capture;
+                 wire ctx_response_valid;
+@@ -1185,8 +1193,8 @@
+                 assign batch_perm_valid = ctx_perm_valid;
+                 assign batch_perm_state = ctx_perm_state;
+                 assign batch_perm_tag = ctx_perm_tag;
+-                assign batch_response_digest = engine_digest;
+-                assign batch_response_capture = engine_capture;
++                assign batch_response_digest = published_digest;
++                assign batch_response_capture = published_capture;
+ 
+                 wire [255:0] seed_address = make_address(ctx_request_layer, ctx_request_tree,
+                     {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
+@@ -1329,7 +1337,7 @@
+                 wire old_batch_slot = batch_request_tag < PIPELINE &&
+                     (!busy[batch_request_tag] || (old_retire && ctx_response_tag == batch_request_tag)) &&
+                     (!pending_valid || ctx_request_tag != batch_request_tag);
+-                wire old_ready = !rst && engine_mode && (!pending_valid || accept) &&
++                wire old_ready = !rst && (batch_mode || scalar_bridge) && (!pending_valid || accept) &&
+                     (scalar_bridge ? old_scalar_slot : old_batch_slot);
+                 wire old_valid = scalar_bridge ? state == IDLE && request_valid : batch_request_valid;
+                 always @(posedge clk) begin : debug_intake_equivalence
+@@ -1489,9 +1497,12 @@
+                 // registers; digest/capture data stay in their existing banks.
+                 logic response_held;
+                 logic [TAG_BITS-1:0] held_tag, next_response_tag;
++                logic [255:0] held_digest, held_capture;
+                 logic [PIPELINE-1:0] waiting_responses;
+                 assign ctx_response_valid = response_held;
+                 assign ctx_response_tag = held_tag;
++                assign published_digest = held_digest;
++                assign published_capture = held_capture;
+                 always_comb begin
+                     waiting_responses = complete;
+                     // The published response owns this slot until consumption.
+@@ -1509,6 +1520,17 @@
+                     end else if (!response_held || ctx_response_ready) begin
+                         response_held <= |waiting_responses;
+                         held_tag <= next_response_tag;
++                        // Completion is visible after its bank write commits.
++                        // Publish payload and tag on the same edge, retaining
++                        // both under backpressure. Workspace writes now start
++                        // at these registers rather than an asynchronous RAM.
++                        if (|waiting_responses) begin
++                            held_digest <= initial_pending[next_response_tag] ?
++                                key_value[next_response_tag] : digest[next_response_tag];
++                            held_capture <= !captured_valid[next_response_tag] ? 256'd0 :
++                                capture_initial[next_response_tag] ? key_value[next_response_tag] :
++                                captured[next_response_tag];
++                        end
+                     end
+                 end
+ `ifndef SYNTHESIS
+@@ -1518,6 +1540,14 @@
+                             $fatal(1, "published response tag out of range");
+                         else if (!complete[held_tag] || !busy[held_tag])
+                             $fatal(1, "published response does not own a completed slot");
++                        else begin
++                            if (held_digest !== (initial_pending[held_tag] ?
++                                key_value[held_tag] : digest[held_tag]))
++                                $fatal(1, "published digest differs from its completed slot");
++                            if (held_capture !== (!captured_valid[held_tag] ? 256'd0 :
++                                capture_initial[held_tag] ? key_value[held_tag] : captured[held_tag]))
++                                $fatal(1, "published capture differs from its completed slot");
++                        end
+                     end
+                 end
+ `endif

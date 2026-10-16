@@ -1,0 +1,13 @@
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -197,7 +197,9 @@
+     logic [4:0] batch_digit_prefetch;
+     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
+     logic [TAG_BITS-1:0] roll_slot;
+-    wire [PIPE_BATCH-1:0] roll_free=~pipe_active | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0);
++    // Consume only registered retirement. A returning slot becomes eligible
++    // on the next edge, separating response valid/tag from issue arbitration.
++    wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
+     always_comb begin
+         roll_slot = 0;
+         for (integer j = PIPE_BATCH - 1; j >= 0; j--) if (roll_free[j]) roll_slot = TAG_BITS'(j);

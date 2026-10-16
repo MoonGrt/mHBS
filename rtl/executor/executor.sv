@@ -71,6 +71,7 @@ module executor #(
     } state_t;
     state_t state, continuation;
     logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
+    logic direct_writeback_phase;
     task automatic enter_state(input state_t next_state);
         begin
             state <= next_state;
@@ -95,6 +96,12 @@ module executor #(
             lt_pipe <= PIPELINE > 1 && (next_state == LT_PIPE_ISSUE || next_state == LT_PIPE_WAIT);
             fors_leaves <= PIPELINE > 1 && indexing == 1 && !verifying &&
                 (next_state == PIPE_ISSUE || next_state == PIPE_WAIT);
+            // Direct-result ownership is stable for the whole batch. Prepare
+            // it at the same transition edge as request/response controls;
+            // algorithm and operation decoding no longer crosses RAM writes.
+            direct_writeback_phase <= PIPELINE > 1 && pipe_direct &&
+                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
+                 next_state == PIPE_VERIFY_INPUT);
         end
     endtask
     // Abort outstanding execution on an error. The autonomous wrapper halts
@@ -130,9 +137,20 @@ module executor #(
     logic [20:0] fors_base;
     logic [9:0] fors_digest_offset;
     logic [13:0] fors_target_prefetch;
-    wire fors_target_group = target >= fors_base && target < fors_base + 21'(fors_total);
-    wire fors_target_wave=fors_target_group && target>=fors_base+21'(fors_offset)
-        && target<fors_base+21'(fors_offset)+21'(PIPELINE);
+    // A FORS microgroup keeps target/base stable while leaves and parents run.
+    // Prepare its unsigned relative index on the existing setup edge. The
+    // consumer then compares a bounded five-bit index instead of cascading
+    // two full-width additions and a full-width range comparison.
+    logic [20:0] fors_target_delta;
+    wire fors_target_group = fors_target_delta < {16'd0, fors_total};
+    wire [5:0] fors_wave_end = {1'b0, fors_offset} + 6'(PIPELINE);
+    wire fors_target_wave = fors_target_group &&
+        fors_target_delta[4:0] >= fors_offset &&
+        {1'b0, fors_target_delta[4:0]} < fors_wave_end;
+    wire [4:0] fors_capture_tag = fors_target_delta[4:0] - fors_offset;
+    // Four-leaf microgroups have a four-aligned base. One shared root-index
+    // addition also supplies its final leaf by restoring the two low bits.
+    wire [20:0] fors_root_index = (fors_base >> 2) + 21'(fors_root_cursor);
     wire [4:0] fors_outputs = fors_total >> (fors_level ? 2 : 1);
     wire sign_only = stateful && !verifying && standalone_chain && macro_flags[2];
     logic [4:0] layer;
@@ -160,6 +178,17 @@ module executor #(
     logic [4:0] tree_height, node_level, auth_level;
     logic [1:0] indexing;
     logic [20:0] target, leaf_cursor, node_index;
+    // Follow the target's path as the current node climbs the tree. Keeping
+    // this coordinate beside node_index removes a variable barrel shift from
+    // the shared workspace write-enable/address/data selection path.
+    logic [20:0] target_at_level;
+    logic auth_node_match, node_below_root;
+    // The parent-path decision is stable while parent setup formats its task.
+    // Shadow it with the node coordinate to keep a wide equality comparison
+    // out of the shared state/clear enables without inserting a controller beat.
+    logic target_parent_match;
+    wire [20:0] tree_target = stateful ? {1'b0, job_index[19:0]}
+        : descriptor[37:36] == 1 ? {7'd0, fors_target_prefetch} : {1'b0, scalar_leaf};
     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
     localparam integer PIPE_BATCH = PIPELINE;
     localparam integer TAG_BITS   = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
@@ -172,25 +201,37 @@ module executor #(
     logic [4:0] batch_digit_prefetch;
     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
     logic [TAG_BITS-1:0] roll_slot;
-    wire [PIPE_BATCH-1:0] roll_free=~pipe_active | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0);
+    logic roll_available;
+    logic [PIPE_BATCH-1:0] roll_next_free;
+    logic [TAG_BITS-1:0] roll_next_slot;
+    // Prepare the next allocator result beside the ownership update. A tag
+    // retired on this edge is first offered in the following cycle, matching
+    // the ownership bitmap while removing its priority encoder from ready.
+    wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
     always_comb begin
-        roll_slot = 0;
-        for (integer j = PIPE_BATCH - 1; j >= 0; j--) if (roll_free[j]) roll_slot = TAG_BITS'(j);
+        roll_next_free = roll_free;
+        if (pipe_valid) roll_next_free[pipe_tag] = 1'b1;
+        if (pipe_selected && pipe_ready) roll_next_free[issue_slot] = 1'b0;
+        roll_next_slot = 0;
+        for (integer j = PIPE_BATCH - 1; j >= 0; j--)
+            if (roll_next_free[j]) roll_next_slot = TAG_BITS'(j);
     end
     wire  [  TAG_BITS-1:0] issue_slot = pipe_rolling ? roll_slot : pipe_issue_slot;
     logic [  TAG_BITS-1:0] pipe_issue_slot;
     logic [COUNT_BITS-1:0] pipe_pair;
     logic [PIPE_BATCH-1:0] pipe_done_mask, pipe_expected_mask;
-    wire [255:0] pipe_read_result, pipe_read_capture;
+    wire [255:0] pipe_read_result, pipe_read_capture, pipe_response_result;
     logic [7:0] pipe_seed_domain, pipe_step_domain;
     // Stateful endpoint batches use the same single write port as SLH WOTS.
     // Sign-only and verification batches retain their CHAIN_STORE path.
     wire pipe_direct = PIPELINE > 1 && indexing != 1 && (stateful ? (!verifying && !sign_only) : operation == 1);
     logic fors_pipe, fors_leaves, lt_pipe, pipe_mode;
     wire pipe_ready, pipe_valid, pipe_selected;
+    // The final response first commits its bitmap/count. The controller
+    // observes only registered retirement, separating recipe return control
+    // from the next execution phase and RAM-address preparation.
     wire lt_batch_complete =
-        ((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1) << pipe_tag) : '0)) &
-         pipe_expected_mask) == pipe_expected_mask;
+        (pipe_done_mask & pipe_expected_mask) == pipe_expected_mask;
     wire [TAG_BITS-1:0] pipe_tag;
 `ifndef SYNTHESIS
     wire [63:0] pipe_hashes, pipe_permutations;
@@ -290,9 +331,15 @@ module executor #(
     );
     // verilog_format: on
     wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
+    // Response consumption already has a registered phase flag. Direct
+    // writeback needs the published response tag; deferred reads use pipe_pair.
+    // Avoid decoding indexing/algorithm/direct mode on the context RAM address.
+    wire [TAG_BITS-1:0] context_read_tag = state == FORS_PICK ?
+        TAG_BITS'(fors_capture_tag) :
+        pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
-        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
+        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && roll_available) : pipe_expected_mask[pipe_issue_slot]));
     // verilog_format: off
     recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
         .UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
@@ -318,11 +365,11 @@ module executor #(
         .batch_b({11'd0, batch_address}),
         .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
         .batch_response_valid(pipe_valid),.batch_response_ready(pipe_response_accept),.batch_response_tag(pipe_tag),
-        .batch_response_digest(),.batch_response_capture(),
+        .batch_response_digest(pipe_response_result),.batch_response_capture(),
         // Direct writeback and deferred consumption never overlap.
         // Select their tag before reading the context RAM, removing a
         // second 256-bit digest/key read port and its output selectors.
-        .batch_read_tag(state==FORS_PICK ? TAG_BITS'(target-fors_base-21'(fors_offset)) : (lt_pipe || fors_pipe || fors_leaves || pipe_direct) && pipe_mode ? pipe_tag : TAG_BITS'(pipe_pair)),
+        .batch_read_tag(context_read_tag),
         .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
         .request_valid(lane_request_active),
         .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
@@ -384,10 +431,22 @@ module executor #(
             end
         end
     endfunction
-    // Checksum and scalar setup retain their shared selector. Batch requests
-    // use the next chain/digit prepared on the preceding acceptance edge.
-    wire [7:0] digit_index = state == TRANSFORM ? transform_index : chain_cursor;
-    wire [4:0] shared_digit = digit(digit_index);
+    // Scalar setup uses the chain digit; batch requests use a digit prepared
+    // on the preceding acceptance edge. The checksum loop only visits message
+    // digits, so it bypasses the state/index/checksum-digit selection network.
+    wire [4:0] shared_digit = digit(chain_cursor);
+    wire [3:0] transform_digit = value[2][{(transform_index[5:0] ^ 6'd1), 2'b0}+:4];
+    wire [3:0] checksum_increment = ~transform_digit;
+`ifndef SYNTHESIS
+    always @(posedge clk) begin : debug_checksum_increment
+        if (!execution_rst && state == TRANSFORM && descriptor[59:56] == 1) begin
+            if (transform_index >= LEN1 || {1'b0, transform_digit} !== digit(transform_index))
+                $fatal(1, "checksum loop exceeded message digits");
+            if ({1'b0, checksum_increment} !== 5'd15 - digit(transform_index))
+                $fatal(1, "checksum nibble complement changed its value");
+        end
+    end
+`endif
     wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
     wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
     genvar fb;
@@ -517,94 +576,235 @@ module executor #(
         end
     endtask
 
+    // A response belongs to exactly one writeback phase. Authentication and
+    // stack writes intentionally meet in PUSH_NODE; authenticate first, then
+    // PUSH_STACK commits the remaining node through this same write port.
+    wire write_auth = auth_write;
+    wire write_stack = stack_write && !auth_write;
+    wire write_fors = (fors_leaves || fors_pipe) && pipe_valid &&
+        (fors_leaves || state == FORS_WAIT);
+    wire write_ltree = lt_pipe && pipe_valid && state == LT_PIPE_WAIT;
+    wire write_direct = direct_writeback_phase && pipe_valid;
+    wire write_chain = state == CHAIN_STORE && indexing != 1;
+    wire write_scalar_ltree = PIPELINE == 1 && state == LT_STORE;
+    wire write_copy = state == LT_COPY;
+    wire write_root = root_write;
+    wire write_auth_from_ram = write_auth && (state == FORS_AUTH0 || state == FORS_AUTH1);
+    wire write_node = write_stack || (write_auth && !write_auth_from_ram);
+    wire write_from_ram = write_copy || write_auth_from_ram;
+    wire write_response = write_fors || write_ltree || write_direct;
+    wire write_result = write_chain || write_scalar_ltree;
+    wire [INDEX_BITS-1:0] direct_write_address = pipe_rolling
+        ? pipe_chain_index[pipe_tag] : chain_cursor + INDEX_BITS'(pipe_tag);
+    // Form a parallel mux from mutually exclusive owners. Grouping identical
+    // data sources avoids repeating the 256-bit response and node selectors.
     always_comb begin
-        endpoint_write = 0;
-        endpoint_address = chain_cursor;
-        endpoint_data = result[W-1:0];
+        endpoint_write = write_auth || write_stack || write_response ||
+            write_result || write_copy || write_root;
+        endpoint_address =
+            ({INDEX_BITS{write_auth}} & (INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level))) |
+            ({INDEX_BITS{write_stack}} & (INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level))) |
+            ({INDEX_BITS{write_fors}} & (INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_offset) + INDEX_BITS'(pipe_tag))) |
+            ({INDEX_BITS{write_ltree}} & ((lt_cursor >> 1) + INDEX_BITS'(pipe_tag))) |
+            ({INDEX_BITS{write_direct}} & direct_write_address) |
+            ({INDEX_BITS{write_chain}} & chain_cursor) |
+            ({INDEX_BITS{write_scalar_ltree || write_copy}} & (lt_cursor >> 1)) |
+            ({INDEX_BITS{write_root}} & INDEX_BITS'(group_index));
+        endpoint_data =
+            ({W{write_node}} & node_value) |
+            ({W{write_from_ram}} & endpoint_value0) |
+            ({W{write_response}} & pipe_response_result) |
+            ({W{write_result}} & result[W-1:0]) |
+            ({W{write_root}} & route_value[W-1:0]);
+    end
+`ifndef SYNTHESIS
+    // Keep the old priority form as a simulation-only equivalence oracle.
+    logic reference_endpoint_write;
+    logic [INDEX_BITS-1:0] reference_endpoint_address;
+    logic [W-1:0] reference_endpoint_data;
+    always_comb begin
+        reference_endpoint_write = 0;
+        reference_endpoint_address = chain_cursor;
+        reference_endpoint_data = result[W-1:0];
         if (auth_write) begin
-            endpoint_write = 1;
-            endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
-            endpoint_data = auth_write_data;
+            reference_endpoint_write = 1;
+            reference_endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
+            reference_endpoint_data = auth_write_data;
         end else if (stack_write) begin
-            endpoint_write = 1;
-            endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
-            endpoint_data = node_value;
+            reference_endpoint_write = 1;
+            reference_endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
+            reference_endpoint_data = node_value;
         end else if (fors_leaves || fors_pipe) begin
-            endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
-            endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
-            endpoint_data = pipe_read_result;
+            reference_endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
+            reference_endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
+            reference_endpoint_data = pipe_response_result;
         end else if (lt_pipe) begin
-            endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
-            endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
-            endpoint_data = pipe_read_result;
+            reference_endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
+            reference_endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
+            reference_endpoint_data = pipe_response_result;
         end else if (pipe_direct && pipe_mode) begin
-            endpoint_write = pipe_valid;
-            endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
-            endpoint_data = pipe_read_result;
+            reference_endpoint_write = pipe_valid;
+            reference_endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
+            reference_endpoint_data = pipe_response_result;
         end else if (state == CHAIN_STORE && indexing != 1) begin
-            endpoint_write = 1;
+            reference_endpoint_write = 1;
         end else if (PIPELINE == 1 && state == LT_STORE) begin
-            endpoint_write = 1;
-            endpoint_address = lt_cursor >> 1;
+            reference_endpoint_write = 1;
+            reference_endpoint_address = lt_cursor >> 1;
         end else if (state == LT_COPY) begin
-            endpoint_write = 1;
-            endpoint_address = lt_cursor >> 1;
-            endpoint_data = endpoint_value0;
+            reference_endpoint_write = 1;
+            reference_endpoint_address = lt_cursor >> 1;
+            reference_endpoint_data = endpoint_value0;
         end else if (root_write) begin
-            endpoint_write = 1;
-            endpoint_address = INDEX_BITS'(group_index);
-            endpoint_data = route_value[W-1:0];
+            reference_endpoint_write = 1;
+            reference_endpoint_address = INDEX_BITS'(group_index);
+            reference_endpoint_data = route_value[W-1:0];
         end
     end
 
+    always @(posedge clk) begin : debug_writeback_ownership
+        if (!execution_rst) begin
+            if (!$onehot0({write_auth, write_stack, write_fors, write_ltree,
+                write_direct, write_chain, write_scalar_ltree, write_copy, write_root}))
+                $fatal(1, "multiple workspace write owners");
+            if (direct_writeback_phase !== (pipe_mode && pipe_direct &&
+                !fors_leaves && !fors_pipe && !lt_pipe))
+                $fatal(1, "registered direct writeback ownership differs from phase");
+            if (endpoint_write !== reference_endpoint_write ||
+                (endpoint_write && (endpoint_address !== reference_endpoint_address ||
+                 endpoint_data !== reference_endpoint_data)))
+                $fatal(1, "workspace write differs from priority reference");
+        end
+    end
+`endif
+
     generate
         begin : read_addresses
-            logic [INDEX_BITS-1:0] address;
+            logic [INDEX_BITS-1:0] address, adjacent_address, next_address, next_adjacent_address;
+            function automatic [INDEX_BITS-1:0] adjacent(input [INDEX_BITS-1:0] selected);
+                adjacent = selected == INDEX_BITS'(WORKSPACE_DEPTH - 1)
+                    ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : selected + 1'b1;
+            endfunction
+            // Form each address pair before the state/ready selection. In
+            // particular, ready must not cross the full address mux followed
+            // by an incrementer before reaching the adjacent-address register.
+            wire [INDEX_BITS-1:0] lt_issue_address =
+                lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
+            wire [INDEX_BITS-1:0] lt_next_address = lt_cursor + INDEX_BITS'(2 * PIPELINE);
+            wire [INDEX_BITS-1:0] fors_leaf_address = INDEX_BITS'(FORS_SCRATCH)
+                + INDEX_BITS'(fors_target_delta ^ 21'd1);
+            wire [INDEX_BITS-1:0] fors_auth_address = INDEX_BITS'(FORS_SCRATCH)
+                + INDEX_BITS'((fors_target_delta >> 1) ^ 21'd1);
+            wire [INDEX_BITS-1:0] fors_issue_offset =
+                (INDEX_BITS'(fors_offset) + INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1;
+            wire [INDEX_BITS-1:0] fors_next_offset =
+                (INDEX_BITS'(fors_offset) + INDEX_BITS'(PIPELINE)) << 1;
+            always_comb begin
+                next_address = address;
+                next_adjacent_address = adjacent_address;
+                case (state)
+                    REDUCE_SETUP, TREE_INIT, LT_COPY: begin
+                        next_address = 0;
+                        next_adjacent_address = 1;
+                    end
+                    PUSH_NODE: begin
+                        next_address = node_level == tree_height
+                            ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
+                        next_adjacent_address = node_level == tree_height
+                            ? INDEX_BITS'(AUTH_BASE + 1) : INDEX_BITS'(STACK_BASE + 1) + INDEX_BITS'(node_level);
+                    end
+                    AUTH_OUTPUT: begin
+                        next_address = INDEX_BITS'(AUTH_BASE + 1) + INDEX_BITS'(auth_level);
+                        next_adjacent_address = INDEX_BITS'(AUTH_BASE + 2) + INDEX_BITS'(auth_level);
+                    end
+                    HASH_ISSUE, HASH_WAIT: begin
+                        next_address = lane_list_next;
+                        next_adjacent_address = adjacent(lane_list_next);
+                    end
+                    LT_PIPE_INIT: begin
+                        next_address = {lt_cursor[INDEX_BITS-1:1], 1'b0};
+                        next_adjacent_address = {lt_cursor[INDEX_BITS-1:1], 1'b1};
+                    end
+                    LT_NEXT: if (PIPELINE == 1) begin
+                        next_address = 0;
+                        next_adjacent_address = 1;
+                    end
+                    LT_PIPE_ISSUE: if (pipe_ready) begin
+                        next_address = lt_issue_address;
+                        next_adjacent_address = adjacent(lt_issue_address);
+                    end
+                    LT_PIPE_WAIT: if (lt_batch_complete) begin
+                        if (lt_cursor + 2 * PIPELINE < lt_count) begin
+                            next_address = lt_next_address;
+                            next_adjacent_address = adjacent(lt_next_address);
+                        end else if (lt_count[0]) begin
+                            next_address = lt_count - 1'b1;
+                            // An odd count minus one is even, including wrap.
+                            next_adjacent_address = lt_count;
+                        end else begin
+                            next_address = 0;
+                            next_adjacent_address = 1;
+                        end
+                    end
+                    FORS_LEAF_NEXT: begin
+                        next_address = fors_target_group ? fors_leaf_address : INDEX_BITS'(FORS_SCRATCH);
+                        next_adjacent_address = fors_target_group ? adjacent(fors_leaf_address) : INDEX_BITS'(FORS_SCRATCH + 1);
+                    end
+                    FORS_AUTH0, FORS_BEGIN, FORS_AUTH1, FORS_LEVEL: begin
+                        next_address = INDEX_BITS'(FORS_SCRATCH);
+                        next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
+                    end
+                    FORS_ISSUE: if (pipe_ready) begin
+                        if (pipe_issue_slot + 1 >= PIPELINE || (pipe_expected_mask >> (pipe_issue_slot + 1)) == 0) begin
+                            next_address = INDEX_BITS'(FORS_SCRATCH);
+                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
+                        end else begin
+                            next_address = INDEX_BITS'(FORS_SCRATCH) + fors_issue_offset;
+                            // Both FORS wave addresses are even; construct the
+                            // low one bit before the ready/state selection.
+                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1) + fors_issue_offset;
+                        end
+                    end
+                    FORS_WAIT: begin
+                        if (fors_offset + PIPELINE < fors_outputs) begin
+                            next_address = INDEX_BITS'(FORS_SCRATCH) + fors_next_offset;
+                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1) + fors_next_offset;
+                        end else if (fors_level) begin
+                            next_address = INDEX_BITS'(FORS_SCRATCH);
+                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
+                        end else begin
+                            next_address = fors_target_group ? fors_auth_address : INDEX_BITS'(FORS_SCRATCH);
+                            next_adjacent_address = fors_target_group ? adjacent(fors_auth_address) : INDEX_BITS'(FORS_SCRATCH + 1);
+                        end
+                    end
+                    FORS_ROOT_NEXT: begin
+                        next_address = INDEX_BITS'(FORS_SCRATCH + 1) + INDEX_BITS'(fors_root_cursor);
+                        next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 2) + INDEX_BITS'(fors_root_cursor);
+                    end
+                    default: begin end
+                endcase
+            end
             always_ff @(posedge clk) begin
-                if (rst) address <= 0;
-                else if (state == REDUCE_SETUP || state == TREE_INIT) address <= 0;
-                else if (state == PUSH_NODE)
-                    address<=node_level==tree_height ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE)+INDEX_BITS'(node_level);
-                else if (state == AUTH_OUTPUT)
-                    address <= INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_level) + 1'b1;
-                else if (state == HASH_ISSUE || state == HASH_WAIT) address <= lane_list_next;
-                else if (state == LT_PIPE_INIT) address <= {lt_cursor[INDEX_BITS-1:1], 1'b0};
-                else if (PIPELINE == 1 && state == LT_NEXT) address <= 0;
-                else if (state == LT_PIPE_ISSUE && pipe_ready)
-                    address <= lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
-                else if (state == LT_PIPE_WAIT && lt_batch_complete) begin
-                    if (lt_cursor + 2 * PIPELINE < lt_count) address <= lt_cursor + 2 * PIPELINE;
-                    else if (lt_count[0]) address <= lt_count - 1'b1;
-                    else address <= 0;
-                end else if (state == LT_COPY) address <= 0;
-                else if (state == FORS_LEAF_NEXT)
-                    address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'((target-fors_base)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
-                else if(state==FORS_AUTH0 || state==FORS_BEGIN || state==FORS_AUTH1 || state==FORS_LEVEL)
-                    address <= INDEX_BITS'(FORS_SCRATCH);
-                else if (state == FORS_ISSUE && pipe_ready)
-                    address<=pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0 ? INDEX_BITS'(FORS_SCRATCH) : INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_issue_slot)+1'b1)<<1);
-                else if (state == FORS_WAIT) begin
-                    if (fors_offset + PIPELINE < fors_outputs)
-                        address<=INDEX_BITS'(FORS_SCRATCH)+((INDEX_BITS'(fors_offset)+INDEX_BITS'(PIPELINE))<<1);
-                    else if (fors_level) address <= INDEX_BITS'(FORS_SCRATCH);
-                    else
-                        address<=fors_target_group ? INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(((target-fors_base)>>1)^21'd1) : INDEX_BITS'(FORS_SCRATCH);
-                end else if (state == FORS_ROOT_NEXT)
-                    address <= INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_root_cursor) + 1'b1;
+                if (rst) begin
+                    address <= 0;
+                    adjacent_address <= 1;
+                end else begin
+                    address <= next_address;
+                    adjacent_address <= next_adjacent_address;
+                end
             end
             assign endpoint_read0 = address;
-            assign endpoint_read1 = address == INDEX_BITS'(WORKSPACE_DEPTH - 1)
-                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : address + 1'b1;
+            assign endpoint_read1 = adjacent_address;
         end
     endgenerate
 
     // Validity is owned by the tree controller; data arrays have no reset.
     // Isolating these writes permits distributed RAM inference.
-    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
+    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_below_root && auth_node_match)
         || state==FORS_AUTH0 || state==FORS_AUTH1);
     wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
     wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
-    wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_level<tree_height && !node_index[0] && !verifying;
+    wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_below_root && !node_index[0] && !verifying;
 `ifndef SYNTHESIS
     initial begin : workspace_capacity
         if (FORS_BATCH > 24 || FORS_SCRATCH <= 35 ||
@@ -620,6 +820,32 @@ module executor #(
             if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
                 if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
         end
+    always @(posedge clk) begin : debug_target_path
+        if (!execution_rst && (state == PUSH_NODE || state == PUSH_STACK ||
+            state == PARENT_SETUP || state == PARENT_DONE)) begin
+            if (target_at_level !== (target >> node_level))
+                $fatal(1, "tree target coordinate is not aligned with node level");
+            if (auth_node_match !== (node_index == (target_at_level ^ 21'd1)))
+                $fatal(1, "authentication-node match is not aligned with node index");
+            if (target_parent_match !== (node_index[20:1] == target_at_level[20:1]))
+                $fatal(1, "target-parent match is not aligned with node index");
+            if (node_below_root !== (node_level < tree_height))
+                $fatal(1, "tree height eligibility is not aligned with node level");
+        end
+        if (!execution_rst && endpoint_read1 !==
+            (endpoint_read0 == INDEX_BITS'(WORKSPACE_DEPTH - 1)
+                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : endpoint_read0 + 1'b1))
+            $fatal(1, "registered adjacent workspace address is not aligned");
+    end
+    // These invariants justify the bounded FORS range and leaf-index logic.
+    always @(posedge clk) begin : debug_fors_relative_index
+        if (!execution_rst && state == FORS_PICK) begin
+            if (fors_base[1:0] != 0 || fors_total == 0 || fors_total > FORS_BATCH)
+                $fatal(1, "invalid FORS microgroup geometry");
+            if (fors_target_delta !== target - fors_base)
+                $fatal(1, "FORS target-relative index changed inside a microgroup");
+        end
+    end
     // Every state transition prepares these flags on the same edge.
     always @(posedge clk) begin : phase_control_equivalence
         if (!rst) begin
@@ -647,6 +873,19 @@ module executor #(
                  state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
                  state == FORS_ISSUE || state == FORS_WAIT)))
                 $fatal(1, "registered batch mode differs from execution state");
+        end
+    end
+    always @(posedge clk) begin : rolling_allocator_equivalence
+        if (!execution_rst && pipe_rolling && pipe_mode) begin
+            if (roll_available !== (|roll_free))
+                $fatal(1, "prepared rolling availability differs from ownership bitmap");
+            if (roll_available) begin
+                if (!roll_free[roll_slot])
+                    $fatal(1, "prepared rolling slot is still active");
+                for (integer j = 0; j < PIPE_BATCH; j++)
+                    if (j < roll_slot && roll_free[j])
+                        $fatal(1, "prepared rolling slot does not preserve allocation order");
+            end
         end
     end
     // Check prepared metadata at acceptance, including rolling reuse and stalls.
@@ -773,6 +1012,7 @@ module executor #(
             fors_level <= 0;
             fors_roots_pending <= 0;
             fors_base <= 0;
+            fors_target_delta <= 0;
             fors_digest_offset <= 0;
             fors_target_prefetch <= 0;
             pipe_cache_valid <= 0;
@@ -781,6 +1021,8 @@ module executor #(
             pipe_issue_slot <= 0;
             pipe_rolling <= 0;
             pipe_active <= 0;
+            roll_slot <= 0;
+            roll_available <= 1;
             pipe_next_chain <= 0;
             pipe_completed <= 0;
             batch_chain_prefetch <= 0;
@@ -800,6 +1042,8 @@ module executor #(
             abort_execution <= 0;
 
             if (pipe_rolling && pipe_mode) begin
+                roll_slot <= roll_next_slot;
+                roll_available <= |roll_next_free;
                 if (pipe_valid) begin
                     pipe_active[pipe_tag] <= 0;
                     pipe_completed <= pipe_completed + 1'b1;
@@ -814,7 +1058,7 @@ module executor #(
                 if(pipe_valid && pipe_response_accept)begin
                     pipe_done_mask[pipe_tag] <= 1;
                     if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
-                        node_value <= pipe_read_result;
+                        node_value <= pipe_response_result;
                 end
             end
             case (state)
@@ -909,6 +1153,7 @@ module executor #(
                             indexing <= 0;
                             leaf_cursor <= stateful ? job_index[19:0] : 0;
                             target <= stateful ? job_index[19:0] : 0;
+                            target_at_level <= stateful ? job_index[19:0] : 0;
                             chain_cursor <= 0;
                             endpoint_count <= descriptor[27:20];
                             saved_chain_descriptor <= descriptor;
@@ -941,8 +1186,11 @@ module executor #(
                     tree_height <= {descriptor[39], descriptor[43:40]};
                     indexing <= descriptor[33:32];
                     standalone_chain <= 0;
-                    target<=stateful ? {1'b0,job_index[19:0]} : descriptor[37:36]==1 ?
-                        {7'd0,fors_target_prefetch} : {1'b0,scalar_leaf};
+                    target <= tree_target;
+                    target_at_level <= tree_target;
+                    auth_node_match <= {1'b0, job_index[19:0]} == (tree_target ^ 21'd1);
+                    target_parent_match <= {1'b0, job_index[19:1]} == tree_target[20:1];
+                    node_below_root <= {descriptor[39], descriptor[43:40]} != 0;
                     leaf_cursor <= verifying ? scalar_leaf : 0;
                     chain_cursor <= 0;
                     node_level <= 0;
@@ -964,6 +1212,7 @@ module executor #(
                     else begin
                         if (PIPELINE > 1 && indexing == 1 && !verifying) begin
                             fors_base <= leaf_cursor;
+                            fors_target_delta <= target - leaf_cursor;
                             fors_offset <= 0;
                             fors_roots_pending <= 0;
                             fors_total<=((21'd1<<tree_height)-leaf_cursor)<FORS_BATCH ? 5'((21'd1<<tree_height)-leaf_cursor) : 5'(FORS_BATCH);
@@ -971,6 +1220,8 @@ module executor #(
                         if (PIPELINE > 1 && !pipe_cache_valid) begin
                             pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
                             pipe_active <= 0;
+                            roll_slot <= 0;
+                            roll_available <= 1;
                             pipe_next_chain <= chain_cursor;
                             pipe_completed <= 0;
                         end
@@ -1035,7 +1286,7 @@ module executor #(
                         batch_digit_prefetch <= digit(batch_chain_index + INDEX_BITS'(1));
                     end
                     if (pipe_rolling) begin
-                        if (pipe_valid && pipe_completed + 1 >= endpoint_count) begin
+                        if (pipe_completed >= endpoint_count) begin
                             pipe_rolling <= 0;
                             pipe_batch_used <= 1;
                             pipe_cache_valid <= 0;
@@ -1058,17 +1309,7 @@ module executor #(
                     else pipe_issue_slot <= pipe_issue_slot + 1'b1;
                 end
                 PIPE_WAIT:
-                if(pipe_direct && !(macro_flags[0] && leaf_cursor==target)
-                    && ((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0))
-                        & pipe_expected_mask)==pipe_expected_mask)begin
-                    // The final response writes the endpoint on this edge.
-                    // Captures retain the registered completion path so a
-                    // one-slot tail never reads capture RAM before its write.
-                    pipe_cache_valid <= 0;
-                    pipe_batch_used <= 1;
-                    pipe_pair <= 0;
-                    advance_direct_batch();
-                end else if ((pipe_done_mask & pipe_expected_mask) == pipe_expected_mask) begin
+                if ((pipe_done_mask & pipe_expected_mask) == pipe_expected_mask) begin
                     if (pipe_direct) begin
                         pipe_cache_valid <= 0;
                         pipe_batch_used <= 1;
@@ -1121,7 +1362,7 @@ module executor #(
                     end
                 end
                 FORS_WAIT:
-                if(((pipe_done_mask | (pipe_valid ? (PIPE_BATCH'(1)<<pipe_tag) : '0)) & pipe_expected_mask)==pipe_expected_mask)begin
+                if(lt_batch_complete)begin
                     if (fors_offset + PIPELINE < fors_outputs) begin
                         fors_offset   <= fors_offset + 5'(PIPELINE);
                         pipe_issue_slot <= 0;
@@ -1147,8 +1388,12 @@ module executor #(
                 FORS_PUSH: begin
                     node_value <= endpoint_value0;
                     node_level <= 2;
-                    node_index <= (fors_base >> 2) + 21'(fors_root_cursor);
-                    leaf_cursor <= fors_base + (21'(fors_root_cursor) << 2) + 3;
+                    target_at_level <= target >> 2;
+                    auth_node_match <= fors_root_index == ((target >> 2) ^ 21'd1);
+                    target_parent_match <= fors_root_index[20:1] == {2'b0, target[20:3]};
+                    node_below_root <= 5'd2 < tree_height;
+                    node_index <= fors_root_index;
+                    leaf_cursor <= {fors_root_index[18:0], 2'b11};
                     fors_roots_pending <= 1;
                     pipe_cache_valid <= 0;
                     pipe_batch_used <= 0;
@@ -1195,11 +1440,19 @@ module executor #(
                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
                         node_value <= 0;
                         node_level <= 0;
+                        target_at_level <= target;
+                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
+                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                        node_below_root <= tree_height != 0;
                         node_index <= leaf_cursor;
                         enter_state(PUSH_NODE);
                     end else if (chain_descriptor[13:12] == 0) begin
                         node_value <= result[W-1:0];
                         node_level <= 0;
+                        target_at_level <= target;
+                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
+                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                        node_below_root <= tree_height != 0;
                         node_index <= leaf_cursor;
                         enter_state(PUSH_NODE);
                     end else begin
@@ -1287,6 +1540,10 @@ module executor #(
                     end else begin
                         node_index <= leaf_cursor;
                         node_level <= 0;
+                        target_at_level <= target;
+                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
+                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                        node_below_root <= tree_height != 0;
                         enter_state(PUSH_NODE);
                     end
                 end
@@ -1307,6 +1564,10 @@ module executor #(
                     end else begin
                         node_index <= leaf_cursor;
                         node_level <= 0;
+                        target_at_level <= target;
+                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
+                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                        node_below_root <= tree_height != 0;
                         enter_state(PUSH_NODE);
                     end
                 end
@@ -1320,6 +1581,10 @@ module executor #(
                 else begin
                     node_value <= result[W-1:0];
                     node_level <= 0;
+                    target_at_level <= target;
+                    auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);
+                    target_parent_match <= verifying || leaf_cursor[20:1] == target[20:1];
+                    node_below_root <= tree_height != 0;
                     node_index <= verifying ? target : leaf_cursor;
                     enter_state(PUSH_NODE);
                 end
@@ -1343,10 +1608,14 @@ module executor #(
                     end
                 end
                 PARENT_SETUP: begin
-                    if(!verifying && macro_flags[3] && (node_index>>1)==(target>>(node_level+1))) begin
+                    if(!verifying && macro_flags[3] && target_parent_match) begin
                         node_value <= 0;
                         node_index <= node_index >> 1;
                         node_level <= node_level + 1'b1;
+                        target_at_level <= target_at_level >> 1;
+                        auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
+                        target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                        node_below_root <= node_level + 5'd1 < tree_height;
                         enter_state(PUSH_NODE);
                     end else begin
                         task_chain <= 0;
@@ -1363,6 +1632,10 @@ module executor #(
                     node_value <= result[W-1:0];
                     node_index <= node_index >> 1;
                     node_level <= node_level + 1'b1;
+                    target_at_level <= target_at_level >> 1;
+                    auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
+                    target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                    node_below_root <= node_level + 5'd1 < tree_height;
                     enter_state(PUSH_NODE);
                 end
                 AUTH_OUTPUT: begin
@@ -1407,7 +1680,7 @@ module executor #(
                         scalar_tree <= scalar_tree >> descriptor[43:40];
                         complete_macro();
                     end else if (descriptor[59:56] == 1) begin
-                        checksum <= checksum + chain_max - shared_digit;
+                        checksum <= checksum + {8'd0, checksum_increment};
                         if (transform_index + 1 == LEN1) complete_macro();
                         else transform_index <= transform_index + 1'b1;
                     end else fail();

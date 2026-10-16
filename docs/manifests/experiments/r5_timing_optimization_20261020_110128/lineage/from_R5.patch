@@ -1,0 +1,211 @@
+--- R5/rtl/executor/executor.sv
++++ S1_live_windows_response_queue_target_path/rtl/executor/executor.sv
+@@ -171,6 +171,12 @@
+     logic [4:0] tree_height, node_level, auth_level;
+     logic [1:0] indexing;
+     logic [20:0] target, leaf_cursor, node_index;
++    // Follow the target's path as the current node climbs the tree. Keeping
++    // this coordinate beside node_index removes a variable barrel shift from
++    // the shared workspace write-enable/address/data selection path.
++    logic [20:0] target_at_level;
++    wire [20:0] tree_target = stateful ? {1'b0, job_index[19:0]}
++        : descriptor[37:36] == 1 ? {7'd0, fors_target_prefetch} : {1'b0, scalar_leaf};
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+     localparam integer PIPE_BATCH = PIPELINE;
+     localparam integer TAG_BITS   = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
+@@ -629,7 +635,7 @@
+ 
+     // Validity is owned by the tree controller; data arrays have no reset.
+     // Isolating these writes permits distributed RAM inference.
+-    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_level<tree_height && node_index==((target>>node_level)^1))
++    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_level<tree_height && node_index==(target_at_level^21'd1))
+         || state==FORS_AUTH0 || state==FORS_AUTH1);
+     wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
+     wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
+@@ -649,6 +655,12 @@
+             if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
+                 if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
+         end
++    always @(posedge clk) begin : debug_target_path
++        if (!execution_rst && (state == PUSH_NODE || state == PUSH_STACK ||
++            state == PARENT_SETUP || state == PARENT_DONE))
++            if (target_at_level !== (target >> node_level))
++                $fatal(1, "tree target coordinate is not aligned with node level");
++    end
+     // These invariants justify the bounded FORS range and leaf-index logic.
+     always @(posedge clk) begin : debug_fors_relative_index
+         if (!execution_rst && state == FORS_PICK) begin
+@@ -948,6 +960,7 @@
+                             indexing <= 0;
+                             leaf_cursor <= stateful ? job_index[19:0] : 0;
+                             target <= stateful ? job_index[19:0] : 0;
++                            target_at_level <= stateful ? job_index[19:0] : 0;
+                             chain_cursor <= 0;
+                             endpoint_count <= descriptor[27:20];
+                             saved_chain_descriptor <= descriptor;
+@@ -980,8 +993,8 @@
+                     tree_height <= {descriptor[39], descriptor[43:40]};
+                     indexing <= descriptor[33:32];
+                     standalone_chain <= 0;
+-                    target<=stateful ? {1'b0,job_index[19:0]} : descriptor[37:36]==1 ?
+-                        {7'd0,fors_target_prefetch} : {1'b0,scalar_leaf};
++                    target <= tree_target;
++                    target_at_level <= tree_target;
+                     leaf_cursor <= verifying ? scalar_leaf : 0;
+                     chain_cursor <= 0;
+                     node_level <= 0;
+@@ -1187,6 +1200,7 @@
+                 FORS_PUSH: begin
+                     node_value <= endpoint_value0;
+                     node_level <= 2;
++                    target_at_level <= target >> 2;
+                     node_index <= fors_root_index;
+                     leaf_cursor <= {fors_root_index[18:0], 2'b11};
+                     fors_roots_pending <= 1;
+@@ -1235,11 +1249,13 @@
+                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
+                         node_value <= 0;
+                         node_level <= 0;
++                        target_at_level <= target;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+                     end else if (chain_descriptor[13:12] == 0) begin
+                         node_value <= result[W-1:0];
+                         node_level <= 0;
++                        target_at_level <= target;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+                     end else begin
+@@ -1327,6 +1343,7 @@
+                     end else begin
+                         node_index <= leaf_cursor;
+                         node_level <= 0;
++                        target_at_level <= target;
+                         enter_state(PUSH_NODE);
+                     end
+                 end
+@@ -1347,6 +1364,7 @@
+                     end else begin
+                         node_index <= leaf_cursor;
+                         node_level <= 0;
++                        target_at_level <= target;
+                         enter_state(PUSH_NODE);
+                     end
+                 end
+@@ -1360,6 +1378,7 @@
+                 else begin
+                     node_value <= result[W-1:0];
+                     node_level <= 0;
++                    target_at_level <= target;
+                     node_index <= verifying ? target : leaf_cursor;
+                     enter_state(PUSH_NODE);
+                 end
+@@ -1383,10 +1402,11 @@
+                     end
+                 end
+                 PARENT_SETUP: begin
+-                    if(!verifying && macro_flags[3] && (node_index>>1)==(target>>(node_level+1))) begin
++                    if(!verifying && macro_flags[3] && (node_index>>1)==(target_at_level>>1)) begin
+                         node_value <= 0;
+                         node_index <= node_index >> 1;
+                         node_level <= node_level + 1'b1;
++                        target_at_level <= target_at_level >> 1;
+                         enter_state(PUSH_NODE);
+                     end else begin
+                         task_chain <= 0;
+@@ -1403,6 +1423,7 @@
+                     node_value <= result[W-1:0];
+                     node_index <= node_index >> 1;
+                     node_level <= node_level + 1'b1;
++                    target_at_level <= target_at_level >> 1;
+                     enter_state(PUSH_NODE);
+                 end
+                 AUTH_OUTPUT: begin
+--- R5/rtl/hash/shake-recipe.sv
++++ S1_live_windows_response_queue_target_path/rtl/hash/shake-recipe.sv
+@@ -1033,7 +1033,11 @@
+                         4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+                         6: source_word = node_word_indexed(address, selected_index[1:0]);
+-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        // A scheduled ADDRESS_LIST can cross its prefix only for
++                        // 24-byte nodes: the last prefix beat needs the first list
++                        // word. Later list words use list_window, so no indexed
++                        // endpoint-word mux is live on this source path.
++                        7: source_word = list_data0[63:0];
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -1063,6 +1067,21 @@
+             wire padding_reached = position > input_length;
+             wire partial_beat = remaining_bytes < 16;
+             wire stream_last = padding_reached || remaining_bytes < 8;
++`ifndef SYNTHESIS
++            always @(posedge clk) begin : debug_prefix_list_word
++                if (!rst && state == STREAM && stream_accept && shapes[ADDRESS_LIST] &&
++                    position < prefix_bytes) begin
++                    // Check only words contributing input bytes to the prefix
++                    // beat. Full list beats use fetched_list, and the last rate
++                    // beat has no second word.
++                    for (integer i = 0; i < 2; i++) begin
++                        if ((i == 0 || beat != 8) && position + 13'(8 * i) < input_length &&
++                            source_control[i][8:6] == 3'd7 && source_control[i][5:0] != 0)
++                            $fatal(1, "prefix beat requested a list word beyond the first");
++                    end
++                end
++            end
++`endif
+             always_ff @(posedge clk) begin
+                 if (rst) fetched_valid <= 0;
+                 else if (stream_accept) begin
+@@ -1525,19 +1544,31 @@
+                 logic [TAG_BITS-1:0] held_tag, next_response_tag;
+                 logic [255:0] held_digest, held_capture;
+                 logic [PIPELINE-1:0] waiting_responses;
++                // Completion and publication own separate lifetimes. The slot
++                // remains complete/busy until retirement, while this queue bit
++                // is removed as soon as its response payload is published.
++                logic [PIPELINE-1:0] awaiting_response;
++                wire publish_response = !response_held || ctx_response_ready;
+                 assign ctx_response_valid = response_held;
+                 assign ctx_response_tag = held_tag;
+                 assign published_digest = held_digest;
+                 assign published_capture = held_capture;
+                 always_comb begin
+-                    waiting_responses = complete;
+-                    // The published response owns this slot until consumption.
+-                    // Excluding it independently of ready keeps backpressure out
+-                    // of the next-tag priority encoder.
+-                    if (response_held) waiting_responses[held_tag] = 1'b0;
++                    waiting_responses = awaiting_response;
+                     next_response_tag = 0;
+                     for (integer j = PIPELINE - 1; j >= 0; j = j - 1)
+                         if (waiting_responses[j]) next_response_tag = TAG_BITS'(j);
++                end
++                always_ff @(posedge clk) begin
++                    if (rst) awaiting_response <= 0;
++                    else begin
++                        if (publish_response && |waiting_responses)
++                            awaiting_response[next_response_tag] <= 0;
++                        if (accept && zero_request)
++                            awaiting_response[ctx_request_tag] <= 1;
++                        if (ctx_perm_done && !again)
++                            awaiting_response[t] <= 1;
++                    end
+                 end
+                 always_ff @(posedge clk) begin
+                     if (rst) begin
+@@ -1561,6 +1592,13 @@
+                 end
+ `ifndef SYNTHESIS
+                 always @(posedge clk) begin : debug_response_selection
++                    if (!rst) begin
++                        for (integer j = 0; j < PIPELINE; j++) begin
++                            if (awaiting_response[j] !==
++                                (complete[j] && !(response_held && held_tag == TAG_BITS'(j))))
++                                $fatal(1, "response queue differs from completion ownership");
++                        end
++                    end
+                     if (!rst && response_held) begin
+                         if (held_tag >= PIPELINE)
+                             $fatal(1, "published response tag out of range");

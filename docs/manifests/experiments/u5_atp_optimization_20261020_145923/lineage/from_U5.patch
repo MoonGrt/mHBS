@@ -1,0 +1,91 @@
+--- U5/rtl/hash/shake-recipe.sv
++++ V1_intake_payload_capacity_enable/rtl/hash/shake-recipe.sv
+@@ -1455,32 +1455,62 @@
+                     if (rst) pending_valid <= 0;
+                     else begin
+                         if (accept) pending_valid <= 0;
+-                        if (receive) begin
+-                            pending_valid <= 1;
+-                            ctx_request_tag <= incoming_tag;
+-                            ctx_request_steps <= incoming_steps;
+-                            ctx_request_capture_after <= incoming_capture_after;
+-                            ctx_request_capture <= incoming_capture;
+-                            ctx_request_family <= incoming_family;
+-                            ctx_request_no_seed <= incoming_no_seed;
+-                            ctx_request_start <= incoming_start;
+-                            ctx_request_initial_value <= incoming_initial_value;
+-                            ctx_request_fixed_shape <= incoming_fixed_shape;
+-                            ctx_request_pair <= incoming_pair;
+-                            ctx_first_phase <= incoming_phase;
+-                            ctx_first_format <= format_controls(incoming_phase,
+-                                incoming_fixed_shape, incoming_pair, incoming_family);
+-                            ctx_request_right <= incoming_right;
+-                            ctx_request_leaf <= incoming_leaf;
+-                            ctx_request_a <= incoming_a;
+-                            ctx_request_b <= incoming_b;
+-                            ctx_seed_domain <= incoming_seed_domain;
+-                            ctx_step_domain <= incoming_step_domain;
+-                            ctx_request_layer <= request_layer;
+-                            ctx_request_tree <= request_tree;
+-                        end
+-                    end
+-                end
++                        if (receive) pending_valid <= 1;
++                    end
++                end
++                // The valid bit owns the payload. A vacant or dispatching intake
++                // may sample invalid inputs; a blocked valid request must hold.
++                // Keep tag validation and receive out of the wide register enable.
++                always_ff @(posedge clk)
++                    if (queue_open) begin
++                        ctx_request_tag <= incoming_tag;
++                        ctx_request_steps <= incoming_steps;
++                        ctx_request_capture_after <= incoming_capture_after;
++                        ctx_request_capture <= incoming_capture;
++                        ctx_request_family <= incoming_family;
++                        ctx_request_no_seed <= incoming_no_seed;
++                        ctx_request_start <= incoming_start;
++                        ctx_request_initial_value <= incoming_initial_value;
++                        ctx_request_fixed_shape <= incoming_fixed_shape;
++                        ctx_request_pair <= incoming_pair;
++                        ctx_first_phase <= incoming_phase;
++                        ctx_first_format <= format_controls(incoming_phase,
++                        incoming_fixed_shape, incoming_pair, incoming_family);
++                        ctx_request_right <= incoming_right;
++                        ctx_request_leaf <= incoming_leaf;
++                        ctx_request_a <= incoming_a;
++                        ctx_request_b <= incoming_b;
++                        ctx_seed_domain <= incoming_seed_domain;
++                        ctx_step_domain <= incoming_step_domain;
++                        ctx_request_layer <= request_layer;
++                        ctx_request_tree <= request_tree;
++                    end
++`ifndef SYNTHESIS
++                localparam integer INTAKE_BITS = TAG_BITS + 690;
++                wire [INTAKE_BITS-1:0] intake_payload = {
++                    ctx_request_tag, ctx_request_steps, ctx_request_capture_after,
++                    ctx_request_capture, ctx_request_family, ctx_request_no_seed,
++                    ctx_request_start, ctx_request_initial_value, ctx_request_fixed_shape,
++                    ctx_request_pair, ctx_first_phase, ctx_first_format, ctx_request_right,
++                    ctx_request_leaf, ctx_request_a, ctx_request_b, ctx_seed_domain,
++                    ctx_step_domain, ctx_request_layer, ctx_request_tree
++                };
++                wire [INTAKE_BITS-1:0] incoming_payload = {
++                    incoming_tag, incoming_steps, incoming_capture_after,
++                    incoming_capture, incoming_family, incoming_no_seed,
++                    incoming_start, incoming_initial_value, incoming_fixed_shape,
++                    incoming_pair, incoming_phase, format_controls(incoming_phase,
++                        incoming_fixed_shape, incoming_pair, incoming_family), incoming_right,
++                    incoming_leaf, incoming_a, incoming_b, incoming_seed_domain,
++                    incoming_step_domain, request_layer, request_tree
++                };
++                logic [INTAKE_BITS-1:0] reference_intake_payload;
++                always @(posedge clk) begin : debug_intake_payload
++                    if (!rst && receive) reference_intake_payload <= incoming_payload;
++                    if (!rst && pending_valid && intake_payload !== reference_intake_payload)
++                        $fatal(1, "valid intake payload differs from original receive snapshot");
++                end
++`endif
+                 wire [3:0] requested_shape = ctx_request_fixed_shape;
+                 wire requested_pair = ctx_request_pair;
+                 wire zero_request = ctx_request_no_seed && ctx_request_steps == 0 &&

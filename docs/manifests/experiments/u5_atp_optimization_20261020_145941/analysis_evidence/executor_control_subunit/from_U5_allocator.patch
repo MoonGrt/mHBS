@@ -1,0 +1,83 @@
+--- rtl/executor/executor.sv
++++ rtl/executor/executor.sv
+@@ -197,12 +197,20 @@
+     logic [4:0] batch_digit_prefetch;
+     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
+     logic [TAG_BITS-1:0] roll_slot;
+-    // Retired slots become available through the registered ownership bitmap.
+-    // Keep response-valid out of the allocator -> request-tag -> ready loop.
++    logic roll_available;
++    logic [PIPE_BATCH-1:0] roll_next_free;
++    logic [TAG_BITS-1:0] roll_next_slot;
++    // Prepare the next allocator result beside the ownership update. A tag
++    // retired on this edge is first offered in the following cycle, matching
++    // the ownership bitmap while removing its priority encoder from ready.
+     wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
+     always_comb begin
+-        roll_slot = 0;
+-        for (integer j = PIPE_BATCH - 1; j >= 0; j--) if (roll_free[j]) roll_slot = TAG_BITS'(j);
++        roll_next_free = roll_free;
++        if (pipe_valid) roll_next_free[pipe_tag] = 1'b1;
++        if (pipe_selected && pipe_ready) roll_next_free[issue_slot] = 1'b0;
++        roll_next_slot = 0;
++        for (integer j = PIPE_BATCH - 1; j >= 0; j--)
++            if (roll_next_free[j]) roll_next_slot = TAG_BITS'(j);
+     end
+     wire  [  TAG_BITS-1:0] issue_slot = pipe_rolling ? roll_slot : pipe_issue_slot;
+     logic [  TAG_BITS-1:0] pipe_issue_slot;
+@@ -327,7 +335,7 @@
+         pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
+     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
+-        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
++        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && roll_available) : pipe_expected_mask[pipe_issue_slot]));
+     // verilog_format: off
+     recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
+         .UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+@@ -861,6 +869,19 @@
+                 $fatal(1, "registered batch mode differs from execution state");
+         end
+     end
++    always @(posedge clk) begin : rolling_allocator_equivalence
++        if (!execution_rst && pipe_rolling && pipe_mode) begin
++            if (roll_available !== (|roll_free))
++                $fatal(1, "prepared rolling availability differs from ownership bitmap");
++            if (roll_available) begin
++                if (!roll_free[roll_slot])
++                    $fatal(1, "prepared rolling slot is still active");
++                for (integer j = 0; j < PIPE_BATCH; j++)
++                    if (j < roll_slot && roll_free[j])
++                        $fatal(1, "prepared rolling slot does not preserve allocation order");
++            end
++        end
++    end
+     // Check prepared metadata at acceptance, including rolling reuse and stalls.
+     always @(posedge clk) begin : batch_prefetch_equivalence
+         if (!execution_rst && state == TREE_INIT && !stateful && descriptor[37:36] == 1)
+@@ -994,6 +1015,8 @@
+             pipe_issue_slot <= 0;
+             pipe_rolling <= 0;
+             pipe_active <= 0;
++            roll_slot <= 0;
++            roll_available <= 1;
+             pipe_next_chain <= 0;
+             pipe_completed <= 0;
+             batch_chain_prefetch <= 0;
+@@ -1013,6 +1036,8 @@
+             abort_execution <= 0;
+ 
+             if (pipe_rolling && pipe_mode) begin
++                roll_slot <= roll_next_slot;
++                roll_available <= |roll_next_free;
+                 if (pipe_valid) begin
+                     pipe_active[pipe_tag] <= 0;
+                     pipe_completed <= pipe_completed + 1'b1;
+@@ -1188,6 +1213,8 @@
+                         if (PIPELINE > 1 && !pipe_cache_valid) begin
+                             pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
+                             pipe_active <= 0;
++                            roll_slot <= 0;
++                            roll_available <= 1;
+                             pipe_next_chain <= chain_cursor;
+                             pipe_completed <= 0;
+                         end

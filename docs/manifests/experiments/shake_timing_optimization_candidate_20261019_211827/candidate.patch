@@ -1,0 +1,240 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -968,7 +968,13 @@
+             wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes + 32 : 22;
+             logic staged_valid, staged_last;
+             logic [127:0] staged_data;
+-            wire stream_accept = !staged_valid || block_ready;
++            logic fetched_valid;
++            logic [127:0] fetched_source, fetched_list;
++            logic fetched_use_list, fetched_prefix_head, fetched_prefix_tail;
++            logic fetched_padding, fetched_partial, fetched_rate_tail, fetched_last;
++            logic [3:0] fetched_remaining;
++            wire output_accept = !staged_valid || block_ready;
++            wire stream_accept = !fetched_valid || output_accept;
+             // Emit sixteen bytes per cycle, then eight bytes at the end of the rate.
+             // One cursor supplies source selection, padding and the final-block test.
+             logic [12:0] position;
+@@ -1044,42 +1050,50 @@
+             // A fixed two-node window supports both aligned SLH and the LMS prefix.
+             wire [127:0] list_window = (RECIPE_MASK[PREFIX_LIST] && list_remainder[1]) ?
+                 list_word_window[143:16] : list_word_window[127:0];
+-            logic [127:0] stream_payload;
+-            logic [191:0] source_window;
+-            always_comb begin
+-                source_window = {
+-                    source_word(source_control[2]),
+-                    source_word(source_control[1]),
+-                    source_word(source_control[0])
+-                };
+-                stream_payload = source_window[127:0];
+-                if (shapes[PREFIX_MESSAGE]) begin
+-                    stream_payload = source_window[143:16];
+-                    if (position == 0) stream_payload = identifier;
+-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+-                end else
+-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+-                    stream_payload = list_window;
+-            end
+-
+-            // One remaining-length subtractor serves every byte of the beat. A
+-            // byte-local position adder otherwise replicates a wide carry chain.
++            wire [191:0] source_window = {
++                source_word(source_control[2]),
++                source_word(source_control[1]),
++                source_word(source_control[0])
++            };
++            // The RAM-to-window stage retains only the selected portions of
++            // adjacent nodes. Cursor/source controls advance on its own handshake;
++            // padding and the source/list merge run in the following stage.
+             wire [12:0] remaining_bytes = input_length - position;
+             wire padding_reached = position > input_length;
+             wire partial_beat = remaining_bytes < 16;
+-            // Only the last eight-byte beat consumes this flag. Exactly eight bytes
+-            // remaining requires another rate block for SHAKE's delimiter.
+             wire stream_last = padding_reached || remaining_bytes < 8;
++            always_ff @(posedge clk) begin
++                if (rst) fetched_valid <= 0;
++                else if (stream_accept) begin
++                    fetched_valid <= STREAM_ENABLE && state == STREAM;
++                    if (STREAM_ENABLE && state == STREAM) begin
++                        fetched_source <= shapes[PREFIX_MESSAGE] ?
++                            source_window[143:16] : source_window[127:0];
++                        fetched_list <= list_window;
++                        fetched_use_list <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                            position >= prefix_bytes;
++                        fetched_prefix_head <= shapes[PREFIX_MESSAGE] && position == 0;
++                        fetched_prefix_tail <= shapes[PREFIX_MESSAGE] && position == 16;
++                        fetched_padding <= padding_reached;
++                        fetched_partial <= partial_beat;
++                        fetched_remaining <= remaining_bytes[3:0];
++                        fetched_rate_tail <= beat == 8;
++                        fetched_last <= stream_last;
++                    end
++                end
++            end
+             always_comb begin
+-                stream_data = stream_payload;
++                stream_data = fetched_use_list ? fetched_list : fetched_source;
++                if (fetched_prefix_head) stream_data = identifier;
++                else if (fetched_prefix_tail) stream_data[47:0] = {16'h8181, be32(leaf)};
+                 for (integer i = 0; i < 16; i++) begin
+-                    if (padding_reached || (partial_beat && remaining_bytes[3:0] <= 4'(i)))
++                    if (fetched_padding || (fetched_partial && fetched_remaining <= 4'(i)))
+                         stream_data[i*8+:8] = 0;
+-                    if (!padding_reached && partial_beat && remaining_bytes[3:0] == 4'(i))
++                    if (!fetched_padding && fetched_partial && fetched_remaining == 4'(i))
+                         stream_data[i*8+:8] = 8'h1f;
+-                    if (beat == 8) begin
++                    if (fetched_rate_tail) begin
+                         if (i >= 8) stream_data[i*8+:8] = 0;
+-                        else if (i == 7 && stream_last) stream_data[i*8+7] = 1'b1;
++                        else if (i == 7 && fetched_last) stream_data[i*8+7] = 1'b1;
+                     end
+                 end
+             end
+@@ -1246,6 +1260,32 @@
+                     (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
+                      captured[ctx_read_tag]) : 256'd0;
+                 wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
++                // Read context operands while the last Keccak round is running.
++                // A slot has one permutation in flight; its operands stay live
++                // from dispatch until this return. Only the new digest depends
++                // on the final round, so context RAM need not follow its tag.
++                wire [TAG_BITS-1:0] prefetch_tag = stage_tag[PIPELINE-2];
++                wire prefetch_context = stage_valid[PIPELINE-2] &&
++                    stage_fixed[PIPELINE-2] && stage_base[PIPELINE-2] + ROUNDS >= 24;
++                logic [255:0] return_key, return_digest, return_captured, return_address;
++                always_ff @(posedge clk)
++                    if (prefetch_context) begin
++                        return_key <= key_value[prefetch_tag];
++                        return_digest <= digest[prefetch_tag];
++                        return_captured <= captured[prefetch_tag];
++                        return_address <= address[prefetch_tag];
++                    end
++`ifndef SYNTHESIS
++                always @(posedge clk) begin : debug_operand_prefetch
++                    if (!rst && ctx_perm_done) begin
++                        if (return_address !== address[t])
++                            $fatal(1, "prefetched address changed before return");
++                        if (return_key !== key_value[t] || return_digest !== digest[t] ||
++                            return_captured !== captured[t])
++                            $fatal(1, "prefetched context operand changed before return");
++                    end
++                end
++`endif
+                 logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
+                 wire node_done = node_phase[t];
+                 wire again = ctx_perm_done && feedback_required[t];
+@@ -1258,7 +1298,7 @@
+                 wire [4:0] next_step = node_done ? iteration[t] : iteration[t] - 1'b1;
+                 logic [255:0] next_address;
+                 always_comb begin
+-                    next_address = address[t];
++                    next_address = return_address;
+                     if (!preserve_counter) next_address[224+:32] = be32({27'd0, next_step});
+                 end
+                 // Intake has already reserved an in-range idle tag. The pending
+@@ -1282,7 +1322,7 @@
+                 // Scalar intake occurs only in IDLE, where no scalar response can
+                 // retire. Batch intake uses its own response handshake for refill.
+                 // Mode selection is applied once, at the public ready outputs.
+-                wire queue_open = !rst && (!pending_valid || (!again && ready));
++                wire queue_open = !rst && (!pending_valid || (!again && ctx_perm_ready));
+                 wire batch_retire = ctx_response_valid && batch_response_ready;
+                 wire scalar_slot_available =
+                     !busy[0] &&
+@@ -1367,12 +1407,12 @@
+                 wire [3:0] block_shape = again ? fixed_shape[t] : requested_shape;
+                 wire block_pair = again ? paired[t] : requested_pair;
+                 wire [255:0] block_value = again ?
+-                    (phase[t][5] ? digest[t] :
+-                     phase[t][3] ? digest[t] ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
++                    (phase[t][5] ? return_digest :
++                     phase[t][3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                     requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                     ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                 wire [255:0]
+-                    block_right = again ? captured[t] ^ ctx_perm_digest[255:0] : ctx_request_right;
++                    block_right = again ? return_captured ^ ctx_perm_digest[255:0] : ctx_request_right;
+                 wire [1599:0] unified_state;
+                 begin : formatter
+                     // Keep each byte placement independent of the family mux.
+@@ -1395,7 +1435,7 @@
+                     wire [7:0] xmss_domain = block_shape == 5 || prf ? 8'd3 :
+                         seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+                     wire [255:0] xmss_key = block_shape == 5 ? block_value :
+-                        seed ? ctx_secret_seed : prf ? ctx_public_seed : key_value[t];
++                        seed ? ctx_secret_seed : prf ? ctx_public_seed : return_key;
+                     wire [255:0] xmss_value = block_shape == 5 ? {block_address[191:160],224'd0} :
+                         seed ? ctx_public_seed : prf ? masked_address : block_value;
+                     wire [255:0] xmss_right = seed ? masked_address : block_right;
+@@ -1698,7 +1738,9 @@
+             wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+             wire normal_valid = hash_state == HASH_RUN && !sent;
+             wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+-            wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
++            // Mode is stable for an operation. Do not distribute HASH_RUN/sent
++            // through this wide mux when those controls only qualify validity.
++            wire [1599:0] issue_state = engine_mode ? batch_perm_state : sponge_state;
+             wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
+             wire [1599:0] finished_state = state_reg[PIPELINE-1];
+             for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+@@ -1726,17 +1768,20 @@
+                     // verilog_format: on
+                 end
+                 for (genvar w = 0; w < 25; w = w + 1) begin : words
+-                    always_ff @(posedge clk)
+-                        if (!rst) begin
+-                            if ((SHARED_STATE && s == PIPELINE - 1) &&
+-                                         state_write_enable[w])
+-                                state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
+-                            // Intermediate data is live only when stage_valid is set.
+-                            // Let bubbles advance without a wide valid-controlled hold;
+-                            // the final bank must retain the sponge and returned digest.
+-                            else if (s < PIPELINE - 1 || source_valid)
+-                                state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
+-                        end
++                    if (s < PIPELINE - 1) begin : advancing
++                        // Reset flushes metadata. Intermediate data can advance
++                        // through reset and bubbles without a global enable net.
++                        always_ff @(posedge clk)
++                            state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
++                    end else begin : retained
++                        always_ff @(posedge clk)
++                            if (!rst) begin
++                                if (SHARED_STATE && state_write_enable[w])
++                                    state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
++                                else if (source_valid)
++                                    state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
++                            end
++                    end
+                 end
+                 always_ff @(posedge clk) begin
+                     if (rst) stage_valid[s] <= 0;
+@@ -1877,7 +1922,13 @@
+                     error <= 0;
+                     beat <= 0;
+                 end else begin
+-                    if (STREAM_ENABLE && staged_valid && block_ready) staged_valid <= 0;
++                    if (STREAM_ENABLE && output_accept) begin
++                        staged_valid <= fetched_valid;
++                        if (fetched_valid) begin
++                            staged_data <= stream_data;
++                            staged_last <= fetched_last;
++                        end
++                    end
+                     case (state)
+                         IDLE:
+                         if (request_valid && request_ready) begin
+@@ -1900,10 +1951,6 @@
+                         STREAM:
+                         if (STREAM_ENABLE && stream_accept) begin
+                             position <= position + 13'(stream_advance);
+-                            staged_data <= stream_data;
+-                            staged_valid <= 1;
+-                            staged_last <= stream_last;
+-                            if (beat == 8) staged_data[127:64] <= 0;
+                             begin
+                                 if (position < prefix_bytes) begin
+                                     if (position + stream_advance >= prefix_bytes)

@@ -1,0 +1,182 @@
+--- rtl/executor/executor.sv
++++ rtl/executor/executor.sv
+@@ -183,6 +183,10 @@
+     // the shared workspace write-enable/address/data selection path.
+     logic [20:0] target_at_level;
+     logic auth_node_match, node_below_root;
++    // The parent-path decision is stable while parent setup formats its task.
++    // Shadow it with the node coordinate to keep a wide equality comparison
++    // out of the shared state/clear enables without inserting a controller beat.
++    logic target_parent_match;
+     wire [20:0] tree_target = stateful ? {1'b0, job_index[19:0]}
+         : descriptor[37:36] == 1 ? {7'd0, fors_target_prefetch} : {1'b0, scalar_leaf};
+     logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
+@@ -197,12 +201,20 @@
+     logic [4:0] batch_digit_prefetch;
+     logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
+     logic [TAG_BITS-1:0] roll_slot;
+-    // Retired slots become available through the registered ownership bitmap.
+-    // Keep response-valid out of the allocator -> request-tag -> ready loop.
++    logic roll_available;
++    logic [PIPE_BATCH-1:0] roll_next_free;
++    logic [TAG_BITS-1:0] roll_next_slot;
++    // Prepare the next allocator result beside the ownership update. A tag
++    // retired on this edge is first offered in the following cycle, matching
++    // the ownership bitmap while removing its priority encoder from ready.
+     wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
+     always_comb begin
+-        roll_slot = 0;
+-        for (integer j = PIPE_BATCH - 1; j >= 0; j--) if (roll_free[j]) roll_slot = TAG_BITS'(j);
++        roll_next_free = roll_free;
++        if (pipe_valid) roll_next_free[pipe_tag] = 1'b1;
++        if (pipe_selected && pipe_ready) roll_next_free[issue_slot] = 1'b0;
++        roll_next_slot = 0;
++        for (integer j = PIPE_BATCH - 1; j >= 0; j--)
++            if (roll_next_free[j]) roll_next_slot = TAG_BITS'(j);
+     end
+     wire  [  TAG_BITS-1:0] issue_slot = pipe_rolling ? roll_slot : pipe_issue_slot;
+     logic [  TAG_BITS-1:0] pipe_issue_slot;
+@@ -327,7 +339,7 @@
+         pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
+     wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
+     assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
+-        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && |roll_free) : pipe_expected_mask[pipe_issue_slot]));
++        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && roll_available) : pipe_expected_mask[pipe_issue_slot]));
+     // verilog_format: off
+     recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
+         .UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
+@@ -815,6 +827,8 @@
+                 $fatal(1, "tree target coordinate is not aligned with node level");
+             if (auth_node_match !== (node_index == (target_at_level ^ 21'd1)))
+                 $fatal(1, "authentication-node match is not aligned with node index");
++            if (target_parent_match !== (node_index[20:1] == target_at_level[20:1]))
++                $fatal(1, "target-parent match is not aligned with node index");
+             if (node_below_root !== (node_level < tree_height))
+                 $fatal(1, "tree height eligibility is not aligned with node level");
+         end
+@@ -859,6 +873,19 @@
+                  state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
+                  state == FORS_ISSUE || state == FORS_WAIT)))
+                 $fatal(1, "registered batch mode differs from execution state");
++        end
++    end
++    always @(posedge clk) begin : rolling_allocator_equivalence
++        if (!execution_rst && pipe_rolling && pipe_mode) begin
++            if (roll_available !== (|roll_free))
++                $fatal(1, "prepared rolling availability differs from ownership bitmap");
++            if (roll_available) begin
++                if (!roll_free[roll_slot])
++                    $fatal(1, "prepared rolling slot is still active");
++                for (integer j = 0; j < PIPE_BATCH; j++)
++                    if (j < roll_slot && roll_free[j])
++                        $fatal(1, "prepared rolling slot does not preserve allocation order");
++            end
+         end
+     end
+     // Check prepared metadata at acceptance, including rolling reuse and stalls.
+@@ -994,6 +1021,8 @@
+             pipe_issue_slot <= 0;
+             pipe_rolling <= 0;
+             pipe_active <= 0;
++            roll_slot <= 0;
++            roll_available <= 1;
+             pipe_next_chain <= 0;
+             pipe_completed <= 0;
+             batch_chain_prefetch <= 0;
+@@ -1013,6 +1042,8 @@
+             abort_execution <= 0;
+ 
+             if (pipe_rolling && pipe_mode) begin
++                roll_slot <= roll_next_slot;
++                roll_available <= |roll_next_free;
+                 if (pipe_valid) begin
+                     pipe_active[pipe_tag] <= 0;
+                     pipe_completed <= pipe_completed + 1'b1;
+@@ -1158,6 +1189,7 @@
+                     target <= tree_target;
+                     target_at_level <= tree_target;
+                     auth_node_match <= {1'b0, job_index[19:0]} == (tree_target ^ 21'd1);
++                    target_parent_match <= {1'b0, job_index[19:1]} == tree_target[20:1];
+                     node_below_root <= {descriptor[39], descriptor[43:40]} != 0;
+                     leaf_cursor <= verifying ? scalar_leaf : 0;
+                     chain_cursor <= 0;
+@@ -1188,6 +1220,8 @@
+                         if (PIPELINE > 1 && !pipe_cache_valid) begin
+                             pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
+                             pipe_active <= 0;
++                            roll_slot <= 0;
++                            roll_available <= 1;
+                             pipe_next_chain <= chain_cursor;
+                             pipe_completed <= 0;
+                         end
+@@ -1356,6 +1390,7 @@
+                     node_level <= 2;
+                     target_at_level <= target >> 2;
+                     auth_node_match <= fors_root_index == ((target >> 2) ^ 21'd1);
++                    target_parent_match <= fors_root_index[20:1] == {2'b0, target[20:3]};
+                     node_below_root <= 5'd2 < tree_height;
+                     node_index <= fors_root_index;
+                     leaf_cursor <= {fors_root_index[18:0], 2'b11};
+@@ -1407,6 +1442,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+@@ -1415,6 +1451,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+@@ -1505,6 +1542,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         enter_state(PUSH_NODE);
+                     end
+@@ -1528,6 +1566,7 @@
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
++                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
+                         node_below_root <= tree_height != 0;
+                         enter_state(PUSH_NODE);
+                     end
+@@ -1544,6 +1583,7 @@
+                     node_level <= 0;
+                     target_at_level <= target;
+                     auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);
++                    target_parent_match <= verifying || leaf_cursor[20:1] == target[20:1];
+                     node_below_root <= tree_height != 0;
+                     node_index <= verifying ? target : leaf_cursor;
+                     enter_state(PUSH_NODE);
+@@ -1568,12 +1608,13 @@
+                     end
+                 end
+                 PARENT_SETUP: begin
+-                    if(!verifying && macro_flags[3] && (node_index>>1)==(target_at_level>>1)) begin
++                    if(!verifying && macro_flags[3] && target_parent_match) begin
+                         node_value <= 0;
+                         node_index <= node_index >> 1;
+                         node_level <= node_level + 1'b1;
+                         target_at_level <= target_at_level >> 1;
+                         auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
++                        target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                         node_below_root <= node_level + 5'd1 < tree_height;
+                         enter_state(PUSH_NODE);
+                     end else begin
+@@ -1593,6 +1634,7 @@
+                     node_level <= node_level + 1'b1;
+                     target_at_level <= target_at_level >> 1;
+                     auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
++                    target_parent_match <= node_index[20:2] == target_at_level[20:2];
+                     node_below_root <= node_level + 5'd1 < tree_height;
+                     enter_state(PUSH_NODE);
+                 end
