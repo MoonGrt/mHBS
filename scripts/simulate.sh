@@ -10,6 +10,8 @@ import os,sys
 from pathlib import Path
 from scripts import run_hash_backends as flow
 name,label,*options=sys.argv[1:]
+try:name=flow.get_profile(name).name
+except ValueError as error:raise SystemExit(str(error))
 if label not in flow.OPERATIONS:raise SystemExit('operation must be keygen, sign or verify')
 folder=flow.ROOT/'build/hashflow/image_chain'
 vector=Path(os.environ.get('VECTORS_DIR',str(folder/'vectors'))).resolve()

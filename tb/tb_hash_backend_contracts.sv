@@ -5,10 +5,13 @@ module tb_hash_backend_contracts;
     logic [1:0] job_operation=0;
     logic [6:0] job_message_length=0;
     logic [63:0] image_header=64'h4842535018000000;
+    logic [63:0] profile_identity=0;
+    logic [31:0] job_index=0;
+    logic [127:0] job_identifier=0;
     logic [63:0] profile_descriptor=64'h2342220621160310;
     wire job_ready,message_ready,verify_ready,verify_pass,busy,done,error,out_valid;
     wire [15:0] error_code;
-    wire [31:0] hash_count,permutation_count,cycles;
+    wire [63:0] hash_count,permutation_count,cycles;
     wire [255:0] out_data;
     wire [5:0] out_bytes;
     logic message_valid=0,verify_valid=0;
@@ -29,7 +32,7 @@ module tb_hash_backend_contracts;
     logic [3:0] expected_digits[0:66];
     integer expected_checks=0;
     executor #(.PROFILE_ENABLE(1)) dut (
-        .clk,.rst,.image_header,.profile_descriptor,
+        .clk,.rst,.image_header,.profile_descriptor,.profile_identity,.job_index,.job_identifier,
         .program_address,.program_data,.job_entry(9'd0),.descriptor_address,.descriptor_data,
         .job_valid,.job_ready,.job_operation,.job_message_length,
         .job_secret_seed,.job_secret_prf,.job_public_seed,.job_randomizer,.job_public_root,
@@ -39,10 +42,46 @@ module tb_hash_backend_contracts;
     always #5 clk=~clk;
     always @(posedge clk) if(!rst && (dut.illegal || dut.lane_fault) && dut.node_memory_write)
         $fatal(1,"fault instruction modified node memory");
+    // The inactive SLH digest storage is the XMSS macro's private KEY scratch.
+    // Its architectural valid bit remains clear; the key survives the MASK
+    // response and the same-edge F request until that F response is consumed.
+    logic stateful_key_live=0;
+    logic [255:0] stateful_key_snapshot=0;
+    integer stateful_key_lifetimes=0;
+    always @(posedge clk) begin : stateful_digest_ownership
+        if(rst || dut.job_accept)begin stateful_key_live=0;stateful_key_snapshot=0;end
+        if(!rst && dut.family_stateful) begin
+            if(dut.hmsg_valid || dut.hmsg_digest[391:256]!==0)
+                $fatal(1,"stateful Job exposed an SLH H_msg digest");
+            if(dut.execute && dut.opcode==OP_PARSE)
+                $fatal(1,"stateful Job retired SLH PARSE");
+            if(dut.macro_request && dut.physical_ready
+                && (dut.physical_recipe[59:56]<5 || dut.physical_recipe[59:56]==12))
+                $fatal(1,"stateful macro issued an SLH Hash recipe");
+            if(stateful_key_live && !dut.lane_fault
+                && dut.hmsg_digest[255:0]!==stateful_key_snapshot)
+                $fatal(1,"XMSS KEY scratch changed before F consumed it");
+            if(dut.chain_issue && dut.family_xmss && dut.physical_recipe[59:56]==6
+                && (!stateful_key_live || dut.hmsg_digest[255:0]!==stateful_key_snapshot))
+                $fatal(1,"XMSS F request did not own its saved KEY");
+            if(dut.chain_response && dut.family_xmss && dut.chain_hash_kind==2) begin
+                stateful_key_snapshot=dut.physical_value[255:0];stateful_key_live=1;
+                stateful_key_lifetimes=stateful_key_lifetimes+1;
+                #1;
+                if(dut.hmsg_digest[255:0]!==stateful_key_snapshot)
+                    $fatal(1,"XMSS KEY response did not enter scratch");
+            end else if(dut.lane_fault || dut.chain_complete) begin
+                stateful_key_live=0;#1;
+                if(dut.hmsg_digest!==0)$fatal(1,"stateful fault/retirement retained KEY scratch");
+            end else if(dut.chain_response && dut.family_xmss && dut.chain_hash_kind==1)
+                stateful_key_live=0;
+        end
+        if(rst)begin #1;if(dut.hmsg_digest!==0)$fatal(1,"reset retained KEY scratch");end
+    end
     always @(posedge clk) begin
         program_data<=program_memory[program_address];
         clocks=clocks+1;
-        if(clocks>500000) $fatal(1,"typed processor timeout");
+        if(clocks>12000000) $fatal(1,"typed processor timeout");
         if(!rst) begin
             if(out_valid) begin
                 if(outputs<16) observed_output[outputs]=out_data;
@@ -123,7 +162,7 @@ module tb_hash_backend_contracts;
             rst=1;job_valid=0;message_valid=0;verify_valid=0;check_outputs=0;check_tree_trace=0;
             check_digit_snapshot=0;check_target_window=0;
             job_operation=0;job_message_length=0;image_header=64'h4842535018000000;
-            profile_descriptor=64'h2342220621160310;
+            profile_descriptor=64'h2342220621160310;profile_identity=0;job_index=0;job_identifier=0;
             repeat(2)tick();
             for(integer j=0;j<512;j=j+1) program_memory[j]=0;
             p=0;outputs=0;traces=0;
@@ -595,6 +634,328 @@ module tb_hash_backend_contracts;
             $display("MICRO_CHAIN_MACRO_PASS cases=%0d all_n both_slots digit0_15 four_modes zero_suffix private_capture atomic_recipe late_fault reset_replay",cases);
         end
     endtask
+    // Independent hashlib oracle: standard byte preimages, not the project VM.
+    function automatic [255:0] expected_stateful_chain(input integer family,slot,pos,suffix);
+        integer item;
+        begin
+            item=family*64+slot*32+pos+(suffix ? 16 : 0);
+            case(item)
+                0:expected_stateful_chain=256'h2329b502ab2970aed34007cc69a493090162e53ae521dd910bb90928827db9c4;
+                1:expected_stateful_chain=256'he10510544dcbb742f953cb2ab9d37753e8270ee70534036945d9bef203ddb8aa;
+                2:expected_stateful_chain=256'h7174b682a16fa3bd6cf269fe7c94a19f432439d786a5da39304fe09db3eef10e;
+                3:expected_stateful_chain=256'h6f90e768be83fa7a845691b2887522d4c0541a24be7b8bcb0afa6af60898fcb4;
+                4:expected_stateful_chain=256'h63eef657b2e6e9c817cc8194944cd8799b0810f9ff118e043f37106ad94384ed;
+                5:expected_stateful_chain=256'hbc9cb904a3722ba6fab19857bea2ac99a6e9e4af693df6c52705a7d7245efd4c;
+                6:expected_stateful_chain=256'ha703b54deb82255115be607a9244d61b86296649fd2aa8cb7166e45b660671c4;
+                7:expected_stateful_chain=256'h8469faf64f8a241e47e740bda31df6cb2c090a3c9d9a8fec62f4edf547655f1c;
+                8:expected_stateful_chain=256'hce796364c35affd869c27e472b9ef24ae48cd6d5a56431eb5ab5a6688b65d719;
+                9:expected_stateful_chain=256'h21201149172d731b742110e63914601e089158ffb5a795e4fd23720c8df35e4d;
+                10:expected_stateful_chain=256'hafb04084d6e96fcfaaa97901826c69c2406f1e6eef9a900c0c2080df385411fb;
+                11:expected_stateful_chain=256'h5543fa29d6aba409c2a857e55ceb4fc51538b1b891e0d6ca07309605b5336d09;
+                12:expected_stateful_chain=256'hbadd8550d372362848e5cdd32e96f1ed3d7aae2e391e5aaf946f0de34945dab7;
+                13:expected_stateful_chain=256'h75866c70a034f234c87a9c6d3551c2c9edbde61a01b463a2bf89348f3efbbe60;
+                14:expected_stateful_chain=256'h88c3ea1199e74193f362a2067e9955afd84e738d2eca9696206d3ba99ba6dd82;
+                15:expected_stateful_chain=256'hfad70562f103acda3f90c3f9fc8362639400f5f5a3afbc0c1804281aa262717e;
+                16:expected_stateful_chain=256'he34694d05aea228bf3b1ba1912df7ac8cdb8238397d7cc1a0f7bf4ca4b6dd8a8;
+                17:expected_stateful_chain=256'h829b5cac40e6b1f864ac5b10bec8794c4efdb1485aaf766d85016acdc8c161b4;
+                18:expected_stateful_chain=256'h311180cfa10755c0afc40a8c20312c145f2fc39979a702eb594c94f7c33e6462;
+                19:expected_stateful_chain=256'h97b35ee4ce67b9f89c7b2fe7b881887d5d1492211b0859a91c16fdd981d4485c;
+                20:expected_stateful_chain=256'h60068f86c2d72b4fd1759e851535b6b93b6c1cd96ed4ec641fa7aa07e4572a8f;
+                21:expected_stateful_chain=256'hc5c51ed51f805ffe99c3f089c31324c2748b0b874925c5406b8c5dd47884e882;
+                22:expected_stateful_chain=256'h44cfa200dfb5bb9fca7c20a552f255f722ad48719852b0d01a016ad72a6b7e54;
+                23:expected_stateful_chain=256'hf3f4687a8558c367c7931fea242ee143933e7175fea05256cbf07615ca9d4a9b;
+                24:expected_stateful_chain=256'hf8ed249eadc57289a2b341f6a5901002a79502c61ec402c2d9da7b35ade2c40d;
+                25:expected_stateful_chain=256'hb012d7a62674d061e7daf048fe16e1d719175aba3c2c3b42643650fb49ab9611;
+                26:expected_stateful_chain=256'hb23d69c166fd21fce4dcaa10bfcd437944cc9cc72addd46506d0239a41f07c34;
+                27:expected_stateful_chain=256'h54dee7c7823d52c060c67e45cc8c8e385899987d19f77cc93f5fce8ae0313447;
+                28:expected_stateful_chain=256'ha0e73e7fb7d7d63ac012586093181608dc2355b7ed58a70ae904d984cc483e5e;
+                29:expected_stateful_chain=256'hf6f267dbaef8aa96312440f7dad3cdb01c5d56675af59d28934512d721c8841a;
+                30:expected_stateful_chain=256'h2a31482edc6b63b6bf595b84e2cd150eb680a7e5955e2e915abce95a0d201b7e;
+                31:expected_stateful_chain=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
+                32:expected_stateful_chain=256'h6fc2f8f728d128015296478e6be5ea82a373a38030403c82bc82268796601e90;
+                33:expected_stateful_chain=256'h9b6f66bf1f05ee1214b3cb1dee772625ecbfedfebb2e5df64309d1de1a9935dc;
+                34:expected_stateful_chain=256'h710a7c90dd52fd8d6fa07ca63136938792aaa4a451430fd7691b9f0f7dd3f40d;
+                35:expected_stateful_chain=256'h5b7be51b742db53064f543bcafa82cb881f7f409d907a2bc3b9c8d602551a5a4;
+                36:expected_stateful_chain=256'hb8b0b8cf5269b1f08e732581bfdcc68eb7b11696141ecce7a73a20ef74f4753f;
+                37:expected_stateful_chain=256'h3b4f3e14abb05a2a16d7e753f74dd2b26944d17e373ec6db1a1d3b68dc3408d0;
+                38:expected_stateful_chain=256'h5c03e50eacfd98703bf312832b437b88655f4d1850855271c0f3be92525afafb;
+                39:expected_stateful_chain=256'h1c6a47152cde10e488d2f9e2257eaf49491919dfcffc4e9fa6c7a9b3b21ee690;
+                40:expected_stateful_chain=256'h31b879c14bc964b9868e20005eb11f03a65d05d7b8d163f0b40aae84ddab6d59;
+                41:expected_stateful_chain=256'h97f89137f912dae97e735751ed4369995a12e6b7e3bdae19520698022a3a985d;
+                42:expected_stateful_chain=256'h6734e8560e1bd78ce1133104aceff770a9a5b25c90544ea6caef1bae6d616f6e;
+                43:expected_stateful_chain=256'h4cf6a2d7315b967a10a0cb42e9383d6596f6540be58871b19c63035150e0648c;
+                44:expected_stateful_chain=256'h5c79fd85e5edbe077ae8f7343961af4ec504180f5e61a7eaa3741c3046424965;
+                45:expected_stateful_chain=256'hb11f0ed9f1d9a9a835ee8b80d70e9b59bb9fe9fe95153eaa0322e0f6bace7d7d;
+                46:expected_stateful_chain=256'hebc743146599323e733f3d7da0e23a37e4296f1653fa082eb9ecf8453377ecd3;
+                47:expected_stateful_chain=256'h74aeb37983c2bbbe05d505596b68ded73b3537ec76a37a14fb3f9f3beed2c404;
+                48:expected_stateful_chain=256'h53ab3d1bb37f6d518ca0055c7df3d6511d802d026b818d65c263acbb297554c7;
+                49:expected_stateful_chain=256'h595734eb6c2cd60534198c13478ab9c6b68f03384197fa01b7c94f0737523f70;
+                50:expected_stateful_chain=256'he4fee5df87c1a3599f3cc18eaf2dfff67acba610e15ab950d4e3b7ef5ebf4746;
+                51:expected_stateful_chain=256'hf9252338667a40463062457b9d55b67c1b21671b3ecd43c52c8d7f236edc0353;
+                52:expected_stateful_chain=256'hbdd54947077d6aff7b5e996fe125fe25724686e12369d6ff5f5058b7356df974;
+                53:expected_stateful_chain=256'h46d946641b3d88d78f3c75d79a6069c3423a559423909a441fa805e6dab0dece;
+                54:expected_stateful_chain=256'h27f43c87d5eebfb667983adb59c925ed906333674cf6f701b969a2bf941fb7fd;
+                55:expected_stateful_chain=256'h204208901019bf2be57c20b8fc0b0c174a3bf3a81d7e7886a8703787233d05ba;
+                56:expected_stateful_chain=256'h5373b1f2097d622c234f2c2b8bf44b20bc6f2a71c4c09e98d409ce8a2d8a2e2a;
+                57:expected_stateful_chain=256'h9a0e2897ce6c37f810ddecb0a25d817c8115d67e7da2f146a9a0bc161d572887;
+                58:expected_stateful_chain=256'h050443a7550dd3aad68a08d35469e548a82432a74e2f72a5ee3e0d5376b4a62e;
+                59:expected_stateful_chain=256'h5584072101741ea2a61df3d2c5c7cf6bbcc1bceee04220d1f3b4e85c140f6f5f;
+                60:expected_stateful_chain=256'h39a3f81daab39f8edd98ce6404acc2fdbcec7b27bb3e7d2bd5c01dd4b67d790f;
+                61:expected_stateful_chain=256'hdf8f52235c461433b80e3db3e3897c52e044ec18003619b99550dee9bc13b65b;
+                62:expected_stateful_chain=256'ha426f30c039bac7a3d33efecd2938a3f3362d9803cb62bd07d5ea063ae5d3b0c;
+                63:expected_stateful_chain=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
+                64:expected_stateful_chain=256'h944eb357e0fda01b9c9d7854b8839812e76be25c26733d0f5cb89848cab99fbd;
+                65:expected_stateful_chain=256'hf29c8c34647096bdd45e9a68c03cbafc3ba84b5ad76c0c9b2e7d1885ee8a463e;
+                66:expected_stateful_chain=256'h34f6aad63a41108f7aacfc2f4af7d99d304b06a9a56c492a1c32619283cec917;
+                67:expected_stateful_chain=256'h91c274a38387f69275ba6bb339979e5f8faf2a04021dd1aad22e3de60c814c21;
+                68:expected_stateful_chain=256'he3ac24c6ad061881e3a72c10d2c94ba202bf09bb5d8d62e7d55f043b5108389d;
+                69:expected_stateful_chain=256'hb9f7637fe2673e123e8e259058166e08118c2adc80c82c30847f568c59ce52cc;
+                70:expected_stateful_chain=256'h0b303814f3b4b7db37ef6b39d8f94580c263474a01b46c9282bb6ca8b64c457e;
+                71:expected_stateful_chain=256'h4dfa3dde1dfa511dc9096f2a23a961988820f3f8092b1643e045f06b39387204;
+                72:expected_stateful_chain=256'hdb2e28b447080834d0bef018863e74ee1bc4a164bb3a4c639fea5fc1a60aa0a3;
+                73:expected_stateful_chain=256'hbf786f05abf54a324670a8a691ca2c374718f95f0d5532c1a59a00d3c64eaaa5;
+                74:expected_stateful_chain=256'hc1d819976f357a23b6b5ce011794b172d0e05db5abb8a1deb115c5458be52efd;
+                75:expected_stateful_chain=256'h40cc45a0b5cb259180e355df10cfd5ec322e1e3a5fec1ce0fe41d9bfe6e8c2d2;
+                76:expected_stateful_chain=256'h6d39c4bb70f88dd79a6ceccd264bb43e6dfbab670d0038a1195887548640e636;
+                77:expected_stateful_chain=256'h2ae8ed7f059965a5bab2cd234378c634cb7e5cafed1f56544f3e5ab999148d64;
+                78:expected_stateful_chain=256'hcb8c48b0668c378282c05eb7d20e972ba35c99c367b006d37356634d8624a228;
+                79:expected_stateful_chain=256'h5a52e87895d682f44f655135e73213c1b2cedd51f8eb9f4ac703f1479b425854;
+                80:expected_stateful_chain=256'h13ffbb26d963690655499a6bef017b51b69dde2041dd9152571586b7d7e54c9c;
+                81:expected_stateful_chain=256'hc6f3f1e6515baefe33371053f9ab428cfe02f72d34dd8a9cca83fb6701398944;
+                82:expected_stateful_chain=256'hce59711c90ce8af670e171f9205cfc2a1da42ffa6c3b668b44c26b637472161c;
+                83:expected_stateful_chain=256'he774a81b5545cd59ceee5fa3b0f019ea08191206f7f7e1740f1cccf66eae016a;
+                84:expected_stateful_chain=256'h28648e1608cd6e3bc6e89b54c2b61c705e9c6b4e6cef60dfedc7030475941307;
+                85:expected_stateful_chain=256'hfc6aa4bff7716c64cb648a13d936b5fa2d1f71a65f77769fbe070cd4218321f2;
+                86:expected_stateful_chain=256'h1f6067ed2581c47a85bf0cb00fb65e391255b6dd0ac44a8274f95037bccb658f;
+                87:expected_stateful_chain=256'hf41da7e64ac344b437b2e0f98118e32fd37c3f6fce437c10c0a39c5691ffe42f;
+                88:expected_stateful_chain=256'h51731af3e544a95d48c8951aa54df9ca22f3753c2721e3c2ec647e59add7a1d5;
+                89:expected_stateful_chain=256'ha6e3ec0978e1f1009d5bf4a292cd8271f7ece63bfe6d6000a2635ebfd67a9fe2;
+                90:expected_stateful_chain=256'h7dc8cf1b7d85e6a88365c221f79e025725483b165957cc66f2b72ba1d8af0cce;
+                91:expected_stateful_chain=256'hce543e4197eef74759fc4897ac25953aec0fc9e78547e27b4a1764eac41eee27;
+                92:expected_stateful_chain=256'h0bc222cbe180e844a8b029f14d9d86914eed45b7f4c150e88076d9e828f364d0;
+                93:expected_stateful_chain=256'h9b3c94ef05668d9db43cdaf03f2cd716bf7387c64d25c79f75442b95d7eeefd3;
+                94:expected_stateful_chain=256'h0fdde1d63058b80f5d11eb7c31f9b89d08b4ce34a1c7ea83bef269504c0d7a22;
+                95:expected_stateful_chain=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
+                96:expected_stateful_chain=256'hcb5c142ed289a80ff708493a22e3b4dedb6e32330c6d3b3c678aa20b3610a92c;
+                97:expected_stateful_chain=256'hc1fc2e2efee610b87a71942696dcb4a93139dca66409ea8600cd7cff04f491ca;
+                98:expected_stateful_chain=256'hc4a8e5cc3a97512ad1ce3c884008fae1ffcf7bdedb7059698ff648746e74e37a;
+                99:expected_stateful_chain=256'h56b51e71074d9ab1834b7ec012a67081a9e91c289e3fd2d508877fafa560a82d;
+                100:expected_stateful_chain=256'h39134e6630ad386924886029f96e62df8fe80bb5268c5088e2414777ea334d43;
+                101:expected_stateful_chain=256'ha387f4b7701aeb56e53608714dd3f7f862e907e91a132617845b86c43f5d0aa0;
+                102:expected_stateful_chain=256'hc22316616983b6018dd0933b8d9eef4dd1dcd8427161eba5640d59c3b40dee8f;
+                103:expected_stateful_chain=256'h755b0ee8f98a3ca1957fc35a2d15d910a4bf5396db55ae44bdc901a2a188c2b3;
+                104:expected_stateful_chain=256'h2c48cc401f55cc78ac63d5424674c5bb97810ceae2a9758c40ab257eeeb0142e;
+                105:expected_stateful_chain=256'h991bde4dd480a6d3243166a2d99f184df0f99ffea5f6016688bbd57a972615d8;
+                106:expected_stateful_chain=256'h843d9f8181c0bd85fd150f1f4b4bc0d4a07b25bc0c89617e9e7c10087f821764;
+                107:expected_stateful_chain=256'hc100a8b81ce7f2f910619c0fe0b570476a9286a58d07bb5146a0108e444359f5;
+                108:expected_stateful_chain=256'he73f191c65b8dfff405cec36897e6a9cae188d23b337134d10bf8c4cd5fc723a;
+                109:expected_stateful_chain=256'h81ffc1d53f2a3354cfd131338ea70b8dd2c30460c1ae64dccb241fa0661710eb;
+                110:expected_stateful_chain=256'h7aac46a8be26b7575d94b7017c467b2897ef167fac19ffba9e42d2dbca9df915;
+                111:expected_stateful_chain=256'hd101306f98e5cfb166cf9537f80178be16e0ecea585c8aa0a04ca7b33a22c843;
+                112:expected_stateful_chain=256'hffaab788f022e559e47b82d3f8ba9ece9867b0e765b80151d8a6812da0a9369e;
+                113:expected_stateful_chain=256'h56eea7a3c75e3283559d3700d89c3e25a57b932a3bdcde797389f2a821a84eb6;
+                114:expected_stateful_chain=256'h85e76d93519c6a28fce616de28482977b9325ca76af7510b16bf8ad4b1226106;
+                115:expected_stateful_chain=256'h69fb9a70c1bb79cec61b309c7b182da746ad006b6931a2ed5a62ed49a8ffa56d;
+                116:expected_stateful_chain=256'h07a620aa334150164573299496968b50dd56956cc1507c5203d4d1260282af9d;
+                117:expected_stateful_chain=256'h1e6bf077944e83198c501d59b69b57a31b3f885a06d8d61c617da190544c8d6a;
+                118:expected_stateful_chain=256'he5e7cc71689effb5f049a3ac24b5b8552c87486d8bfefe158955e96ed4b03fe7;
+                119:expected_stateful_chain=256'hf9c48398365edbf4bfbbcbaab57eac1d3218686b5d70045fd030a26aa8f4f63f;
+                120:expected_stateful_chain=256'h495bc749616f8b18a234708ccb97a3600544fee304e952e2739609f40f30958d;
+                121:expected_stateful_chain=256'hd7cbda3ba9330719a80db504832b4dabdc8040eba0989c8ea66ec57793cac72f;
+                122:expected_stateful_chain=256'h8af4f662c5e7647e29e6ef4c93ea2794ff3de60d328cdb589453e1a948518292;
+                123:expected_stateful_chain=256'h613d27240d5df4af9914deecb84ab84873619cc853edcc582365f3dca5bf2c21;
+                124:expected_stateful_chain=256'h44351cb398bbd329068d160e9d2f8b7573291915b4e02af6f3e3fc32ea4ebb64;
+                125:expected_stateful_chain=256'h3e9665f099f31a3aaddda3e556de52ff56a5b127d356469a5e9861d3f7ecca60;
+                126:expected_stateful_chain=256'h98ec3634e27ff35718d53a899d71cef6d1a1f4aa153131f4d9c9941cb4a39e78;
+                127:expected_stateful_chain=256'h3f3e3d3c3b3a393837363534333231302f2e2d2c2b2a29282726252423222120;
+                default:expected_stateful_chain=0;
+            endcase
+        end
+    endfunction
+    task stateful_chain_program(input integer family,slot,digit,mode);
+        begin
+            chain_program(32,slot,digit,mode);
+            profile_identity=family==0 ? 64'd8 : 64'd11;
+            profile_descriptor=64'h430a200000010a20;
+            for(integer j=0;j<16;j=j+1)job_identifier[j*8+:8]=8'(160+j);
+            if(family==0) begin
+                descriptor_memory[4]=64'h0502012001000000;
+                descriptor_memory[5]=64'h0503012001000000;
+                descriptor_memory[7]=64'h0500012001000000;
+                descriptor_memory[8]=64'h0600012001000000;
+            end else begin
+                descriptor_memory[7]=64'h0900012001000000;
+                descriptor_memory[8]=64'h0a00012001000000;
+            end
+        end
+    endtask
+    task stateful_chain_cases;
+        integer cases,budget;
+        logic [255:0] endpoint,capture;
+        begin
+            cases=0;
+            for(integer family=0;family<2;family=family+1)
+                for(integer slot=0;slot<2;slot=slot+1)
+                    for(integer digit=0;digit<16;digit=digit+1)
+                        for(integer mode=0;mode<4;mode=mode+1) begin
+                            stateful_chain_program(family,slot,digit,mode);launch();finish_job();
+                            endpoint=expected_stateful_chain(family,slot,mode==2 ? digit : 15,0);
+                            if(mode==3)endpoint=expected_stateful_chain(family,slot,digit,1);
+                            capture=mode==1 || mode==2 ? expected_stateful_chain(family,slot,digit,0)
+                                : (slot==0 ? job_secret_seed : job_public_seed);
+                            budget=mode==0 || mode==1 ? (family==0 ? 46 : 16)
+                                : mode==2 ? 1+digit*(family==0 ? 3 : 1) : (15-digit)*(family==0 ? 3 : 1);
+                            if(outputs!=4 || observed_output[0]!==endpoint || observed_output[1]!==capture)
+                                $fatal(1,"stateful CHAIN oracle family=%0d slot=%0d digit=%0d mode=%0d got=%h expected=%h cap=%h expected=%h",
+                                    family,slot,digit,mode,observed_output[0],endpoint,observed_output[1],capture);
+                            if(observed_output[2]!==job_secret_prf || observed_output[3]!==(slot==0 ? job_public_seed : job_secret_seed)
+                                || dut.node[2]!==job_randomizer || dut.node[6]!==0 || dut.hmsg_digest!==0 || dut.hmsg_valid)
+                                $fatal(1,"stateful CHAIN touched inactive/retained architectural state");
+                            if(dut.ctx_step[slot]!=(mode==2 ? digit : 15) || dut.ctx_step[1-slot]!=(slot==0 ? 2 : 1)
+                                || dut.ctx_chain!=0 || dut.ctx_cursor!=5 || dut.ctx_layer!=0 || dut.ctx_tree!=0)
+                                $fatal(1,"stateful CHAIN terminal/context");
+                            if(hash_count!=budget || permutation_count!=budget || traces!=budget
+                                || dut.macro_count!=1 || dut.macro_hashes!=budget)
+                                $fatal(1,"stateful CHAIN budget family=%0d digit=%0d mode=%0d expected=%0d actual=%0d macro=%0d",
+                                    family,digit,mode,budget,hash_count,dut.macro_hashes);
+                            cases=cases+1;
+                        end
+            for(integer bad=0;bad<4;bad=bad+1) begin
+                stateful_chain_program(0,0,3,1);
+                case(bad)
+                    0:descriptor_memory[4][55:48]=3;
+                    1:descriptor_memory[4][47:40]=2;
+                    2:descriptor_memory[5][29:24]=0;
+                    3:descriptor_memory[5][0]=1;
+                endcase
+                launch();expect_fault();
+                if(hash_count || traces || dut.macro_count || dut.ctx_step[0]!=1
+                    || dut.node_memory[116]!==job_secret_prf || dut.node_memory[119]!==job_secret_seed)
+                    $fatal(1,"stateful CHAIN preflight not atomic");
+            end
+            // A private digit capture precedes a forced failing F; no CAP,
+            // endpoint or STEP commit is allowed, and invalid H_msg stays zero.
+            stateful_chain_program(0,0,3,1);launch();
+            while(!(dut.chain_active && dut.chain_shadow_valid && dut.physical_valid
+                && dut.chain_hash_stage && dut.group_b_value>=7))tick();
+            force dut.physical_error=1'b1;tick();release dut.physical_error;
+            if(!error || error_code!=16'h3007 || dut.chain_shadow_valid || dut.ctx_step[0]!=1
+                || dut.node_memory[116]!==job_secret_prf || dut.node_memory[119]!==job_secret_seed
+                || dut.hmsg_digest!==0 || dut.node[2]!==job_randomizer || dut.node[6]!==0)
+                $fatal(1,"stateful CHAIN late fault committed private state");
+            stateful_chain_program(0,1,4,1);launch();
+            while(!dut.chain_shadow_valid)tick();rst=1;repeat(2)tick();
+            if(dut.chain_shadow_valid || dut.scratch_valid!=0 || dut.hmsg_digest!==0)
+                $fatal(1,"stateful CHAIN reset retained private state");
+            launch();finish_job();
+            if(observed_output[0]!==expected_stateful_chain(0,1,15,0)
+                || observed_output[1]!==expected_stateful_chain(0,1,4,0) || hash_count!=46)
+                $fatal(1,"stateful CHAIN reset replay");
+            if(stateful_key_lifetimes<1440)$fatal(1,"missing XMSS KEY ownership lifetimes");
+            $display("MICRO_STATEFUL_KEY_OWNERSHIP_PASS lifetimes=%0d valid0 stable_through_MASK_F fault_reset_retirement_clear",stateful_key_lifetimes);
+            $display("MICRO_STATEFUL_CHAIN_PASS cases=%0d both_families both_slots digit0_15 four_modes key_mask_f_capture_atomic preflight late_fault reset_replay",cases);
+        end
+    endtask
+    // Zero-Hash instruction tests exercise widths and logical RAM partitions
+    // directly, independently of a million-leaf traversal or a Hash oracle.
+    task stateful_boundary_cases;
+        integer cases,height,index_value;
+        logic [31:0] expected_node_number;
+        begin
+            cases=0;
+            for(integer profile=8;profile<=13;profile=profile+1) begin
+                height=profile==8 || profile==11 ? 10 : profile==9 ? 16 : profile==12 ? 15 : 20;
+                for(integer sample=0;sample<9;sample=sample+1) begin
+                    case(sample)
+                        0:index_value=0;1:index_value=1;2:index_value=(1<<height)-1;
+                        3:index_value=1023;4:index_value=1024;
+                        5:index_value=32767;6:index_value=32768;
+                        7:index_value=65535;default:index_value=65536;
+                    endcase
+                    if(index_value<(1<<height)) begin
+                        reset_program();profile_identity=64'(profile);
+                        profile_descriptor={8'd67,8'(height),8'd32,16'd0,8'd1,8'(height),8'd32};
+                        job_operation=1;job_index=32'(index_value);
+                        emit(OP_HEIGHT);emit(OP_TARGET,1);emit(OP_NODE_BEGIN,2);
+                        if(profile>=11)emit(OP_ADRS,5);
+                        emit(OP_NODE_PARENT);emit(OP_ADRS,5);emit(OP_END);
+                        launch();finish_job();
+                        expected_node_number=profile>=11 ? (32'd1<<(height-1))+32'(index_value>>1) : 32'(index_value>>1);
+                        if(dut.accepted_index!==32'(index_value) || dut.ctx_leaf!==20'(index_value)
+                            || dut.ctx_target!==20'(index_value) || dut.ctx_index!==20'(index_value>>1)
+                            || dut.ctx_height!==5'(height) || dut.ctx_level!==5'd1
+                            || dut.addr_b[0]!==expected_node_number || hash_count || traces)
+                            $fatal(1,"stateful index/parent width profile=%0d q=%0d",profile,index_value);
+                        cases=cases+1;
+                    end
+                end
+                reset_program();profile_identity=64'(profile);
+                profile_descriptor={8'd67,8'(height),8'd32,16'd0,8'd1,8'(height),8'd32};
+                job_operation=1;job_index=32'd1<<height;emit(OP_END);launch();
+                while(!error && !done)tick();
+                if(!error || error_code!=16'h3008 || hash_count || traces || outputs || dut.scratch_valid)
+                    $fatal(1,"stateful out-of-range q accepted profile=%0d",profile);
+                cases=cases+1;
+            end
+            for(integer family=0;family<2;family=family+1) begin
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);emit(OP_NMOV,4,11);emit(OP_NMOV,5,13);
+                emit(OP_STORE,1,4,IDX_LEVEL);repeat(20)emit(OP_LEVEL_NEXT);
+                emit(OP_STORE,1,5,IDX_LEVEL);emit(OP_LOAD,0,1,IDX_LEVEL);emit(OP_EMIT,0,0);
+                emit(OP_LEVEL_INIT);repeat(19)emit(OP_LEVEL_NEXT);
+                emit(OP_STORE,2,4,IDX_LEVEL);emit(OP_LOAD,0,2,IDX_LEVEL);emit(OP_EMIT,0,0);
+                emit(OP_LEVEL_INIT);emit(OP_LOAD,0,1,IDX_LEVEL);emit(OP_EMIT,0,0);emit(OP_END);
+                launch();finish_job();
+                if(outputs!=3 || observed_output[0]!==job_public_seed
+                    || observed_output[1]!==job_secret_seed || observed_output[2]!==job_secret_seed
+                    || dut.node_memory[88]!==job_public_seed || dut.node_memory[108]!==job_secret_seed
+                    || hash_count || traces)$fatal(1,"stateful STACK20/AUTH19 overlap family=%0d",family);
+                cases=cases+1;
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);repeat(20)emit(OP_LEVEL_NEXT);emit(OP_STORE,2,11,IDX_LEVEL);emit(OP_END);
+                launch();expect_fault();if(hash_count || traces)$fatal(1,"AUTH20 started Hash");cases=cases+1;
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);repeat(21)emit(OP_LEVEL_NEXT);emit(OP_END);
+                launch();expect_fault();if(dut.ctx_level!=20)$fatal(1,"level21 not atomic");cases=cases+1;
+            end
+            // Existing SLH ABI3 images retain their original logical limits;
+            // the added stateful RAM ranges and selectors grant no permission.
+            for(integer bad=0;bad<7;bad=bad+1) begin
+                reset_program();
+                case(bad)
+                    0:begin profile_descriptor[39:32]=14;emit(OP_HEIGHT,1);repeat(16)emit(OP_LEVEL_NEXT);end
+                    1:emit(OP_ADRS,9);
+                    2:emit(OP_REDUCE_INIT,2);
+                    3:emit(OP_REDUCE_NEXT,2);
+                    4:emit(OP_XMSS_MASK);
+                    5:emit(OP_BR,COND_LTREE_PAIR,0,0,0);
+                    6:emit(OP_BR,COND_LTREE_MORE,0,0,0);
+                endcase
+                emit(OP_END);launch();expect_fault();if(hash_count || traces)$fatal(1,"SLH extension violation started Hash");cases=cases+1;
+            end
+            // TREE remains absent from ABI3, even in a valid stateful Job.
+            for(integer family=0;family<3;family=family+1) begin
+                reset_program();
+                if(family!=0)begin profile_identity=family==1 ? 8 : 11;profile_descriptor=64'h430a200000010a20;end
+                emit(8'd37);emit(OP_END);launch();expect_fault();cases=cases+1;
+            end
+            // The final cursor value 2^20 must be representable and stop the
+            // bounded loop, while a further update is an atomic fault. This
+            // executes metadata only: no h20 leaf or tree Hash is evaluated.
+            for(integer overflow=0;overflow<2;overflow=overflow+1) begin
+                reset_program();profile_identity=10;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);emit(OP_CURSOR_INIT);emit(OP_CURSOR_NEXT,0,0,0,2);
+                emit(OP_BR,COND_CURSOR_MORE,0,0,2);
+                if(overflow)emit(OP_CURSOR_NEXT,0,0,0,1);
+                emit(OP_END);launch();
+                if(overflow)expect_fault();else finish_job();
+                if(dut.ctx_cursor!==21'h100000 || hash_count || traces)
+                    $fatal(1,"stateful cursor21 terminal/overflow");
+                cases=cases+1;
+            end
+            $display("MICRO_STATEFUL_BOUNDARY_PASS cases=%0d q_width20 parent_width21 heights10_15_16_20 STACK21 AUTH20 family_permissions illegal_TREE",cases);
+        end
+    endtask
     initial begin
         for(integer j=0;j<32;j=j+1) descriptor_memory[j]=0;
         descriptor_memory[2]=64'h0105011001000000;
@@ -606,6 +967,8 @@ module tb_hash_backend_contracts;
             job_public_seed[j*8+:8]=8'(j+64);job_randomizer[j*8+:8]=8'(j+96);
             job_public_root[j*8+:8]=8'(j+128);
         end
+        if($test$plusargs("STATEFUL_ONLY")) begin stateful_chain_cases();stateful_boundary_cases();$finish;end
+        if($test$plusargs("BOUNDARY_ONLY")) begin stateful_boundary_cases();$finish;end
         storage_cases();
         if($test$plusargs("STORAGE_ONLY")) begin
             $display("MICRO_STORAGE_PASS all_n fixed_partitions independent_rw node_zero_job retained_spaces atomic_faults");
@@ -836,6 +1199,8 @@ module tb_hash_backend_contracts;
         reset_program();job_operation=2;job_message_length=1;
         emit(OP_ROOT_COMPARE);emit(OP_NMOV,2,15);emit(OP_END);launch();send_message();expect_fault();
         $display("MICRO_PROCESSOR_PASS K1U1 onehot_issue typed_permissions snapshots64 overlap branch_flush atomic_wait inactive_lane digest_retention checksum snapshot_digits_all_n target_widths1_14 group_offset_atomic cursor14 chain_terminal parent14 atomic_step faults verify_stall message_ram_long_short_all_n both_recipes reset_replay");
+        stateful_chain_cases();
+        stateful_boundary_cases();
         $finish;
     end
 endmodule

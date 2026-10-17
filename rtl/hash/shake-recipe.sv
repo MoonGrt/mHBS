@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 `default_nettype none
 
-// SLH-DSA SHAKE byte recipes. Each accepted request performs exactly one
+// Typed HBS SHAKE byte recipes. Each accepted request performs exactly one
 // complete hash. Fields stay stable until its response is consumed. A caller
 // may present a new request on that same edge; the lane never creates one.
 module recipe #(
@@ -23,7 +23,11 @@ module recipe #(
     input wire [6:0] message_length,
     input wire [4:0] request_layer,
     input wire [63:0] request_tree,
-    input wire [9:0] request_leaf,
+    input wire [19:0] request_leaf,
+    input wire [1:0] request_address_type,
+    input wire [31:0] request_index,
+    input wire [127:0] request_identifier,
+    input wire [N*8-1:0] request_key,
     input wire [INDEX_BITS-1:0] request_a,
     input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
@@ -33,14 +37,17 @@ module recipe #(
     input wire response_ready,
     output wire [DIGEST_BYTES*8-1:0] response_value,
     output logic error,
-    output logic [31:0] hash_count, permutation_count
+    output logic [63:0] hash_count, permutation_count
 );
     localparam [3:0] ADDRESS_SEED=1, ADDRESS_VALUE=2, MESSAGE_PRF=3,
-        MESSAGE_DIGEST=4, ADDRESS_LIST=12;
-    localparam bit STREAM_ENABLE=(RECIPE_MASK & 16'h1018)!=0;
+        MESSAGE_DIGEST=4, XMSS_PRF=5, XMSS_F=6, XMSS_H=7, XMSS_MESSAGE=8,
+        LMS_SECRET=9, LMS_CHAIN=10, LMS_MESSAGE=11, ADDRESS_LIST=12,
+        LMS_LEAF=13, LMS_PARENT=14, LMS_PUBLIC=15;
+    localparam bit STREAM_ENABLE=(RECIPE_MASK & 16'h9918)!=0;
     typedef enum logic [1:0] {IDLE, STREAM, WAIT_HASH, RESPONSE} state_t;
     state_t state;
     wire [3:0] shape=request_recipe[59:56];
+    wire [7:0] domain=request_recipe[55:48];
     wire [7:0] arity=request_recipe[47:40];
     logic [12:0] input_length;
     logic [2:0] node_words;
@@ -48,7 +55,10 @@ module recipe #(
     logic [4:0] beat;
     logic [INDEX_BITS-1:0] list_cursor;
     logic [4:0] list_remainder;
-    wire fixed_block=shape==ADDRESS_SEED || shape==ADDRESS_VALUE;
+    logic [63:0] alignment_carry;
+    wire fixed_block=shape==ADDRESS_SEED || shape==ADDRESS_VALUE
+        || shape==XMSS_PRF || shape==XMSS_F || shape==XMSS_H
+        || shape==LMS_SECRET || shape==LMS_CHAIN || shape==LMS_LEAF || shape==LMS_PARENT;
     // Only the seventeenth word can finish a rate block. At that word the
     // absolute cursor already gives its end; no second block-base counter
     // is needed. block_last is consumed only with that final beat.
@@ -71,27 +81,43 @@ module recipe #(
     wire stream_emit=STREAM_ENABLE && state==STREAM;
     wire stream_accept=!stream_emit || block_ready;
     wire [63:0] stream_block_data=STREAM_ENABLE ? stream_data : 64'd0;
-    wire valid_shape=shape==ADDRESS_SEED || shape==ADDRESS_VALUE
-        || shape==MESSAGE_PRF || shape==MESSAGE_DIGEST || shape==ADDRESS_LIST;
+    wire new_shape=shape>=XMSS_PRF && shape!=ADDRESS_LIST;
+    wire valid_shape=shape!=0;
     wire bad_request=!valid_shape || !RECIPE_MASK[shape]
         || !(node_bytes==16 || node_bytes==24 || node_bytes==32) || 32'(node_bytes)>N
         || (shape==ADDRESS_VALUE && arity!=1 && arity!=2)
         || (shape==ADDRESS_LIST && (arity==0 || 32'(arity)>(1<<INDEX_BITS)))
         || ((shape==MESSAGE_PRF || shape==MESSAGE_DIGEST) && 32'(message_length)>MAX_MESSAGE_BYTES);
+    wire bad_standard_request=new_shape && (node_bytes!=32
+        || ((shape==XMSS_PRF) && (domain>4 || arity!=1 || request_address_type>2))
+        || ((shape==XMSS_F || shape==XMSS_MESSAGE || shape==LMS_SECRET
+            || shape==LMS_CHAIN || shape==LMS_MESSAGE || shape==LMS_LEAF) && (domain!=0 || arity!=1))
+        || ((shape==XMSS_H || shape==LMS_PARENT) && (domain!=0 || arity!=2))
+        || (shape==LMS_PUBLIC && (domain!=0 || arity!=67))
+        || ((shape==XMSS_MESSAGE || shape==LMS_MESSAGE) && 32'(message_length)>MAX_MESSAGE_BYTES));
+    wire reject_request=bad_request || bad_standard_request;
 
     assign request_ready=hash_ready && (state==IDLE || (response_valid && response_ready));
     // The SHAKE state already retains the digest. Expose completion directly,
     // then retain only the valid flag when the consumer applies backpressure.
     assign response_valid=state==RESPONSE || (state==WAIT_HASH && digest_valid);
-    assign list_index0=list_cursor;
-    assign list_index1=list_cursor+1'b1;
+    wire [12:0] lms_list_last_offset=position>=13'd16 ? position-13'd15 : 13'd0;
+    assign list_index0=shape==LMS_PUBLIC ? INDEX_BITS'(lms_list_last_offset>>5) : list_cursor;
+    assign list_index1=list_index0+1'b1;
     function automatic [31:0] be32(input [31:0] value);
         be32={value[7:0],value[15:8],value[23:16],value[31:24]};
     endfunction
     wire [255:0] address={be32(request_b),be32(32'(request_a)),
-        be32({22'd0,request_leaf}),be32({24'd0,request_recipe[55:48]}),
+        be32({12'd0,request_leaf}),be32({24'd0,request_recipe[55:48]}),
         be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,
         be32({27'd0,request_layer})};
+    wire [31:0] xmss_keymask=domain>=2 ? {24'd0,domain}-32'd2 : 32'd0;
+    wire [255:0] xmss_address={be32(xmss_keymask),be32(request_b),
+        be32(32'(request_a)),be32(request_address_type==2 ? 32'd0 : {12'd0,request_leaf}),
+        be32({30'd0,request_address_type}),be32(request_tree[31:0]),
+        be32(request_tree[63:32]),be32({27'd0,request_layer})};
+    wire [255:0] index_bytes={be32(request_index),224'd0};
+    wire [31:0] lms_q=shape==LMS_MESSAGE ? request_index : {12'd0,request_leaf};
     function automatic [63:0] node_word(input [255:0] data,input [9:0] index);
         case(index)
             0:node_word=data[63:0];
@@ -102,7 +128,9 @@ module recipe #(
         endcase
     endfunction
     localparam integer MESSAGE_WORDS=(MAX_MESSAGE_BYTES+7)/8;
-    wire [9:0] message_prefix_words=shape==MESSAGE_PRF ? 2*10'(node_words) : 3*10'(node_words);
+    wire [9:0] message_prefix_words=shape==XMSS_MESSAGE ? 10'd16
+        : shape==LMS_MESSAGE ? 10'd6
+        : shape==MESSAGE_PRF ? 2*10'(node_words) : 3*10'(node_words);
     wire [9:0] message_word_index=position[12:3]-message_prefix_words;
     assign message_word_address=message_word_index[3:0];
     function automatic [63:0] source_word(input [9:0] index);
@@ -125,6 +153,12 @@ module recipe #(
                     if(index<10'(node_words)) source=3;
                     else if(index<10'(node_words)+10'd4) begin source=6;selected_index=index-10'(node_words);end
                 end
+                XMSS_MESSAGE: if(RECIPE_MASK[XMSS_MESSAGE]) begin
+                    if(index<4) begin source=7;selected_index=index;end
+                    else if(index<8) begin source=2;selected_index=index-4;end
+                    else if(index<12) begin source=4;selected_index=index-8;end
+                    else if(index<16) begin source=5;selected_index=index-12;end
+                end
                 default:begin end
             endcase
             case(source)
@@ -132,7 +166,9 @@ module recipe #(
                 2:source_word=node_word(256'(randomizer),selected_index);
                 3:source_word=node_word(256'(public_seed),selected_index);
                 4:source_word=node_word(256'(root),selected_index);
+                5:source_word=node_word(index_bytes,selected_index);
                 6:source_word=node_word(address,selected_index);
+                7:source_word=selected_index==3 ? 64'h0200000000000000 : 64'd0;
                 default:source_word=0;
             endcase
         end
@@ -170,6 +206,54 @@ module recipe #(
                 end else fast_block[768 +:8]=8'h1f;
             end
         endcase
+        // Standard fixed preimages. Each branch describes one Hash only;
+        // CHAIN and TREE retain ownership of KEY/MASK/F sequencing.
+        if(new_shape) begin
+            fast_block=0;
+            case(shape)
+                XMSS_PRF: begin
+                    fast_block[248 +:8]=domain==0 ? 8'd4 : 8'd3;
+                    fast_block[256 +:256]=domain==0 ? 256'(secret_seed)
+                        : domain==1 ? 256'(secret_prf) : 256'(public_seed);
+                    if(domain==0) begin
+                        fast_block[512 +:256]=256'(public_seed);
+                        fast_block[768 +:256]=xmss_address;
+                        fast_block[1024 +:8]=8'h1f;
+                    end else begin
+                        fast_block[512 +:256]=domain==1 ? index_bytes : xmss_address;
+                        fast_block[768 +:8]=8'h1f;
+                    end
+                end
+                XMSS_F,XMSS_H: begin
+                    fast_block[248 +:8]=shape==XMSS_H ? 8'd1 : 8'd0;
+                    fast_block[256 +:256]=256'(request_key);
+                    fast_block[512 +:256]=256'(request_left);
+                    if(shape==XMSS_H) begin
+                        fast_block[768 +:256]=256'(request_right);
+                        fast_block[1024 +:8]=8'h1f;
+                    end else fast_block[768 +:8]=8'h1f;
+                end
+                LMS_SECRET,LMS_CHAIN: begin
+                    fast_block[0 +:128]=request_identifier;
+                    fast_block[128 +:32]=be32(lms_q);
+                    fast_block[160 +:16]={8'(request_a),8'd0};
+                    fast_block[176 +:8]=shape==LMS_SECRET ? 8'hff : request_b[7:0];
+                    fast_block[184 +:256]=shape==LMS_SECRET ? 256'(secret_seed) : 256'(request_left);
+                    fast_block[440 +:8]=8'h1f;
+                end
+                LMS_LEAF,LMS_PARENT: begin
+                    fast_block[0 +:128]=request_identifier;
+                    fast_block[128 +:32]=be32(request_b);
+                    fast_block[160 +:16]=shape==LMS_LEAF ? 16'h8282 : 16'h8383;
+                    fast_block[176 +:256]=256'(request_left);
+                    if(shape==LMS_PARENT) begin
+                        fast_block[432 +:256]=256'(request_right);
+                        fast_block[688 +:8]=8'h1f;
+                    end else fast_block[432 +:8]=8'h1f;
+                end
+                default:begin end
+            endcase
+        end
         fast_block[1087]=1;
     end
     logic [63:0] stream_data;
@@ -178,11 +262,41 @@ module recipe #(
     wire past_end_word=position[12:3]>input_length[12:3];
     always @* begin
         stream_data=source_word(position[12:3]);
-        if((shape==MESSAGE_PRF || shape==MESSAGE_DIGEST)
+        if((shape==MESSAGE_PRF || shape==MESSAGE_DIGEST || shape==XMSS_MESSAGE)
             && position[12:3]>=message_prefix_words && 32'(message_word_index)<MESSAGE_WORDS)
             stream_data=message_word_data;
         if(shape==ADDRESS_LIST && position>=13'(prefix_bytes))
             stream_data=node_word(256'(list_data0),{8'd0,list_remainder[4:3]});
+        if(shape==LMS_MESSAGE || shape==LMS_PUBLIC) begin
+            stream_data=0;
+            case(position)
+                0:stream_data=request_identifier[63:0];
+                8:stream_data=request_identifier[127:64];
+                16:begin
+                    stream_data[31:0]=be32(lms_q);
+                    stream_data[47:32]=shape==LMS_MESSAGE ? 16'h8181 : 16'h8080;
+                    stream_data[63:48]=shape==LMS_MESSAGE ? randomizer[15:0] : list_data0[15:0];
+                end
+                default:begin
+                    if(shape==LMS_MESSAGE) begin
+                        case(position)
+                            24:stream_data=64'(256'(randomizer)>>16);
+                            32:stream_data=64'(256'(randomizer)>>80);
+                            40:stream_data=64'(256'(randomizer)>>144);
+                            48:stream_data={message_word_data[15:0],randomizer[255:208]};
+                            default:stream_data={message_word_data[15:0],alignment_carry[63:16]};
+                        endcase
+                    end else begin
+                        case(position[4:3])
+                            0:stream_data=list_data0[143:80];
+                            1:stream_data=list_data0[207:144];
+                            2:stream_data={list_data0[15:0],alignment_carry[63:16]};
+                            default:stream_data=list_data0[79:16];
+                        endcase
+                    end
+                end
+            endcase
+        end
         for(i=0;i<8;i=i+1) begin
             if(past_end_word || (at_end_word && 3'(i)>=input_length[2:0]))
                 stream_data[i*8 +:8]=0;
@@ -191,8 +305,8 @@ module recipe #(
         end
     end
     shake_context #(.UNROLL(UNROLL),.DIGEST_BYTES(DIGEST_BYTES)) sponge (
-        .clk,.rst,.context_valid(request_valid && request_ready && !bad_request),.context_ready(hash_ready),
-        .fast_block_valid(request_valid && request_ready && !bad_request && fixed_block),.fast_block_ready(fast_ready),
+        .clk,.rst,.context_valid(request_valid && request_ready && !reject_request),.context_ready(hash_ready),
+        .fast_block_valid(request_valid && request_ready && !reject_request && fixed_block),.fast_block_ready(fast_ready),
         .fast_block_data(fast_block),.block_valid(stream_emit),.block_ready,
         .block_data(stream_block_data),.block_last(STREAM_ENABLE && stream_last),
         .response_valid(digest_valid),.response_digest(response_value)
@@ -209,29 +323,36 @@ module recipe #(
             beat<=0;
             list_cursor<=0;
             list_remainder<=0;
+            alignment_carry<=0;
         end else begin
             // Accepting a new caller request has priority over draining the
             // old response. Its digest is observed before this edge updates
             // the sponge, so local feedback needs no extra result register.
             if(request_valid && request_ready) begin
-                error<=bad_request;
+                error<=reject_request;
                 position<=0;
                 beat<=0;
                 list_cursor<=0;
                 list_remainder<=0;
+                alignment_carry<=0;
                 node_words<=node_bytes[5:3];
                 case(shape)
                     ADDRESS_LIST:input_length<=list_length;
                     MESSAGE_PRF,MESSAGE_DIGEST:input_length<=13'(message_prefix)+13'(message_length);
+                    XMSS_MESSAGE:input_length<=13'd128+13'(message_length);
+                    LMS_MESSAGE:input_length<=13'd54+13'(message_length);
+                    LMS_PUBLIC:input_length<=13'd2166;
                     default:input_length<=0;
                 endcase
-                if(PROFILE_ENABLE && !bad_request) begin
+                if(PROFILE_ENABLE && !reject_request) begin
                     hash_count<=hash_count+1'b1;
                     if(fixed_block) permutation_count<=permutation_count+1'b1;
                 end
-                state<=bad_request ? RESPONSE : fixed_block ? WAIT_HASH : STREAM;
+                state<=reject_request ? RESPONSE : fixed_block ? WAIT_HASH : STREAM;
             end else case(state)
                 STREAM: if(STREAM_ENABLE && stream_accept) begin
+                    if(shape==LMS_MESSAGE) alignment_carry<=message_word_data;
+                    else if(shape==LMS_PUBLIC) alignment_carry<=list_data0[255:192];
                     position<=position+13'd8;
                     if(position<13'(prefix_bytes)) begin
                         if(position+13'd8>=13'(prefix_bytes))

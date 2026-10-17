@@ -148,5 +148,6 @@
 | u5_atp_optimization_20261020_152253 | [U5_ATP_Architecture_20261020](u5_atp_optimization_20261020_152253/reports/U5_ATP_Architecture_20261020.md)，[U5_ATP_Optimization_20261020_152253](u5_atp_optimization_20261020_152253/reports/U5_ATP_Optimization_20261020_152253.md) | [证据](u5_atp_optimization_20261020_152253/ARTIFACTS.json) |
 | timing_targets_20261020_154052 | [Timing_Targets_20261020_154052](timing_targets_20261020_154052/reports/Timing_Targets_20261020_154052.md) | [证据](timing_targets_20261020_154052/ARTIFACTS.json) |
 | image_chain_import_20261021 | [HashFlow ABI3 image-chain 移植](image_chain_import_20261021/reports/Image_Chain.md) | [证据](image_chain_import_20261021/ARTIFACTS.json) |
+| image_chain_stateful_20261021_121656 | [Stateful_Extension](image_chain_stateful_20261021_121656/reports/Stateful_Extension.md) | [证据](image_chain_stateful_20261021_121656/ARTIFACTS.json) |
 
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。

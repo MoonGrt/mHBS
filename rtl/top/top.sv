@@ -19,13 +19,14 @@ module top #(
     parameter DESCRIPTOR_INIT_FILE="tb/vectors/slh_128f/descriptor.mem"
 )(
     input wire clk,rst,
+    input wire [31:0] job_index,input wire [127:0] job_identifier,input wire [255:0] job_lms_c,
     input wire message_valid,output wire message_ready,
     input wire [6:0] message_length,input wire [63:0] message_data,
     input wire verify_valid,output wire verify_ready,
     input wire [255:0] verify_data,output wire verify_pass,
     output logic busy,done,keygen_done,error,output logic [15:0] error_code,
-    output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
-    output wire [31:0] hash_count,permutation_count,
+    output logic [63:0] boot_cycles,keygen_cycles,sign_cycles,
+    output wire [63:0] hash_count,permutation_count,
     output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
     output wire [1:0] result_kind,
     input wire signature_read_enable,input wire [10:0] signature_read_address,
@@ -49,6 +50,7 @@ module top #(
     common #(.LANES(LANES),.UNROLL(UNROLL),.SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),.PROFILE_ENABLE(PROFILE_ENABLE)) common (
 .job_secret_seed(SECRET_SEED),.job_secret_prf(SECRET_PRF),.job_public_seed(PUBLIC_SEED),.job_randomizer(RANDOMIZER),.job_public_root(PUBLIC_ROOT),.job_operation(OPERATION),
  .clk,.rst,.program_address,.program_data,.descriptor_address,.descriptor_data,
+ .job_index,.job_identifier,.job_lms_c,
  .message_length,.message_data,.message_valid,.message_ready,
  .verify_valid,.verify_ready,.verify_data,.verify_pass,
  .busy,.done,.keygen_done,.error,.error_code,.boot_cycles,.keygen_cycles,.sign_cycles,

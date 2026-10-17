@@ -10,7 +10,7 @@ class Op(IntEnum):
     TARGET=11; DIGITS=12; DIGIT_LOAD=13; STEP_INIT=14; STEP_NEXT=15; MASK=16
     NODE_BEGIN=17; NODE_PARENT=18; LEVEL_INIT=19; LEVEL_NEXT=20; ADRS=21
     REDUCE_INIT=22; REDUCE_NEXT=23; PARSE=24; NMOV=25; LOAD=26; STORE=27
-    HASH=28; WAIT=29; INPUT=30; EMIT=31; ROOT_COMPARE=32; END=33; JMP=34; BR=35; CHAIN=36
+    HASH=28; WAIT=29; INPUT=30; EMIT=31; ROOT_COMPARE=32; END=33; JMP=34; BR=35; CHAIN=36; XMSS_MASK=38
 
 class LayerInit(IntEnum): FIRST=0; TOP=1
 class Height(IntEnum): HT=0; FORS=1; LITERAL=2
@@ -21,12 +21,12 @@ class ChainLeaf(IntEnum): CURSOR=0; LEAF=1
 class StepSource(IntEnum): ZERO=0; DIGIT=1
 class Mask(IntEnum): FIXED=0; PAIR=1; SUFFIX=2; PREFIX=3
 class NodeSource(IntEnum): CURSOR=0; TARGET=1; LEAF=2; IMMEDIATE=3
-class TreeKind(IntEnum): HT=0; FORS=1
+class TreeKind(IntEnum): HT=0; FORS=1; LTREE=2
 class Addr(IntEnum):
     WOTS_CURSOR=0; WOTS_LEAF=1; FORS_CURSOR=2; FORS_TARGET=3
-    FORS_NODE=4; HT_NODE=5; WOTS_LIST=6; FORS_LIST=7; REDUCE_NODE=8
+    FORS_NODE=4; HT_NODE=5; WOTS_LIST=6; FORS_LIST=7; REDUCE_NODE=8; LTREE_CURSOR=9; LTREE_LEAF=10
 class ListLeaf(IntEnum): CURSOR=0; LEAF=1
-class ReduceNext(IntEnum): INDEX=0; LEVEL=1
+class ReduceNext(IntEnum): INDEX=0; LEVEL=1; LTREE_LEVEL=2
 class Index(IntEnum):
     LEVEL=0; CHAIN0=1; CHAIN1=2; GROUP=3; CURSOR=4
     REDUCE_LEFT=5; REDUCE_RIGHT=6; REDUCE_OUT=7; IMMEDIATE=8
@@ -34,13 +34,14 @@ class Cond(IntEnum):
     CURSOR_MORE=0; CHAIN_MORE=1; GROUP_MORE=2; LAYER_MORE=3; FINAL_LAYER=4
     LEVEL_MORE=5; TARGET_LEAF=6; INDEX_ODD=7; AUTH_MATCH=8; SAME_PARENT=9
     STEP_EQ_DIGIT=10; STEP_MORE=11; LANE_ENABLED=12; MASK_ZERO=13
-    FORS_PAIR_TARGET=14; REDUCE_MORE=15; REDUCE_AGAIN=16; ROOT_EQUAL=17
+    FORS_PAIR_TARGET=14; REDUCE_MORE=15; REDUCE_AGAIN=16; ROOT_EQUAL=17; LTREE_PAIR=18; LTREE_MORE=19
 class N(IntEnum):
     V0=0; V1=1; V2=2; V3=3; L0=4; L1=5; RIGHT=6; CAP0=7; CAP1=8
     NODE=9; TMPNODE=10; SECRET=11; PRF=12; PUBLIC=13; RANDOM=14; ZERO=15
 class Space(IntEnum): LIST=0; STACK=1; AUTH=2
-SPACE_DEPTHS=(68,16,16)
+SPACE_DEPTHS=(68,21,20)
 PROFILE_CODES={"slh_128f":0,"slh_192f":1,"slh_256f":2,"slh_128s":4,"slh_192s":5,"slh_256s":6}
+PROFILE_CODES.update({"xmss_h10":8,"xmss_h16":9,"xmss_h20":10,"lms_h10":11,"lms_h15":12,"lms_h20":13})
 MAGIC=0x48425350
 ABI=3
 BRANCHES={Op.JMP,Op.BR}
@@ -74,6 +75,7 @@ ACCESS={
     Op.WAIT:({'pending'},{'nodes','hmsg','pending'}),Op.INPUT:(set(),{'nodes'}),
     Op.EMIT:({'nodes'},set()),Op.ROOT_COMPARE:({'nodes'},{'root_equal'}),
     Op.END:({'root_equal'},set()),Op.JMP:(set(),set()),
+    Op.XMSS_MASK:({'nodes'},{'nodes'}),
     Op.CHAIN:({'nodes','chain','digit','mask','cursor','leaf','layer','tree','profile'},
         {'nodes','step'}),
     Op.BR:({'cursor','chain','group','layer','level','height','target','index','path',
@@ -88,7 +90,7 @@ FIELDS.update({Op.LAYER_INIT:"d",Op.CURSOR_NEXT:"i",Op.CHAIN_NEXT:"i",Op.HEIGHT:
     Op.TARGET:"d",Op.DIGIT_LOAD:"d",Op.STEP_INIT:"da",Op.STEP_NEXT:"d",Op.MASK:"di",
     Op.NODE_BEGIN:"dai",Op.ADRS:"da",Op.REDUCE_INIT:"d",Op.REDUCE_NEXT:"d",
     Op.NMOV:"da",Op.LOAD:"dabi",Op.STORE:"dabi",Op.HASH:"da",Op.INPUT:"d",
-    Op.EMIT:"a",Op.JMP:"i",Op.BR:"dabi",Op.CHAIN:"dab"})
+    Op.EMIT:"a",Op.JMP:"i",Op.BR:"dabi",Op.CHAIN:"dab",Op.XMSS_MASK:"d"})
 
 @dataclass(frozen=True)
 class Instruction:
@@ -115,30 +117,62 @@ def encoding_rules():
         rules[op]+=[f"{f} == 0" for f in "dabi" if f not in FIELDS[op]]
     limits={Op.LAYER_INIT:{'d':1},Op.HEIGHT:{'d':2},Op.TARGET:{'d':1},Op.DIGIT_LOAD:{'d':2},
         Op.STEP_INIT:{'d':2,'a':1},Op.STEP_NEXT:{'d':2},Op.MASK:{'d':3},
-        Op.NODE_BEGIN:{'d':3,'a':1},Op.ADRS:{'d':8,'a':1},Op.REDUCE_INIT:{'d':1},
-        Op.REDUCE_NEXT:{'d':1},Op.NMOV:{'d':10,'a':15},Op.LOAD:{'d':10,'a':2,'b':8},
+        Op.NODE_BEGIN:{'d':3,'a':1},Op.ADRS:{'d':10,'a':1},Op.REDUCE_INIT:{'d':2},
+        Op.REDUCE_NEXT:{'d':2},Op.NMOV:{'d':10,'a':15},Op.LOAD:{'d':10,'a':2,'b':8},
         Op.STORE:{'d':2,'a':15,'b':8},Op.HASH:{'d':11,'a':2},Op.INPUT:{'d':10},
-        Op.EMIT:{'a':15},Op.JMP:{'i':511},Op.BR:{'d':17,'a':1,'b':1,'i':511},
-        Op.CHAIN:{'d':3,'a':2,'b':1}}
+        Op.EMIT:{'a':15},Op.JMP:{'i':511},Op.BR:{'d':19,'a':1,'b':1,'i':511},
+        Op.XMSS_MASK:{'d':1},Op.CHAIN:{'d':3,'a':2,'b':1}}
     for op,fields in limits.items(): rules[op]+=[f"{f} <= {n}" for f,n in fields.items()]
     for op in (Op.CURSOR_NEXT,Op.CHAIN_NEXT): rules[op]+=["i >= 1","i <= 2"]
-    rules[Op.HEIGHT]+=["(d == 2 and i >= 1 and i <= 4) or (d != 2 and i == 0)"]
+    rules[Op.HEIGHT]+=["(d == 2 and i >= 1 and i <= 20) or (d != 2 and i == 0)"]
     rules[Op.MASK]+=["(d == 0 and i <= 3) or (d != 0 and i == 0)"]
-    rules[Op.NODE_BEGIN]+=["(d == 3 and i <= 16383) or (d != 3 and i == 0)"]
+    rules[Op.NODE_BEGIN]+=["(d == 3 and i <= 1048575) or (d != 3 and i == 0)"]
     rules[Op.ADRS]+=["d == 6 or d == 8 or a == 0"]
     rules[Op.HASH]+=["d >= 2"]
     rules[Op.BR]+=["d == 10 or d == 11 or d == 12 or a == 0"]
     for op,space in ((Op.LOAD,'a'),(Op.STORE,'d')):
         rules[op]+=[f"{space} == 0 or b == 0", f"{space} != 0 or b != 0",
-            f"(b == 8 and i < (68 if {space} == 0 else 16)) or (b != 8 and i == 0)"]
+            f"(b == 8 and i < (68 if {space} == 0 else (21 if {space} == 1 else 20))) or (b != 8 and i == 0)"]
     return rules
 RULES=encoding_rules()
 
-def validate_instruction(ins,used):
+def validate_instruction(ins,used,profile=None):
     env=dict(d=ins.d,a=ins.a,b=ins.b,i=ins.imm)
     if any(not eval(rule,{'__builtins__':{}},env) for rule in RULES[ins.op]):
         raise ValueError(f"illegal typed operands: {ins.op.name}")
     if ins.op in BRANCHES and ins.imm>=used: raise ValueError("branch outside code")
+    if profile is not None:
+        if profile.family == "slh":
+            if (ins.op == Op.XMSS_MASK or ins.op == Op.ADRS and ins.d > 8
+                or ins.op in (Op.REDUCE_INIT,Op.REDUCE_NEXT) and ins.d > 1
+                or ins.op == Op.BR and ins.d > 17
+                or ins.op == Op.HEIGHT and ins.d == 2 and ins.imm > 4
+                or ins.op == Op.NODE_BEGIN and ins.d == 3 and ins.imm > 16383):
+                raise ValueError("stateful-only instruction/operand")
+        elif profile.family != "xmss" and (ins.op == Op.XMSS_MASK
+            or ins.op == Op.ADRS and ins.d in (9,10)
+            or ins.op in (Op.REDUCE_INIT,Op.REDUCE_NEXT) and ins.d == 2
+            or ins.op == Op.BR and ins.d in (18,19)):
+            raise ValueError("XMSS-only instruction/operand")
+
+def validate_recipe(recipe,p):
+    allowed=(15<<56)|(255<<48)|(255<<40)|(63<<32)|(63<<24)
+    if recipe & ~allowed: raise ValueError("recipe reserved bits")
+    shape=(recipe>>56)&15;domain=(recipe>>48)&255;arity=(recipe>>40)&255
+    output=(recipe>>32)&63;blocks=(recipe>>24)&63
+    if not 1<=blocks<=32: raise ValueError("recipe block bound")
+    if p.family=="slh":
+        if shape not in (1,2,3,4,12) or output!=(p.m if shape==4 else p.n): raise ValueError("SLH recipe")
+        if shape in (1,3,4) and arity!=1 or shape==2 and arity not in (1,2) or shape==12 and not 1<=arity<=68: raise ValueError("recipe arity")
+        length=2*p.n+32 if shape==1 else p.n+32+arity*p.n if shape in (2,12) else 2*p.n+87 if shape==3 else 3*p.n+87
+    elif p.family=="xmss":
+        if shape not in (5,6,7,8) or output!=32 or arity!=(2 if shape==7 else 1): raise ValueError("XMSS recipe")
+        if shape==5 and domain>4 or shape!=5 and domain: raise ValueError("XMSS domain")
+        length={5:128 if domain==0 else 96,6:96,7:128,8:215}[shape]
+    else:
+        if shape not in (9,10,11,13,14,15) or output!=32 or domain or arity!=(2 if shape==14 else 67 if shape==15 else 1): raise ValueError("LMS recipe")
+        length={9:55,10:55,11:141,13:54,14:86,15:2166}[shape]
+    if blocks<length//136+1: raise ValueError("recipe block capacity")
 
 @dataclass(frozen=True)
 class MicroImage:
@@ -147,6 +181,9 @@ class MicroImage:
 
     @property
     def used(self): return self.descriptors[12]
+
+    @property
+    def hash_backend(self): return "shake"
 
     @property
     def entries(self):
@@ -171,28 +208,11 @@ class MicroImage:
         p = get_profile(name)
         expected = sum(x << (8*i) for i, x in enumerate((p.n,p.hp,p.d,p.k,p.a,p.m,p.h,p.chains)))
         if self.descriptors[14] != expected: raise ValueError("profile parameter mismatch")
-        if self.descriptors[13] != (p.keygen_bytes | (p.signature_bytes << 32)):
+        if self.descriptors[13] != (p.hardware_keygen_bytes | (p.hardware_signature_bytes << 32)):
             raise ValueError("output byte counts")
-        recipe_allowed = (15 << 56) | (255 << 48) | (255 << 40) | (63 << 32) | (63 << 24)
-        for recipe in self.descriptors[2:12]:
-            if recipe & ~recipe_allowed: raise ValueError("recipe reserved bits")
-            shape = (recipe >> 56) & 15
-            arity = (recipe >> 40) & 255
-            output = (recipe >> 32) & 63
-            blocks = (recipe >> 24) & 63
-            if shape not in (1,2,3,4,12) or not 1 <= output <= 49 or not 1 <= blocks <= 32:
-                raise ValueError("recipe bounds/shape")
-            if shape in (1,3,4) and arity != 1: raise ValueError("recipe arity")
-            if shape == 2 and arity not in (1,2): raise ValueError("recipe arity")
-            if shape == 12 and not 1 <= arity <= 68: raise ValueError("list arity")
-            if output != (p.m if shape == 4 else p.n):
-                raise ValueError("recipe output must match profile")
-            length = (2*p.n+32 if shape == 1 else p.n+32+arity*p.n
-                      if shape in (2,12) else 2*p.n+87 if shape == 3 else 3*p.n+87)
-            if blocks < length//136+1:
-                raise ValueError("recipe block capacity cannot cover legal inputs")
+        for recipe in self.descriptors[2:12]: validate_recipe(recipe,p)
         decoded=tuple(Instruction.decode(w) for w in self.program[:self.used])
-        for ins in decoded: validate_instruction(ins,self.used)
+        for ins in decoded: validate_instruction(ins,self.used,p)
         pending=[(pc,False) for pc in self.entries];seen=set()
         while pending:
             pc,active=pending.pop()
@@ -294,7 +314,7 @@ def sv_definitions():
         clauses=[]
         for rule in RULES[op]:
             # One conditional expression is used for memory-space capacity.
-            rule=re.sub(r'\(68 if ([ad]) == 0 else 16\)',r'(\1 == 0 ? 68 : 16)',rule)
+            rule=re.sub(r'\(68 if ([ad]) == 0 else \(21 if [ad] == 1 else 20\)\)',r'(\1 == 0 ? 68 : (\1 == 1 ? 21 : 20))',rule)
             rule=rule.replace(' and ',' && ').replace(' or ',' || ')
             clauses.append('('+rule+')')
         rows.append('        OP_'+op.name+':typed_encoding_valid='+(' && '.join(clauses) or "1'b1")+';')

@@ -51,11 +51,11 @@ def main():
     lane_log = folder/"hash_lane.log"
     run([sys.executable, "scripts/check_recipes.py", "--unroll", "1"], lane_log)
     lane_passes = re.findall(r"SINGLE_HASH_LANE_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
-    if {mask for _, mask in lane_passes} != {"101e", "0006"}:
+    if {mask for _, mask in lane_passes} != {"101e", "0006", "fffe"}:
         raise RuntimeError(f"Missing lane unit success marker; see {lane_log}")
     turnover_passes = re.findall(r"SINGLE_HASH_TURNOVER_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
     turnover_cases = {mask: int(count) for count, mask in turnover_passes}
-    if len(turnover_passes) != 2 or turnover_cases != {"101e": 5, "0006": 3}:
+    if len(turnover_passes) != 3 or turnover_cases != {"101e": 5, "0006": 3, "fffe": 11}:
         raise RuntimeError(f"Missing single-Hash turnover protocol coverage; see {lane_log}")
 
     obj = folder/"processor"/key; obj.mkdir(parents=True, exist_ok=True)
@@ -72,7 +72,17 @@ def main():
     if ABI >= 3 and (len(macro_passes) != 1 or int(macro_passes[0][0]) != 384):
         raise RuntimeError(f"Missing complete ABI 3 CHAIN unit matrix; see {processor_log}")
     macro_cases = int(macro_passes[0][0]) if macro_passes else 0
-    result = dict(passed=True,abi=ABI,macro_cases=macro_cases, source_sha256=inputs, verilator_version=version,
+    stateful_passes=re.findall(r'MICRO_STATEFUL_CHAIN_PASS cases=(\d+)',processor_log.read_text())
+    if stateful_passes!=['256']:raise RuntimeError('Missing stateful CHAIN family/mode/digit matrix')
+    boundary_passes=re.findall(r'MICRO_STATEFUL_BOUNDARY_PASS cases=(\d+)',processor_log.read_text())
+    if boundary_passes!=['64']:raise RuntimeError('Missing stateful widths, RAM partitions and family permissions')
+    ownership_passes=re.findall(r'MICRO_STATEFUL_KEY_OWNERSHIP_PASS lifetimes=(\d+)',processor_log.read_text())
+    if len(ownership_passes)!=1 or int(ownership_passes[0])<1440:
+        raise RuntimeError('Missing persistent XMSS KEY ownership assertions')
+    if any(sha(ROOT/name)!=value for name,value in inputs.items()):
+        raise RuntimeError('Unit sources changed during verification')
+    result = dict(passed=True,abi=ABI,macro_cases=macro_cases,stateful_macro_cases=256,stateful_boundary_cases=64,
+                  stateful_key_lifetimes=int(ownership_passes[0]),source_sha256=inputs, verilator_version=version,
                   lane_cases={mask: int(count) for count, mask in lane_passes},
                   turnover_cases=turnover_cases,
                   processor_binary_sha256=sha(executable),

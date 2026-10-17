@@ -21,7 +21,7 @@ NAMES=('slh_128f','slh_128s','slh_192f','slh_192s','slh_256f','slh_256s')
 
 def digest(data):return hashlib.sha256(data).hexdigest()
 
-def check(run=None):
+def check(run=None, *, historical=True):
     receipt=json.loads((ARCHIVE/'SOURCE.json').read_text())
     for path,identity in receipt['reference_evidence'].items():
         assert digest((ARCHIVE/path).read_bytes())==identity['sha256'],('source reference evidence identity',path)
@@ -52,7 +52,14 @@ def check(run=None):
     profile=mapped(text('model/profiles.py'))
     profile='\n'.join(line for line in profile.split('\n') if not any('Profile("'+name+'"' in line for name in ('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4')))
     expected['model/profiles.py']=profile.replace('ALIASES = {"slh": "slh_128f", "xmss": "xmss_omega4", "lms": "lms_omega4"}','ALIASES = {"slh": "slh_128f"}')
-    for path,value in expected.items():assert (ROOT/path).read_bytes()==value.encode(),('unrecorded source change',path)
+    with tarfile.open(ARCHIVE/'rtl.tar.gz') as sealed:
+        frozen={entry.name:sealed.extractfile(entry).read() for entry in sealed if entry.isfile()}
+    with tarfile.open(ARCHIVE/'test_sources.tar.gz') as sealed:
+        frozen.update({entry.name:sealed.extractfile(entry).read() for entry in sealed if entry.isfile()})
+    for path,value in expected.items():
+        actual=frozen[path] if historical else (ROOT/path).read_bytes()
+        assert actual==value.encode(),('unrecorded source change',path)
+
     sys.path.insert(0,str(ROOT))
     from model.mHBS import compile_micro
     from model.microcode import ABI,MicroImage,sv_definitions
@@ -73,14 +80,14 @@ def check(run=None):
             try:MicroImage(image.program,tuple(descriptor)).validate()
             except ValueError:pass
             else:raise AssertionError('foreign ABI accepted '+str(abi))
-    for name in ('xmss_h10','lms_h10','xmss_omega4','lms_omega4'):
+    for name in (('xmss_omega4','lms_omega4') if historical else ('xmss_h10','lms_h10','xmss_omega4','lms_omega4')):
         try:compile_micro(name)
         except ValueError:pass
         else:raise AssertionError('unsupported profile accepted '+name)
     result={'passed':True,'source_commit':receipt['source_commit'],'abi':3,'backend':'shake','configuration':'K1U1',
         'controlled_source_comparisons':{p:digest(value.encode()) for p,value in expected.items()},
         'original_and_regenerated_images':image_checks,'images_equal':12,'foreign_abis_rejected':[1,2,4,5],
-        'unsupported_stateful_profiles_rejected':True,'parent_repository_required':False,'formal_equivalence_claimed':False}
+        'historical_frozen_sources_checked':historical,'current_extended_sources_claimed_equal':False if historical else True,'parent_repository_required':False,'formal_equivalence_claimed':False}
     if run:
         candidate=json.loads(Path(run).read_text())['cases']
         baseline=json.loads((ARCHIVE/'source_evidence/functional_rtl.json').read_text())['cases']
@@ -104,8 +111,8 @@ def check(run=None):
     return result
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--rtl-results',type=Path);p.add_argument('--out',type=Path)
-    args=p.parse_args();result=check(args.rtl_results);value=json.dumps(result,indent=2,sort_keys=True)+'\n'
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--rtl-results',type=Path);p.add_argument('--out',type=Path);p.add_argument('--strict-current',dest='historical',action='store_false',help='require the current source to be the unextended original import');p.add_argument('--historical',action='store_true',default=True,help='bind source mapping proof to the original frozen import, and compare current SLH ROMs')
+    args=p.parse_args();result=check(args.rtl_results,historical=args.historical);value=json.dumps(result,indent=2,sort_keys=True)+'\n'
     if args.out:args.out.parent.mkdir(parents=True,exist_ok=True);args.out.write_text(value)
     print(value)
 
