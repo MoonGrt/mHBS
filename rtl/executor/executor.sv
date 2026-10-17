@@ -1,1735 +1,1253 @@
-`timescale 1ns / 1ps
+`timescale 1ns/1ps
 `default_nettype none
-// Single-lane ABI 4 macro executor for SLH and standard SHAKE256 XMSS/LMS.
-// verilog_format: off
+// HBS microprogram ABI 4, fixed K1U1. HASH executes one Hash, CHAIN one
+// WOTS chain, and TREE one bounded HT/FORS tree; image selects groups/layers.
+// L0/L1 are logical node/context slots sharing one physical Hash lane.
+// Only typed metadata and branch instructions may retire between HASH and its explicit WAIT.
 module executor #(
-    parameter integer UNROLL=2, PIPELINE=1
+    parameter integer UNROLL=1, LANES=1,
+    parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
 ) (
-`ifndef SYNTHESIS
-    output logic [15:0] error_code,
-    output logic [63:0] cycles,
-    output wire [63:0] hash_count, permutation_count,
-`endif
-    input wire clk, rst,
     input wire [63:0] image_header, profile_descriptor,
-    output wire [3:0] program_address, input wire [63:0] program_data,
-    output wire [3:0] template_address, input wire [63:0] template_data,
-    output wire [9:0] descriptor_addresses, input wire [127:0] descriptor_data,
-    input wire [3:0] job_entry, input wire [1:0] job_operation,
-    input wire job_valid, output wire job_ready, input wire [6:0] job_message_length,
-    input wire [31:0] job_index, input wire [127:0] job_identifier,
-    input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_public_root, job_randomizer,
-    input wire message_valid, output wire message_ready, input wire [63:0] message_data,
+    output wire [8:0] program_address,
+    input wire [63:0] program_data,
+    input wire [8:0] job_entry,
+    output wire [4:0] descriptor_address,
+    input wire [63:0] descriptor_data,
+    input wire clk, rst,
+    input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
+    input wire [6:0] job_message_length,
+    input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
+    input wire message_valid, output wire message_ready,
+    input wire [63:0] message_data,
     input wire verify_valid, output wire verify_ready,
-    input wire [255:0] verify_data, output logic verify_pass,
-    output wire out_valid, output wire [255:0] out_data,
-    output wire [5:0] out_bytes, output wire busy, output logic done, error
+    input wire [255:0] verify_data,
+    output logic verify_pass,
+    output logic out_valid, output logic [255:0] out_data,
+    output wire [5:0] out_bytes,
+    output wire busy, output logic done, error, output logic [15:0] error_code,
+    output wire [31:0] hash_count, permutation_count,
+    output logic [31:0] cycles
 );
-// verilog_format: on
-    localparam integer N = 32, W = 256, V = 392, INDEX_BITS = 8, MAX_MESSAGE_BYTES = 87;
-    localparam integer DIGEST_BYTES = 49;
-    // Six supported profiles need at most ceil(35*9/8)=40 FORS bytes.
-    // Tree/leaf indices still consume the full V-bit transient Hmsg result.
-    localparam integer FORS_DIGEST_BITS = 320;
-    wire [4:0] config_code = profile_descriptor[4:0];
-    wire decoded_stateful = config_code >= 5'h18 && config_code <= 5'h1d;
-    wire decoded_xmss = decoded_stateful && config_code < 5'h1b;
-`ifdef MHBS_SHA2
-    wire valid_profile=profile_descriptor[63:6]==0 && profile_descriptor[5] &&
-        (decoded_stateful || config_code==0 || config_code==4);
-`else
-    wire valid_profile=profile_descriptor[63:5]==0 && (decoded_stateful
-        || config_code==0 || config_code==1 || config_code==2 || config_code==4 || config_code==5 || config_code==6);
-`endif
-    wire [4:0] decoded_height=(config_code==5'h18 || config_code==5'h1b) ? 5'd10
-        : config_code==5'h19 ? 5'd16 : config_code==5'h1c ? 5'd15 : 5'd20;
-    logic stateful, xmss, small_signature;
-    logic [4:0] stateful_height;
-    logic [1:0] profile_code;
-    logic [5:0] node_bytes;
-    wire [3:0] chain_max = 4'd15;
-    wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14)
-        : profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
-    wire [7:0] LEN1 = {1'b0, node_bytes, 1'b0};
-    // Two reads are sufficient: request recipe plus chain-step recipe.
-    // Macro and tree/chain descriptors are already latched in setup states.
-    typedef enum logic [6:0] {
-        IDLE, MESSAGE, LAUNCH, FETCH, LOAD_DESCRIPTOR, DECODE,
-        TREE_INIT, CHAIN_SETUP, CHAIN_STORE,
-        CHAIN_OUTPUT0=10, CHAIN_NEXT=14, REDUCE_SETUP, LEAF_SETUP,
-        PUSH_NODE, PARENT_SETUP, PARENT_DONE, AUTH_OUTPUT, TREE_FINISH,
-        HASH_ISSUE, HASH_WAIT, HASH_RESULT, ROUTE, TRANSFORM,
-        EMIT, EMIT_NEXT, OUTPUT_CHUNK, DRAIN, FINISH, FAILED,
-        VERIFY_INPUT, VERIFY_RANDOM, VERIFY_CHAIN_INPUT,
-        VERIFY_CHAIN_RUN, VERIFY_CHAIN_ADVANCE,
-        // Explicit gaps preserve active state encodings used by cycle observers.
-        PIPE_ISSUE, PIPE_WAIT, PIPE_LOAD, PIPE_CAPTURE_NEXT=42,
-        LT_SETUP=44, LT_STORE, LT_COPY, LT_NEXT, LT_FINISH, SF_LEAF=50, SF_LEAF_DONE, SF_RANDOM,
-        PIPE_VERIFY_INPUT, LT_PIPE_INIT, LT_PIPE_ISSUE, LT_PIPE_WAIT,
-        FORS_PICK=58, FORS_AUTH0, FORS_BEGIN, FORS_LEFT, FORS_ISSUE=63, FORS_WAIT, FORS_LEVEL, FORS_AUTH1, FORS_PUSH,
-        FORS_LEAF_NEXT, FORS_ROOT_NEXT, PUSH_STACK
-    } state_t;
-    state_t state, continuation;
-    logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
-    logic direct_writeback_phase;
-    task automatic enter_state(input state_t next_state);
-        begin
-            state <= next_state;
-            // Prepare interface controls with the state transition, so binary
-            // state decoding does not cross recipe ready and return to prefetch.
-            lane_request_active <= next_state == HASH_ISSUE;
-            batch_issue_phase <= PIPELINE > 1 && (next_state == PIPE_ISSUE ||
-                next_state == LT_PIPE_ISSUE || next_state == FORS_ISSUE);
-            batch_verify_phase <= PIPELINE > 1 && next_state == PIPE_VERIFY_INPUT;
-            pipe_response_accept <= PIPELINE > 1 && (next_state == PIPE_ISSUE ||
-                next_state == PIPE_WAIT || next_state == PIPE_VERIFY_INPUT ||
-                next_state == LT_PIPE_WAIT || next_state == FORS_WAIT);
-            // Decode the destination on the transition edge, before these
-            // shared phase controls fan out through the recipe formatter.
-            // IDLE membership is empty, so the reset transition clears all four.
-            pipe_mode <= PIPELINE > 1 && (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
-                next_state == PIPE_VERIFY_INPUT || next_state == LT_PIPE_ISSUE ||
-                next_state == LT_PIPE_WAIT || next_state == FORS_LEFT ||
-                next_state == FORS_ISSUE || next_state == FORS_WAIT);
-            fors_pipe <= PIPELINE > 1 && (next_state == FORS_LEFT ||
-                next_state == FORS_ISSUE || next_state == FORS_WAIT);
-            lt_pipe <= PIPELINE > 1 && (next_state == LT_PIPE_ISSUE || next_state == LT_PIPE_WAIT);
-            fors_leaves <= PIPELINE > 1 && indexing == 1 && !verifying &&
-                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT);
-            // Direct-result ownership is stable for the whole batch. Prepare
-            // it at the same transition edge as request/response controls;
-            // algorithm and operation decoding no longer crosses RAM writes.
-            direct_writeback_phase <= PIPELINE > 1 && pipe_direct &&
-                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
-                 next_state == PIPE_VERIFY_INPUT);
-        end
-    endtask
-    // Abort outstanding execution on an error. The autonomous wrapper halts
-    // until reset; this benchmark does not track index consumption.
-    // The main controller uses return-state registers and need not synthesize
-    // as a one-hot FSM. Never drive asynchronous reset from its binary decode.
-    (* dont_touch="yes" *) logic abort_execution;
-    wire execution_rst = rst || abort_execution;
+    `include "rtl/executor/instructions.svh"
+    localparam integer MAX_MESSAGE_BYTES=87;
+    typedef enum logic [2:0] {IDLE,MESSAGE,LAUNCH,EXEC,FINISH,FAILED,MACRO,TREE_RUN} phase_t;
+    phase_t phase;
     logic [1:0] operation;
-    wire verifying = operation == 2;
-    // Hash, output and Verify transfers are serialized. Their continuation
-    // is consumed before another transfer starts, so one register is enough.
-    // Boot loader owns immutable Job registers for this reset epoch.
-    wire [255:0] secret_seed = job_secret_seed, secret_prf = job_secret_prf;
-    wire [255:0] public_seed = job_public_seed, randomizer = job_randomizer;
-    logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
-    logic [6:0] message_length, message_received;
-    logic [W-1:0] value[0:3];
-    logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
-    logic [63:0] scalar_tree;
-    logic [19:0] scalar_leaf;
-    logic [11:0] checksum;
-    logic [7:0] transform_index;
-    logic [7:0] lt_count, lt_cursor;
-    logic [3:0] lt_level;
-    localparam integer FORS_BATCH = 4 * ((PIPELINE + 3) / 4);
-    // FORS runs before WOTS. Its at most 35 roots use 0..34, so
-    // the 24-node microgroup scratch can reuse dead endpoints 36..59.
-    // Tree-stack/auth data remain independently live in 68..107.
-    localparam integer FORS_SCRATCH = 36, WORKSPACE_DEPTH = 128;
-    logic fors_level, fors_roots_pending;
-    logic [4:0] fors_total, fors_offset, fors_root_cursor;
-    logic [20:0] fors_base;
-    logic [9:0] fors_digest_offset;
-    logic [13:0] fors_target_prefetch;
-    // A FORS microgroup keeps target/base stable while leaves and parents run.
-    // Prepare its unsigned relative index on the existing setup edge. The
-    // consumer then compares a bounded five-bit index instead of cascading
-    // two full-width additions and a full-width range comparison.
-    logic [20:0] fors_target_delta;
-    wire fors_target_group = fors_target_delta < {16'd0, fors_total};
-    wire [5:0] fors_wave_end = {1'b0, fors_offset} + 6'(PIPELINE);
-    wire fors_target_wave = fors_target_group &&
-        fors_target_delta[4:0] >= fors_offset &&
-        {1'b0, fors_target_delta[4:0]} < fors_wave_end;
-    wire [4:0] fors_capture_tag = fors_target_delta[4:0] - fors_offset;
-    // Four-leaf microgroups have a four-aligned base. One shared root-index
-    // addition also supplies its final leaf by restoring the two low bits.
-    wire [20:0] fors_root_index = (fors_base >> 2) + 21'(fors_root_cursor);
-    wire [4:0] fors_outputs = fors_total >> (fors_level ? 2 : 1);
-    wire sign_only = stateful && !verifying && standalone_chain && macro_flags[2];
-    logic [4:0] layer;
-    logic [5:0] group_index;
-    logic [3:0] macro_op, macro_flags;
-    logic [4:0] macro_desc, macro_route;
-    logic [63:0] saved_descriptor, saved_chain_descriptor;
-    wire [63:0] descriptor = saved_descriptor;
-    wire [63:0] route_descriptor = descriptor_data[127:64];
+    wire [7:0] n=profile_descriptor[7:0], hp=profile_descriptor[15:8];
+    wire [7:0] layers=profile_descriptor[23:16], fors_k=profile_descriptor[31:24];
+    wire [7:0] fors_a=profile_descriptor[39:32], digest_bytes=profile_descriptor[47:40];
+    wire [7:0] total_height=profile_descriptor[55:48], chain_count=profile_descriptor[63:56];
+    wire [5:0] node_bytes=tree_owner ? tree_node_bytes : {n[5:3],3'd0};
+    wire [7:0] len1={2'd0,node_bytes}<<1;
+    wire [8:0] fors_bytes=({1'b0,fors_k}*{1'b0,fors_a}+9'd7)>>3;
+    wire [7:0] tree_bits=total_height-hp;
+    wire config_valid=(n==16 || n==24 || n==32) && hp>0 && hp<=10
+        && layers>0 && layers<=31 && fors_k>0 && fors_k<=35 && fors_a>0 && fors_a<=14
+        && (fors_k*fors_a)<=320 && digest_bytes<=49 && digest_bytes>0
+        && total_height>=hp && tree_bits<=64 && chain_count<=67 && chain_count>0;
 
-    logic seq_start, seq_complete;
-    wire seq_ready, seq_done, cmd_valid;
-    wire [47:0] cmd;
-    // verilog_format: off
-    sequencer sequencer (
-        .clk,.rst(execution_rst),.start(seq_start),.entry(job_entry),.ready(seq_ready),.done(seq_done),
-        .program_address,.program_data,.template_address,.template_data,
-        .command_valid(cmd_valid),.command_ready(state==FETCH),.command_done(seq_complete),.command(cmd)
-    );
-    // verilog_format: on
-
-    logic [4:0] parent_id;
-    wire [63:0] chain_descriptor = saved_chain_descriptor;
-    logic standalone_chain;
-    logic [4:0] tree_height, node_level, auth_level;
-    logic [1:0] indexing;
-    logic [20:0] target, leaf_cursor, node_index;
-    // Follow the target's path as the current node climbs the tree. Keeping
-    // this coordinate beside node_index removes a variable barrel shift from
-    // the shared workspace write-enable/address/data selection path.
-    logic [20:0] target_at_level;
-    logic auth_node_match, node_below_root;
-    // The parent-path decision is stable while parent setup formats its task.
-    // Shadow it with the node coordinate to keep a wide equality comparison
-    // out of the shared state/clear enables without inserting a controller beat.
-    logic target_parent_match;
-    wire [20:0] tree_target = stateful ? {1'b0, job_index[19:0]}
-        : descriptor[37:36] == 1 ? {7'd0, fors_target_prefetch} : {1'b0, scalar_leaf};
-    logic [INDEX_BITS-1:0] chain_cursor, endpoint_count;
-    localparam integer PIPE_BATCH = PIPELINE;
-    localparam integer TAG_BITS   = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
-    localparam integer COUNT_BITS = $clog2(PIPELINE + 1);
-    logic pipe_cache_valid, pipe_batch_used;
-    logic pipe_rolling;
-    logic [PIPE_BATCH-1:0] pipe_active;
-    logic [7:0] pipe_next_chain, pipe_completed;
-    logic [INDEX_BITS-1:0] batch_chain_prefetch;
-    logic [4:0] batch_digit_prefetch;
-    logic [7:0] pipe_chain_index[0:PIPE_BATCH-1];
-    logic [TAG_BITS-1:0] roll_slot;
-    logic roll_available;
-    logic [PIPE_BATCH-1:0] roll_next_free;
-    logic [TAG_BITS-1:0] roll_next_slot;
-    // Prepare the next allocator result beside the ownership update. A tag
-    // retired on this edge is first offered in the following cycle, matching
-    // the ownership bitmap while removing its priority encoder from ready.
-    wire [PIPE_BATCH-1:0] roll_free = ~pipe_active;
-    always_comb begin
-        roll_next_free = roll_free;
-        if (pipe_valid) roll_next_free[pipe_tag] = 1'b1;
-        if (pipe_selected && pipe_ready) roll_next_free[issue_slot] = 1'b0;
-        roll_next_slot = 0;
-        for (integer j = PIPE_BATCH - 1; j >= 0; j--)
-            if (roll_next_free[j]) roll_next_slot = TAG_BITS'(j);
-    end
-    wire  [  TAG_BITS-1:0] issue_slot = pipe_rolling ? roll_slot : pipe_issue_slot;
-    logic [  TAG_BITS-1:0] pipe_issue_slot;
-    logic [COUNT_BITS-1:0] pipe_pair;
-    logic [PIPE_BATCH-1:0] pipe_done_mask, pipe_expected_mask;
-    wire [255:0] pipe_read_result, pipe_read_capture, pipe_response_result;
-    logic [7:0] pipe_seed_domain, pipe_step_domain;
-    // Stateful endpoint batches use the same single write port as SLH WOTS.
-    // Sign-only and verification batches retain their CHAIN_STORE path.
-    wire pipe_direct = PIPELINE > 1 && indexing != 1 && (stateful ? (!verifying && !sign_only) : operation == 1);
-    logic fors_pipe, fors_leaves, lt_pipe, pipe_mode;
-    wire pipe_ready, pipe_valid, pipe_selected;
-    // The final response first commits its bitmap/count. The controller
-    // observes only registered retirement, separating recipe return control
-    // from the next execution phase and RAM-address preparation.
-    wire lt_batch_complete =
-        (pipe_done_mask & pipe_expected_mask) == pipe_expected_mask;
-    wire [TAG_BITS-1:0] pipe_tag;
-`ifndef SYNTHESIS
-    wire [63:0] pipe_hashes, pipe_permutations;
-`endif
-    wire  [255:0] selected_capture = pipe_batch_used ? pipe_read_capture : lane_capture;
-    logic [255:0] node_value;
-    localparam integer STACK_BASE = 68, AUTH_BASE = 88;
-
-    logic [4:0] hash_recipe_id;
-    assign descriptor_addresses = {
-        state == CHAIN_SETUP ? chain_descriptor[48:44] : macro_route, hash_recipe_id[4:0]
-    };
-    always @* begin
-        hash_recipe_id = macro_desc;
-        case (state)
-            TREE_INIT: hash_recipe_id = {1'b0, saved_descriptor[58:52]};
-            EMIT: hash_recipe_id = emit_base + emit_cursor;
-            CHAIN_SETUP: hash_recipe_id = chain_descriptor[59:52];
-            VERIFY_CHAIN_RUN: hash_recipe_id = chain_descriptor[48:44];
-            REDUCE_SETUP, LT_PIPE_INIT: hash_recipe_id = chain_descriptor[43:36];
-            LT_SETUP: if (PIPELINE == 1) hash_recipe_id = chain_descriptor[43:36];
-            SF_LEAF: hash_recipe_id = chain_descriptor[35:28];
-            PARENT_SETUP: hash_recipe_id = parent_id;
-            default: begin
-            end
-        endcase
-    end
-    logic [63:0] task_recipe, task_step;
-    logic task_chain;
-    logic task_capture;
-    logic [4:0] task_steps, task_capture_after;
-    logic [19:0] task_leaf;
-    logic [INDEX_BITS-1:0] task_a;
-    // Every supported address fits 21 bits: LMS leaves are 2^h+q,
-    // h<=20; FORS uses a six-bit group and at most a fourteen-bit leaf.
-    // Extend at the recipe boundary rather than carrying eleven dead bits.
-    logic [20:0] task_b;
-    wire [19:0] fors_tree_base = {14'd0, group_index} << FORS_A;
-    wire [20:0] fors_chain_address = {1'b0, fors_tree_base}
-        + (verifying ? target : leaf_cursor);
-    wire [4:0] parent_level = node_level + 5'd1;
-    wire [20:0] parent_index = node_index >> 1;
-    wire [20:0] parent_address = parent_index
-        + (indexing == 1 ? ({1'b0, fors_tree_base} >> parent_level)
-           : indexing == 2 ? (21'd1 << (tree_height - parent_level)) : 21'd0);
-    wire [20:0] batch_address = fors_pipe
-        ? ({1'b0, fors_tree_base} >> (fors_level ? 2 : 1))
-          + (fors_base >> (fors_level ? 2 : 1))
-          + 21'(fors_offset) + 21'(pipe_issue_slot)
-        : lt_pipe ? 21'(lt_cursor >> 1) + 21'(pipe_issue_slot)
-        : indexing == 1 ? {1'b0, fors_tree_base} + batch_leaf_index : 21'd0;
-    // Parent operands stay unchanged until the successful parent response
-    // is consumed. Other recipes do not consume the right input, so no
-    // duplicate parent-right register is needed.
-    wire [255:0] parent_right = verifying && continuation==PARENT_DONE && !node_index[0] ? emit_value : node_value;
-    // A scalar input is dead when its result arrives. Parent setup loads
-    // the left operand into result; LMS leaves and Verify chains already
-    // have their input there. The right node remains independently live.
-    wire verify_step_needed = task_b[3:0] != chain_max;
-    wire lane_ready, lane_valid, lane_error;
-    wire [V-1:0] lane_value;
-    wire [255:0] lane_capture;
-    wire [INDEX_BITS-1:0] lane_list_next;
-`ifndef SYNTHESIS
-    wire [63:0] lane_hashes, lane_permutations;
-    logic [63:0] hash_base, permutation_base;
-`endif
-
-    logic [V-1:0] result;
-    // ROUTE consumes these registers before it can update any source. Keep
-    // the original staging cycle, but remember only the source selection.
-    localparam logic [1:0] ROUTE_HASH = 0, ROUTE_NODE = 1, ROUTE_SAVED = 2, ROUTE_EMIT = 3;
-    logic [1:0] route_source;
-    wire [V-1:0] route_value = route_source==ROUTE_HASH ? result
-        : {{(V-W){1'b0}}, (route_source==ROUTE_NODE ? node_value
-                        : route_source==ROUTE_SAVED ? value[3] : emit_value)};
-    // Captures remain stable until CHAIN_OUTPUT0 consumes them.
-`ifndef SYNTHESIS
-    wire [63:0] total_hashes = lane_hashes + pipe_hashes;
-    wire [63:0] total_permutations = lane_permutations + pipe_permutations;
-    assign hash_count = total_hashes - hash_base;
-    assign permutation_count = total_permutations - permutation_base;
-`endif
-
-    logic endpoint_write;
-    logic [INDEX_BITS-1:0] endpoint_address;
-    wire [INDEX_BITS-1:0] endpoint_read0, endpoint_read1;
-    logic [255:0] endpoint_data;
-    wire [255:0] endpoint_value0, endpoint_value1;
-    // All list producers are mutually exclusive. A single write port serves
-    // WOTS completions, FORS roots and in-place L-tree reduction.
-    wire root_write = state == ROUTE && macro_route != 0 && route_descriptor[53];
-    // verilog_format: off
-    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS)) endpoints (
-        .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
-        .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1)
-    );
-    // verilog_format: on
-    wire [INDEX_BITS-1:0] batch_chain_index = batch_chain_prefetch;
-    // Response consumption already has a registered phase flag. Direct
-    // writeback needs the published response tag; deferred reads use pipe_pair.
-    // Avoid decoding indexing/algorithm/direct mode on the context RAM address.
-    wire [TAG_BITS-1:0] context_read_tag = state == FORS_PICK ?
-        TAG_BITS'(fors_capture_tag) :
-        pipe_response_accept ? pipe_tag : TAG_BITS'(pipe_pair);
-    wire [20:0] batch_leaf_index=leaf_cursor+21'(fors_leaves ? fors_offset : 0)+21'(pipe_issue_slot);
-    assign pipe_selected=PIPELINE>1 && (batch_issue_phase || (batch_verify_phase && verify_valid))
-        && (fors_pipe || (pipe_rolling ? (pipe_next_chain<endpoint_count && roll_available) : pipe_expected_mask[pipe_issue_slot]));
-    // verilog_format: off
-    recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),
-        .UNROLL(UNROLL),.PIPELINE(PIPELINE),.MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),
-        .SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe)) lane (
-`ifndef SYNTHESIS
-        .hash_count(lane_hashes),
-        .permutation_count(lane_permutations),
-        .batch_hashes(pipe_hashes),.batch_permutations(pipe_permutations),
-`endif
-        .clk,.rst(execution_rst),.node_bytes,
-        .batch_mode(pipe_mode),.batch_request_valid(pipe_selected),.batch_request_ready(pipe_ready),
-        .batch_request_tag(issue_slot),
-        .batch_steps(lt_pipe || fors_pipe ? 5'd0 : stateful && verifying ? {1'b0,chain_max}-batch_digit_prefetch
-        : (sign_only || (macro_flags[3] && leaf_cursor==target)) ? batch_digit_prefetch : chain_descriptor[19:15]),
-        .batch_family(stateful ? (xmss ? 2'd1 : 2'd2) : 2'd0),
-        .batch_no_seed(lt_pipe || fors_pipe || (stateful && verifying)),.batch_start(stateful && verifying ? 4'(batch_digit_prefetch) : 4'd0),
-        .batch_initial_value(fors_pipe || lt_pipe ? endpoint_value0 : verify_data),
-        .batch_fixed_shape(fors_pipe ? 4'd2 : lt_pipe ? 4'd8 : 4'd0),.batch_pair(lt_pipe || fors_pipe),.batch_right(endpoint_value1),
-        .batch_capture_after(indexing==1 ? 5'd0 : batch_digit_prefetch),
-        .batch_capture_enable(!fors_pipe && !lt_pipe && !verifying && macro_flags[0] && (indexing==1 ? batch_leaf_index==target : leaf_cursor==target)),
-        .batch_leaf(lt_pipe ? leaf_cursor[19:0] : indexing==1 ? scalar_leaf : leaf_cursor[19:0]),
-        .batch_a(fors_pipe ? (fors_level ? 8'd2 : 8'd1) : lt_pipe ? {4'd0,lt_level} : indexing==1 ? 8'd0 : batch_chain_index),
-        .batch_b({11'd0, batch_address}),
-        .batch_seed_domain(pipe_seed_domain),.batch_step_domain(pipe_step_domain),
-        .batch_response_valid(pipe_valid),.batch_response_ready(pipe_response_accept),.batch_response_tag(pipe_tag),
-        .batch_response_digest(pipe_response_result),.batch_response_capture(),
-        // Direct writeback and deferred consumption never overlap.
-        // Select their tag before reading the context RAM, removing a
-        // second 256-bit digest/key read port and its output selectors.
-        .batch_read_tag(context_read_tag),
-        .batch_read_digest(pipe_read_result),.batch_read_capture(pipe_read_capture),
-        .request_valid(lane_request_active),
-        .request_ready(lane_ready), .request_recipe(task_recipe), .request_step_recipe(task_step),
-        .request_chain(task_chain), .request_steps(task_steps),
-        .request_capture_after(task_capture_after),
-        .request_capture(task_capture),
-        .secret_seed,.secret_prf,.public_seed,.root(value[3][W-1:0]),
-        .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0][W-1:0] : randomizer),
-        .identifier(job_identifier),.message_buffer,.message_length,
-        .request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
-        .request_a(task_a),.request_b({11'd0, task_b}),.request_left(result[W-1:0]),.request_right(parent_right),
-        .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
-        .list_data0(endpoint_value0),.list_data1(endpoint_value1),
-        .response_valid(lane_valid),.response_ready(state==HASH_WAIT),
-        .response_value(lane_value),.response_capture(lane_capture),.error(lane_error)
-    );
-    // verilog_format: on
-`ifndef SYNTHESIS
-    initial
-        if(UNROLL<1 || PIPELINE<1 || PIPELINE>24 ||
-        UNROLL*PIPELINE>24 || 24%(UNROLL*PIPELINE)!=0)
-            $fatal(1, "Unsupported P/U configuration");
-
-`endif
-
-    // Verify never emits output: share its input-node latch with the output latch.
-    logic [255:0] emit_value;
-    logic [  5:0] emit_length;
-    logic [  7:0] emit_base;
-    logic [3:0] emit_count, emit_cursor;
-    wire [63:0] emit_descriptor = descriptor_data[63:0];
-    // One node per valid cycle, low byte first. The receiver uses done to
-    // delimit the job and out_bytes to discard unused high bytes.
-    assign out_valid = state == OUTPUT_CHUNK;
-    assign out_data = emit_value;
-    assign out_bytes = emit_length;
-    assign job_ready = state == IDLE;
-    assign message_ready = state == MESSAGE;
-    assign verify_ready=verifying && (state==VERIFY_INPUT || (state==PIPE_VERIFY_INPUT && pipe_ready));
-    assign busy = state != IDLE;
-
-    function automatic [31:0] be32(input [31:0] x);
-        be32 = {x[7:0], x[15:8], x[23:16], x[31:24]};
-    endfunction
-    function automatic [4:0] digit(input [7:0] index);
-        reg [7:0] checksum_index;
+    // Every architectural field has fixed writers. There is no indexed scalar
+    // register file, general integer ALU, or common scalar writeback network.
+    logic [4:0] ctx_layer;
+    logic [63:0] ctx_tree;
+    logic [9:0] ctx_leaf;
+    logic [5:0] ctx_group;
+    // Digest bit offset is part of the bounded FORS context. Only explicit
+    // GROUP_INIT/NEXT update it; this avoids a multiplier before TARGET.
+    logic [8:0] ctx_fors_offset;
+    logic [13:0] ctx_target;
+    logic [14:0] ctx_cursor;
+    logic [6:0] ctx_chain;
+    logic [3:0] ctx_step [0:1],ctx_digit [0:1];
+    logic [3:0] ctx_height,ctx_level;
+    logic [13:0] ctx_index,ctx_path;
+    logic [19:0] ctx_fors_base;
+    logic [1:0] ctx_mask,ctx_digit_valid;
+    logic [6:0] ctx_reduce_index,ctx_reduce_span;
+    logic [9:0] addr_leaf [0:1];
+    logic [6:0] addr_a [0:1];
+    // Every typed ADRS constructor is bounded by the FORS address domain:
+    // at most 35 trees of height 14, so all legal B values fit in 20 bits.
+    // Serialization restores the fixed 32-bit ADRS word with zero extension.
+    logic [19:0] addr_b [0:1];
+    logic root_equal,root_compare_valid;
+    localparam [1:0] CHAIN_FULL=0,CHAIN_CAP_FULL=1,CHAIN_CAP_PREFIX=2,CHAIN_SUFFIX=3;
+    typedef enum logic [2:0] {CHAIN_SEED,CHAIN_F,CHAIN_ISSUE,CHAIN_RUN,
+        CHAIN_CAP,CHAIN_RESULT,CHAIN_DONE} chain_state_t;
+    chain_state_t chain_state;
+    logic [1:0] chain_mode;
+    logic chain_slot,chain_feedback,chain_hash_stage,chain_shadow_valid;
+    logic [3:0] chain_digit;
+    // Preflight fixes every F recipe field except the output length and
+    // block limit. Snapshot only those two fields; reconstruct the validated
+    // constants without retaining a second arbitrary 64-bit recipe bank.
+    logic [5:0] chain_f_bytes,chain_f_blocks;
+    wire [63:0] chain_f_recipe={4'd0,4'd2,8'd0,8'd1,2'd0,
+        chain_f_bytes,2'd0,chain_f_blocks,24'd0};
+    logic [4:0] chain_expected_hashes;
+    logic [31:0] macro_count,macro_busy_cycles,macro_hashes;
+    wire chain_active=phase==MACRO;
+    wire [3:0] chain_terminal=chain_mode==CHAIN_CAP_PREFIX ? chain_digit : 4'd15;
+    wire chain_capture_mode=chain_mode==CHAIN_CAP_FULL || chain_mode==CHAIN_CAP_PREFIX;
+    wire chain_complete=chain_active && chain_state==CHAIN_DONE && !error && !tree_owner;
+    wire chain_child_complete=chain_active && chain_state==CHAIN_DONE && !error && tree_owner;
+    // TREE is a fixed sequencer, not a second instruction stream. It never
+    // changes the image-owned layer/tree/leaf/group/target. Child CHAIN returns
+    // here rather than retiring the frozen TREE instruction.
+    localparam [1:0] TREE_ROOT=0,TREE_SIGN=1,TREE_VERIFY=2;
+    typedef enum logic [4:0] {T_PREFLIGHT,T_INIT,T_LEAF,T_INPUT_CHAIN,T_CHILD,
+        T_EMIT_CAP,T_STORE_CHAIN,T_ZERO_LEAF,
+        T_COMPRESS,T_ISSUE,T_WAIT,T_CAPTURE,T_CHECK,T_MERGE_RIGHT,
+        T_MERGE_LEFT,T_SAVE,T_NEXT_LEAF,T_AUTH_BEGIN,T_SECRET_EMIT,
+        T_AUTH_EMIT,T_RETURN,T_CLEANUP,T_DONE,T_FORS_PREP,T_FORS_RESULT,
+        T_FORS_RIGHT,T_INPUT_SECRET,T_FORS_TARGET,
+        T_VERIFY_BEGIN,T_VERIFY_POSITION,T_VERIFY_RIGHT,T_VERIFY_INPUT} tree_state_t;
+    tree_state_t tree_state,tree_resume;
+    logic tree_owner,tree_kind,chain_child_started,tree_profile_valid;
+    logic [1:0] tree_mode;
+    logic [0:0] tree_flags;
+    logic [2:0] tree_node_words;
+    wire [5:0] tree_node_bytes={tree_node_words,3'd0};
+    logic [3:0] tree_height;
+    logic [6:0] tree_chain_count;
+    logic [9:0] tree_leaf_snapshot;
+    logic [13:0] tree_target;
+    logic [19:0] tree_group_base;
+    logic [3:0] tree_recipe_id;
+    logic [1:0] tree_recipe_index,tree_fors_stage;
+    logic [5:0] tree_recipe_blocks[0:3];
+    logic [31:0] tree_count,tree_busy_cycles,tree_hashes,tree_chains,tree_input_wait_cycles,tree_child_busy_cycles;
+    wire tree_active=tree_owner && (phase==TREE_RUN || phase==MACRO);
+    wire [4:0] tree_outer_layer=group_layer;
+    wire [63:0] tree_outer_tree=group_tree;
+    wire [9:0] tree_outer_leaf=tree_leaf_snapshot;
+    wire [5:0] tree_outer_group=ctx_group;
+    wire [13:0] tree_outer_target=tree_target;
+    wire [14:0] tree_limit=15'd1<<tree_height;
+    wire tree_selected=tree_mode==TREE_SIGN && ctx_cursor=={1'b0,tree_target};
+    wire tree_pair_selected=ctx_cursor=={1'b0,tree_target[13:1],1'b0};
+    wire tree_capture_auth=tree_mode==TREE_SIGN && ctx_index==(ctx_path^14'd1);
+    wire tree_skip_parent=!tree_kind && tree_flags[0] && ctx_index[13:1]==ctx_path[13:1];
+    wire tree_complete=tree_active && phase==TREE_RUN && tree_state==T_DONE && !error;
+    wire tree_cleanup=tree_active && phase==TREE_RUN && tree_state==T_CLEANUP && !error;
+    wire chain_child_start=chain_active && tree_owner && !chain_child_started && !error;
+    wire tree_child_start=tree_active && phase==TREE_RUN && tree_state==T_CHILD && !error;
+    wire tree_response=tree_active && phase==TREE_RUN && tree_state==T_WAIT
+        && group_complete && !error && !lane_fault;
+    // Non-target FORS pairs need no intermediate secret/auth capture. Their
+    // PRF0, PRF1, F0, F1 requests turn over while the old response is drained.
+    // The sole RAM port writes the old slot and reads the other F input.
+    wire tree_fors_reissue=tree_response && tree_kind && tree_mode==TREE_SIGN
+        && tree_resume==T_FORS_RESULT && tree_fors_stage!=3 && !tree_pair_selected;
+    wire [1:0] tree_fors_next=tree_fors_stage+2'd1;
+    wire [63:0] tree_fors_next_recipe=tree_recipe(tree_fors_next[1] ? 4'd5 : 4'd4);
+    wire [19:0] tree_fors_next_b=tree_group_base+{5'd0,ctx_cursor}+{19'd0,tree_fors_next[0]};
+    wire tree_direct_request=tree_active && phase==TREE_RUN && !error
+        && (tree_state==T_ISSUE || tree_fors_reissue);
+    wire tree_issue=tree_owner && ((tree_direct_request && physical_ready) || chain_issue);
+    wire [1:0] trace_owner=tree_owner ? 2'd2 : chain_active ? 2'd1 : 2'd0;
+    // Stage at request acceptance, including a CHAIN response/next-F turnover.
+    wire [2:0] trace_tree_stage=tree_kind ? (physical_recipe[59:56]==1 ? 3'd4
+        : physical_recipe[47:40]==1 ? 3'd5 : 3'd6)
+        : chain_active ? (chain_reissue || chain_hash_stage ? 3'd1 : 3'd0)
+        : physical_recipe[59:56]==12 ? 3'd2 : 3'd3;
+    wire [3:0] trace_tree_step=physical_b_value[3:0];
+    wire [14:0] trace_tree_leaf=ctx_cursor;
+    wire [6:0] trace_tree_chain=ctx_chain;
+    wire [3:0] trace_tree_level=ctx_level;
+    function automatic [63:0] tree_recipe(input [3:0] rid);
+        reg [3:0] shape;
+        reg [7:0] domain,arity;
+        reg [1:0] slot;
         begin
-            checksum_index = index - LEN1;
-            digit = 0;
-            if (index < LEN1) begin
-                digit = {1'b0, value[2][{(index[5:0]^6'd1), 2'b0}+:4]};
-            end else begin
-                case (checksum_index)
-                    0: digit = {1'b0, checksum[11:8]};
-                    1: digit = {1'b0, checksum[7:4]};
-                    2: digit = {1'b0, checksum[3:0]};
-                    default: digit = 0;
-                endcase
-            end
-        end
-    endfunction
-    // Scalar setup uses the chain digit; batch requests use a digit prepared
-    // on the preceding acceptance edge. The checksum loop only visits message
-    // digits, so it bypasses the state/index/checksum-digit selection network.
-    wire [4:0] shared_digit = digit(chain_cursor);
-    wire [3:0] transform_digit = value[2][{(transform_index[5:0] ^ 6'd1), 2'b0}+:4];
-    wire [3:0] checksum_increment = ~transform_digit;
-`ifndef SYNTHESIS
-    always @(posedge clk) begin : debug_checksum_increment
-        if (!execution_rst && state == TRANSFORM && descriptor[59:56] == 1) begin
-            if (transform_index >= LEN1 || {1'b0, transform_digit} !== digit(transform_index))
-                $fatal(1, "checksum loop exceeded message digits");
-            if ({1'b0, checksum_increment} !== 5'd15 - digit(transform_index))
-                $fatal(1, "checksum nibble complement changed its value");
-        end
-    end
-`endif
-    wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
-    wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
-    genvar fb;
-    generate
-        for (fb = 0; fb < FORS_DIGEST_BITS; fb = fb + 1) begin : fors_bit_order
-            assign fors_bitstream[fb] = fors_digest[(fb/8)*8+7-(fb%8)];
-        end
-    endgenerate
-    function automatic [9:0] fors_group_offset(input [5:0] group_number);
-        begin
-            case (FORS_A)
-                6: fors_group_offset = ({group_number, 2'b0} + {group_number, 1'b0});
-                8: fors_group_offset = {group_number, 3'b0};
-                9: fors_group_offset = ({group_number, 3'b0} + group_number);
-                12: fors_group_offset = ({group_number, 3'b0} + {group_number, 2'b0});
-                default: fors_group_offset = ({group_number, 4'b0} - {group_number, 1'b0});
+            shape=2;domain=0;arity=1;slot=0;
+            case(rid)
+                4:begin shape=1;domain=6;slot=0;end
+                5:begin domain=3;slot=1;end
+                6:begin domain=3;arity=2;slot=2;end
+                7:begin shape=1;domain=5;slot=0;end
+                8:slot=1;
+                9:begin shape=12;domain=1;arity={1'b0,tree_chain_count};slot=2;end
+                10:begin domain=2;arity=2;slot=3;end
+                default:begin end
             endcase
+            tree_recipe={4'd0,shape,domain,arity,2'd0,tree_node_bytes,
+                2'd0,tree_recipe_blocks[slot],24'd0};
         end
     endfunction
-    function automatic [13:0] fors_target(input [9:0] offset);
-        reg [13:0] segment;
+    function automatic tree_recipe_valid(input [63:0] value,input [3:0] rid);
+        reg [63:0] expected;
+        reg [12:0] input_bytes,capacity;
         begin
-            segment = fors_bitstream >> offset;
-            // verilog_format: off
-            case (FORS_A)
-                6: fors_target = {8'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5]};
-                8: fors_target = {6'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7]};
-                9: fors_target = {5'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8]};
-                12: fors_target = {2'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11]};
-                default: fors_target = {segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11],segment[12],segment[13]};
-            endcase
-            // verilog_format: on
+            expected=tree_recipe(rid);
+            input_bytes=13'd32+{7'd0,tree_node_bytes}+
+                (rid==9 ? (tree_node_bytes==16 ? {2'd0,tree_chain_count,4'd0}
+                    : tree_node_bytes==24 ? {2'd0,tree_chain_count,4'd0}+{3'd0,tree_chain_count,3'd0}
+                    : {1'd0,tree_chain_count,5'd0})
+                : (rid==6 || rid==10) ? {6'd0,tree_node_bytes,1'd0} : {7'd0,tree_node_bytes});
+            capacity=({7'd0,value[29:24]}<<7)+({7'd0,value[29:24]}<<3);
+            tree_recipe_valid=(value & 64'hffffff3f00ffffff)==(expected & 64'hffffff3f00ffffff)
+                && value[39:38]==0 && value[31:30]==0 && value[29:24]>=1 && value[29:24]<=32
+                && capacity>input_bytes;
         end
     endfunction
-    function automatic [63:0] parsed_tree(input [V-1:0] digest);
-        reg [63:0] bytes;
-        integer j;
-        begin
-            if (small_signature) begin
-                case (node_bytes)
-                    16: bytes = {digest[168+:56], 8'd0};
-                    24: bytes = {digest[240+:56], 8'd0};
-                    default: bytes = {digest[312+:56], 8'd0};
-                endcase
-            end else
-                case (node_bytes)
-                    16: bytes = digest[200+:64];
-                    24: bytes = digest[264+:64];
-                    default: bytes = digest[320+:64];
-                endcase
-            for (j = 0; j < 8; j = j + 1) parsed_tree[(7-j)*8+:8] = bytes[j*8+:8];
-            if (small_signature && node_bytes != 32) parsed_tree[63:54] = 0;
-            else if (!small_signature && node_bytes != 32) parsed_tree[63] = 0;
-        end
+    wire tree_start=tree_active && phase==TREE_RUN && tree_state==T_PREFLIGHT
+        && tree_profile_valid && tree_recipe_valid(descriptor_data,tree_recipe_id)
+        && tree_recipe_id==(tree_kind ? 4'd6 : 4'd10) && !error;
+    logic tree_memory_write,tree_right_write;
+    logic [6:0] tree_read_address,tree_write_address;
+    logic [255:0] tree_write_value,tree_right_value;
+
+    // Word 123 is a private transactional capture shadow. It is inaccessible
+    // through every legal object/space selector and uses the existing 1R1W port.
+    wire chain_capture_write,chain_cap_commit,chain_result_commit;
+    wire [255:0] node [0:10];
+    // Fixed architectural objects share one physical asynchronous 1R1W RAM.
+    // Its addresses are private wires, never microprogram operands: LIST
+    // 0..67, STACK 80..95, AUTH 96..111, node object 112+object. K1 recipes
+    // consume either LIST, R, or one logical result; never two RAM operands.
+    // V2, the public root V3, and RIGHT retain their dedicated fixed buses.
+    (* ram_style="distributed" *) logic [255:0] node_memory [0:127];
+    wire [6:0] node_memory_read_address;
+    wire [255:0] node_memory_read=node_memory[node_memory_read_address];
+    logic [15:0] scratch_valid;
+    function automatic scratch_object(input [7:0] object);
+        scratch_object=object==0 || object==1 || object==4 || object==5
+            || object==7 || object==8 || object==9 || object==10;
     endfunction
-    function automatic [9:0] parsed_leaf(input [V-1:0] digest);
-        begin
-            if (small_signature) begin
-                case (node_bytes)
-                    16: parsed_leaf = {1'b0, digest[224], digest[232+:8]};
-                    24: parsed_leaf = {1'b0, digest[296], digest[304+:8]};
-                    default: parsed_leaf = {2'b0, digest[368+:8]};
-                endcase
-            end else
-                parsed_leaf=node_bytes==16 ? {7'b0,digest[264 +:3]}
-                : node_bytes==24 ? {7'b0,digest[328 +:3]} : {6'b0,digest[384 +:4]};
-        end
-    endfunction
-    task automatic fail;
-        begin
-            error <= 1;
-            abort_execution <= 1;
-            enter_state(FAILED);
-        end
-    endtask
-    task automatic complete_macro;
-        begin
-            seq_complete <= 1;
-            enter_state(FETCH);
-        end
-    endtask
-    task automatic route_result(input [1:0] source);
-        begin
-            route_source <= source;
-            enter_state(ROUTE);
-        end
-    endtask
-    task automatic start_output(input [255:0] v, input [5:0] length, input state_t ret);
-        begin
-            emit_value <= v;
-            emit_length <= length;
-            continuation <= ret;
-            enter_state(OUTPUT_CHUNK);
-        end
-    endtask
-    // All slots have completed before this transition. Their capture data
-    // stays intact until the final output beat, then the whole batch is free.
-    task automatic advance_direct_batch;
-        begin
-            if (chain_cursor + PIPELINE < endpoint_count) begin
-                chain_cursor <= chain_cursor + PIPELINE;
-                batch_chain_prefetch <= chain_cursor + INDEX_BITS'(PIPELINE);
-                batch_digit_prefetch <= digit(chain_cursor + INDEX_BITS'(PIPELINE));
-                pipe_pair <= 0;
-                pipe_issue_slot <= 0;
-                pipe_done_mask <= 0;
-                for (integer q = 0; q < PIPE_BATCH; q = q + 1)
-                pipe_expected_mask[q] <= 32'(chain_cursor) + PIPELINE + q < endpoint_count;
-                enter_state(PIPE_ISSUE);
-            end else begin
-                chain_cursor <= endpoint_count - 1'b1;
-                enter_state(CHAIN_NEXT);
-            end
-        end
-    endtask
-    task automatic start_hash(input [63:0] selected_recipe, input state_t ret);
-        begin
-            task_recipe <= selected_recipe;
-            continuation <= ret;
-            enter_state(HASH_ISSUE);
-        end
-    endtask
-    task automatic read_verify_node(input state_t ret);
-        begin
-            continuation <= ret;
-            enter_state(VERIFY_INPUT);
-        end
-    endtask
-
-    // A response belongs to exactly one writeback phase. Authentication and
-    // stack writes intentionally meet in PUSH_NODE; authenticate first, then
-    // PUSH_STACK commits the remaining node through this same write port.
-    wire write_auth = auth_write;
-    wire write_stack = stack_write && !auth_write;
-    wire write_fors = (fors_leaves || fors_pipe) && pipe_valid &&
-        (fors_leaves || state == FORS_WAIT);
-    wire write_ltree = lt_pipe && pipe_valid && state == LT_PIPE_WAIT;
-    wire write_direct = direct_writeback_phase && pipe_valid;
-    wire write_chain = state == CHAIN_STORE && indexing != 1;
-    wire write_scalar_ltree = PIPELINE == 1 && state == LT_STORE;
-    wire write_copy = state == LT_COPY;
-    wire write_root = root_write;
-    wire write_auth_from_ram = write_auth && (state == FORS_AUTH0 || state == FORS_AUTH1);
-    wire write_node = write_stack || (write_auth && !write_auth_from_ram);
-    wire write_from_ram = write_copy || write_auth_from_ram;
-    wire write_response = write_fors || write_ltree || write_direct;
-    wire write_result = write_chain || write_scalar_ltree;
-    wire [INDEX_BITS-1:0] direct_write_address = pipe_rolling
-        ? pipe_chain_index[pipe_tag] : chain_cursor + INDEX_BITS'(pipe_tag);
-    // Form a parallel mux from mutually exclusive owners. Grouping identical
-    // data sources avoids repeating the 256-bit response and node selectors.
-    always_comb begin
-        endpoint_write = write_auth || write_stack || write_response ||
-            write_result || write_copy || write_root;
-        endpoint_address =
-            ({INDEX_BITS{write_auth}} & (INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level))) |
-            ({INDEX_BITS{write_stack}} & (INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level))) |
-            ({INDEX_BITS{write_fors}} & (INDEX_BITS'(FORS_SCRATCH) + INDEX_BITS'(fors_offset) + INDEX_BITS'(pipe_tag))) |
-            ({INDEX_BITS{write_ltree}} & ((lt_cursor >> 1) + INDEX_BITS'(pipe_tag))) |
-            ({INDEX_BITS{write_direct}} & direct_write_address) |
-            ({INDEX_BITS{write_chain}} & chain_cursor) |
-            ({INDEX_BITS{write_scalar_ltree || write_copy}} & (lt_cursor >> 1)) |
-            ({INDEX_BITS{write_root}} & INDEX_BITS'(group_index));
-        endpoint_data =
-            ({W{write_node}} & node_value) |
-            ({W{write_from_ram}} & endpoint_value0) |
-            ({W{write_response}} & pipe_response_result) |
-            ({W{write_result}} & result[W-1:0]) |
-            ({W{write_root}} & route_value[W-1:0]);
-    end
-`ifndef SYNTHESIS
-    // Keep the old priority form as a simulation-only equivalence oracle.
-    logic reference_endpoint_write;
-    logic [INDEX_BITS-1:0] reference_endpoint_address;
-    logic [W-1:0] reference_endpoint_data;
-    always_comb begin
-        reference_endpoint_write = 0;
-        reference_endpoint_address = chain_cursor;
-        reference_endpoint_data = result[W-1:0];
-        if (auth_write) begin
-            reference_endpoint_write = 1;
-            reference_endpoint_address = INDEX_BITS'(AUTH_BASE) + INDEX_BITS'(auth_write_level);
-            reference_endpoint_data = auth_write_data;
-        end else if (stack_write) begin
-            reference_endpoint_write = 1;
-            reference_endpoint_address = INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
-            reference_endpoint_data = node_value;
-        end else if (fors_leaves || fors_pipe) begin
-            reference_endpoint_write = pipe_valid && (fors_leaves || state == FORS_WAIT);
-            reference_endpoint_address=INDEX_BITS'(FORS_SCRATCH)+INDEX_BITS'(fors_offset)+INDEX_BITS'(pipe_tag);
-            reference_endpoint_data = pipe_response_result;
-        end else if (lt_pipe) begin
-            reference_endpoint_write = pipe_valid && state == LT_PIPE_WAIT;
-            reference_endpoint_address = (lt_cursor >> 1) + INDEX_BITS'(pipe_tag);
-            reference_endpoint_data = pipe_response_result;
-        end else if (pipe_direct && pipe_mode) begin
-            reference_endpoint_write = pipe_valid;
-            reference_endpoint_address=pipe_rolling ? pipe_chain_index[pipe_tag] : chain_cursor+INDEX_BITS'(pipe_tag);
-            reference_endpoint_data = pipe_response_result;
-        end else if (state == CHAIN_STORE && indexing != 1) begin
-            reference_endpoint_write = 1;
-        end else if (PIPELINE == 1 && state == LT_STORE) begin
-            reference_endpoint_write = 1;
-            reference_endpoint_address = lt_cursor >> 1;
-        end else if (state == LT_COPY) begin
-            reference_endpoint_write = 1;
-            reference_endpoint_address = lt_cursor >> 1;
-            reference_endpoint_data = endpoint_value0;
-        end else if (root_write) begin
-            reference_endpoint_write = 1;
-            reference_endpoint_address = INDEX_BITS'(group_index);
-            reference_endpoint_data = route_value[W-1:0];
-        end
-    end
-
-    always @(posedge clk) begin : debug_writeback_ownership
-        if (!execution_rst) begin
-            if (!$onehot0({write_auth, write_stack, write_fors, write_ltree,
-                write_direct, write_chain, write_scalar_ltree, write_copy, write_root}))
-                $fatal(1, "multiple workspace write owners");
-            if (direct_writeback_phase !== (pipe_mode && pipe_direct &&
-                !fors_leaves && !fors_pipe && !lt_pipe))
-                $fatal(1, "registered direct writeback ownership differs from phase");
-            if (endpoint_write !== reference_endpoint_write ||
-                (endpoint_write && (endpoint_address !== reference_endpoint_address ||
-                 endpoint_data !== reference_endpoint_data)))
-                $fatal(1, "workspace write differs from priority reference");
-        end
-    end
-`endif
-
-    generate
-        begin : read_addresses
-            logic [INDEX_BITS-1:0] address, adjacent_address, next_address, next_adjacent_address;
-            function automatic [INDEX_BITS-1:0] adjacent(input [INDEX_BITS-1:0] selected);
-                adjacent = selected == INDEX_BITS'(WORKSPACE_DEPTH - 1)
-                    ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : selected + 1'b1;
-            endfunction
-            // Form each address pair before the state/ready selection. In
-            // particular, ready must not cross the full address mux followed
-            // by an incrementer before reaching the adjacent-address register.
-            wire [INDEX_BITS-1:0] lt_issue_address =
-                lt_cursor + ((INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1);
-            wire [INDEX_BITS-1:0] lt_next_address = lt_cursor + INDEX_BITS'(2 * PIPELINE);
-            wire [INDEX_BITS-1:0] fors_leaf_address = INDEX_BITS'(FORS_SCRATCH)
-                + INDEX_BITS'(fors_target_delta ^ 21'd1);
-            wire [INDEX_BITS-1:0] fors_auth_address = INDEX_BITS'(FORS_SCRATCH)
-                + INDEX_BITS'((fors_target_delta >> 1) ^ 21'd1);
-            wire [INDEX_BITS-1:0] fors_issue_offset =
-                (INDEX_BITS'(fors_offset) + INDEX_BITS'(pipe_issue_slot) + 1'b1) << 1;
-            wire [INDEX_BITS-1:0] fors_next_offset =
-                (INDEX_BITS'(fors_offset) + INDEX_BITS'(PIPELINE)) << 1;
-            always_comb begin
-                next_address = address;
-                next_adjacent_address = adjacent_address;
-                case (state)
-                    REDUCE_SETUP, TREE_INIT, LT_COPY: begin
-                        next_address = 0;
-                        next_adjacent_address = 1;
-                    end
-                    PUSH_NODE: begin
-                        next_address = node_level == tree_height
-                            ? INDEX_BITS'(AUTH_BASE) : INDEX_BITS'(STACK_BASE) + INDEX_BITS'(node_level);
-                        next_adjacent_address = node_level == tree_height
-                            ? INDEX_BITS'(AUTH_BASE + 1) : INDEX_BITS'(STACK_BASE + 1) + INDEX_BITS'(node_level);
-                    end
-                    AUTH_OUTPUT: begin
-                        next_address = INDEX_BITS'(AUTH_BASE + 1) + INDEX_BITS'(auth_level);
-                        next_adjacent_address = INDEX_BITS'(AUTH_BASE + 2) + INDEX_BITS'(auth_level);
-                    end
-                    HASH_ISSUE, HASH_WAIT: begin
-                        next_address = lane_list_next;
-                        next_adjacent_address = adjacent(lane_list_next);
-                    end
-                    LT_PIPE_INIT: begin
-                        next_address = {lt_cursor[INDEX_BITS-1:1], 1'b0};
-                        next_adjacent_address = {lt_cursor[INDEX_BITS-1:1], 1'b1};
-                    end
-                    LT_NEXT: if (PIPELINE == 1) begin
-                        next_address = 0;
-                        next_adjacent_address = 1;
-                    end
-                    LT_PIPE_ISSUE: if (pipe_ready) begin
-                        next_address = lt_issue_address;
-                        next_adjacent_address = adjacent(lt_issue_address);
-                    end
-                    LT_PIPE_WAIT: if (lt_batch_complete) begin
-                        if (lt_cursor + 2 * PIPELINE < lt_count) begin
-                            next_address = lt_next_address;
-                            next_adjacent_address = adjacent(lt_next_address);
-                        end else if (lt_count[0]) begin
-                            next_address = lt_count - 1'b1;
-                            // An odd count minus one is even, including wrap.
-                            next_adjacent_address = lt_count;
-                        end else begin
-                            next_address = 0;
-                            next_adjacent_address = 1;
-                        end
-                    end
-                    FORS_LEAF_NEXT: begin
-                        next_address = fors_target_group ? fors_leaf_address : INDEX_BITS'(FORS_SCRATCH);
-                        next_adjacent_address = fors_target_group ? adjacent(fors_leaf_address) : INDEX_BITS'(FORS_SCRATCH + 1);
-                    end
-                    FORS_AUTH0, FORS_BEGIN, FORS_AUTH1, FORS_LEVEL: begin
-                        next_address = INDEX_BITS'(FORS_SCRATCH);
-                        next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
-                    end
-                    FORS_ISSUE: if (pipe_ready) begin
-                        if (pipe_issue_slot + 1 >= PIPELINE || (pipe_expected_mask >> (pipe_issue_slot + 1)) == 0) begin
-                            next_address = INDEX_BITS'(FORS_SCRATCH);
-                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
-                        end else begin
-                            next_address = INDEX_BITS'(FORS_SCRATCH) + fors_issue_offset;
-                            // Both FORS wave addresses are even; construct the
-                            // low one bit before the ready/state selection.
-                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1) + fors_issue_offset;
-                        end
-                    end
-                    FORS_WAIT: begin
-                        if (fors_offset + PIPELINE < fors_outputs) begin
-                            next_address = INDEX_BITS'(FORS_SCRATCH) + fors_next_offset;
-                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1) + fors_next_offset;
-                        end else if (fors_level) begin
-                            next_address = INDEX_BITS'(FORS_SCRATCH);
-                            next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 1);
-                        end else begin
-                            next_address = fors_target_group ? fors_auth_address : INDEX_BITS'(FORS_SCRATCH);
-                            next_adjacent_address = fors_target_group ? adjacent(fors_auth_address) : INDEX_BITS'(FORS_SCRATCH + 1);
-                        end
-                    end
-                    FORS_ROOT_NEXT: begin
-                        next_address = INDEX_BITS'(FORS_SCRATCH + 1) + INDEX_BITS'(fors_root_cursor);
-                        next_adjacent_address = INDEX_BITS'(FORS_SCRATCH + 2) + INDEX_BITS'(fors_root_cursor);
-                    end
-                    default: begin end
-                endcase
-            end
-            always_ff @(posedge clk) begin
-                if (rst) begin
-                    address <= 0;
-                    adjacent_address <= 1;
-                end else begin
-                    address <= next_address;
-                    adjacent_address <= next_adjacent_address;
-                end
-            end
-            assign endpoint_read0 = address;
-            assign endpoint_read1 = adjacent_address;
-        end
-    endgenerate
-
-    // Validity is owned by the tree controller; data arrays have no reset.
-    // Isolating these writes permits distributed RAM inference.
-    wire auth_write=!verifying && macro_flags[1] && ((state==PUSH_NODE && node_below_root && auth_node_match)
-        || state==FORS_AUTH0 || state==FORS_AUTH1);
-    wire [4:0] auth_write_level=state==FORS_AUTH0 ? 5'd0 : state==FORS_AUTH1 ? 5'd1 : node_level;
-    wire [255:0] auth_write_data=state==FORS_AUTH0 || state==FORS_AUTH1 ? endpoint_value0 : node_value;
-    wire stack_write=(state==PUSH_NODE || state==PUSH_STACK) && node_below_root && !node_index[0] && !verifying;
-`ifndef SYNTHESIS
-    initial begin : workspace_capacity
-        if (FORS_BATCH > 24 || FORS_SCRATCH <= 35 ||
-            FORS_SCRATCH + FORS_BATCH > STACK_BASE || AUTH_BASE + 20 > WORKSPACE_DEPTH)
-            $fatal(1, "workspace regions exceed preserved algorithm capacities");
-    end
-    always @(posedge clk)
-        if (!execution_rst) begin
-            if (endpoint_write && endpoint_address >= WORKSPACE_DEPTH)
-                $fatal(1, "workspace write out of range");
-            if (endpoint_read0 >= WORKSPACE_DEPTH || endpoint_read1 >= WORKSPACE_DEPTH)
-                $fatal(1, "workspace read out of range");
-            if ((lt_pipe && state == LT_PIPE_ISSUE) || (fors_pipe && state != FORS_WAIT))
-                if (endpoint_write) $fatal(1, "reduction write before batch inputs accepted");
-        end
-    always @(posedge clk) begin : debug_target_path
-        if (!execution_rst && (state == PUSH_NODE || state == PUSH_STACK ||
-            state == PARENT_SETUP || state == PARENT_DONE)) begin
-            if (target_at_level !== (target >> node_level))
-                $fatal(1, "tree target coordinate is not aligned with node level");
-            if (auth_node_match !== (node_index == (target_at_level ^ 21'd1)))
-                $fatal(1, "authentication-node match is not aligned with node index");
-            if (target_parent_match !== (node_index[20:1] == target_at_level[20:1]))
-                $fatal(1, "target-parent match is not aligned with node index");
-            if (node_below_root !== (node_level < tree_height))
-                $fatal(1, "tree height eligibility is not aligned with node level");
-        end
-        if (!execution_rst && endpoint_read1 !==
-            (endpoint_read0 == INDEX_BITS'(WORKSPACE_DEPTH - 1)
-                ? INDEX_BITS'(WORKSPACE_DEPTH - 2) : endpoint_read0 + 1'b1))
-            $fatal(1, "registered adjacent workspace address is not aligned");
-    end
-    // These invariants justify the bounded FORS range and leaf-index logic.
-    always @(posedge clk) begin : debug_fors_relative_index
-        if (!execution_rst && state == FORS_PICK) begin
-            if (fors_base[1:0] != 0 || fors_total == 0 || fors_total > FORS_BATCH)
-                $fatal(1, "invalid FORS microgroup geometry");
-            if (fors_target_delta !== target - fors_base)
-                $fatal(1, "FORS target-relative index changed inside a microgroup");
-        end
-    end
-    // Every state transition prepares these flags on the same edge.
-    always @(posedge clk) begin : phase_control_equivalence
-        if (!rst) begin
-            if (lane_request_active !== (state == HASH_ISSUE))
-                $fatal(1, "registered scalar request differs from execution state");
-            if (batch_issue_phase !== (PIPELINE > 1 && (state == PIPE_ISSUE ||
-                state == LT_PIPE_ISSUE || state == FORS_ISSUE)))
-                $fatal(1, "registered batch request differs from execution state");
-            if (batch_verify_phase !== (PIPELINE > 1 && state == PIPE_VERIFY_INPUT))
-                $fatal(1, "registered batch verify differs from execution state");
-            if (pipe_response_accept !== (pipe_mode && state != LT_PIPE_ISSUE &&
-                (!fors_pipe || state == FORS_WAIT)))
-                $fatal(1, "registered batch response ready differs from execution state");
-            if (fors_pipe !== (PIPELINE > 1 &&
-                (state == FORS_LEFT || state == FORS_ISSUE || state == FORS_WAIT)))
-                $fatal(1, "registered FORS phase differs from execution state");
-            if (fors_leaves !== (PIPELINE > 1 && indexing == 1 && !verifying &&
-                (state == PIPE_ISSUE || state == PIPE_WAIT)))
-                $fatal(1, "registered FORS leaf phase differs from execution state");
-            if (lt_pipe !== (PIPELINE > 1 &&
-                (state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT)))
-                $fatal(1, "registered L-tree phase differs from execution state");
-            if (pipe_mode !== (PIPELINE > 1 &&
-                (state == PIPE_ISSUE || state == PIPE_WAIT || state == PIPE_VERIFY_INPUT ||
-                 state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
-                 state == FORS_ISSUE || state == FORS_WAIT)))
-                $fatal(1, "registered batch mode differs from execution state");
-        end
-    end
-    always @(posedge clk) begin : rolling_allocator_equivalence
-        if (!execution_rst && pipe_rolling && pipe_mode) begin
-            if (roll_available !== (|roll_free))
-                $fatal(1, "prepared rolling availability differs from ownership bitmap");
-            if (roll_available) begin
-                if (!roll_free[roll_slot])
-                    $fatal(1, "prepared rolling slot is still active");
-                for (integer j = 0; j < PIPE_BATCH; j++)
-                    if (j < roll_slot && roll_free[j])
-                        $fatal(1, "prepared rolling slot does not preserve allocation order");
-            end
-        end
-    end
-    // Check prepared metadata at acceptance, including rolling reuse and stalls.
-    always @(posedge clk) begin : batch_prefetch_equivalence
-        if (!execution_rst && state == TREE_INIT && !stateful && descriptor[37:36] == 1)
-            if (fors_target_prefetch !== fors_target(fors_group_offset(group_index)))
-                $fatal(1, "prefetched FORS target differs at tree initialization");
-        if (!execution_rst && PIPELINE > 1 && pipe_selected && pipe_ready &&
-            !fors_pipe && !lt_pipe && indexing != 1) begin
-            if (batch_chain_index !== (pipe_rolling ? pipe_next_chain :
-                chain_cursor + INDEX_BITS'(pipe_issue_slot)))
-                $fatal(1, "prefetched chain index differs at acceptance");
-            if (batch_digit_prefetch !== digit(pipe_rolling ? pipe_next_chain :
-                chain_cursor + INDEX_BITS'(pipe_issue_slot)))
-                $fatal(1, "prefetched WOTS digit differs at acceptance");
-        end
-    end
-`endif
-
-    reg [255:0] emit_source;
-    always_comb begin
-        case (emit_descriptor[59:56])
-            0: emit_source = secret_seed;
-            1: emit_source = secret_prf;
-            2: emit_source = public_seed;
-            3: emit_source = value[3][W-1:0];
-            4: emit_source = xmss ? value[0] : randomizer;
-            5: emit_source = {128'd0, job_identifier};
-            6: emit_source = {224'd0, be32(job_index)};
-            7: emit_source = be32(emit_descriptor[31:0]);
-            default: emit_source = 0;
-        endcase
-    end
-
-`ifndef SYNTHESIS
-    // Diagnostic classification observes the same pre-edge state as the FSM.
-    // It does not drive error handling, state transitions, or reset.
-    logic [15:0] diagnostic_reason;
-    always_comb begin : debug_failure_reason
-        diagnostic_reason = 0;
-        // verilog_format: off
-        case (state)
-            IDLE:
-            if (job_valid) begin
-                if (!valid_profile) diagnostic_reason = 16'h3009;
-                else if (decoded_stateful && job_index >= (32'd1 << decoded_height))
-                    diagnostic_reason = 16'h3008;
-            end
-            DECODE: if (macro_op < 1 || macro_op > 5) diagnostic_reason = 16'h3006;
-            CHAIN_SETUP:
-            if(endpoint_count==0 || endpoint_count>67 ||
-                (!standalone_chain && (tree_height>20 || (indexing==1 && tree_height<2))))
-                diagnostic_reason = 16'h300a;
-            HASH_WAIT: if (lane_valid && lane_error) diagnostic_reason = 16'h3007;
-            TRANSFORM: if (descriptor[59:56] != 1 && descriptor[59:56] != 2) diagnostic_reason = 16'h3006;
-            TREE_INIT,AUTH_OUTPUT,CHAIN_NEXT,CHAIN_OUTPUT0,CHAIN_STORE,
-            DRAIN,EMIT,EMIT_NEXT,FAILED,FETCH,FINISH,
-            FORS_AUTH0,FORS_AUTH1,FORS_BEGIN,FORS_ISSUE,FORS_LEAF_NEXT,FORS_LEFT,FORS_LEVEL,FORS_PICK,FORS_PUSH,FORS_ROOT_NEXT,FORS_WAIT,
-            HASH_ISSUE,HASH_RESULT,LAUNCH,LEAF_SETUP,LOAD_DESCRIPTOR,
-            LT_SETUP,LT_STORE,LT_NEXT,LT_COPY,LT_FINISH,LT_PIPE_INIT,LT_PIPE_ISSUE,LT_PIPE_WAIT,
-            MESSAGE,OUTPUT_CHUNK,PARENT_DONE,PARENT_SETUP,
-            PIPE_ISSUE,PIPE_LOAD,PIPE_VERIFY_INPUT,PIPE_WAIT,PUSH_NODE,PUSH_STACK,REDUCE_SETUP,
-            ROUTE,SF_LEAF,SF_LEAF_DONE,SF_RANDOM,TREE_FINISH,TREE_INIT,
-            VERIFY_CHAIN_ADVANCE,VERIFY_CHAIN_INPUT,VERIFY_CHAIN_RUN,VERIFY_INPUT,VERIFY_RANDOM: diagnostic_reason = 0;
-            default: diagnostic_reason = 16'h3006;
-        endcase
-        // verilog_format: on
-    end
-    always_ff @(posedge clk) begin : debug_statistics
-        if (rst) begin
-            cycles <= 0;
-            hash_base <= 0;
-            permutation_base <= 0;
-            error_code <= 0;
-        end else begin
-            if (state == IDLE && job_valid) begin
-                cycles <= 0;
-                hash_base <= total_hashes;
-                permutation_base <= total_permutations;
-                error_code <= 0;
-            end else if (state != IDLE && state != FAILED) cycles <= cycles + 1'b1;
-            if (diagnostic_reason != 0) error_code <= diagnostic_reason;
-        end
-    end
-`endif
-
+    wire cpu_node_write=execute && (opcode==OP_NMOV || opcode==OP_LOAD
+        || (opcode==OP_INPUT && verify_valid));
+    wire [255:0] cpu_load_value=node_memory_read;
+    wire [255:0] cpu_node_value=opcode==OP_NMOV ? read_node(a)
+        : opcode==OP_INPUT ? trim_node(verify_data) : cpu_load_value;
+    wire scratch_write=cpu_node_write && scratch_object(d);
+    wire result_write=execute && opcode==OP_WAIT && group_complete;
+    wire [3:0] result_object=group_mask[1] ? 4'd5 : 4'd4;
+    wire [255:0] scratch_read=scratch_valid[node_memory_read_address[3:0]]
+        ? node_memory_read : 256'd0;
+    logic node_memory_write;
+    logic [6:0] node_memory_write_address;
+    logic [255:0] node_memory_write_value;
+    always_ff @(posedge clk) if(node_memory_write)
+        node_memory[node_memory_write_address]<=node_memory_write_value;
     always_ff @(posedge clk) begin
-        if (rst) begin
-            enter_state(IDLE);
-            done <= 0;
-            error <= 0;
+        if(rst || job_accept) scratch_valid<=0;
+        else if(tree_cleanup) scratch_valid<=scratch_valid & 16'h0013;
+        else if(tree_memory_write && tree_write_address>=112 && tree_write_address<123)
+            scratch_valid[tree_write_address[3:0]]<=1;
+        else if(scratch_write) scratch_valid[d[3:0]]<=1;
+        else if(result_write) scratch_valid[result_object]<=1;
+        else if(chain_cap_commit) scratch_valid[chain_slot ? 8 : 7]<=1;
+        else if(chain_result_commit) scratch_valid[chain_slot ? 5 : 4]<=1;
+    end
+    genvar object;
+    generate for(object=0;object<11;object=object+1) begin: node_objects
+        if(object==0 || object==1 || object==4 || object==5 || object>=7) begin: scratch
+            // The constant views are observations, not extra datapath reads.
+`ifndef SYNTHESIS
+            assign node[object]=scratch_valid[object] ? node_memory[112+object] : 256'd0;
+`else
+            assign node[object]=256'd0;
+`endif
+        end else begin: direct
+            logic [255:0] value;
+            assign node[object]=value;
+            always_ff @(posedge clk) begin
+                if(rst) value<=0;
+                else if(job_accept) value<=object==3 ? trim_node(job_public_root) : 256'd0;
+                else if(object==6 && tree_cleanup) value<=0;
+                else if(object==6 && tree_right_write) value<=tree_right_value;
+                else if(cpu_node_write && d==object) value<=cpu_node_value;
+            end
+        end
+    end endgenerate
+    logic [391:0] hmsg_digest;
+    logic hmsg_valid,digits_valid;
+    logic [255:0] digit_message;
+    logic [11:0] digit_checksum;
+    // Message reception finishes before any image instruction can issue a
+    // Hash. A single dedicated read port therefore serves the physical lane;
+    // bytes beyond message_length are masked by the lane's SHAKE padding.
+    // Old words may remain across jobs and reset, without being observable.
+    (* ram_style="distributed" *) logic [63:0] message_words [0:15];
+    wire [3:0] message_word_address;
+    wire [63:0] message_word_data=message_words[message_word_address];
+    logic [6:0] message_length,message_received;
+    wire message_write=!rst && phase==MESSAGE && message_valid;
+    always_ff @(posedge clk) if(message_write)
+        message_words[message_received[6:3]]<=message_data;
 
-            abort_execution <= 0;
-            seq_start <= 0;
-            seq_complete <= 0;
-            stateful <= 0;
-            xmss <= 0;
-            small_signature <= 0;
-            stateful_height <= 10;
-            profile_code <= 0;
-            node_bytes <= 16;
-            operation <= 0;
-            scalar_tree <= 0;
-            scalar_leaf <= 0;
-            verify_pass <= 0;
-            continuation <= IDLE;
-            macro_op <= 0;
-            macro_desc <= 0;
-            macro_route <= 0;
-            macro_flags <= 0;
-            task_chain <= 0;
-            task_capture <= 0;
-
-            layer <= 0;
-            task_recipe <= 0;
-            task_step <= 0;
-            message_received <= 0;
-            lt_count <= 0;
-            lt_cursor <= 0;
-            lt_level <= 0;
-            fors_total <= 0;
-            fors_offset <= 0;
-            fors_root_cursor <= 0;
-            fors_level <= 0;
-            fors_roots_pending <= 0;
-            fors_base <= 0;
-            fors_target_delta <= 0;
-            fors_digest_offset <= 0;
-            fors_target_prefetch <= 0;
-            pipe_cache_valid <= 0;
-            pipe_batch_used <= 0;
-            pipe_pair <= 0;
-            pipe_issue_slot <= 0;
-            pipe_rolling <= 0;
-            pipe_active <= 0;
-            roll_slot <= 0;
-            roll_available <= 1;
-            pipe_next_chain <= 0;
-            pipe_completed <= 0;
-            batch_chain_prefetch <= 0;
-            batch_digit_prefetch <= 0;
-            pipe_done_mask <= 0;
-            pipe_expected_mask <= 0;
-
-            task_steps <= 0;
-            task_capture_after <= 0;
-            task_leaf <= 0;
-            task_a <= 0;
-            task_b <= 0;
+    function automatic [255:0] trim_node(input [255:0] value);
+        case(node_bytes)
+            16:trim_node={128'd0,value[127:0]};
+            24:trim_node={64'd0,value[191:0]};
+            default:trim_node=value;
+        endcase
+    endfunction
+    function automatic [255:0] read_node(input [7:0] address);
+        reg [255:0] value;
+        begin
+            value=0;
+            if(address<11) begin
+                if(scratch_object(address)) value=scratch_read;
+                else value=node[address];
+            end
+            else case(address)
+                11:value=job_secret_seed;
+                12:value=job_secret_prf;
+                13:value=job_public_seed;
+                14:value=job_randomizer;
+                default:value=0;
+            endcase
+            read_node=trim_node(value);
+        end
+    endfunction
+    function automatic [1:0] select_lanes(input [7:0] selector,input [1:0] mask);
+        case(selector)
+            0:select_lanes=mask;
+            1:select_lanes=mask&2'b01;
+            2:select_lanes=mask&2'b10;
+            default:select_lanes=0;
+        endcase
+    endfunction
+    // DIGITS owns an immutable node snapshot and its bounded checksum.
+    // Later writes to V2 cannot alter the WOTS digits already produced.
+    function automatic [3:0] read_digit(input [6:0] address);
+        begin
+            if(address<len1) read_digit=digit_message[{(address[5:0]^6'd1),2'b0} +:4];
+            else if(address==len1) read_digit=digit_checksum[11:8];
+            else if(address==len1+8'd1) read_digit=digit_checksum[7:4];
+            else if(address==len1+8'd2) read_digit=digit_checksum[3:0];
+            else read_digit=0;
+        end
+    endfunction
+    wire [4:0] checksum_byte [0:31];
+    wire [5:0] checksum_pair [0:15];
+    wire [6:0] checksum_quad [0:7];
+    wire [7:0] checksum_octet [0:3];
+    genvar check_index;
+    generate
+        for(check_index=0;check_index<32;check_index=check_index+1) begin: byte_sums
+            assign checksum_byte[check_index]={1'b0,~node[2][check_index*8 +:4]}
+                +{1'b0,~node[2][check_index*8+4 +:4]};
+        end
+        for(check_index=0;check_index<16;check_index=check_index+1) begin: pair_sums
+            assign checksum_pair[check_index]={1'b0,checksum_byte[check_index*2]}
+                +{1'b0,checksum_byte[check_index*2+1]};
+        end
+        for(check_index=0;check_index<8;check_index=check_index+1) begin: quad_sums
+            assign checksum_quad[check_index]={1'b0,checksum_pair[check_index*2]}
+                +{1'b0,checksum_pair[check_index*2+1]};
+        end
+        for(check_index=0;check_index<4;check_index=check_index+1) begin: octet_sums
+            assign checksum_octet[check_index]={1'b0,checksum_quad[check_index*2]}
+                +{1'b0,checksum_quad[check_index*2+1]};
+        end
+    endgenerate
+    wire [8:0] checksum_low={1'b0,checksum_octet[0]}+{1'b0,checksum_octet[1]};
+    wire [8:0] checksum_high=(n!=16 ? {1'b0,checksum_octet[2]} : 9'd0)
+        +(n==32 ? {1'b0,checksum_octet[3]} : 9'd0);
+    wire [9:0] checksum_total={1'b0,checksum_low}+{1'b0,checksum_high};
+    task automatic fault(input [15:0] code);
+        begin error<=1;error_code<=code;phase<=FAILED;end
+    endtask
+    // Current IR plus one prefetched instruction. A pending synchronous ROM
+    // response also reserves a queue position. Redirect discards the obsolete
+    // response and starts the target read on that same edge.
+    logic fetch_active, ir_valid, prefetch_valid, fetch_pending;
+    logic [63:0] ir, prefetch_word;
+    (* dont_touch="true" *) logic [3:0] node_source_address;
+    wire issue_now=1'b0;
+    logic [8:0] fetch_pc;
+    wire [7:0] opcode=ir[63:56], d=ir[55:48], a=ir[47:40], b=ir[39:32];
+    wire [31:0] imm=ir[31:0];
+    logic retire, redirect, halt_fetch;
+    logic [8:0] redirect_pc;
+    logic fetch_issue;
+    integer fetch_occupancy;
+    wire start_fetch=phase==LAUNCH;
+    assign program_address=start_fetch ? job_entry : redirect ? redirect_pc : fetch_pc;
+    always_comb begin
+        fetch_occupancy=(ir_valid ? 1 : 0)+(prefetch_valid ? 1 : 0)
+            +(fetch_pending ? 1 : 0)-(retire ? 1 : 0);
+        fetch_issue=fetch_active && !halt_fetch && fetch_occupancy<2;
+        if(start_fetch || redirect) fetch_issue=1;
+        if(error || phase==FAILED || rst) fetch_issue=0;
+    end
+    always_ff @(posedge clk) begin
+        if(rst) begin
+            fetch_active<=0;ir_valid<=0;prefetch_valid<=0;fetch_pending<=0;
+            fetch_pc<=0;ir<=0;prefetch_word<=0;node_source_address<=0;
+        end else if(error || phase==FAILED || halt_fetch) begin
+            fetch_active<=0;ir_valid<=0;prefetch_valid<=0;fetch_pending<=0;
+        end else if(start_fetch || redirect) begin
+            fetch_active<=1;ir_valid<=0;prefetch_valid<=0;fetch_pending<=1;
+            fetch_pc<=(start_fetch ? job_entry : redirect_pc)+9'd1;
         end else begin
-            done <= 0;
-            seq_start <= 0;
-            seq_complete <= 0;
-            abort_execution <= 0;
-
-            if (pipe_rolling && pipe_mode) begin
-                roll_slot <= roll_next_slot;
-                roll_available <= |roll_next_free;
-                if (pipe_valid) begin
-                    pipe_active[pipe_tag] <= 0;
-                    pipe_completed <= pipe_completed + 1'b1;
+            fetch_pending<=fetch_issue;
+            if(fetch_issue) fetch_pc<=fetch_pc+9'd1;
+            case({fetch_pending,retire})
+                2'b01:begin ir<=prefetch_word;node_source_address<=prefetch_word[43:40];ir_valid<=prefetch_valid;prefetch_valid<=0;end
+                2'b10:begin
+                    if(!ir_valid) begin ir<=program_data;node_source_address<=program_data[43:40];ir_valid<=1;end
+                    else begin prefetch_word<=program_data;prefetch_valid<=1;end
                 end
-                if (pipe_selected && pipe_ready) begin
-                    pipe_active[issue_slot] <= 1;
-                    pipe_chain_index[issue_slot] <= pipe_next_chain;
-                    pipe_next_chain <= pipe_next_chain + 1'b1;
+                2'b11:begin
+                    ir_valid<=1;
+                    if(prefetch_valid) begin ir<=prefetch_word;node_source_address<=prefetch_word[43:40];prefetch_word<=program_data;prefetch_valid<=1;end
+                    else begin ir<=program_data;node_source_address<=program_data[43:40];prefetch_valid<=0;end
+                end
+                default:begin end
+            endcase
+        end
+    end
+
+    logic group_valid;
+    logic [1:0] group_mask;
+    // A one-hot logical destination is retained until explicit WAIT publishes
+    // the physical response. Hardware never serializes a two-lane request.
+    wire [1:0] response_pending=group_valid ? group_mask : 2'b00;
+    logic [63:0] group_recipe, group_tree;
+    logic [4:0] group_layer;
+    logic [9:0] group_leaf_value;
+    logic [6:0] group_a_value;
+    logic [19:0] group_b_value;
+    wire [9:0] group_leaf [0:1];
+    wire [6:0] group_a [0:1];
+    wire [31:0] group_b [0:1];
+    wire [391:0] result [0:1];
+    wire [1:0] lane_ready,lane_valid,lane_error;
+    wire [391:0] lane_value [0:1];
+    wire [6:0] lane_list0 [0:1],lane_list1 [0:1];
+    wire physical_ready,physical_valid,physical_error;
+    wire [391:0] physical_value;
+    wire [6:0] physical_list0,physical_list1;
+    logic [31:0] hash_base,permutation_base;
+    wire [31:0] total_hashes,total_permutations;
+    wire lane_fault=group_valid && physical_valid && physical_error;
+    wire group_complete=group_valid && physical_valid;
+    wire chain_response=chain_active && chain_state==CHAIN_RUN && group_complete && !error && !lane_fault;
+    wire [4:0] chain_position=chain_hash_stage ? {1'b0,group_b_value[3:0]}+5'd1 : 5'd0;
+    wire chain_at_end=chain_position=={1'b0,chain_terminal};
+    wire chain_capture_now=chain_capture_mode && chain_position=={1'b0,chain_digit};
+    assign chain_capture_write=chain_response && chain_capture_now && !rst;
+    assign chain_cap_commit=chain_active && chain_state==CHAIN_CAP && !error && !rst;
+    assign chain_result_commit=chain_active && chain_state==CHAIN_RESULT && !error && !rst;
+    function automatic chain_recipe_valid(input [63:0] value,input bit seed);
+        chain_recipe_valid=value[63:60]==0 && value[59:56]==(seed ? 4'd1 : 4'd2)
+            && value[55:48]==(seed ? 8'd5 : 8'd0) && value[47:40]==8'd1
+            && value[39:38]==0 && value[37:32]==node_bytes && value[31:30]==0
+            && value[29:24]>=1 && value[29:24]<=32 && value[23:0]==0;
+    endfunction
+    // Start observes fully validated snapshots. A malformed recipe never
+    // starts an instance or reaches the physical Hash lane.
+    wire chain_start=chain_active && !tree_owner && chain_state==CHAIN_F && !error
+        && chain_recipe_valid(descriptor_data,1'b0);
+    // Only this bounded macro can authorize the next F as its predecessor
+    // drains. Ordinary HASH still needs its next explicit image instruction.
+    wire chain_reissue=chain_response && !chain_at_end;
+    wire [3:0] chain_next_step=chain_hash_stage ? group_b_value[3:0]+4'd1 : 4'd0;
+    wire macro_request=chain_active && !error && (chain_state==CHAIN_ISSUE || chain_reissue);
+    wire chain_issue=macro_request && physical_ready;
+    wire [63:0] physical_recipe=chain_reissue ? chain_f_recipe
+        : tree_fors_reissue ? tree_fors_next_recipe : group_recipe;
+    wire [31:0] physical_b_value=chain_reissue ? {28'd0,chain_next_step}
+        : {12'd0,tree_fors_reissue ? tree_fors_next_b : group_b_value};
+    wire [1:0] physical_mask=tree_fors_reissue ? (tree_fors_next[0] ? 2'b10 : 2'b01) : group_mask;
+    // Verification-only observation wires; they add no architectural state.
+    wire [1:0] trace_hash_valid=((phase==EXEC && ir_valid && opcode==OP_WAIT && group_complete && !error && !lane_fault && !illegal)
+        || chain_response || tree_response)
+        ? group_mask : 2'b00;
+    wire [63:0] trace_recipe=group_recipe,trace_tree=group_tree;
+    wire [4:0] trace_layer=group_layer;
+    wire [9:0] trace_leaf[0:1];
+    wire [6:0] trace_a[0:1];
+    wire [31:0] trace_b[0:1];
+    wire [391:0] trace_result[0:1];
+    assign hash_count=PROFILE_ENABLE ? total_hashes-hash_base : 32'd0;
+    assign permutation_count=PROFILE_ENABLE ? total_permutations-permutation_base : 32'd0;
+    assign descriptor_address=tree_active && phase==TREE_RUN && tree_state==T_PREFLIGHT ? {1'b0,tree_recipe_id}
+        : chain_active && chain_state==CHAIN_SEED ? 5'd7
+        : chain_active && chain_state==CHAIN_F ? 5'd8 : d[4:0];
+    genvar logical_slot;
+    generate for(logical_slot=0;logical_slot<2;logical_slot=logical_slot+1) begin: logical_slots
+        assign group_leaf[logical_slot]=group_leaf_value;
+        assign group_a[logical_slot]=group_a_value;
+        assign group_b[logical_slot]={12'd0,group_b_value};
+        assign trace_leaf[logical_slot]=group_leaf_value;
+        assign trace_a[logical_slot]=group_a_value;
+        assign trace_b[logical_slot]={12'd0,group_b_value};
+        assign lane_ready[logical_slot]=physical_ready && group_mask[logical_slot];
+        assign lane_valid[logical_slot]=physical_valid && group_mask[logical_slot];
+        assign lane_error[logical_slot]=physical_error && group_mask[logical_slot];
+        assign lane_value[logical_slot]=physical_value;
+        assign lane_list0[logical_slot]=physical_list0;
+        assign lane_list1[logical_slot]=physical_list1;
+        assign result[logical_slot]=physical_value;
+        assign trace_result[logical_slot]=physical_value;
+    end endgenerate
+    generate for(genvar physical=0;physical<1;physical=physical+1) begin: lanes
+        recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(7),.UNROLL(UNROLL),
+            .MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),.RECIPE_MASK(16'h101e),
+            .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
+            .clk,.rst(rst || error),.node_bytes,
+            .request_valid((phase==EXEC && group_valid && !physical_valid && !error) || macro_request || tree_direct_request),.request_ready(physical_ready),
+            .request_recipe(physical_recipe),
+            .secret_seed(job_secret_seed),.secret_prf(job_secret_prf),.public_seed(job_public_seed),
+            .root(node[3]),.randomizer(group_recipe[59:56]==4 ? scratch_read : job_randomizer),
+            .message_word_address,.message_word_data,.message_length,
+            .request_layer(group_layer),.request_tree(group_tree),
+            .request_leaf(group_leaf_value),.request_a(group_a_value),.request_b(physical_b_value),
+            // WOTS F's fixed frame already selects exactly n digest bytes.
+            // Truncate architectural writes, without duplicating that mux here.
+            .request_left(chain_active && (chain_feedback || chain_reissue) ? physical_value[255:0] : scratch_read),.request_right(node[6]),
+            .list_index0(physical_list0),.list_index1(physical_list1),.list_data0(list_value),.list_data1(256'd0),
+            .response_valid(physical_valid),
+            .response_ready((phase==EXEC && ir_valid && opcode==OP_WAIT && group_complete && !error && !lane_fault && !illegal)
+                || chain_response || tree_response),
+            .response_value(physical_value),.error(physical_error),
+            .hash_count(total_hashes),.permutation_count(total_permutations)
+        );
+    end endgenerate
+    initial if(LANES!=1 || UNROLL!=1 || SWAP_PHYSICAL_LANES)
+        $error("Microprogram production core requires fixed K1U1 without lane swap");
+
+    // Bounded digest transforms. These circuits cannot launch a Hash.
+    logic [63:0] parsed_tree;
+    logic [9:0] parsed_leaf;
+    // TARGET reads one bounded MD window. A fixed byte-bit reversal matches
+    // FORS's MSB-first bit stream; the final reversal restores the integer.
+    // Padding covers every legal final window without reading tree/leaf bytes.
+    wire [332:0] fors_bitstream;
+    assign fors_bitstream[332:320]=13'd0;
+    genvar fors_byte,fors_bit;
+    generate for(fors_byte=0;fors_byte<40;fors_byte=fors_byte+1) begin: fors_bytes_reverse
+        for(fors_bit=0;fors_bit<8;fors_bit=fors_bit+1) begin: bits_reverse
+            assign fors_bitstream[fors_byte*8+fors_bit]=hmsg_digest[fors_byte*8+7-fors_bit];
+        end
+    end endgenerate
+    wire [8:0] target_offset=ctx_fors_offset;
+    wire [13:0] fors_window=fors_bitstream[target_offset +:14];
+    wire [13:0] fors_window_reverse={fors_window[0],fors_window[1],fors_window[2],fors_window[3],
+        fors_window[4],fors_window[5],fors_window[6],fors_window[7],fors_window[8],fors_window[9],
+        fors_window[10],fors_window[11],fors_window[12],fors_window[13]};
+    wire [13:0] target_value=fors_window_reverse>>(4'd14-fors_a[3:0]);
+    // TREE and LEAF are adjacent in H_msg. Select one bounded byte window,
+    // then reorder its bytes; separate dynamic reads per byte duplicate muxes.
+    wire [79:0] address_window=80'(hmsg_digest >> {fors_bytes,3'b000});
+    wire [3:0] tree_byte_count=4'((tree_bits+8'd7)>>3);
+    wire [63:0] tree_window_be={address_window[7:0],address_window[15:8],
+        address_window[23:16],address_window[31:24],address_window[39:32],
+        address_window[47:40],address_window[55:48],address_window[63:56]};
+    wire [15:0] leaf_window=16'(address_window >> {tree_byte_count,3'b000});
+    always_comb begin
+        parsed_tree=tree_window_be >> {(4'd8-tree_byte_count),3'b000};
+        if(tree_bits<64) parsed_tree=parsed_tree&((64'd1<<tree_bits)-1'b1);
+        parsed_leaf=hp>8 ? {leaf_window[7:0],leaf_window[15:8]} : {2'd0,leaf_window[7:0]};
+        parsed_leaf=parsed_leaf&((10'd1<<hp)-1'b1);
+    end
+    wire [14:0] cursor_limit=15'd1<<ctx_height;
+    wire [19:0] group_base={14'd0,ctx_group}<<fors_a;
+    wire [1:0] pair_mask={ctx_chain+8'd1<chain_count,ctx_chain<chain_count};
+    wire [1:0] selected_lanes=select_lanes(d,ctx_mask);
+    wire [1:0] issue_mask=select_lanes(a,ctx_mask);
+    wire [15:0] cursor_next={1'b0,ctx_cursor}+imm[1:0];
+    wire [9:0] fors_offset_next={1'b0,ctx_fors_offset}+{2'd0,fors_a};
+    wire [7:0] chain_next={1'b0,ctx_chain}+imm[1:0];
+    wire [7:0] macro_chain_index={1'b0,ctx_chain}+{7'd0,issue_mask[1]};
+    wire [3:0] requested_height=d==0 ? hp[3:0] : d==1 ? fors_a[3:0] : imm[3:0];
+    logic [14:0] begin_index;
+    always_comb case(d)
+        0:begin_index=ctx_cursor;
+        1:begin_index={1'b0,ctx_target};
+        2:begin_index={5'd0,ctx_leaf};
+        default:begin_index=imm[14:0];
+    endcase
+    logic [15:0] memory_address;
+    always_comb case(b)
+        IDX_LEVEL:memory_address={12'd0,ctx_level};
+        IDX_CHAIN0:memory_address={9'd0,ctx_chain};
+        IDX_CHAIN1:memory_address={9'd0,ctx_chain}+16'd1;
+        IDX_GROUP:memory_address={10'd0,ctx_group};
+        IDX_CURSOR:memory_address={1'b0,ctx_cursor};
+        IDX_REDUCE_LEFT:memory_address={8'd0,ctx_reduce_index,1'b0};
+        IDX_REDUCE_RIGHT:memory_address={8'd0,ctx_reduce_index,1'b1};
+        IDX_REDUCE_OUT:memory_address={9'd0,ctx_reduce_index};
+        default:memory_address=imm[15:0];
+    endcase
+    wire [6:0] list_address=group_valid ? lane_list0[0] : memory_address[6:0];
+    wire [255:0] list_value=list_address<68 ? node_memory_read : 256'd0;
+    wire [6:0] cpu_load_address=a==0 ? memory_address[6:0]
+        : {a==1 ? 3'b101 : 3'b110,memory_address[3:0]};
+    assign node_memory_read_address=tree_active && phase==TREE_RUN ? tree_read_address
+        : chain_active && chain_state==CHAIN_CAP ? 7'd123
+        : group_valid
+        ? (group_recipe[59:56]==12 ? list_address
+            : {3'b111,group_recipe[59:56]==4 ? 4'd0 : result_object})
+        : opcode==OP_LOAD ? cpu_load_address : {3'b111,node_source_address};
+    always_comb begin
+        node_memory_write=0;
+        node_memory_write_address=0;
+        node_memory_write_value=0;
+        if(tree_memory_write) begin
+            node_memory_write=1;
+            node_memory_write_address=tree_write_address;
+            node_memory_write_value=tree_write_value;
+        end else if(scratch_write) begin
+            node_memory_write=1;
+            node_memory_write_address={3'b111,d[3:0]};
+            node_memory_write_value=cpu_node_value;
+        end else if(execute && opcode==OP_STORE) begin
+            node_memory_write=1;
+            node_memory_write_address=d==0 ? memory_address[6:0]
+                : {d==1 ? 3'b101 : 3'b110,memory_address[3:0]};
+            node_memory_write_value=read_node(a);
+        end else if(result_write) begin
+            node_memory_write=1;
+            node_memory_write_address={3'b111,result_object};
+            node_memory_write_value=trim_node(physical_value[255:0]);
+        end else if(chain_capture_write) begin
+            node_memory_write=1;
+            node_memory_write_address=7'd123;
+            node_memory_write_value=trim_node(physical_value[255:0]);
+        end else if(chain_cap_commit) begin
+            node_memory_write=1;
+            node_memory_write_address=chain_slot ? 7'd120 : 7'd119;
+            node_memory_write_value=node_memory_read;
+        end else if(chain_result_commit) begin
+            node_memory_write=1;
+            node_memory_write_address=chain_slot ? 7'd117 : 7'd116;
+            node_memory_write_value=trim_node(physical_value[255:0]);
+        end
+    end
+    // The TREE controller shares the sole RAM read and write ports with the
+    // instruction datapath and child CHAIN. Every state touches at most one
+    // RAM source and one destination; RIGHT remains its existing fixed bus.
+    always_comb begin
+        tree_read_address=7'd116;
+        if(group_valid) tree_read_address=group_recipe[59:56]==12
+            ? physical_list0 : (group_mask[1] ? 7'd117 : 7'd116);
+        if(tree_fors_reissue && tree_fors_next[1])
+            tree_read_address=tree_fors_next[0] ? 7'd117 : 7'd116;
+        case(tree_state)
+            T_EMIT_CAP,T_SECRET_EMIT:tree_read_address=7'd119;
+            T_MERGE_LEFT:tree_read_address=7'd80+{3'd0,ctx_level};
+            T_FORS_RIGHT:tree_read_address=7'd117;
+            T_FORS_RESULT:begin
+                if(tree_fors_stage<2) tree_read_address=tree_fors_stage[0] ? 7'd117 : 7'd116;
+                else tree_read_address=tree_target[0] ? 7'd116 : 7'd117;
+            end
+            T_AUTH_EMIT:tree_read_address=7'd96+{3'd0,ctx_level};
+            default:begin end
+        endcase
+        tree_memory_write=0;tree_write_address=0;tree_write_value=0;
+        tree_right_write=0;tree_right_value=node_memory_read;
+        if(tree_active && phase==TREE_RUN && !error && !lane_fault && !rst) case(tree_state)
+            T_INPUT_CHAIN,T_INPUT_SECRET:if(verify_valid) begin
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=trim_node(verify_data);
+            end
+            T_STORE_CHAIN:if(!(tree_selected && tree_flags[0])) begin
+                tree_memory_write=1;tree_write_address=ctx_chain;tree_write_value=node_memory_read;
+            end
+            T_ZERO_LEAF:begin tree_memory_write=1;tree_write_address=7'd116;end
+            T_WAIT:if(tree_response) begin
+                tree_memory_write=1;tree_write_address=group_mask[1] ? 7'd117 : 7'd116;
+                tree_write_value=trim_node(physical_value[255:0]);
+            end
+            T_CAPTURE:if(tree_capture_auth) begin
+                tree_memory_write=1;tree_write_address=7'd96+{3'd0,ctx_level};tree_write_value=node_memory_read;
+            end
+            T_CHECK:if(ctx_index[0] && tree_skip_parent) begin
+                tree_memory_write=1;tree_write_address=7'd116;
+            end
+            T_MERGE_RIGHT,T_FORS_RIGHT,T_VERIFY_RIGHT:tree_right_write=1;
+            T_MERGE_LEFT:begin
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=node_memory_read;
+            end
+            T_SAVE:begin
+                tree_memory_write=1;tree_write_address=7'd80+{3'd0,ctx_level};tree_write_value=node_memory_read;
+            end
+            T_FORS_RESULT:begin
+                if(tree_pair_selected && tree_fors_stage<2 && tree_fors_stage[0]==tree_target[0]) begin
+                    tree_memory_write=1;tree_write_address=7'd119;tree_write_value=node_memory_read;
+                end else if(tree_pair_selected && tree_fors_stage==3) begin
+                    tree_memory_write=1;tree_write_address=7'd96;tree_write_value=node_memory_read;
                 end
             end
-            if (pipe_mode) begin
-                if(pipe_valid && pipe_response_accept)begin
-                    pipe_done_mask[pipe_tag] <= 1;
-                    if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
-                        node_value <= pipe_response_result;
-                end
+            T_VERIFY_INPUT:if(verify_valid) begin
+                if(ctx_index[0]) begin
+                    tree_memory_write=1;tree_write_address=7'd116;tree_write_value=trim_node(verify_data);
+                end else begin tree_right_write=1;tree_right_value=trim_node(verify_data);end
             end
-            case (state)
-                IDLE:
-                if (job_valid) begin
-                    error <= 0;
-                    operation <= job_operation;
-                    stateful <= decoded_stateful;
-                    xmss <= decoded_xmss;
-                    stateful_height <= decoded_height;
-                    small_signature <= !decoded_stateful && config_code[2];
-                    profile_code <= config_code[1:0];
-                    node_bytes<=decoded_stateful ? 6'd32 : config_code[1:0]==0 ? 6'd16 : config_code[1:0]==1 ? 6'd24 : 6'd32;
-                    verify_pass <= 0;
-                    message_length <= job_message_length;
-                    message_received <= 0;
-                    scalar_tree <= 0;
-                    scalar_leaf <= decoded_stateful ? job_index[19:0] : 0;
-                    layer <= 0;
-                    group_index <= 0;
+            T_RETURN:if(tree_flags[0]) begin
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=node[3];
+            end
+            default:begin end
+        endcase
+    end
+    logic condition;
+    always_comb begin
+        condition=0;
+        case(d)
+            COND_CURSOR_MORE:condition=ctx_cursor<cursor_limit;
+            COND_CHAIN_MORE:condition=ctx_chain<chain_count;
+            COND_GROUP_MORE:condition=ctx_group<fors_k;
+            COND_LAYER_MORE:condition=ctx_layer<layers;
+            COND_FINAL_LAYER:condition=ctx_layer+8'd1==layers;
+            COND_LEVEL_MORE:condition=ctx_level<ctx_height;
+            COND_TARGET_LEAF:condition=ctx_cursor==ctx_target;
+            COND_INDEX_ODD:condition=ctx_index[0];
+            COND_AUTH_MATCH:condition=ctx_index==(ctx_path^14'd1);
+            COND_SAME_PARENT:condition=ctx_index[13:1]==ctx_path[13:1];
+            COND_STEP_EQ_DIGIT:condition=ctx_step[a[0]]==ctx_digit[a[0]];
+            COND_STEP_MORE:condition=ctx_step[a[0]]<15;
+            COND_LANE_ENABLED:condition=ctx_mask[a[0]];
+            COND_MASK_ZERO:condition=ctx_mask==0;
+            COND_FORS_PAIR_TARGET:condition=ctx_cursor=={ctx_target[13:1],1'b0};
+            COND_REDUCE_MORE:condition=ctx_reduce_index<ctx_reduce_span;
+            COND_REDUCE_AGAIN:condition=ctx_reduce_span>1;
+            COND_ROOT_EQUAL:condition=root_equal;
+            default:condition=0;
+        endcase
+    end
+    logic illegal;
+    wire metadata_safe=typed_metadata(opcode);
+    wire job_accept=phase==IDLE && job_valid && !error && config_valid
+        && image_header[63:32]==32'h48425350 && image_header[31:27]==5'd4
+        && job_operation<=2 && (job_operation==0 ? job_message_length==0
+            : job_message_length>0 && job_message_length<=MAX_MESSAGE_BYTES);
+    wire execute=phase==EXEC && ir_valid && !error && !lane_fault && !illegal;
 
-                    value[3] <= job_public_root;
-                    if (!valid_profile) fail();
-                    else if (decoded_stateful && job_index >= (32'd1 << decoded_height)) fail();
-                    else if (job_operation) begin
-                        enter_state(MESSAGE);
-                    end else begin
-                        enter_state(LAUNCH);
+    // A malformed instruction retires nothing and changes no context, node,
+    // stream, or lane result. Fault control only cancels execution.
+    always_comb begin
+        retire=chain_complete || tree_complete;redirect=0;redirect_pc=imm[8:0];halt_fetch=0;illegal=0;
+        if(phase==EXEC && ir_valid && !error && !lane_fault) begin
+            illegal=!typed_encoding_valid(ir) || (group_valid && !metadata_safe && opcode!=OP_WAIT);
+            retire=1;
+            if(!illegal) case(opcode)
+                OP_LAYER_NEXT:illegal=ctx_layer>=layers;
+                OP_GROUP_NEXT:illegal=ctx_group>=fors_k || fors_offset_next>10'd320;
+                OP_CURSOR_NEXT:illegal=cursor_next>{1'b0,cursor_limit};
+                OP_CHAIN_NEXT:illegal=ctx_chain>=chain_count || chain_next>chain_count+8'd1;
+                OP_HEIGHT:illegal=requested_height==0 || requested_height>14;
+                OP_TARGET:illegal=d==0 && (!hmsg_valid || ctx_group>=fors_k);
+                OP_DIGITS:retire=1;
+                OP_DIGIT_LOAD:illegal=!digits_valid
+                    || (selected_lanes[0] && (ctx_chain>=chain_count || ctx_chain>=len1+8'd3))
+                    || (selected_lanes[1] && (ctx_chain+8'd1>=chain_count || ctx_chain+8'd1>=len1+8'd3));
+                OP_STEP_INIT:illegal=a==1 && (!digits_valid || (selected_lanes & ~ctx_digit_valid)!=0);
+                OP_STEP_NEXT:illegal=(selected_lanes[0] && ctx_step[0]==15)
+                    || (selected_lanes[1] && ctx_step[1]==15);
+                OP_MASK:illegal=d==3 && (!digits_valid || (pair_mask & ~ctx_digit_valid)!=0);
+                OP_NODE_BEGIN:illegal=ctx_height==0 || begin_index>=cursor_limit
+                    || ctx_target>=cursor_limit || (a==1 && ctx_group>=fors_k);
+                OP_NODE_PARENT,OP_LEVEL_NEXT:illegal=ctx_level>=ctx_height;
+                OP_ADRS:case(d)
+                    0,1:illegal=ctx_chain>=chain_count || (d==0 && ctx_cursor>=1024);
+                    2:illegal=ctx_group>=fors_k || ctx_cursor>=(15'd1<<fors_a);
+                    3:illegal=ctx_group>=fors_k || ctx_target>=(15'd1<<fors_a);
+                    4:illegal=ctx_group>=fors_k;
+                    5:illegal=ctx_level>ctx_height;
+                    6:illegal=a==0 && ctx_cursor>=1024;
+                    8:illegal=ctx_reduce_index>=ctx_reduce_span || ctx_level==0;
+                    default:begin end
+                endcase
+                OP_REDUCE_INIT:illegal=cursor_limit>68 || ctx_height==0 || (d==1 && ctx_group>=fors_k);
+                OP_REDUCE_NEXT:illegal=d==0 ? ctx_reduce_index>=ctx_reduce_span
+                    : (ctx_reduce_span<=1 || ctx_level>=ctx_height);
+                OP_PARSE:illegal=!hmsg_valid;
+                OP_LOAD:illegal=memory_address>=(a==0 ? 68 : 16);
+                OP_STORE:illegal=memory_address>=(d==0 ? 68 : 16);
+                OP_HASH:illegal=(issue_mask!=2'b01 && issue_mask!=2'b10)
+                    || (descriptor_data[59:56]!=1 && descriptor_data[59:56]!=2
+                        && descriptor_data[59:56]!=3 && descriptor_data[59:56]!=4
+                        && descriptor_data[59:56]!=12)
+                    || (issue_mask[1] && descriptor_data[59:56]!=1 && descriptor_data[59:56]!=2)
+                    || (issue_mask[1] && descriptor_data[59:56]==2 && descriptor_data[47:40]!=1);
+                OP_CHAIN:begin
+                    retire=0;
+                    illegal=(issue_mask!=2'b01 && issue_mask!=2'b10)
+                        || macro_chain_index>=chain_count
+                        || (b==0 && ctx_cursor>=1024)
+                        || (d!=CHAIN_FULL && (!digits_valid || !ctx_digit_valid[issue_mask[1]]));
+                end
+                OP_TREE:begin
+                    retire=0;
+                    illegal=a!=operation || ctx_layer>=layers || ctx_leaf>=(11'd1<<hp)
+                        || (d==1 && ctx_group>=fors_k)
+                        || (a!=TREE_ROOT && ctx_target>=(15'd1<<(d==0 ? hp : fors_a)))
+                        || (d==0 && a!=TREE_ROOT && !digits_valid)
+                        || (b[0] && ctx_layer+8'd1!=layers);
+                end
+                OP_WAIT:begin retire=group_complete;illegal=!group_valid;end
+                OP_INPUT:begin retire=verify_valid;illegal=operation!=2;end
+                OP_EMIT:illegal=operation==2;
+                OP_ROOT_COMPARE:illegal=operation!=2;
+                OP_END:begin halt_fetch=1;illegal=operation==2 && !root_compare_valid;end
+                OP_JMP:redirect=1;
+                OP_BR:begin
+                    redirect=condition^b[0];
+                    illegal=(d==COND_ROOT_EQUAL && !root_compare_valid)
+                        || (d==COND_STEP_EQ_DIGIT && !ctx_digit_valid[a[0]]);
+                end
+                default:begin end
+            endcase
+            if(illegal) begin retire=0;redirect=0;halt_fetch=1;end
+        end
+        if(lane_fault) halt_fetch=1;
+    end
+    assign job_ready=phase==IDLE && !error;
+    assign message_ready=phase==MESSAGE;
+    assign verify_ready=!error && !lane_fault && !rst &&
+        ((phase==EXEC && ir_valid && opcode==OP_INPUT && !group_valid
+            && operation==2 && !illegal)
+        || (tree_active && phase==TREE_RUN && (tree_state==T_INPUT_CHAIN
+            || tree_state==T_INPUT_SECRET || tree_state==T_VERIFY_INPUT)));
+    assign out_bytes=node_bytes;
+    assign busy=phase!=IDLE && phase!=FAILED;
+    always_ff @(posedge clk) begin
+        if(rst || job_accept) begin
+            ctx_layer<=0;ctx_tree<=0;ctx_leaf<=0;ctx_group<=0;ctx_fors_offset<=0;ctx_target<=0;
+            ctx_cursor<=0;ctx_chain<=0;ctx_height<=0;ctx_level<=0;
+            ctx_index<=0;ctx_path<=0;ctx_fors_base<=0;ctx_mask<=0;
+            ctx_reduce_index<=0;ctx_reduce_span<=0;ctx_digit_valid<=0;
+            for(integer lane=0;lane<2;lane=lane+1) begin
+                ctx_step[lane]<=0;ctx_digit[lane]<=0;
+                addr_leaf[lane]<=0;addr_a[lane]<=0;addr_b[lane]<=0;
+            end
+        end else if(tree_cleanup) begin
+            ctx_cursor<=0;ctx_chain<=0;ctx_height<=0;ctx_level<=0;
+            ctx_index<=0;ctx_path<=0;ctx_fors_base<=0;ctx_mask<=1;
+            ctx_reduce_index<=0;ctx_reduce_span<=0;ctx_digit_valid<=0;
+            for(integer lane=0;lane<2;lane=lane+1) begin
+                ctx_step[lane]<=0;ctx_digit[lane]<=0;
+                addr_leaf[lane]<=0;addr_a[lane]<=0;addr_b[lane]<=0;
+            end
+        end else if(chain_complete || chain_child_complete) begin
+            ctx_step[chain_slot]<=chain_terminal;
+        end else if(tree_active && phase==TREE_RUN && !error && !lane_fault) begin
+            case(tree_state)
+                T_INIT:begin
+                    ctx_cursor<=0;ctx_chain<=0;ctx_height<=tree_height;ctx_level<=0;
+                    ctx_index<=0;ctx_path<=tree_target;ctx_fors_base<=tree_kind ? tree_group_base : 20'd0;
+                    ctx_mask<=1;ctx_digit_valid<=0;ctx_reduce_index<=0;ctx_reduce_span<=0;
+                    ctx_step[0]<=0;ctx_step[1]<=0;ctx_digit[0]<=0;ctx_digit[1]<=0;
+                end
+                T_LEAF:ctx_chain<=0;
+                T_CHILD:begin
+                    ctx_digit[0]<=read_digit(ctx_chain);
+                    ctx_digit_valid<=tree_mode==TREE_VERIFY || tree_selected ? 2'b01 : 2'b00;
+                    ctx_step[0]<=tree_mode==TREE_VERIFY ? read_digit(ctx_chain) : 4'd0;
+                end
+                T_STORE_CHAIN:ctx_chain<=ctx_chain+7'd1;
+                T_ZERO_LEAF:begin
+                    ctx_level<=0;ctx_index<=ctx_cursor[13:0];ctx_path<=tree_target;ctx_fors_base<=0;
+                end
+                T_WAIT:if(tree_response && group_recipe[59:56]==12 && tree_mode!=TREE_VERIFY) begin
+                    ctx_level<=0;ctx_index<=ctx_cursor[13:0];ctx_path<=tree_target;ctx_fors_base<=0;
+                end
+                T_CHECK:if(ctx_index[0] && tree_skip_parent) begin
+                    ctx_level<=ctx_level+4'd1;ctx_index<=ctx_index>>1;
+                    ctx_path<=ctx_path>>1;ctx_fors_base<=ctx_fors_base>>1;
+                end
+                T_MERGE_LEFT:begin
+                    ctx_level<=ctx_level+4'd1;ctx_index<=ctx_index>>1;
+                    ctx_path<=ctx_path>>1;ctx_fors_base<=ctx_fors_base>>1;
+                end
+                T_FORS_RIGHT:begin
+                    ctx_level<=1;ctx_index<=ctx_cursor[14:1];ctx_path<=tree_target>>1;
+                    ctx_fors_base<=tree_group_base>>1;
+                end
+                T_NEXT_LEAF:ctx_cursor<=ctx_cursor+(tree_kind ? 15'd2 : 15'd1);
+                T_AUTH_BEGIN:ctx_level<=0;
+                T_AUTH_EMIT:ctx_level<=ctx_level+4'd1;
+                T_VERIFY_INPUT:if(verify_valid) begin
+                    ctx_level<=ctx_level+4'd1;ctx_index<=ctx_index>>1;
+                    ctx_path<=ctx_path>>1;ctx_fors_base<=ctx_fors_base>>1;
+                end
+                T_VERIFY_BEGIN:begin
+                    ctx_level<=0;ctx_index<=tree_target;ctx_path<=tree_target;
+                    ctx_fors_base<=tree_kind ? tree_group_base : 20'd0;
+                end
+                default:begin end
+            endcase
+        end else if(execute) begin
+            case(opcode)
+                OP_LAYER_INIT:ctx_layer<=d==0 ? 5'd0 : layers[4:0]-5'd1;
+                OP_LAYER_NEXT:ctx_layer<=ctx_layer+5'd1;
+                OP_TREE_NEXT:begin
+                    ctx_leaf<=ctx_tree[9:0]&((10'd1<<hp)-1'b1);
+                    ctx_tree<=ctx_tree>>hp;
+                end
+                OP_GROUP_INIT:begin ctx_group<=0;ctx_fors_offset<=0;end
+                OP_GROUP_NEXT:begin ctx_group<=ctx_group+6'd1;ctx_fors_offset<=fors_offset_next[8:0];end
+                OP_CURSOR_INIT:ctx_cursor<=0;
+                OP_CURSOR_NEXT:ctx_cursor<=cursor_next[14:0];
+                OP_CHAIN_INIT:begin ctx_chain<=0;ctx_digit_valid<=0;end
+                OP_CHAIN_NEXT:begin ctx_chain<=chain_next[6:0];ctx_digit_valid<=0;end
+                OP_HEIGHT:ctx_height<=requested_height;
+                OP_TARGET:ctx_target<=d==0 ? target_value : {4'd0,ctx_leaf};
+                OP_DIGITS:ctx_digit_valid<=0;
+                OP_DIGIT_LOAD:begin
+                    if(selected_lanes[0]) ctx_digit[0]<=read_digit(ctx_chain);
+                    if(selected_lanes[1]) ctx_digit[1]<=read_digit(ctx_chain+7'd1);
+                    ctx_digit_valid<=ctx_digit_valid|selected_lanes;
+                end
+                OP_STEP_INIT:begin
+                    if(selected_lanes[0]) ctx_step[0]<=a==0 ? 4'd0 : ctx_digit[0];
+                    if(selected_lanes[1]) ctx_step[1]<=a==0 ? 4'd0 : ctx_digit[1];
+                end
+                OP_STEP_NEXT:begin
+                    if(selected_lanes[0]) ctx_step[0]<=ctx_step[0]+4'd1;
+                    if(selected_lanes[1]) ctx_step[1]<=ctx_step[1]+4'd1;
+                end
+                OP_MASK:case(d)
+                    0:ctx_mask<=imm[1:0];
+                    1:ctx_mask<=pair_mask;
+                    2:ctx_mask<=pair_mask & {ctx_step[1]<15,ctx_step[0]<15};
+                    3:ctx_mask<=pair_mask & {ctx_step[1]<ctx_digit[1],ctx_step[0]<ctx_digit[0]};
+                    default:begin end
+                endcase
+                OP_NODE_BEGIN:begin
+                    ctx_level<=0;ctx_index<=begin_index[13:0];ctx_path<=ctx_target;
+                    ctx_fors_base<=a==1 ? group_base : 20'd0;
+                end
+                OP_NODE_PARENT:begin
+                    ctx_level<=ctx_level+4'd1;ctx_index<=ctx_index>>1;
+                    ctx_path<=ctx_path>>1;ctx_fors_base<=ctx_fors_base>>1;
+                end
+                OP_LEVEL_INIT:ctx_level<=0;
+                OP_LEVEL_NEXT:ctx_level<=ctx_level+4'd1;
+                OP_ADRS:case(d)
+                    0,1:begin
+                        for(integer lane=0;lane<2;lane=lane+1) begin
+                            addr_leaf[lane]<=d==0 ? ctx_cursor[9:0] : ctx_leaf;
+                            addr_a[lane]<=ctx_chain+7'(lane);
+                            addr_b[lane]<={16'd0,ctx_step[lane]};
+                        end
+                    end
+                    2,3:begin
+                        for(integer lane=0;lane<2;lane=lane+1) begin
+                            addr_leaf[lane]<=ctx_leaf;addr_a[lane]<=0;
+                            addr_b[lane]<=group_base+(d==2 ? {5'd0,ctx_cursor} : {6'd0,ctx_target})+(d==2 ? 20'(lane) : 20'd0);
+                        end
+                    end
+                    4,5:begin
+                        for(integer lane=0;lane<2;lane=lane+1) begin
+                            addr_leaf[lane]<=d==4 ? ctx_leaf : 10'd0;
+                            addr_a[lane]<={3'd0,ctx_level};
+                            addr_b[lane]<=(d==4 ? ctx_fors_base : 20'd0)+{6'd0,ctx_index};
+                        end
+                    end
+                    6,7:begin
+                        for(integer lane=0;lane<2;lane=lane+1) begin
+                            addr_leaf[lane]<=d==7 || a==1 ? ctx_leaf : ctx_cursor[9:0];
+                            addr_a[lane]<=0;addr_b[lane]<=0;
+                        end
+                    end
+                    8:begin
+                        for(integer lane=0;lane<2;lane=lane+1) begin
+                            addr_leaf[lane]<=a==1 ? ctx_leaf : 10'd0;
+                            addr_a[lane]<={3'd0,ctx_level};
+                            addr_b[lane]<=(a==1 ? ctx_fors_base : 20'd0)+{13'd0,ctx_reduce_index};
+                        end
+                    end
+                    default:begin end
+                endcase
+                OP_REDUCE_INIT:begin
+                    ctx_reduce_span<=cursor_limit[6:0];ctx_reduce_index<=0;
+                    ctx_level<=0;ctx_fors_base<=d==1 ? group_base : 20'd0;
+                end
+                OP_REDUCE_NEXT:begin
+                    if(d==0) ctx_reduce_index<=ctx_reduce_index+7'd1;
+                    else begin
+                        ctx_reduce_span<=ctx_reduce_span>>1;ctx_reduce_index<=0;
+                        ctx_level<=ctx_level+4'd1;ctx_fors_base<=ctx_fors_base>>1;
                     end
                 end
-                MESSAGE:
-                if (message_valid) begin
-                    // The offline-validated private ROM stream always supplies full
-                    // eight-byte beats; its last word is already zero padded.
-                    message_buffer[{message_received[6:3], 6'b0}+:64] <= message_data;
-                    message_received <= message_received + 7'd8;
-                    if (message_received + 7'd8 >= message_length) enter_state(LAUNCH);
-                end
-                LAUNCH:
-                if (seq_ready) begin
-                    seq_start <= 1;
-                    enter_state(FETCH);
-                end
-                FETCH: begin
-                    if (seq_done) begin
-                        if (verifying) begin
-                            verify_pass <= value[2][127:0]==job_public_root[127:0]
-                                    && (node_bytes==16 || value[2][191:128]==job_public_root[191:128])
-                                    && (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
-                            enter_state(DRAIN);
-                        end else enter_state(DRAIN);
-                    end else if (cmd_valid) begin
-                        macro_op <= cmd[47:44];
-                        macro_desc <= cmd[43:36];
-                        macro_route <= cmd[35:28];
-                        macro_flags <= cmd[27:24];
-                        layer <= cmd[23:19];
-                        group_index <= cmd[18:13];
-                        task_chain <= 0;
-                        task_capture <= 0;
-                        pipe_cache_valid <= 0;
-                        pipe_batch_used <= 0;
-                        task_steps <= 0;
-                        enter_state(LOAD_DESCRIPTOR);
+                OP_PARSE:begin ctx_tree<=parsed_tree;ctx_leaf<=parsed_leaf;end
+                default:begin end
+            endcase
+        end
+    end
+    // Optional observation counters have no control role and vanish when
+    // PROFILE_ENABLE is false. Busy includes recipe setup and commit clocks.
+    always_ff @(posedge clk) begin
+        if(rst || job_accept || !PROFILE_ENABLE) begin
+            macro_count<=0;macro_busy_cycles<=0;macro_hashes<=0;
+            tree_count<=0;tree_busy_cycles<=0;tree_hashes<=0;tree_chains<=0;tree_input_wait_cycles<=0;tree_child_busy_cycles<=0;
+        end else if(!error) begin
+            if(chain_start) macro_count<=macro_count+32'd1;
+            if(chain_active && !tree_owner) macro_busy_cycles<=macro_busy_cycles+32'd1;
+            if(chain_issue && !tree_owner) macro_hashes<=macro_hashes+32'd1;
+            if(tree_start) tree_count<=tree_count+32'd1;
+            if(tree_active) tree_busy_cycles<=tree_busy_cycles+32'd1;
+            if(chain_active && tree_owner) tree_child_busy_cycles<=tree_child_busy_cycles+32'd1;
+            if(tree_issue) tree_hashes<=tree_hashes+32'd1;
+            if(chain_child_start) tree_chains<=tree_chains+32'd1;
+            if(tree_active && verify_ready && !verify_valid) tree_input_wait_cycles<=tree_input_wait_cycles+32'd1;
+        end
+    end
+    always_ff @(posedge clk) begin
+        if(rst) begin
+            phase<=IDLE;operation<=0;done<=0;error<=0;error_code<=0;verify_pass<=0;
+            out_valid<=0;out_data<=0;cycles<=0;hash_base<=0;permutation_base<=0;
+            message_length<=0;message_received<=0;
+            hmsg_digest<=0;hmsg_valid<=0;digits_valid<=0;digit_checksum<=0;
+            root_equal<=0;root_compare_valid<=0;group_valid<=0;group_mask<=0;
+            group_recipe<=0;group_layer<=0;group_tree<=0;
+            group_leaf_value<=0;group_a_value<=0;group_b_value<=0;
+            chain_state<=CHAIN_SEED;chain_mode<=0;chain_slot<=0;chain_digit<=0;
+            chain_feedback<=0;chain_hash_stage<=0;chain_shadow_valid<=0;
+            chain_f_bytes<=0;chain_f_blocks<=0;chain_expected_hashes<=0;
+            tree_owner<=0;tree_kind<=0;tree_mode<=0;tree_flags<=0;tree_profile_valid<=0;tree_state<=T_PREFLIGHT;tree_resume<=T_RETURN;
+            tree_node_words<=0;tree_height<=0;tree_chain_count<=0;tree_leaf_snapshot<=0;tree_target<=0;
+            tree_group_base<=0;tree_recipe_id<=0;tree_recipe_index<=0;tree_fors_stage<=0;chain_child_started<=0;
+            for(integer slot=0;slot<4;slot=slot+1) tree_recipe_blocks[slot]<=0;
+        end else begin
+            done<=0;out_valid<=0;
+            if(chain_child_start) chain_child_started<=1;
+            if(PROFILE_ENABLE && phase!=IDLE && phase!=FAILED) cycles<=cycles+1'b1;
+            if(lane_fault) begin
+                group_valid<=0;chain_shadow_valid<=0;fault(16'h3007);
+            end else if(illegal) begin
+                group_valid<=0;chain_shadow_valid<=0;fault(16'h3006);
+            end else case(phase)
+                IDLE:if(job_valid && !error) begin
+                    if(!config_valid || image_header[63:32]!=32'h48425350 || image_header[31:27]!=5'd4)
+                        fault(16'h3006);
+                    else if(job_operation>2 || (job_operation==0 ? job_message_length!=0
+                        : job_message_length==0 || job_message_length>87)) fault(16'h3002);
+                    else begin
+                        operation<=job_operation;verify_pass<=0;cycles<=0;
+                        root_equal<=0;root_compare_valid<=0;
+                        hash_base<=total_hashes;permutation_base<=total_permutations;
+                        message_length<=job_message_length;message_received<=0;
+                        hmsg_digest<=0;hmsg_valid<=0;digits_valid<=0;
+                                    phase<=job_operation==0 ? LAUNCH : MESSAGE;
                     end
                 end
-                LOAD_DESCRIPTOR: begin
-                    saved_descriptor <= descriptor_data[63:0];
-                    // Group coordinates already settled in FETCH. Split the
-                    // offset arithmetic from the digest selector using these
-                    // existing descriptor/decode cycles; TREE_INIT never waits.
-                    fors_digest_offset <= fors_group_offset(group_index);
-                    enter_state(DECODE);
+                MESSAGE:if(message_valid) begin
+                    message_received<=message_received+7'd8;
+                    if(message_received+7'd8>=message_length) phase<=LAUNCH;
                 end
-                DECODE: begin
-                    fors_target_prefetch <= fors_target(fors_digest_offset);
-                    case (macro_op)
-                        1: begin
-                            task_leaf <= scalar_leaf;
-                            task_a <= 0;
-                            task_b <= 0;
-                            // The sign program starts with PRF_msg. Verification
-                            // supplies that R as the first external node.
-                            if(verifying && stateful && (saved_descriptor[59:56]==5 || saved_descriptor[59:56]==11))
-                                read_verify_node(SF_RANDOM);
-                            else if (verifying && saved_descriptor[59:56] == 3)
-                                read_verify_node(VERIFY_RANDOM);
-                            else start_hash(saved_descriptor, HASH_RESULT);
+                LAUNCH:phase<=EXEC;
+                EXEC:if(ir_valid) begin
+                    case(opcode)
+                        OP_NMOV:begin
+                            if(d==2 || d==3) root_compare_valid<=0;
                         end
-                        2: begin
-                            standalone_chain <= 1;
-                            indexing <= 0;
-                            leaf_cursor <= stateful ? job_index[19:0] : 0;
-                            target <= stateful ? job_index[19:0] : 0;
-                            target_at_level <= stateful ? job_index[19:0] : 0;
-                            chain_cursor <= 0;
-                            endpoint_count <= descriptor[27:20];
-                            saved_chain_descriptor <= descriptor;
-                            enter_state(CHAIN_SETUP);
+                        OP_LOAD:begin
+                            if(d==2 || d==3) root_compare_valid<=0;
                         end
-                        3: enter_state(TREE_INIT);
-                        4: begin
-                            checksum <= 0;
-                            transform_index <= 0;
-                            enter_state(TRANSFORM);
+                        OP_HASH:begin
+                            group_valid<=1;group_mask<=issue_mask;
+                            group_recipe<=descriptor_data;group_layer<=ctx_layer;group_tree<=ctx_tree;
+                            group_leaf_value<=addr_leaf[issue_mask[1]];
+                            group_a_value<=addr_a[issue_mask[1]];
+                            group_b_value<=addr_b[issue_mask[1]];
                         end
-                        5:
-                        if (verifying && stateful) complete_macro();
-                        else begin
-                            emit_base   <= descriptor[59:52];
-                            emit_count  <= descriptor[51:48];
-                            emit_cursor <= 0;
-                            enter_state(EMIT);
+                        OP_CHAIN:begin
+                            phase<=MACRO;chain_state<=CHAIN_SEED;
+                            chain_mode<=d[1:0];chain_slot<=issue_mask[1];
+                            chain_digit<=d==CHAIN_FULL ? 4'd0 : ctx_digit[issue_mask[1]];
+                            chain_expected_hashes<=d==CHAIN_FULL || d==CHAIN_CAP_FULL ? 5'd16
+                                : d==CHAIN_CAP_PREFIX ? 5'd1+{1'b0,ctx_digit[issue_mask[1]]}
+                                : 5'd15-{1'b0,ctx_digit[issue_mask[1]]};
+                            chain_hash_stage<=d==CHAIN_SUFFIX;chain_feedback<=0;chain_shadow_valid<=0;
+                            group_valid<=0;group_mask<=issue_mask;
+                            group_layer<=ctx_layer;group_tree<=ctx_tree;
+                            group_leaf_value<=b==0 ? ctx_cursor[9:0] : ctx_leaf;
+                            group_a_value<=macro_chain_index[6:0];
+                            group_b_value<=d==CHAIN_SUFFIX ? {16'd0,ctx_digit[issue_mask[1]]} : 20'd0;
                         end
-                        default: fail();
+                        OP_TREE:begin
+                            phase<=TREE_RUN;tree_owner<=1;tree_state<=T_PREFLIGHT;
+                            tree_profile_valid<=config_valid;
+                            tree_kind<=d[0];tree_mode<=a[1:0];tree_flags<=b[0];
+                            tree_node_words<=n[5:3];tree_height<=d==0 ? hp[3:0] : fors_a[3:0];
+                            tree_chain_count<=chain_count[6:0];tree_leaf_snapshot<=ctx_leaf;tree_target<=ctx_target;
+                            tree_group_base<=group_base;tree_recipe_id<=d==0 ? 4'd7 : a==TREE_SIGN ? 4'd4 : 4'd5;
+                            tree_recipe_index<=d==0 || a==TREE_SIGN ? 2'd0 : 2'd1;
+                            group_valid<=0;group_mask<=1;group_layer<=ctx_layer;group_tree<=ctx_tree;
+                        end
+                        OP_WAIT:if(group_complete) begin
+                            if(group_mask[0] && group_recipe[59:56]==4) begin hmsg_digest<=result[0];hmsg_valid<=1;end
+                            group_valid<=0;
+                        end
+                        OP_DIGITS:begin digit_message<=node[2];digit_checksum<={2'd0,checksum_total};digits_valid<=1;end
+                        OP_INPUT:if(verify_valid) begin
+                            if(d==2 || d==3) root_compare_valid<=0;
+                        end
+                        OP_EMIT:begin out_valid<=1;out_data<=read_node(a);end
+                        OP_ROOT_COMPARE:begin root_equal<=read_node(2)==read_node(3);root_compare_valid<=1;end
+                        OP_END:begin verify_pass<=operation==2 && root_equal;phase<=FINISH;end
+                        default:begin end
                     endcase
                 end
-                TREE_INIT: begin
-                    fors_roots_pending <= 0;
-                    pipe_cache_valid <= 0;
-                    pipe_batch_used <= 0;
-                    saved_chain_descriptor <= descriptor_data[63:0];
-
-                    parent_id <= descriptor[51:44];
-                    tree_height <= {descriptor[39], descriptor[43:40]};
-                    indexing <= descriptor[33:32];
-                    standalone_chain <= 0;
-                    target <= tree_target;
-                    target_at_level <= tree_target;
-                    auth_node_match <= {1'b0, job_index[19:0]} == (tree_target ^ 21'd1);
-                    target_parent_match <= {1'b0, job_index[19:1]} == tree_target[20:1];
-                    node_below_root <= {descriptor[39], descriptor[43:40]} != 0;
-                    leaf_cursor <= verifying ? scalar_leaf : 0;
-                    chain_cursor <= 0;
-                    node_level <= 0;
-                    auth_level <= 0;
-                    endpoint_count <= descriptor_data[27:20];
-                    if (stateful && verifying) begin
-                        node_value <= value[2];
-                        node_index <= job_index[19:0];
-                        enter_state(PUSH_NODE);
-                    end else enter_state(CHAIN_SETUP);
-                end
-                CHAIN_SETUP: begin
-                    // This setup edge already precedes every new chain batch.
-                    // The prefetched index and digit remain stable on stalls.
-                    batch_chain_prefetch <= chain_cursor;
-                    batch_digit_prefetch <= digit(chain_cursor);
-                    if(endpoint_count==0 || endpoint_count>67 || (!standalone_chain && (tree_height>20 || (indexing==1 && tree_height<2))))
-                        fail();
-                    else begin
-                        if (PIPELINE > 1 && indexing == 1 && !verifying) begin
-                            fors_base <= leaf_cursor;
-                            fors_target_delta <= target - leaf_cursor;
-                            fors_offset <= 0;
-                            fors_roots_pending <= 0;
-                            fors_total<=((21'd1<<tree_height)-leaf_cursor)<FORS_BATCH ? 5'((21'd1<<tree_height)-leaf_cursor) : 5'(FORS_BATCH);
-                        end
-                        if (PIPELINE > 1 && !pipe_cache_valid) begin
-                            pipe_rolling<=pipe_direct && !(macro_flags[0] && leaf_cursor==target);
-                            pipe_active <= 0;
-                            roll_slot <= 0;
-                            roll_available <= 1;
-                            pipe_next_chain <= chain_cursor;
-                            pipe_completed <= 0;
-                        end
-                        if (stateful && PIPELINE > 1) begin
-                            if (pipe_cache_valid) begin
-                                pipe_pair <= pipe_pair + 1'b1;
-                                enter_state(PIPE_LOAD);
-                            end else begin
-                                pipe_pair <= 0;
-                                pipe_issue_slot <= 0;
-                                pipe_done_mask <= 0;
-                                for (integer q = 0; q < PIPE_BATCH; q = q + 1)
-                                pipe_expected_mask[q] <= 32'(chain_cursor) + q < endpoint_count;
-                                pipe_seed_domain <= descriptor_data[55:48];
-                                pipe_step_domain <= descriptor_data[119:112];
-                                enter_state(verifying ? PIPE_VERIFY_INPUT : PIPE_ISSUE);
-                            end
-                        end else if (verifying) begin
-                            task_chain <= 0;
-                            task_capture <= 0;
-                            task_step <= descriptor_data[127:64];
-                            task_steps <= 0;
-                            task_leaf <= scalar_leaf;
-                            task_a <= indexing == 1 ? 0 : chain_cursor;
-                            task_b <= indexing == 1 ? fors_chain_address : 21'(shared_digit);
-                            read_verify_node(VERIFY_CHAIN_INPUT);
-                        end else if(!stateful && PIPELINE>1 && descriptor_data[59:56]==1 && descriptor_data[123:120]==2)begin
-                            if (pipe_cache_valid) begin
-                                pipe_pair <= pipe_pair + 1'b1;
-                                enter_state(PIPE_LOAD);
-                            end else begin
-                                pipe_pair <= 0;
-                                pipe_issue_slot <= 0;
-                                pipe_done_mask <= 0;
-                                for (integer q = 0; q < PIPE_BATCH; q = q + 1)
-                                pipe_expected_mask[q]<=indexing==1 ? (q<FORS_BATCH && 32'(leaf_cursor)+q < (32'd1<<tree_height))
-                                    : (32'(chain_cursor)+q < endpoint_count);
-                                pipe_seed_domain <= descriptor_data[55:48];
-                                pipe_step_domain <= descriptor_data[119:112];
-                                enter_state(PIPE_ISSUE);
-                            end
+                MACRO:case(chain_state)
+                    CHAIN_SEED:begin
+                        if(!chain_recipe_valid(descriptor_data,1'b1)) begin
+                            chain_shadow_valid<=0;fault(16'h3006);
                         end else begin
-                            pipe_batch_used <= 0;
-                            task_chain <= 1;
-                            task_step <= descriptor_data[127:64];
-
-                            task_capture<=(indexing==1 ? leaf_cursor==target : leaf_cursor==target) && macro_flags[0];
-                            task_leaf <= indexing == 1 ? scalar_leaf : leaf_cursor;
-                            task_a <= indexing == 1 ? 0 : chain_cursor;
-                            task_b <= indexing == 1 ? fors_chain_address : 21'd0;
-                            task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target))
-                            ? shared_digit : chain_descriptor[19:15];
-                            task_capture_after <= indexing == 1 ? 0 : shared_digit;
-                            start_hash(descriptor_data[63:0], CHAIN_STORE);
+                            group_recipe<=descriptor_data;chain_state<=CHAIN_F;
                         end
                     end
-                end
-                PIPE_ISSUE: begin
-                    if ((pipe_rolling && pipe_selected && pipe_ready) ||
-                        (!pipe_rolling && (!pipe_expected_mask[pipe_issue_slot] || pipe_ready))) begin
-                        batch_chain_prefetch <= batch_chain_index + 1'b1;
-                        batch_digit_prefetch <= digit(batch_chain_index + INDEX_BITS'(1));
-                    end
-                    if (pipe_rolling) begin
-                        if (pipe_completed >= endpoint_count) begin
-                            pipe_rolling <= 0;
-                            pipe_batch_used <= 1;
-                            pipe_cache_valid <= 0;
-                            chain_cursor <= endpoint_count - 1'b1;
-                            enter_state(CHAIN_NEXT);
+                    CHAIN_F:begin
+                        if(!chain_recipe_valid(descriptor_data,1'b0)) begin
+                            chain_shadow_valid<=0;fault(16'h3006);
+                        end else begin
+                            chain_f_bytes<=descriptor_data[37:32];chain_f_blocks<=descriptor_data[29:24];
+                            if(chain_mode==CHAIN_SUFFIX) group_recipe<=descriptor_data;
+                            if(chain_mode==CHAIN_SUFFIX && chain_digit==15) chain_state<=CHAIN_DONE;
+                            else begin group_valid<=1;chain_state<=CHAIN_ISSUE;end
                         end
-                    end else if (!pipe_expected_mask[pipe_issue_slot] || pipe_ready) begin
-                        if(pipe_issue_slot+1>=PIPELINE ||
-                           (pipe_direct && (pipe_expected_mask>>(pipe_issue_slot+1))==0))
-                            enter_state(PIPE_WAIT);
-                        else pipe_issue_slot <= pipe_issue_slot + 1'b1;
                     end
-                end
-                PIPE_VERIFY_INPUT:
-                if (verify_valid && pipe_ready) begin
-                    batch_chain_prefetch <= batch_chain_index + 1'b1;
-                    batch_digit_prefetch <= digit(batch_chain_index + INDEX_BITS'(1));
-                    if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)
-                        enter_state(PIPE_WAIT);
-                    else pipe_issue_slot <= pipe_issue_slot + 1'b1;
-                end
-                PIPE_WAIT:
-                if ((pipe_done_mask & pipe_expected_mask) == pipe_expected_mask) begin
-                    if (pipe_direct) begin
-                        pipe_cache_valid <= 0;
-                        pipe_batch_used <= 1;
-                        pipe_pair <= 0;
-                        if (macro_flags[0] && leaf_cursor == target) begin
-                            start_output(pipe_read_capture, node_bytes, PIPE_CAPTURE_NEXT);
-                            pipe_pair <= 1;
-                        end else advance_direct_batch();
-                    end else if (indexing == 1 && !verifying) begin
-                        pipe_cache_valid <= 0;
-                        pipe_batch_used  <= 1;
-                        enter_state(FORS_PICK);
-                    end else enter_state(PIPE_LOAD);
-                end
-                FORS_PICK: begin
-                    if (fors_target_wave && macro_flags[0])
-                        start_output(pipe_read_capture, node_bytes, FORS_LEAF_NEXT);
-                    else enter_state(FORS_LEAF_NEXT);
-                end
-                FORS_LEAF_NEXT: begin
-                    if (fors_offset + PIPELINE < fors_total) begin
-                        fors_offset   <= fors_offset + 5'(PIPELINE);
-                        pipe_issue_slot <= 0;
-                        pipe_done_mask  <= 0;
-                        for (integer q = 0; q < PIPE_BATCH; q++)
-                        pipe_expected_mask[q] <= 32'(fors_offset) + PIPELINE + q < fors_total;
-                        enter_state(PIPE_ISSUE);
-                    end else if (fors_target_group) enter_state(FORS_AUTH0);
-                    else enter_state(FORS_BEGIN);
-                end
-                FORS_AUTH0: enter_state(FORS_BEGIN);
-                FORS_BEGIN: begin
-                    fors_level <= 0;
-                    fors_offset <= 0;
-                    pipe_issue_slot <= 0;
-                    pipe_done_mask <= 0;
-                    for (integer q = 0; q < PIPE_BATCH; q++)
-                    pipe_expected_mask[q] <= q < (fors_total >> 1);
-                    pipe_seed_domain <= 3;
-                    pipe_step_domain <= 3;
-                    enter_state(FORS_LEFT);
-                end
-                FORS_LEFT: enter_state(FORS_ISSUE);
-                FORS_ISSUE:
-                if (pipe_ready) begin
-                    if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)
-                        enter_state(FORS_WAIT);
-                    else begin
-                        pipe_issue_slot <= pipe_issue_slot + 1'b1;
+                    CHAIN_ISSUE:if(chain_issue) chain_state<=CHAIN_RUN;
+                    CHAIN_RUN:if(chain_response) begin
+                        if(chain_capture_now) chain_shadow_valid<=1;
+                        if(chain_at_end) begin
+                            group_valid<=0;
+                            // This check precedes every architectural commit.
+                            if(chain_capture_mode && !(chain_shadow_valid || chain_capture_now)) begin
+                                chain_shadow_valid<=0;fault(16'h3006);
+                            end else chain_state<=chain_capture_mode ? CHAIN_CAP : CHAIN_RESULT;
+                        end else begin
+                            chain_feedback<=1;chain_hash_stage<=1;
+                            group_recipe<=chain_f_recipe;
+                            group_b_value<={16'd0,chain_next_step};
+                            chain_state<=chain_issue ? CHAIN_RUN : CHAIN_ISSUE;
+                        end
                     end
-                end
-                FORS_WAIT:
-                if(lt_batch_complete)begin
-                    if (fors_offset + PIPELINE < fors_outputs) begin
-                        fors_offset   <= fors_offset + 5'(PIPELINE);
-                        pipe_issue_slot <= 0;
-                        pipe_done_mask  <= 0;
-                        for (integer q = 0; q < PIPE_BATCH; q++)
-                        pipe_expected_mask[q] <= 32'(fors_offset) + PIPELINE + q < fors_outputs;
-                        enter_state(FORS_LEFT);
-                    end else if (fors_level) begin
-                        fors_root_cursor <= 0;
-                        enter_state(FORS_PUSH);
-                    end else enter_state(fors_target_group ? FORS_AUTH1 : FORS_LEVEL);
-                end
-                FORS_AUTH1: enter_state(FORS_LEVEL);
-                FORS_LEVEL: begin
-                    fors_level <= 1;
-                    fors_offset <= 0;
-                    pipe_issue_slot <= 0;
-                    pipe_done_mask <= 0;
-                    for (integer q = 0; q < PIPE_BATCH; q++)
-                    pipe_expected_mask[q] <= q < (fors_total >> 2);
-                    enter_state(FORS_LEFT);
-                end
-                FORS_PUSH: begin
-                    node_value <= endpoint_value0;
-                    node_level <= 2;
-                    target_at_level <= target >> 2;
-                    auth_node_match <= fors_root_index == ((target >> 2) ^ 21'd1);
-                    target_parent_match <= fors_root_index[20:1] == {2'b0, target[20:3]};
-                    node_below_root <= 5'd2 < tree_height;
-                    node_index <= fors_root_index;
-                    leaf_cursor <= {fors_root_index[18:0], 2'b11};
-                    fors_roots_pending <= 1;
-                    pipe_cache_valid <= 0;
-                    pipe_batch_used <= 0;
-                    enter_state(PUSH_NODE);
-                end
-                FORS_ROOT_NEXT: begin
-                    if (fors_root_cursor + 1 < (fors_total >> 2)) begin
-                        fors_root_cursor <= fors_root_cursor + 1'b1;
-                        enter_state(FORS_PUSH);
-                    end else begin
-                        fors_roots_pending <= 0;
-                        leaf_cursor <= fors_base + 21'(fors_total);
-                        chain_cursor <= 0;
-                        enter_state(CHAIN_SETUP);
+                    CHAIN_CAP:chain_state<=CHAIN_RESULT;
+                    CHAIN_RESULT:chain_state<=CHAIN_DONE;
+                    CHAIN_DONE:begin
+                        chain_shadow_valid<=0;phase<=tree_owner ? TREE_RUN : EXEC;
+                        if(tree_owner) tree_state<=tree_selected ? T_EMIT_CAP : T_STORE_CHAIN;
                     end
-                end
-                PIPE_LOAD: begin
-                    pipe_batch_used <= 1;
-                    pipe_cache_valid<=pipe_pair+1<PIPELINE && ((pipe_expected_mask>>(pipe_pair+1))!=0);
-                    result <= {{(V - W) {1'b0}}, pipe_read_result};
-                    enter_state(CHAIN_STORE);
-                end
-                CHAIN_STORE: begin
-                    if (standalone_chain && chain_cursor == 0) node_value <= result[W-1:0];
-                    task_chain <= 0;
-                    if (sign_only || (!verifying && macro_flags[0] && leaf_cursor == target))
-                        enter_state(CHAIN_OUTPUT0);
-                    else enter_state(CHAIN_NEXT);
-                end
-                CHAIN_OUTPUT0:
-                start_output(sign_only ? result[W-1:0] : selected_capture, node_bytes, CHAIN_NEXT);
-                CHAIN_NEXT: begin
-                    if (indexing != 1 && chain_cursor + 1 < endpoint_count) begin
-                        chain_cursor <= chain_cursor + 1;
-                        enter_state(CHAIN_SETUP);
-                    end else if (sign_only) complete_macro();
-                    else if (stateful && chain_descriptor[13:12] == 2) begin
-                        lt_count  <= endpoint_count;
-                        lt_cursor <= 0;
-                        lt_level  <= 0;
-                        enter_state(LT_PIPE_INIT);
-                    end else if (standalone_chain && chain_descriptor[13:12] == 0)
-                        route_result(ROUTE_NODE);
-                    else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
-                        node_value <= 0;
-                        node_level <= 0;
-                        target_at_level <= target;
-                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
-                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
-                        node_below_root <= tree_height != 0;
-                        node_index <= leaf_cursor;
-                        enter_state(PUSH_NODE);
-                    end else if (chain_descriptor[13:12] == 0) begin
-                        node_value <= result[W-1:0];
-                        node_level <= 0;
-                        target_at_level <= target;
-                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
-                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
-                        node_below_root <= tree_height != 0;
-                        node_index <= leaf_cursor;
-                        enter_state(PUSH_NODE);
-                    end else begin
-                        enter_state(REDUCE_SETUP);
-                    end
-                end
-                REDUCE_SETUP: begin
-                    task_chain <= 0;
-                    task_capture <= 0;
-                    task_steps <= 0;
-                    task_leaf <= leaf_cursor;
-                    task_a <= 0;
-                    task_b <= 0;
-                    start_hash(descriptor_data[63:0], stateful ? SF_LEAF : LEAF_SETUP);
-                end
-                LT_PIPE_INIT: begin
-                    pipe_rolling <= 0;
-                    if (lt_cursor + 1 >= lt_count) enter_state(LT_COPY);
-                    else if (PIPELINE == 1) enter_state(LT_SETUP);
-                    else begin
-                        pipe_issue_slot  <= 0;
-                        pipe_done_mask   <= 0;
-                        pipe_seed_domain <= descriptor_data[55:48];
-                        pipe_step_domain <= descriptor_data[55:48];
-                        for (integer q = 0; q < PIPE_BATCH; q++)
-                        pipe_expected_mask[q] <= 32'(lt_cursor) + 2 * q + 1 < lt_count;
-                        enter_state(LT_PIPE_ISSUE);
-                    end
-                end
-                LT_PIPE_ISSUE:
-                if (pipe_ready) begin
-                    if(pipe_issue_slot+1>=PIPELINE || (pipe_expected_mask>>(pipe_issue_slot+1))==0)
-                        enter_state(LT_PIPE_WAIT);
-                    else pipe_issue_slot <= pipe_issue_slot + 1'b1;
-                end
-                // The last response or odd-tail copy commits on this edge.
-                // Both use the same layer advance; INIT/COPY/FINISH observes
-                // the committed RAM value without an extra advance cycle.
-                LT_PIPE_WAIT, LT_COPY: if (PIPELINE == 1 && state == LT_COPY) enter_state(LT_NEXT);
-                else if (state == LT_COPY || lt_batch_complete) begin
-                    if (state != LT_COPY && lt_cursor + 2 * PIPELINE < lt_count) begin
-                        lt_cursor <= lt_cursor + 2 * PIPELINE;
-                        enter_state(LT_PIPE_INIT);
-                    end else if (state != LT_COPY && lt_count[0]) begin
-                        lt_cursor <= lt_count - 1'b1;
-                        enter_state(LT_COPY);
-                    end else if (lt_count <= 2) enter_state(LT_FINISH);
-                    else begin
-                        lt_count  <= (lt_count + 1) >> 1;
-                        lt_cursor <= 0;
-                        lt_level  <= lt_level + 1'b1;
-                        enter_state(LT_PIPE_INIT);
-                    end
-                end
-                LT_SETUP: if (PIPELINE == 1) begin
-                    task_chain <= 0;
-                    task_capture <= 0;
-                    task_steps <= 0;
-                    task_leaf <= leaf_cursor;
-                    task_a <= {4'd0, lt_level};
-                    task_b <= 21'(lt_cursor >> 1);
-                    result <= {{(V - W) {1'b0}}, endpoint_value0};
-                    node_value <= endpoint_value1;
-                    start_hash(descriptor_data[63:0], LT_STORE);
-                end else fail();
-                LT_STORE: if (PIPELINE == 1) enter_state(LT_NEXT);
-                else fail();
-                LT_NEXT: if (PIPELINE == 1) begin
-                    if (lt_cursor + 2 < lt_count) begin
-                        lt_cursor <= lt_cursor + 2;
-                        enter_state(LT_PIPE_INIT);
-                    end else if (lt_count <= 2) enter_state(LT_FINISH);
-                    else begin
-                        lt_count <= (lt_count + 1) >> 1;
-                        lt_cursor <= 0;
-                        lt_level <= lt_level + 1'b1;
-                        enter_state(LT_PIPE_INIT);
-                    end
-                end else fail();
-                LT_FINISH: begin
-                    node_value <= endpoint_value0;
-                    if (verifying && standalone_chain) begin
-                        value[2] <= endpoint_value0;
-                        complete_macro();
-                    end else begin
-                        node_index <= leaf_cursor;
-                        node_level <= 0;
-                        target_at_level <= target;
-                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
-                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
-                        node_below_root <= tree_height != 0;
-                        enter_state(PUSH_NODE);
-                    end
-                end
-                SF_LEAF: begin
-                    task_chain <= 0;
-                    task_capture <= 0;
-                    task_steps <= 0;
-                    task_leaf <= leaf_cursor;
-                    task_a <= 0;
-                    task_b <= (21'd1 << stateful_height) + leaf_cursor;
-                    start_hash(descriptor_data[63:0], SF_LEAF_DONE);
-                end
-                SF_LEAF_DONE: begin
-                    node_value <= result[W-1:0];
-                    if (verifying && standalone_chain) begin
-                        value[2] <= result[W-1:0];
-                        complete_macro();
-                    end else begin
-                        node_index <= leaf_cursor;
-                        node_level <= 0;
-                        target_at_level <= target;
-                        auth_node_match <= leaf_cursor == (target ^ 21'd1);
-                        target_parent_match <= leaf_cursor[20:1] == target[20:1];
-                        node_below_root <= tree_height != 0;
-                        enter_state(PUSH_NODE);
-                    end
-                end
-                SF_RANDOM: begin
-                    value[0] <= emit_value;
-                    if (xmss) complete_macro();
-                    else start_hash(saved_descriptor, HASH_RESULT);
-                end
-                LEAF_SETUP:
-                if (standalone_chain) route_result(ROUTE_HASH);
-                else begin
-                    node_value <= result[W-1:0];
-                    node_level <= 0;
-                    target_at_level <= target;
-                    auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);
-                    target_parent_match <= verifying || leaf_cursor[20:1] == target[20:1];
-                    node_below_root <= tree_height != 0;
-                    node_index <= verifying ? target : leaf_cursor;
-                    enter_state(PUSH_NODE);
-                end
-                PUSH_NODE, PUSH_STACK: begin
-                    if (state == PUSH_NODE && auth_write && stack_write) enter_state(PUSH_STACK);
-                    else begin
-                        if (node_level == tree_height) begin
-                            auth_level <= 0;
-                            if (!verifying && macro_flags[1]) enter_state(AUTH_OUTPUT);
-                            else enter_state(TREE_FINISH);
-                        end else if (verifying) read_verify_node(PARENT_SETUP);
-                        else if (node_index[0]) enter_state(PARENT_SETUP);
+                    default:begin group_valid<=0;chain_shadow_valid<=0;fault(16'h3006);end
+                endcase
+                TREE_RUN:case(tree_state)
+                    T_PREFLIGHT:begin
+                        if(!tree_profile_valid || !tree_recipe_valid(descriptor_data,tree_recipe_id)) fault(16'h3006);
                         else begin
-                            if (fors_roots_pending) enter_state(FORS_ROOT_NEXT);
-                            else begin
-                                leaf_cursor  <= leaf_cursor + 1'b1;
-                                chain_cursor <= 0;
-                                enter_state(CHAIN_SETUP);
-                            end
+                            tree_recipe_blocks[tree_recipe_index]<=descriptor_data[29:24];
+                            if(tree_recipe_id==(tree_kind ? 4'd6 : 4'd10)) tree_state<=T_INIT;
+                            else begin tree_recipe_id<=tree_recipe_id+4'd1;tree_recipe_index<=tree_recipe_index+2'd1;end
                         end
                     end
-                end
-                PARENT_SETUP: begin
-                    if(!verifying && macro_flags[3] && target_parent_match) begin
-                        node_value <= 0;
-                        node_index <= node_index >> 1;
-                        node_level <= node_level + 1'b1;
-                        target_at_level <= target_at_level >> 1;
-                        auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
-                        target_parent_match <= node_index[20:2] == target_at_level[20:2];
-                        node_below_root <= node_level + 5'd1 < tree_height;
-                        enter_state(PUSH_NODE);
-                    end else begin
-                        task_chain <= 0;
-                        task_capture <= 0;
-                        task_steps <= 0;
-                        task_leaf <= indexing == 1 ? scalar_leaf : 0;
-                        task_a <= descriptor_data[59:56] == 8 ? node_level : node_level + 1'b1;
-                        task_b <= parent_address;
-                        result[W-1:0]<=verifying ? (node_index[0] ? emit_value : node_value) : endpoint_value0;
-                        start_hash(descriptor_data[63:0], PARENT_DONE);
+                    T_INIT:begin
+                        tree_fors_stage<=0;
+                        if(tree_kind) tree_state<=tree_mode==TREE_VERIFY ? T_INPUT_SECRET : T_FORS_PREP;
+                        else tree_state<=T_LEAF;
                     end
-                end
-                PARENT_DONE: begin
-                    node_value <= result[W-1:0];
-                    node_index <= node_index >> 1;
-                    node_level <= node_level + 1'b1;
-                    target_at_level <= target_at_level >> 1;
-                    auth_node_match <= (node_index >> 1) == ((target_at_level >> 1) ^ 21'd1);
-                    target_parent_match <= node_index[20:2] == target_at_level[20:2];
-                    node_below_root <= node_level + 5'd1 < tree_height;
-                    enter_state(PUSH_NODE);
-                end
-                AUTH_OUTPUT: begin
-                    if (auth_level < tree_height) begin
-                        start_output(endpoint_value0, node_bytes, AUTH_OUTPUT);
-                        auth_level <= auth_level + 1'b1;
-                    end else enter_state(TREE_FINISH);
-                end
-                TREE_FINISH: begin
-                    if (stateful && verifying) value[2] <= node_value;
-                    route_result(!verifying && macro_flags[3] ? ROUTE_SAVED : ROUTE_NODE);
-                end
-                HASH_ISSUE: if (lane_ready) enter_state(HASH_WAIT);
-                HASH_WAIT:
-                if (lane_valid) begin
-                    result <= lane_value;
-                    if (lane_error) fail();
-                    else enter_state(continuation);
-                end
-                HASH_RESULT: route_result(ROUTE_HASH);
-                ROUTE: begin
-                    if (macro_route == 0) complete_macro();
-                    else begin
-                        if (!route_descriptor[53]) begin
-                            value[route_descriptor[57:56]] <= route_value[W-1:0];
-                            if (route_descriptor[57:56] == 1)
-                                fors_digest_tail <= route_value[FORS_DIGEST_BITS-1:W];
-                        end
-                        if (route_descriptor[54]) begin
-                            scalar_tree <= parsed_tree(route_value);
-                            scalar_leaf <= parsed_leaf(route_value);
-                        end
-                        if (!verifying && route_descriptor[55])
-                            start_output(route_value[W-1:0], node_bytes, FETCH);
-                        else enter_state(FETCH);
-                        seq_complete <= 1;
+                    T_LEAF:tree_state<=tree_mode==TREE_VERIFY ? T_INPUT_CHAIN : T_CHILD;
+                    T_INPUT_CHAIN:if(verify_valid) tree_state<=T_CHILD;
+                    T_CHILD:begin
+                        phase<=MACRO;chain_child_started<=0;
+                        chain_mode<=tree_mode==TREE_VERIFY ? CHAIN_SUFFIX
+                            : tree_selected ? (tree_flags[0] ? CHAIN_CAP_PREFIX : CHAIN_CAP_FULL) : CHAIN_FULL;
+                        chain_slot<=0;chain_digit<=tree_mode==TREE_VERIFY || tree_selected ? read_digit(ctx_chain) : 4'd0;
+                        chain_expected_hashes<=tree_mode==TREE_VERIFY ? 5'd15-{1'b0,read_digit(ctx_chain)}
+                            : tree_selected && tree_flags[0] ? 5'd1+{1'b0,read_digit(ctx_chain)} : 5'd16;
+                        chain_hash_stage<=tree_mode==TREE_VERIFY;chain_feedback<=0;chain_shadow_valid<=0;
+                        chain_f_bytes<=tree_node_bytes;chain_f_blocks<=tree_recipe_blocks[1];
+                        group_mask<=1;group_leaf_value<=tree_mode==TREE_VERIFY ? tree_leaf_snapshot : ctx_cursor[9:0];
+                        group_a_value<=ctx_chain;group_b_value<=tree_mode==TREE_VERIFY ? {16'd0,read_digit(ctx_chain)} : 20'd0;
+                        group_recipe<=tree_recipe(tree_mode==TREE_VERIFY ? 4'd8 : 4'd7);
+                        if(tree_mode==TREE_VERIFY && read_digit(ctx_chain)==15) begin group_valid<=0;chain_state<=CHAIN_DONE;end
+                        else begin group_valid<=1;chain_state<=CHAIN_ISSUE;end
                     end
-                end
-                TRANSFORM: begin
-                    if (descriptor[59:56] == 2) begin
-                        scalar_leaf <= scalar_tree & ((1 << descriptor[43:40]) - 1);
-                        scalar_tree <= scalar_tree >> descriptor[43:40];
-                        complete_macro();
-                    end else if (descriptor[59:56] == 1) begin
-                        checksum <= checksum + {8'd0, checksum_increment};
-                        if (transform_index + 1 == LEN1) complete_macro();
-                        else transform_index <= transform_index + 1'b1;
-                    end else fail();
-                end
-                EMIT: begin
-                    start_output(emit_source, emit_descriptor[53:48], EMIT_NEXT);
-                end
-                EMIT_NEXT: begin
-                    if (emit_cursor + 1 < emit_count) begin
-                        emit_cursor <= emit_cursor + 1'b1;
-                        enter_state(EMIT);
-                    end else complete_macro();
-                end
-                VERIFY_INPUT:
-                if (verify_valid) begin
-                    emit_value <= verify_data;
-                    enter_state(continuation);
-                end
-                VERIFY_RANDOM: route_result(ROUTE_EMIT);
-                VERIFY_CHAIN_INPUT: begin
-                    // A WOTS digit of 15 already is an endpoint: zero hashes.
-                    result <= {{(V - W) {1'b0}}, emit_value};
-                    if (indexing == 1) start_hash(task_step, LEAF_SETUP);
-                    else enter_state(VERIFY_CHAIN_RUN);
-                end
-                VERIFY_CHAIN_RUN: begin
-                    if (!verify_step_needed) begin
-                        enter_state(CHAIN_STORE);
-                    end else start_hash(descriptor_data[63:0], VERIFY_CHAIN_ADVANCE);
-                end
-                VERIFY_CHAIN_ADVANCE: begin
-                    task_b <= {17'd0, task_b[3:0] + 4'd1};
-                    enter_state(VERIFY_CHAIN_RUN);
-                end
-                OUTPUT_CHUNK: begin
-                    if (pipe_direct && continuation == PIPE_CAPTURE_NEXT) begin
-                        if (pipe_pair < PIPELINE && (pipe_expected_mask >> pipe_pair) != 0) begin
-                            emit_value <= pipe_read_capture;
-                            pipe_pair  <= pipe_pair + 1'b1;
-                        end else advance_direct_batch();
-                    end else enter_state(continuation);
-                end
-                DRAIN: enter_state(FINISH);
-                FINISH: begin
-                    done <= 1;
-                    enter_state(IDLE);
-                end
-                FAILED: enter_state(IDLE);
-                default: fail();
+                    T_EMIT_CAP:begin out_valid<=1;out_data<=node_memory_read;tree_state<=T_STORE_CHAIN;end
+                    T_STORE_CHAIN:begin
+                        if(ctx_chain+8'd1<tree_chain_count) tree_state<=tree_mode==TREE_VERIFY ? T_INPUT_CHAIN : T_CHILD;
+                        else tree_state<=tree_selected && tree_flags[0] ? T_ZERO_LEAF : T_COMPRESS;
+                    end
+                    T_ZERO_LEAF:tree_state<=T_CAPTURE;
+                    T_COMPRESS:begin
+                        group_recipe<=tree_recipe(9);group_mask<=1;group_valid<=1;
+                        group_leaf_value<=tree_mode==TREE_VERIFY ? tree_leaf_snapshot : ctx_cursor[9:0];
+                        group_a_value<=0;group_b_value<=0;tree_state<=T_ISSUE;
+                        tree_resume<=tree_mode==TREE_VERIFY ? T_VERIFY_BEGIN : T_CAPTURE;
+                    end
+                    T_ISSUE:if(physical_ready) tree_state<=T_WAIT;
+                    T_WAIT:if(tree_response) begin
+                        if(tree_fors_reissue) begin
+                            group_recipe<=tree_fors_next_recipe;group_mask<=physical_mask;
+                            group_b_value<=tree_fors_next_b;tree_fors_stage<=tree_fors_next;
+                            tree_state<=physical_ready ? T_WAIT : T_ISSUE;
+                        end else begin group_valid<=0;tree_state<=tree_resume;end
+                    end
+                    T_CAPTURE:tree_state<=T_CHECK;
+                    T_CHECK:begin
+                        if(ctx_index[0]) tree_state<=tree_skip_parent ? T_CAPTURE : T_MERGE_RIGHT;
+                        else tree_state<=T_SAVE;
+                    end
+                    T_MERGE_RIGHT:tree_state<=T_MERGE_LEFT;
+                    T_MERGE_LEFT:begin
+                        group_recipe<=tree_recipe(tree_kind ? 4'd6 : 4'd10);group_mask<=1;group_valid<=1;
+                        group_leaf_value<=tree_kind ? tree_leaf_snapshot : 10'd0;
+                        group_a_value<={3'd0,ctx_level}+7'd1;
+                        group_b_value<=(ctx_fors_base>>1)+{7'd0,ctx_index[13:1]};
+                        tree_resume<=T_CAPTURE;tree_state<=T_ISSUE;
+                    end
+                    T_SAVE:tree_state<=T_NEXT_LEAF;
+                    T_NEXT_LEAF:begin
+                        if(ctx_cursor+(tree_kind ? 15'd2 : 15'd1)<tree_limit)
+                            tree_state<=tree_kind ? T_FORS_PREP : T_LEAF;
+                        else tree_state<=tree_mode==TREE_SIGN ? T_AUTH_BEGIN : T_RETURN;
+                    end
+                    T_AUTH_BEGIN:tree_state<=tree_kind ? T_SECRET_EMIT : T_AUTH_EMIT;
+                    T_SECRET_EMIT:begin out_valid<=1;out_data<=node_memory_read;tree_state<=T_AUTH_EMIT;end
+                    T_AUTH_EMIT:begin
+                        out_valid<=1;out_data<=node_memory_read;
+                        if(ctx_level+5'd1>=tree_height) tree_state<=T_RETURN;
+                    end
+                    T_RETURN:tree_state<=T_CLEANUP;
+                    T_CLEANUP:begin root_equal<=0;root_compare_valid<=0;tree_state<=T_DONE;end
+                    T_DONE:begin tree_owner<=0;phase<=EXEC;end
+                    T_FORS_PREP:begin
+                        group_recipe<=tree_recipe(tree_fors_stage[1] ? 4'd5 : 4'd4);
+                        group_mask<=tree_fors_stage[0] ? 2'b10 : 2'b01;group_valid<=1;
+                        group_leaf_value<=tree_leaf_snapshot;group_a_value<=0;
+                        group_b_value<=tree_group_base+{5'd0,ctx_cursor}+{19'd0,tree_fors_stage[0]};
+                        tree_resume<=T_FORS_RESULT;tree_state<=T_ISSUE;
+                    end
+                    T_FORS_RESULT:begin
+                        if(tree_fors_stage==3) begin tree_fors_stage<=0;tree_state<=T_FORS_RIGHT;end
+                        else begin tree_fors_stage<=tree_fors_stage+2'd1;tree_state<=T_FORS_PREP;end
+                    end
+                    T_FORS_RIGHT:begin
+                        group_recipe<=tree_recipe(6);group_mask<=1;group_valid<=1;
+                        group_leaf_value<=tree_leaf_snapshot;group_a_value<=1;
+                        group_b_value<=(tree_group_base>>1)+{6'd0,ctx_cursor[14:1]};
+                        tree_resume<=T_CAPTURE;tree_state<=T_ISSUE;
+                    end
+                    T_INPUT_SECRET:if(verify_valid) tree_state<=T_FORS_TARGET;
+                    T_FORS_TARGET:begin
+                        group_recipe<=tree_recipe(5);group_mask<=1;group_valid<=1;
+                        group_leaf_value<=tree_leaf_snapshot;group_a_value<=0;
+                        group_b_value<=tree_group_base+{6'd0,tree_target};
+                        tree_resume<=T_VERIFY_BEGIN;tree_state<=T_ISSUE;
+                    end
+                    T_VERIFY_BEGIN:tree_state<=T_VERIFY_POSITION;
+                    T_VERIFY_POSITION:tree_state<=ctx_index[0] ? T_VERIFY_RIGHT : T_VERIFY_INPUT;
+                    T_VERIFY_RIGHT:tree_state<=T_VERIFY_INPUT;
+                    T_VERIFY_INPUT:if(verify_valid) begin
+                        group_recipe<=tree_recipe(tree_kind ? 4'd6 : 4'd10);group_mask<=1;group_valid<=1;
+                        group_leaf_value<=tree_kind ? tree_leaf_snapshot : 10'd0;
+                        group_a_value<={3'd0,ctx_level}+7'd1;
+                        group_b_value<=(ctx_fors_base>>1)+{7'd0,ctx_index[13:1]};
+                        tree_resume<=ctx_level+5'd1<tree_height ? T_VERIFY_POSITION : T_RETURN;
+                        tree_state<=T_ISSUE;
+                    end
+                    default:begin group_valid<=0;fault(16'h3006);end
+                endcase
+                FINISH:begin done<=1;phase<=IDLE;end
+                FAILED:group_valid<=0;
+                default:fault(16'h3006);
             endcase
         end
     end
