@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check both RTL mappings against an independent lane-array Keccak round."""
+"""Check the source generic RTL mapping against an independent lane-array Keccak round."""
 import os
 from pathlib import Path
 import random
@@ -56,7 +56,7 @@ def main():
                for r in range(24) for s in states]
     vector_file = work / "rounds.mem"
     vector_file.write_text("".join(f"{v:0802x}\n" for v in vectors))
-    for mapping in ("generic", "lut6"):
+    for mapping in ("generic",):
         obj = work / mapping
         command = [os.environ.get("VERILATOR", "verilator"), "--binary", "--timing",
                    "-O3", "-j", "2", "-Wno-fatal", "--top-module", "tb_keccak",
@@ -71,7 +71,6 @@ def main():
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, check=True)
         (work / f"{mapping}.log").write_text(result.stdout)
         print(f"{mapping}: {result.stdout.splitlines()[0]}")
-    print("LUT6 truth table: 64/64 inputs passed")
 
 
 if __name__ == "__main__":

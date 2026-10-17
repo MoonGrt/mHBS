@@ -1,85 +1,190 @@
 #!/usr/bin/env python3
-"""Check migration ABI, standard serializers, q bounds and retained SLH images."""
-import json
+"""Compare every ABI 3 Hash input/result with the independent SLH reference.
+
+The comparison includes multiplicity and is insensitive to task scheduling.
+Task identities use SHA256(u32le(input length)||input||u32le(result length)||result),
+without trusting recipe IDs or reference function names. Sorted binary chunks
+bound Python memory, including the largest small-signature profiles. The
+receipt retains compact sorted-work digests; temporary task files are removed.
+"""
+from __future__ import annotations
+
 import argparse
-from dataclasses import replace
+import concurrent.futures
+import hashlib
+import heapq
+import json
 from pathlib import Path
+import struct
 import sys
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from model.profiles import PROFILES,get_profile,profile_names
-from model.executor import Job,Machine,compile_image,field,Kind
-from model.mHBS import compile_external,ExternalImage
-from model.reference.stateful_shake import hardware_verify_input,verify_serialized,parse_signature
+import tempfile
+import time
+
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from model.microcode import MicroImage
+from model.mHBS import compile_micro
+from model.executor import MicroMachine
+from model.profiles import SLH_NAMES,get_profile
+from model.reference import slh_dsa
+from model.vectors import KAT,default_job
+
+FORMAT='hbs_hash_work_v1'
+FINGERPRINT='SHA256(u32le(input length)||input||u32le(result length)||result)'
+SOURCE_PATHS=('scripts/check_standard_models.py','model/microcode.py',
+    'model/mHBS.py','model/executor.py','model/profiles.py',
+    'model/reference/slh_dsa.py','model/vectors.py')
+
+
+def sha_bytes(data): return hashlib.sha256(data).hexdigest()
+def sha_file(path): return sha_bytes(Path(path).read_bytes())
+
+
+def fingerprint(data,result):
+    h=hashlib.sha256();h.update(struct.pack('<I',len(data)));h.update(data)
+    h.update(struct.pack('<I',len(result)));h.update(result)
+    return h.digest()
+
+
+class HashWork:
+    def __init__(self,folder,*,chunk_size=262144):
+        if chunk_size<1: raise ValueError('chunk size')
+        self.folder=Path(folder);self.folder.mkdir(parents=True)
+        self.chunk_size=chunk_size;self.buffer=[];self.chunks=[]
+        self.tasks=0;self.permutations=0;self.ordered=hashlib.sha256();self.finished=False
+
+    def __call__(self,_kind,data,result):
+        if self.finished: raise ValueError('finished Hash observer')
+        key=fingerprint(data,result);self.buffer.append(key);self.ordered.update(key)
+        self.tasks+=1;self.permutations+=len(data)//136+1
+        if len(self.buffer)>=self.chunk_size: self._flush()
+
+    def _flush(self):
+        if not self.buffer: return
+        self.buffer.sort();path=self.folder/f'{len(self.chunks):04d}.bin'
+        path.write_bytes(b''.join(self.buffer));self.chunks.append(path);self.buffer.clear()
+
+    def finish(self):
+        self._flush();self.finished=True
+        return self
+
+    @staticmethod
+    def _records(path):
+        with path.open('rb') as source:
+            while block:=source.read(32*32768):
+                if len(block)%32: raise ValueError('truncated Hash task chunk')
+                for offset in range(0,len(block),32): yield block[offset:offset+32]
+
+    def sorted_records(self):
+        if not self.finished: raise ValueError('unfinished Hash observer')
+        return heapq.merge(*(self._records(path) for path in self.chunks))
+
+
+def compare_work(reference,candidate):
+    """External merge, counting repeated tasks rather than comparing sets."""
+    reference.finish();candidate.finish()
+    left=iter(reference.sorted_records());right=iter(candidate.sorted_records())
+    a=next(left,None);b=next(right,None)
+    ref_digest=hashlib.sha256();candidate_digest=hashlib.sha256()
+    matched=ref_extra=candidate_extra=0
+    while a is not None or b is not None:
+        if b is None or a is not None and a<b:
+            ref_digest.update(a);ref_extra+=1;a=next(left,None)
+        elif a is None or b<a:
+            candidate_digest.update(b);candidate_extra+=1;b=next(right,None)
+        else:
+            ref_digest.update(a);candidate_digest.update(b);matched+=1
+            a=next(left,None);b=next(right,None)
+    same=not ref_extra and not candidate_extra
+    return dict(reference_tasks=reference.tasks,candidate_tasks=candidate.tasks,
+        reference_permutations=reference.permutations,candidate_permutations=candidate.permutations,
+        matched_tasks=matched,reference_extra=ref_extra,candidate_extra=candidate_extra,
+        reference_multiset_sha256=ref_digest.hexdigest(),candidate_multiset_sha256=candidate_digest.hexdigest(),
+        reference_order_sha256=reference.ordered.hexdigest(),candidate_order_sha256=candidate.ordered.hexdigest(),
+        tasksetsame=same,relation='exact_multiset' if same else 'different_multiset')
+
+
+def source_identity(names):
+    paths=set(SOURCE_PATHS)
+    for name in names:
+        p=get_profile(name)
+        path=next(KAT.glob(f'slh_dsa_shake_{p.n*8}f_siggen_acvp_tc*.json'))
+        paths.add(str(path.relative_to(ROOT)))
+    return {path:sha_file(ROOT/path) for path in sorted(paths)}
+
+
+def check_profile(name,folder,image_root,chunk_size):
+    p=get_profile(name);job,message=default_job(name)
+    params=getattr(slh_dsa,f'SLH_DSA_SHAKE_{p.n*8}{name[-1].upper()}')
+    image_path=Path(image_root)/name;image=MicroImage.read(image_path)
+    if image!=compile_micro(name): raise ValueError('image does not match current compiler')
+    folder=Path(folder);rows={};sk=pk=signature=None;log=[]
+    image_hashes={key:sha_file(image_path/(key+'.mem')) for key in ('program','descriptor')}
+    for operation,label in enumerate(('keygen','sign','verify')):
+        start=time.monotonic()
+        with tempfile.TemporaryDirectory(prefix=f'.{name}_{label}_',dir=folder) as tmp:
+            reference=HashWork(Path(tmp)/'reference',chunk_size=chunk_size)
+            candidate=HashWork(Path(tmp)/'candidate',chunk_size=chunk_size)
+            if operation==0:
+                sk,pk=slh_dsa.keygen_internal(params,job.secret,job.prf,job.public,reference)
+                expected=sk+pk
+            elif operation==1:
+                signature=slh_dsa.sign_internal(params,message,sk,job.random,reference);expected=signature
+            else:
+                if not slh_dsa.verify_internal(params,message,signature,pk,reference):
+                    raise AssertionError('reference Verify failed')
+                expected=True
+            root=pk[p.n:] if operation else bytes(p.n)
+            msg=message if operation else b'';sig=signature if operation==2 else b''
+            machine=MicroMachine(image,job,root,msg,operation,sig,observe=candidate,
+                instruction_limit=2_000_000_000)
+            actual=machine.run()
+            if actual!=expected: raise AssertionError((name,label,'full output mismatch'))
+            comparison=compare_work(reference,candidate)
+            passed=comparison['tasksetsame'] and comparison['reference_permutations']==comparison['candidate_permutations']
+            row=dict(passed=passed,profile=name,operation=operation,instructions=machine.instructions,
+                instruction_words=image.used,output_sha256=sha_bytes(b'' if operation==2 else actual),
+                verify_pass=bool(actual) if operation==2 else None,
+                inputs_sha256=dict(image_hashes,
+                    secret=sha_bytes(job.secret),prf=sha_bytes(job.prf),public=sha_bytes(job.public),
+                    random=sha_bytes(job.random),root=sha_bytes(root),message=sha_bytes(msg),signature=sha_bytes(sig)),
+                seconds=time.monotonic()-start,**comparison)
+            rows[f'{name}/{label}']=row
+            marker='HASH_WORK_PASS' if passed else 'HASH_WORK_FAIL'
+            log.append(f'{marker} {name} {label} reference={reference.tasks} candidate={candidate.tasks} '
+                f'matched={comparison["matched_tasks"]} reference_extra={comparison["reference_extra"]} '
+                f'candidate_extra={comparison["candidate_extra"]} digest={comparison["candidate_multiset_sha256"]}')
+            print(log[-1],flush=True)
+            if not passed:
+                (folder/f'{name}.log').write_text('\n'.join(log)+'\n')
+                raise AssertionError((name,label,'Hash work multiset mismatch',comparison))
+    (folder/f'{name}.log').write_text('\n'.join(log)+'\n')
+    return rows
+
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--hash',dest='hash_backend',choices=('shake','sha2'),default='shake')
-    args=parser.parse_args();backend=args.hash_backend
-    root=Path(__file__).resolve().parents[1]
-    vectors=root/'tb/vectors' if backend=='shake' else root/'tb/vectors/sha2'
-    for name in profile_names(backend):
-        p=get_profile(name,backend)
-        image=compile_image(p.name,hash_backend=backend);external=compile_external(p.name,backend);decoded=external.decode(backend)
-        assert decoded.h==p.h and image.output_bytes(True)==p.signature_bytes
-        assert decoded.hash_backend==backend and external.hash_backend==backend
-        assert replace(image).hash_backend==backend
-        assert replace(external).hash_backend==backend
-        for bit in (6,31,63):
-            descriptors=list(external.descriptors);descriptors[1]|=1<<bit
-            try:replace(external,descriptors=tuple(descriptors)).decode(backend);raise AssertionError('reserved backend bits accepted')
-            except ValueError:pass
-        try:external.decode('sha2' if backend=='shake' else 'shake');raise AssertionError('wrong ROM backend accepted')
-        except ValueError:pass
-        if not p.stateful:
-            for op in ('keygen','sign','verify'):
-                if not (vectors/p.name/op/'descriptor.mem').exists():continue
-                old=ExternalImage.read(vectors/p.name/op)
-                assert old==external
-                assert old.hash_backend==backend and old.decode(backend).hash_backend==backend
-            continue
-        assert image.hp==p.h and image.output_bytes(False)==p.keygen_bytes and p.chains==67
-        for desc in image.descriptors:
-            if desc>>60==Kind.TREE:assert (field(desc,40,4)|(field(desc,39,1)<<4))==p.h
-        z=bytes(32)
-        Machine(image,Job(z,z,z,z,q=(1<<p.h)-1))
-        try:Machine(image,Job(z,z,z,z,q=1<<p.h));raise AssertionError('q overflow accepted')
-        except ValueError:pass
-        fake=(1<<p.h).to_bytes(4,'big')+bytes(p.signature_bytes-4)
-        try:parse_signature(p.name,fake,backend);raise AssertionError('signature q overflow accepted')
-        except ValueError:pass
-        vector=vectors/p.name
-        if not (vector/'sign/expected.mem').exists():
-            print('STANDARD_CODEC_PASS',p.name,'fixture pending');continue
-        def mem(op,name):return bytes(int(x,16) for x in (vector/op/name).read_text().split())
-        pk,sig=mem('keygen','expected.mem'),mem('sign','expected.mem')
-        job=[int(x,16) for x in (vector/'sign/job.mem').read_text().split()]
-        message=mem('sign','message.mem')[:job[8]]
-        assert verify_serialized(p.name,message,sig,pk,hash_backend=backend)
-        assert len(hardware_verify_input(p.name,sig,pk,backend)['nodes'])==68+p.h
-        assert not verify_serialized(p.name,message,sig,pk[:-1],hash_backend=backend)
-        bad=bytearray(pk);bad[3]^=1;assert not verify_serialized(p.name,message,sig,bad,hash_backend=backend)
-        assert not verify_serialized(p.name,message,sig[:-1],pk,hash_backend=backend)
-        assert not verify_serialized(p.name,message,sig,pk,hash_backend='sha2' if backend=='shake' else 'shake')
-        for other in PROFILES.values():
-            if other.family==p.family and other.h!=p.h:
-                assert not verify_serialized(other.name,message,sig,pk,hash_backend=backend)
-        print('STANDARD_CODEC_PASS',p.name)
-    assert get_profile('xmss').name=='xmss_h10' and get_profile('lms').name=='lms_h10'
-    from model.stateful import encode,cold_image
-    for alias in ('xmss','lms'):
-        canonical=get_profile(alias,backend).name
-        assert encode(alias,backend)==encode(canonical,backend)
-        assert cold_image(alias,backend).hash_backend==backend
-        assert get_profile(alias,backend).hash_backend==backend
-    for legacy in ('xmss_omega2','xmss_omega4','lms_omega2','lms_omega4'):
-        try:get_profile(legacy);raise AssertionError('legacy accepted')
-        except ValueError as e:assert 'retired' in str(e)
-    if backend=='sha2':
-        for name in ('slh_192f','slh_256f','slh_192s','slh_256s'):
-            try:get_profile(name,backend);raise AssertionError('unsupported SHA2 profile accepted')
-            except ValueError:pass
-        image=compile_image('lms_h10',hash_backend=backend)
-        assert any(field(d,24,6)==34 for d in image.descriptors if d>>60==Kind.HASH)
-    print('STANDARD_MODEL_PASS',backend)
+    parser.add_argument('--profile',choices=('all',*SLH_NAMES),default='all')
+    parser.add_argument('--out',type=Path,default=Path('build/hashflow/hash_work'))
+    parser.add_argument('--image-root',type=Path,default=Path('tb/vectors'))
+    parser.add_argument('--jobs',type=int,default=3)
+    parser.add_argument('--chunk-size',type=int,default=262144)
+    args=parser.parse_args();names=SLH_NAMES if args.profile=='all' else (args.profile,)
+    if args.jobs<1 or args.chunk_size<1: parser.error('positive jobs/chunk size required')
+    folder=args.out.resolve();folder.mkdir(parents=True,exist_ok=True)
+    identity=source_identity(names);start=time.monotonic();cases={}
+    image_root=args.image_root.resolve()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
+        futures=[pool.submit(check_profile,name,folder,image_root,args.chunk_size) for name in names]
+        for future in concurrent.futures.as_completed(futures): cases.update(future.result())
+    if source_identity(names)!=identity: raise ValueError('Hash work sources changed during gate')
+    result=dict(passed=len(cases)==len(names)*3 and all(row['passed'] for row in cases.values()),
+        format=FORMAT,fingerprint=FINGERPRINT,source_sha256=identity,cases=cases,
+        sorted_record_bytes=32,chunk_tasks=args.chunk_size,
+        logs={path.name:sha_file(path) for path in sorted(folder.glob('*.log'))},
+        seconds=time.monotonic()-start)
+    (folder/'results.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n')
+    print('HASH_WORK_ALL_PASS',len(cases),'cases',folder,flush=True)
+
 
 if __name__=='__main__':main()

@@ -1,1 +1,1 @@
-"""Normative-algorithm reference models used as μHBS oracles."""
+"""Independent FIPS 205 SLH-DSA SHAKE reference."""

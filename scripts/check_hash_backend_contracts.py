@@ -1,89 +1,86 @@
 #!/usr/bin/env python3
-"""Validate ROM/backend admission and scalar error handshakes without tree work."""
-from concurrent.futures import ThreadPoolExecutor
-from hashlib import sha256
+"""Run the production U1 Hash lane vectors and the microprocessor protocol unit."""
+from __future__ import annotations
+
 import argparse
+import hashlib
 import json
-import os
 from pathlib import Path
 import re
 import subprocess
 import sys
-import time
 
-ROOT=Path(__file__).resolve().parents[1]
-sys.path.insert(0,str(ROOT))
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from model.microcode import ABI
+
+ROOT = Path(__file__).resolve().parents[1]
+PROCESSOR_SOURCES = (
+    "rtl/hash/keccak.sv",
+    "rtl/hash/shake-recipe.sv",
+    "rtl/executor/executor.sv",
+    "tb/tb_hash_backend_contracts.sv",
+)
+LANE_SOURCES = (*PROCESSOR_SOURCES[:2], "tb/tb_recipe.sv",
+                "scripts/check_recipes.py")
+
+
+def sha(path):
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+
+
+def run(command, log):
+    with log.open("w") as stream:
+        try:
+            subprocess.run(command, cwd=ROOT, stdout=stream, stderr=subprocess.STDOUT, check=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"Micro unit failed; see {log}") from exc
 
 
 def main():
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--jobs',type=int,default=2)
-    args=parser.parse_args()
-    if not 1<=args.jobs<=4:
-        parser.error('--jobs must be 1..4')
-    work=ROOT/'build/hash_backend_contracts'
-    work.mkdir(parents=True,exist_ok=True)
-    from model.mHBS import compile_image
-    from model.profiles import get_profile
-    static=[]
-    for backend in ('shake','sha2'):
-        for name,code in (('xmss_h20',0x1a),('lms_h20',0x1d)):
-            profile=get_profile(name,backend)
-            image=compile_image(name,hash_backend=backend)
-            assert profile.h==20 and image.descriptors[1]==code+(32 if backend=='sha2' else 0)
-            assert len(image.program)==16 and len(image.templates)==16 and len(image.descriptors)==32
-            static.append(dict(backend=backend,profile=name,height=20,descriptor=image.descriptors[1],
-                               verification='static ROM encoding; universal RTL elaboration; no simulated Job'))
-    for name in ('slh_192f','slh_256f','slh_192s','slh_256s'):
-        try:
-            compile_image(name,hash_backend='sha2')
-        except ValueError:
-            static.append(dict(backend='sha2',profile=name,rejected=True))
-        else:
-            raise AssertionError('Unsupported SHA2 SLH profile accepted: '+name)
-    names=[name.strip() for name in (ROOT/'sources.txt').read_text().splitlines() if name.strip()]
-    checked=[*names,'sources.txt','scripts/check_hash_backend_contracts.py','tb/tb_hash_backend_contracts.sv']
-    source_sha={name:sha256((ROOT/name).read_bytes()).hexdigest() for name in checked}
-    public=bytes(range(65,97));left=bytes(range(161,193));right=bytes(range(193,225))
-    address=bytes([3])+bytes.fromhex('0123456789abcdef')+bytes([0x83])
-    address+=(513).to_bytes(4,'big')+(67).to_bytes(4,'big')+(0x12345678).to_bytes(4,'big')
-    expected=sha256(public[:16]+bytes(48)+address+left[:16]+right[:16]).digest()[:16]
-    expected_hex=(expected+bytes(16))[::-1].hex()
-    configurations=[(backend,synthesis) for backend in ('shake','sha2') for synthesis in (False,True)]
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--out", type=Path, default=Path("build/hashflow/units"))
+    parser.add_argument("--verilator", default="verilator")
+    args = parser.parse_args()
+    folder = args.out.resolve(); folder.mkdir(parents=True, exist_ok=True)
+    inputs = {name: sha(ROOT/name) for name in sorted(set(PROCESSOR_SOURCES+LANE_SOURCES))}
+    inputs["rtl/executor/instructions.svh"] = sha(ROOT/"rtl/executor/instructions.svh")
+    inputs["scripts/check_hash_backend_contracts.py"] = sha(Path(__file__))
+    version = subprocess.check_output([args.verilator, "--version"], text=True).strip()
+    key = hashlib.sha256(json.dumps((inputs, version), sort_keys=True).encode()).hexdigest()[:16]
 
-    def run(configuration):
-        backend,synthesis=configuration
-        folder=work/f'{backend}_synthesis{int(synthesis)}'
-        folder.mkdir(parents=True,exist_ok=True)
-        command=[os.environ.get('VERILATOR','verilator'),'--binary','--timing','-O3','-j','2','-Wno-fatal',
-                 '--top-module','tb_hash_backend_contracts','--Mdir',str(folder/'obj')]
-        if backend=='sha2': command.append('-DMHBS_SHA2')
-        if synthesis: command.append('-DSYNTHESIS')
-        command.extend([*names,'tb/tb_hash_backend_contracts.sv'])
-        started=time.monotonic()
-        with (folder/'compile.log').open('w') as log:
-            result=subprocess.run(command,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
-        if result.returncode:
-            return dict(backend=backend,synthesis=synthesis,passed=False,stage='compile',log=str(folder/'compile.log'))
-        result=subprocess.run([str(folder/'obj/Vtb_hash_backend_contracts'),f'+FIXED_EXPECTED={expected_hex}'],
-                              cwd=ROOT,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
-        (folder/'run.log').write_text(result.stdout)
-        print(result.stdout.strip(),flush=True)
-        match=re.search(r'admissions=(\d+) accepted=(\d+) rejected=(\d+) recipes=(\d+) h20_jobs=0',result.stdout)
-        return dict(backend=backend,synthesis=synthesis,passed=result.returncode==0 and bool(match),
-                    counts=dict(zip(('admissions','accepted','rejected','recipes'),map(int,match.groups()))) if match else {},
-                    elapsed_seconds=time.monotonic()-started,log=str(folder/'run.log'))
+    lane_log = folder/"hash_lane.log"
+    run([sys.executable, "scripts/check_recipes.py", "--unroll", "1"], lane_log)
+    lane_passes = re.findall(r"SINGLE_HASH_LANE_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
+    if {mask for _, mask in lane_passes} != {"101e", "0006"}:
+        raise RuntimeError(f"Missing lane unit success marker; see {lane_log}")
+    turnover_passes = re.findall(r"SINGLE_HASH_TURNOVER_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
+    turnover_cases = {mask: int(count) for count, mask in turnover_passes}
+    if len(turnover_passes) != 2 or turnover_cases != {"101e": 5, "0006": 3}:
+        raise RuntimeError(f"Missing single-Hash turnover protocol coverage; see {lane_log}")
 
-    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
-        results=list(pool.map(run,configurations))
-    unchanged=all(sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_sha.items())
-    report=dict(schema='mhbs.hash_backend_contracts.v1',passed=sum(r['passed'] for r in results),total=len(results),
-                source_unchanged=unchanged,source_sha256=source_sha,static_checks=static,results=results,
-                scope='Job admission and recipe-unit checks only; no h20 Jobs or full trees execute')
-    (work/'VALIDATION.json').write_text(json.dumps(report,indent=2)+'\n')
-    if not unchanged or not all(r['passed'] for r in results):
-        raise SystemExit(1)
+    obj = folder/"processor"/key; obj.mkdir(parents=True, exist_ok=True)
+    executable = obj/"micro_unit"
+    if not executable.exists():
+        run([args.verilator, "--binary", "--timing", "-O2", "-j", "2",
+             "-Wno-fatal", "-Wno-WIDTH", "-Wno-UNOPTFLAT", "--top-module", "tb_hash_backend_contracts",
+             "--Mdir", str(obj), "-o", "micro_unit", *PROCESSOR_SOURCES], obj/"compile.log")
+    processor_log = folder/"processor.log"
+    run([str(executable)], processor_log)
+    if "MICRO_PROCESSOR_PASS" not in processor_log.read_text():
+        raise RuntimeError(f"Missing processor unit success marker; see {processor_log}")
+    macro_passes = re.findall(r'MICRO_CHAIN_MACRO_PASS cases=(\d+)([^\n]*)',processor_log.read_text())
+    if ABI >= 3 and (len(macro_passes) != 1 or int(macro_passes[0][0]) != 384):
+        raise RuntimeError(f"Missing complete ABI 3 CHAIN unit matrix; see {processor_log}")
+    macro_cases = int(macro_passes[0][0]) if macro_passes else 0
+    result = dict(passed=True,abi=ABI,macro_cases=macro_cases, source_sha256=inputs, verilator_version=version,
+                  lane_cases={mask: int(count) for count, mask in lane_passes},
+                  turnover_cases=turnover_cases,
+                  processor_binary_sha256=sha(executable),
+                  logs={log.name: sha(log) for log in (lane_log, processor_log)})
+    (folder/"results.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
+    print("MICRO_UNITS_PASS", sum(result["lane_cases"].values()), "lane cases;",
+          sum(turnover_cases.values()), "turnover cases; processor protocol unit;",macro_cases,"CHAIN cases", folder)
 
 
-if __name__=='__main__':
+if __name__ == "__main__":
     main()
