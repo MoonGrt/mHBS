@@ -44,14 +44,16 @@ module executor #(
     wire [7:0] len1={2'd0,node_bytes}<<1;
     wire [8:0] fors_bytes=({1'b0,fors_k}*{1'b0,fors_a}+9'd7)>>3;
     wire [7:0] tree_bits=total_height-hp;
-    wire family_slh=profile_identity==0 || profile_identity==1 || profile_identity==2
-        || profile_identity==4 || profile_identity==5 || profile_identity==6;
-    wire family_xmss=profile_identity>=8 && profile_identity<=10;
-    wire family_lms=profile_identity>=11 && profile_identity<=13;
+    wire profile_identity_valid=profile_identity[63:5]==0;
+    wire [4:0] profile_code=profile_identity[4:0];
+    wire family_slh=profile_code==0 || profile_code==1 || profile_code==2
+        || profile_code==4 || profile_code==5 || profile_code==6;
+    wire family_xmss=profile_code>=8 && profile_code<=10;
+    wire family_lms=profile_code>=11 && profile_code<=13;
     wire family_stateful=family_xmss || family_lms;
     logic [63:0] expected_profile;
     always_comb case(
-        profile_identity
+        profile_code
     )
         0:expected_profile=64'h2342220621160310;
         1:expected_profile=64'h33422a0821160318;
@@ -69,7 +71,8 @@ module executor #(
         && layers>0 && layers<=31 && fors_k>0 && fors_k<=35 && fors_a>0 && fors_a<=14
         && (fors_k*fors_a)<=320 && digest_bytes<=49 && digest_bytes>0
         && total_height>=hp && tree_bits<=64 && chain_count<=67 && chain_count>0;
-    wire config_valid=family_slh ? slh_config_valid : expected_profile!=0 && profile_descriptor==expected_profile;
+    wire config_valid=profile_identity_valid && (family_slh ? slh_config_valid
+        : expected_profile!=0 && profile_descriptor==expected_profile);
     logic [31:0] accepted_index;
     logic [127:0] accepted_identifier;
     logic [255:0] accepted_randomizer;
@@ -129,7 +132,8 @@ module executor #(
     wire [3:0] chain_terminal=chain_mode==CHAIN_CAP_PREFIX ? chain_digit : 4'd15;
     wire chain_capture_mode=chain_mode==CHAIN_CAP_FULL || chain_mode==CHAIN_CAP_PREFIX;
     wire chain_complete=chain_active && chain_state==CHAIN_DONE && !error && !tree_owner;
-    wire chain_child_complete=chain_active && chain_state==CHAIN_DONE && !error && tree_owner;
+    wire chain_child_complete=chain_active && (chain_state==CHAIN_DONE || chain_state==CHAIN_RESULT)
+        && !error && tree_owner;
     // TREE is a fixed sequencer, not a second instruction stream. It never
     // changes the image-owned layer/tree/leaf/group/target. Child CHAIN returns
     // here rather than retiring the frozen TREE instruction.
@@ -266,7 +270,9 @@ module executor #(
         && tree_recipe_id==tree_last_recipe && !error;
     logic tree_memory_write,tree_right_write;
     logic [6:0] tree_read_address,tree_write_address;
-    logic [255:0] tree_write_value,tree_right_value;
+    wire [255:0] tree_write_value;
+    logic [255:0] tree_right_value;
+    logic tree_write_ram,tree_write_verify,tree_write_hash,tree_write_right,tree_write_root,tree_write_xor;
 
     // Word 123 is a private transactional capture shadow. It is inaccessible
     // through every legal object/space selector and uses the existing 1R1W port.
@@ -588,6 +594,25 @@ module executor #(
         assign result[logical_slot]=physical_value;
         assign trace_result[logical_slot]=physical_value;
     end endgenerate
+    // A Hash snapshots only the operands used by its shape. KEY/PRF and
+    // list/message shapes never drive a node operand into the fixed frame.
+    wire [3:0] physical_shape=physical_recipe[59:56];
+    wire physical_left_used=physical_shape==2 || physical_shape==6 || physical_shape==7
+        || physical_shape==10 || physical_shape==13 || physical_shape==14;
+    wire left_chain_xor=physical_left_used && chain_active && family_xmss;
+    wire left_chain_feedback=physical_left_used && chain_active && !family_xmss
+        && (chain_feedback || chain_reissue);
+    wire left_memory=physical_left_used && !left_chain_xor && !left_chain_feedback;
+    // TREE has already produced every fixed operand in its private result
+    // slots. General image HASH still observes the architectural valid mask.
+    wire left_memory_valid=(tree_active && !chain_active)
+        || scratch_valid[node_memory_read_address[3:0]];
+    wire left_ram_enable=left_chain_xor || (left_memory && left_memory_valid);
+    wire left_digest_enable=left_chain_xor || left_chain_feedback;
+    // The XMSS F operand is RAM xor MASK; ordinary requests select one
+    // bank. Factor the shared bits before the 256-bit gates.
+    wire [255:0] physical_left=(node_memory_read & {256{left_ram_enable}})
+        ^ (physical_value[255:0] & {256{left_digest_enable}});
     generate for(genvar physical=0;physical<1;physical=physical+1) begin: lanes
         recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(7),.UNROLL(UNROLL),
             .MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),.RECIPE_MASK(16'hfffe),
@@ -602,9 +627,7 @@ module executor #(
             .message_word_address,.message_word_data,.message_length,
             .request_layer(group_layer),.request_tree(group_tree),
             .request_leaf(group_leaf_value),.request_a(group_a_value),.request_b(physical_b_value),
-            .request_left(chain_active && family_xmss
-                ? (physical_recipe[59:56]==6 ? node_memory_read ^ physical_value[255:0] : node_memory_read)
-                : chain_active && (chain_feedback || chain_reissue) ? physical_value[255:0] : scratch_read),.request_right(node[6]),
+            .request_left(physical_left),.request_right(node[6]),
             .list_index0(physical_list0),.list_index1(physical_list1),.list_data0(list_value),.list_data1(256'd0),
             .response_valid(physical_valid),
             .response_ready((phase==EXEC && ir_valid && opcode==OP_WAIT && group_complete && !error && !lane_fault && !illegal)
@@ -690,44 +713,36 @@ module executor #(
             : {3'b111,(group_recipe[59:56]==4 || group_recipe[59:56]==8 || group_recipe[59:56]==11) ? 4'd0 : result_object})
         : opcode==OP_LOAD ? cpu_load_address
         : opcode==OP_XMSS_MASK ? (d==0 ? 7'd121 : 7'd122) : {3'b111,node_source_address};
+    // The CPU, TREE, and child CHAIN own this single write port in
+    // disjoint phases. Combine their data in parallel, rather than feeding
+    // a wide priority chain through every inactive owner.
+    wire [255:0] write_hash_node=trim_node(physical_value[255:0]);
+    wire write_private_hash=chain_private_write && chain_state!=CHAIN_VALUE_INIT;
+    wire write_capture_hash=chain_capture_write && !family_xmss;
+    wire write_result_hash=chain_result_commit && !family_xmss;
+    wire write_readback=(chain_private_write && chain_state==CHAIN_VALUE_INIT)
+        || (chain_capture_write && family_xmss) || chain_cap_commit
+        || (chain_result_commit && family_xmss);
     always_comb begin
-        node_memory_write=0;
+        node_memory_write=tree_memory_write || scratch_write
+            || (execute && opcode==OP_STORE) || result_write || chain_private_write
+            || chain_capture_write || chain_cap_commit || chain_result_commit;
         node_memory_write_address=0;
-        node_memory_write_value=0;
-        if(tree_memory_write) begin
-            node_memory_write=1;
-            node_memory_write_address=tree_write_address;
-            node_memory_write_value=tree_write_value;
-        end else if(scratch_write) begin
-            node_memory_write=1;
-            node_memory_write_address={3'b111,cpu_node_target[3:0]};
-            node_memory_write_value=cpu_node_value;
-        end else if(execute && opcode==OP_STORE) begin
-            node_memory_write=1;
-            node_memory_write_address=d==0 ? memory_address[6:0]
-                : (d==1 ? 7'd68 : 7'd89)+memory_address[6:0];
-            node_memory_write_value=read_node(a);
-        end else if(result_write) begin
-            node_memory_write=1;
-            node_memory_write_address={3'b111,result_object};
-            node_memory_write_value=trim_node(physical_value[255:0]);
-        end else if(chain_private_write) begin
-            node_memory_write=1;
-            node_memory_write_address=7'd124;
-            node_memory_write_value=chain_state==CHAIN_VALUE_INIT ? node_memory_read : physical_value[255:0];
-        end else if(chain_capture_write) begin
-            node_memory_write=1;
-            node_memory_write_address=7'd123;
-            node_memory_write_value=family_xmss ? node_memory_read : trim_node(physical_value[255:0]);
-        end else if(chain_cap_commit) begin
-            node_memory_write=1;
-            node_memory_write_address=chain_slot ? 7'd120 : 7'd119;
-            node_memory_write_value=node_memory_read;
-        end else if(chain_result_commit) begin
-            node_memory_write=1;
-            node_memory_write_address=chain_slot ? 7'd117 : 7'd116;
-            node_memory_write_value=family_xmss ? node_memory_read : trim_node(physical_value[255:0]);
-        end
+        if(tree_memory_write) node_memory_write_address=tree_write_address;
+        else if(scratch_write) node_memory_write_address={3'b111,cpu_node_target[3:0]};
+        else if(execute && opcode==OP_STORE) node_memory_write_address=d==0 ? memory_address[6:0]
+            : (d==1 ? 7'd68 : 7'd89)+memory_address[6:0];
+        else if(result_write) node_memory_write_address={3'b111,result_object};
+        else if(chain_private_write) node_memory_write_address=7'd124;
+        else if(chain_capture_write) node_memory_write_address=7'd123;
+        else if(chain_cap_commit) node_memory_write_address=chain_slot ? 7'd120 : 7'd119;
+        else if(chain_result_commit) node_memory_write_address=chain_slot ? 7'd117 : 7'd116;
+        node_memory_write_value=({256{tree_memory_write}} & tree_write_value)
+            | ({256{scratch_write}} & cpu_node_value)
+            | ({256{execute && opcode==OP_STORE}} & read_node(a))
+            | ({256{result_write || write_capture_hash || write_result_hash}} & write_hash_node)
+            | ({256{write_private_hash}} & physical_value[255:0])
+            | ({256{write_readback}} & node_memory_read);
     end
     // The TREE controller shares the sole RAM read and write ports with the
     // instruction datapath and child CHAIN. Every state touches at most one
@@ -753,61 +768,69 @@ module executor #(
             T_AUTH_EMIT:tree_read_address=7'd89+{2'd0,ctx_level};
             default:begin end
         endcase
-        tree_memory_write=0;tree_write_address=0;tree_write_value=0;
+        tree_memory_write=0;tree_write_address=0;
+        tree_write_ram=0;tree_write_verify=0;tree_write_hash=0;
+        tree_write_right=0;tree_write_root=0;tree_write_xor=0;
         tree_right_write=0;tree_right_value=node_memory_read;
         if(tree_active && phase==TREE_RUN && !error && !lane_fault && !rst) case(tree_state)
             T_INPUT_CHAIN,T_INPUT_SECRET:if(verify_valid) begin
-                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=trim_node(verify_data);
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_verify=1;
             end
             T_STORE_CHAIN:if(!(tree_selected && tree_flags[0])) begin
-                tree_memory_write=1;tree_write_address=ctx_chain;tree_write_value=node_memory_read;
+                tree_memory_write=1;tree_write_address=ctx_chain;tree_write_ram=1;
             end
             T_ZERO_LEAF:begin tree_memory_write=1;tree_write_address=7'd116;end
             T_WAIT:if(tree_response) begin
                 tree_memory_write=1;tree_write_address=group_mask[1] ? 7'd117 : 7'd116;
-                tree_write_value=trim_node(physical_value[255:0]);
+                tree_write_hash=1;
             end
             T_CAPTURE:if(tree_capture_auth) begin
-                tree_memory_write=1;tree_write_address=7'd89+{2'd0,ctx_level};tree_write_value=node_memory_read;
+                tree_memory_write=1;tree_write_address=7'd89+{2'd0,ctx_level};tree_write_ram=1;
             end
             T_CHECK:if(ctx_index[0] && tree_skip_parent) begin
                 tree_memory_write=1;tree_write_address=7'd116;
             end
             T_MERGE_RIGHT,T_FORS_RIGHT,T_VERIFY_RIGHT:tree_right_write=1;
             T_MERGE_LEFT:begin
-                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=node_memory_read;
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_ram=1;
             end
             T_SAVE:begin
-                tree_memory_write=1;tree_write_address=7'd68+{2'd0,ctx_level};tree_write_value=node_memory_read;
+                tree_memory_write=1;tree_write_address=7'd68+{2'd0,ctx_level};tree_write_ram=1;
             end
             T_FORS_RESULT:begin
                 if(tree_pair_selected && tree_fors_stage<2 && tree_fors_stage[0]==tree_target[0]) begin
-                    tree_memory_write=1;tree_write_address=7'd119;tree_write_value=node_memory_read;
+                    tree_memory_write=1;tree_write_address=7'd119;tree_write_ram=1;
                 end else if(tree_pair_selected && tree_fors_stage==3) begin
-                    tree_memory_write=1;tree_write_address=7'd89;tree_write_value=node_memory_read;
+                    tree_memory_write=1;tree_write_address=7'd89;tree_write_ram=1;
                 end
             end
             T_VERIFY_INPUT:if(verify_valid) begin
                 if(ctx_index[0]) begin
-                    tree_memory_write=1;tree_write_address=7'd116;tree_write_value=trim_node(verify_data);
+                    tree_memory_write=1;tree_write_address=7'd116;tree_write_verify=1;
                 end else begin tree_right_write=1;tree_right_value=trim_node(verify_data);end
             end
-            T_LT_LEFT:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_value=node_memory_read;end
+            T_LT_LEFT:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_ram=1;end
             T_LT_RIGHT,T_X_SAVE_RIGHT:begin
                 tree_memory_write=1;tree_write_address=7'd122;
-                tree_write_value=tree_state==T_LT_RIGHT ? node_memory_read : node[6];
+                tree_write_ram=tree_state==T_LT_RIGHT;tree_write_right=tree_state!=T_LT_RIGHT;
             end
-            T_LT_ODD,T_X_RESTORE_LEFT:begin tree_memory_write=1;tree_write_address=7'd116;tree_write_value=node_memory_read;end
-            T_LT_STORE:begin tree_memory_write=1;tree_write_address=ctx_reduce_index;tree_write_value=node_memory_read;end
-            T_X_SAVE_LEFT:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_value=node_memory_read;end
-            T_X_LEFT_MASK:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_value=node_memory_read^physical_value[255:0];end
+            T_LT_ODD,T_X_RESTORE_LEFT:begin tree_memory_write=1;tree_write_address=7'd116;tree_write_ram=1;end
+            T_LT_STORE:begin tree_memory_write=1;tree_write_address=ctx_reduce_index;tree_write_ram=1;end
+            T_X_SAVE_LEFT:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_ram=1;end
+            T_X_LEFT_MASK:begin tree_memory_write=1;tree_write_address=7'd121;tree_write_xor=1;end
             T_X_RIGHT_MASK:begin tree_right_write=1;tree_right_value=node_memory_read^physical_value[255:0];end
             T_RETURN:if(tree_flags[0]) begin
-                tree_memory_write=1;tree_write_address=7'd116;tree_write_value=node[3];
+                tree_memory_write=1;tree_write_address=7'd116;tree_write_root=1;
             end
             default:begin end
         endcase
     end
+    assign tree_write_value=({256{tree_write_ram}} & node_memory_read)
+        | ({256{tree_write_verify}} & trim_node(verify_data))
+        | ({256{tree_write_hash}} & write_hash_node)
+        | ({256{tree_write_right}} & node[6])
+        | ({256{tree_write_root}} & node[3])
+        | ({256{tree_write_xor}} & (node_memory_read ^ physical_value[255:0]));
     logic condition;
     always_comb begin
         condition=0;
@@ -1178,8 +1201,9 @@ module executor #(
                         root_equal<=0;root_compare_valid<=0;
                         hash_base<=total_hashes;permutation_base<=total_permutations;
                         message_length<=job_message_length;message_received<=0;
-                        hmsg_digest<=0;hmsg_valid<=0;digits_valid<=0;
-                                    phase<=job_operation==0 || job_message_length==0 ? LAUNCH : MESSAGE;
+                        hmsg_digest<=0;
+                        hmsg_valid<=0;digits_valid<=0;
+                        phase<=job_operation==0 || job_message_length==0 ? LAUNCH : MESSAGE;
                     end
                 end
                 MESSAGE:if(message_valid) begin
@@ -1311,7 +1335,12 @@ module executor #(
                         else if(chain_issue) chain_state<=CHAIN_RUN;
                     end
                     CHAIN_CAP:chain_state<=CHAIN_RESULT;
-                    CHAIN_RESULT:chain_state<=CHAIN_DONE;
+                    CHAIN_RESULT:begin
+                        if(tree_owner) begin
+                            chain_shadow_valid<=0;phase<=TREE_RUN;
+                            tree_state<=tree_selected ? T_EMIT_CAP : T_STORE_CHAIN;
+                        end else chain_state<=CHAIN_DONE;
+                    end
                     CHAIN_DONE:begin
                         chain_shadow_valid<=0;phase<=tree_owner ? TREE_RUN : EXEC;
                         if(tree_owner) tree_state<=tree_selected ? T_EMIT_CAP : T_STORE_CHAIN;
@@ -1375,7 +1404,10 @@ module executor #(
                         end else begin group_valid<=0;tree_state<=tree_resume;end
                         if(family_xmss && tree_resume==T_X_MASK0) hmsg_digest[255:0]<=physical_value[255:0];
                     end
-                    T_CAPTURE:tree_state<=T_CHECK;
+                    // The AUTH write and parity decision are independent. Only
+                    // TOP_SHORTCUT's zero write needs a following edge.
+                    T_CAPTURE:tree_state<=ctx_index[0]
+                        ? (tree_skip_parent ? T_CHECK : T_MERGE_RIGHT) : T_SAVE;
                     T_CHECK:begin
                         if(ctx_index[0]) tree_state<=tree_skip_parent ? T_CAPTURE : T_MERGE_RIGHT;
                         else tree_state<=T_SAVE;

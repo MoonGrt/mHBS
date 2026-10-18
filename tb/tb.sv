@@ -49,7 +49,7 @@ module tb;
     longint unsigned cycles=0,waits=0;
     integer flip=-1,bad_message=0,expected=1,interrupt_run=0,chain_interrupt=0,fault=0;
     longint unsigned watchdog=500000000;
-    integer tree_interrupt=0,tree_snapshot_test=0;
+    integer tree_interrupt=0,tree_snapshot_test=0,lms_snapshot_test=0;
     integer root_bit=-1,root_noise=0,node_noise=0,tail_noise=0,bad_length=-1,bad_operation=-1;
     longint unsigned retired=0,hash_waits=0,overlap=0,round_cycles[0:1];
     longint unsigned observed_hashes=0,observed_permutations=0,operation_cycles=0;
@@ -123,13 +123,23 @@ module tb;
                 dut.core.physical_b_value})
             $fatal(1,"Hash launch context differs from issue snapshot logical=%0d",active_logical);
     end
-    // Independent ownership scoreboard. Stateful Jobs borrow H_msg storage
-    // for KEY only; no stateful image may claim an SLH parseable digest.
-    logic sf_key_valid=0;
-    logic [255:0] sf_key_value=0;
+    // Independent ownership scoreboard: XMSS KEY and LMS C/I share SLH's
+    // inactive H_msg bank, and no stateful image can parse that bank as H_msg.
+    logic sf_key_valid=0,sf_lms_inputs_valid=0;
+    logic [255:0] sf_key_value=0,sf_lms_c=0;
+    logic [127:0] sf_lms_i=0;
     always @(posedge clk)begin: stateful_storage_owner
-        if(rst)begin sf_key_valid=0;sf_key_value=0;end
-        else if(is_stateful && !error)begin
+        if(rst)begin
+            sf_key_valid=0;sf_key_value=0;sf_lms_inputs_valid=0;sf_lms_c=0;sf_lms_i=0;
+        end else if(is_stateful && !error)begin
+            if(!is_xmss && sf_lms_inputs_valid)begin
+                if(dut.core.accepted_identifier!==sf_lms_i
+                    || dut.core.runtime_randomizer!==sf_lms_c)
+                    $fatal(1,"LMS immutable C/I snapshot changed during its Job");
+            end
+            if(!is_xmss && dut.core.job_accept)begin
+                sf_lms_c=job_randomizer;sf_lms_i=job_identifier;sf_lms_inputs_valid=1;
+            end
             if(dut.core.hmsg_valid)$fatal(1,"stateful KEY scratch escaped as a parseable SLH H_msg");
             if(dut.core.retire && dut.core.opcode==OP_PARSE)
                 $fatal(1,"stateful image retired forbidden SLH PARSE");
@@ -661,6 +671,7 @@ module tb;
         if($value$plusargs("CHAIN_INTERRUPT=%d",chain_interrupt))begin end
         if($value$plusargs("TREE_INTERRUPT=%d",tree_interrupt))begin end
         if($value$plusargs("TREE_SNAPSHOT=%d",tree_snapshot_test))begin end
+        if($value$plusargs("LMS_SNAPSHOT=%d",lms_snapshot_test))begin end
         if($value$plusargs("FAULT=%d",fault))begin end
         if($value$plusargs("ROOT_BIT=%d",root_bit))begin end
         if($value$plusargs("ROOT_NOISE=%d",root_noise))begin end
@@ -708,6 +719,7 @@ module tb;
         if(fault==12)program_memory[entry_pc]={OP_TREE,8'd1,8'd0,8'd0,32'd0};
         if(fault==13)program_memory[entry_pc]={OP_TREE,8'd0,8'd2,8'd1,32'd0};
         if(fault==14)descriptor_memory[5][59:56]=4'd3;
+        if(fault==17)descriptor_memory[1][63]=1'b1;
         repeat(4)tick();rst=0;
         if(interrupt_run)begin repeat(1000)tick();rst=1;repeat(4)tick();rst=0;end
         if(chain_interrupt)begin
@@ -719,6 +731,13 @@ module tb;
             while(!(dut.core.tree_active && round_active[0]
                 && dut.core.lanes[0].lane.sponge.round_index>=3))tick();
             rst=1;repeat(4)tick();rst=0;
+        end
+        if(lms_snapshot_test)begin : lms_snapshot_poison
+            if(!is_stateful || is_xmss)$fatal(1,"LMS snapshot requires an LMS Job");
+            while(!(dut.core.job_valid && dut.core.job_ready))tick();
+            tick();
+            @(negedge clk);
+            job[3]=~job[3];job[9]=~job[9];
         end
         if(tree_snapshot_test)begin : tree_snapshot_poison
             logic [63:0] saved[0:14];
@@ -750,6 +769,8 @@ module tb;
             if((fault==4 || fault==9 || fault==10) && error_code!=16'h3101)$fatal(1,"old ABI accepted");
             if(fault>=5 && fault!=9 && fault!=10 && fault!=16 && error_code!=16'h3006)
                 $fatal(1,"typed operand/range fault");
+            if(fault==17 && (authorized_hashes || started_hashes || observed_hashes || cursor || node_sent))
+                $fatal(1,"reserved profile bits changed architectural data before rejection");
             if(fault==8 && (authorized_hashes || started_hashes || observed_hashes))
                 $fatal(1,"paired ISSUE caused a physical Hash start before its fault");
             if(fault>=11 && fault<=14 && (observed_trees || node_sent!=(fault==14 ? 1 : 0) || cursor))
@@ -813,5 +834,18 @@ module tb;
             if(run<replay)begin rst=1;repeat(4)tick();rst=0;end
         end
         $finish;
+    end
+    // The common RAM remains 1R1W. Monitor the independent owner decodes
+    // instead of relying on an implicit priority between 256-bit sources.
+    always @(posedge clk) if(!rst && !dut.core.error) begin
+        if(!$onehot0({dut.core.tree_memory_write,dut.core.scratch_write,
+            dut.core.execute && dut.core.opcode==OP_STORE,dut.core.result_write,
+            dut.core.chain_private_write,dut.core.chain_capture_write,
+            dut.core.chain_cap_commit,dut.core.chain_result_commit}))
+            $fatal(1,"overlapping node RAM write owners");
+        if(!$onehot0({dut.core.tree_write_ram,dut.core.tree_write_verify,
+            dut.core.tree_write_hash,dut.core.tree_write_right,
+            dut.core.tree_write_root,dut.core.tree_write_xor}))
+            $fatal(1,"overlapping TREE node RAM data sources");
     end
 endmodule

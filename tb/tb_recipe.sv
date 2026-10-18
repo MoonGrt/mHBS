@@ -43,6 +43,10 @@ module tb_recipe;
         .list_index0,.list_index1,.list_data0,.list_data1,
         .response_valid,.response_ready,.response_value,.error,.hash_count,.permutation_count
     );
+    // The final combinational round is already a completed visible digest;
+    // include that event before its accepting edge updates the monitor FF.
+    wire [63:0] visible_permutations=observed_permutations
+        +64'(dut.sponge.final_round && !rst);
     always #5 clk=~clk;
     always @* begin
         for(integer b=0;b<32;b=b+1) begin
@@ -127,7 +131,7 @@ module tb_recipe;
                 $fatal(1,"turnover next digest/error mismatch first=%0d next=%0d",first,second);
             if(hash_count-hashes_before!=(PROFILE ? (vectors[second][406] ? 1 : 2) : 0)
                 || permutation_count-permutations_before!=(PROFILE ? vectors[first][414:407]+vectors[second][414:407] : 0)
-                || observed_permutations-observed_before!=vectors[first][414:407]+vectors[second][414:407])
+                || visible_permutations-observed_before!=vectors[first][414:407]+vectors[second][414:407])
                 $fatal(1,"turnover Hash/permutation count mismatch first=%0d next=%0d",first,second);
             next_digest=response_value;
             repeat(3) begin
@@ -190,8 +194,8 @@ module tb_recipe;
             end
             if(hash_count-old_hashes!=(PROFILE && !error ? 1 : 0)
                 || permutation_count-old_permutations!=(PROFILE ? vectors[j][414:407] : 0)
-                || observed_permutations-old_observed!=vectors[j][414:407])
-                $fatal(1,"single hash counts case=%0d hashes=%0d permutations=%0d observed=%0d expected=%0d",j,hash_count-old_hashes,permutation_count-old_permutations,observed_permutations-old_observed,vectors[j][414:407]);
+                || visible_permutations-old_observed!=vectors[j][414:407])
+                $fatal(1,"single hash counts case=%0d hashes=%0d permutations=%0d observed=%0d expected=%0d",j,hash_count-old_hashes,permutation_count-old_permutations,visible_permutations-old_observed,vectors[j][414:407]);
             retained=response_value;
             request_valid=1;
             repeat(5) begin

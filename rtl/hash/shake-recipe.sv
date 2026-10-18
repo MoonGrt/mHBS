@@ -408,11 +408,17 @@ module shake_context #(
     wire [1599:0] round_state [0:UNROLL];
     wire [1599:0] advanced_state=round_state[UNROLL];
 
-    assign context_ready=state==IDLE;
+    // Completion and the next explicit request may share the final-round edge.
+    // The response observes the old advanced state; the accepting FF edge then
+    // replaces it with the next request's fixed frame. No request is invented.
+    wire final_round=state==RUN && 32'(round_index)+UNROLL>=24 && running_last;
+    assign context_ready=state==IDLE || final_round;
     assign block_ready=state==WAIT_BLOCK;
-    assign fast_block_ready=(state==IDLE && context_valid)
+    assign fast_block_ready=(context_ready && context_valid)
         || (state==WAIT_BLOCK && first_block && append_index==0);
-    assign response_digest=sponge_state[DIGEST_BYTES*8-1:0];
+    assign response_valid=!rst && final_round;
+    assign response_digest=state==RUN ? advanced_state[DIGEST_BYTES*8-1:0]
+        : sponge_state[DIGEST_BYTES*8-1:0];
     assign round_state[0]=sponge_state;
     genvar round_step;
     generate for(round_step=0;round_step<UNROLL;round_step=round_step+1) begin: rounds
@@ -477,9 +483,15 @@ module shake_context #(
             running_last<=0;
             append_index<=0;
             round_index<=0;
-            response_valid<=0;
+        end else if(context_valid && context_ready) begin
+            first_block<=1;
+            append_index<=0;
+            if(take_fast) begin
+                running_last<=1;
+                round_index<=0;
+                state<=RUN;
+            end else state<=WAIT_BLOCK;
         end else begin
-            response_valid<=0;
             case(state)
                 IDLE: if(context_valid) begin
                     first_block<=1;
@@ -504,7 +516,6 @@ module shake_context #(
                 end
                 RUN: if(32'(round_index)+UNROLL>=24) begin
                     if(running_last) begin
-                        response_valid<=1;
                         state<=IDLE;
                     end else begin
                         first_block<=0;
