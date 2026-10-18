@@ -127,7 +127,8 @@ module executor #(
     wire chain_active=phase==MACRO;
     wire [3:0] chain_terminal=chain_mode==CHAIN_CAP_PREFIX ? chain_digit : 4'd15;
     wire chain_capture_mode=chain_mode==CHAIN_CAP_FULL || chain_mode==CHAIN_CAP_PREFIX;
-    wire chain_complete=chain_active && chain_state==CHAIN_DONE && !error;
+    // The result write is the last transaction; retire on that same edge.
+    wire chain_complete=chain_active && (chain_state==CHAIN_RESULT || chain_state==CHAIN_DONE) && !error;
     // Word 123 is a private transactional capture shadow. It is inaccessible
     // through every legal object/space selector and uses the existing 1R1W port.
     wire chain_capture_write,chain_cap_commit,chain_result_commit;
@@ -985,7 +986,10 @@ module executor #(
                         else if(chain_issue) chain_state<=CHAIN_RUN;
                     end
                     CHAIN_CAP:chain_state<=CHAIN_RESULT;
-                    CHAIN_RESULT:chain_state<=CHAIN_DONE;
+                    CHAIN_RESULT:begin
+                        chain_shadow_valid<=0;phase<=EXEC;
+                        if(family_xmss) hmsg_digest<=0;
+                    end
                     CHAIN_DONE:begin
                         chain_shadow_valid<=0;phase<=EXEC;
                         // The H_msg buffer is invalid throughout a stateful Job.

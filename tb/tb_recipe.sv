@@ -43,6 +43,10 @@ module tb_recipe;
         .list_index0,.list_index1,.list_data0,.list_data1,
         .response_valid,.response_ready,.response_value,.error,.hash_count,.permutation_count
     );
+    // The final combinational round is already a completed visible digest;
+    // include that event before its accepting edge updates the monitor FF.
+    wire [63:0] visible_permutations=observed_permutations
+        +64'(dut.sponge.final_round && !rst);
     always #5 clk=~clk;
     always @* begin
         for(integer b=0;b<32;b=b+1) begin
@@ -127,7 +131,7 @@ module tb_recipe;
                 $fatal(1,"turnover next digest/error mismatch first=%0d next=%0d",first,second);
             if(hash_count-hashes_before!=(PROFILE ? (vectors[second][406] ? 1 : 2) : 0)
                 || permutation_count-permutations_before!=(PROFILE ? vectors[first][414:407]+vectors[second][414:407] : 0)
-                || observed_permutations-observed_before!=vectors[first][414:407]+vectors[second][414:407])
+                || visible_permutations-observed_before!=vectors[first][414:407]+vectors[second][414:407])
                 $fatal(1,"turnover Hash/permutation count mismatch first=%0d next=%0d",first,second);
             next_digest=response_value;
             repeat(3) begin
@@ -190,8 +194,8 @@ module tb_recipe;
             end
             if(hash_count-old_hashes!=(PROFILE && !error ? 1 : 0)
                 || permutation_count-old_permutations!=(PROFILE ? vectors[j][414:407] : 0)
-                || observed_permutations-old_observed!=vectors[j][414:407])
-                $fatal(1,"single hash counts case=%0d hashes=%0d permutations=%0d observed=%0d expected=%0d",j,hash_count-old_hashes,permutation_count-old_permutations,observed_permutations-old_observed,vectors[j][414:407]);
+                || visible_permutations-old_observed!=vectors[j][414:407])
+                $fatal(1,"single hash counts case=%0d hashes=%0d permutations=%0d observed=%0d expected=%0d",j,hash_count-old_hashes,permutation_count-old_permutations,visible_permutations-old_observed,vectors[j][414:407]);
             retained=response_value;
             request_valid=1;
             repeat(5) begin
@@ -219,6 +223,28 @@ module tb_recipe;
         turnover_pair(fixed_first,fixed_next,0);
         turnover_pair(fixed_next,fixed_first,4);
         turnover_pair(fixed_first,invalid_next,2);
+        turnover_pair(fixed_first,invalid_next,0);
+        if(stream_first>=0) turnover_pair(fixed_first,stream_first,0);
+        if(list_first>=0) turnover_pair(fixed_first,list_first,0);
+        // Reset has priority over both a visible final-round response and a
+        // simultaneously presented successor. Replay must start from zero.
+        load_vector(fixed_first);request_valid=1;tick();request_valid=0;
+        while(!response_valid) tick();
+        if(!dut.sponge.final_round) $fatal(1,"missing final-round reset edge");
+        rst=1;request_valid=1;response_ready=1;#1;
+        if(response_valid) $fatal(1,"reset exposed final-round response");
+        tick();request_valid=0;response_ready=0;rst=0;tick();
+        if(response_valid || !request_ready || hash_count!=0 || permutation_count!=0
+            || accepted_requests!=0 || accepted_responses!=0 || observed_permutations!=0)
+            $fatal(1,"final-round reset accepted successor or retained prior state");
+        load_vector(fixed_first);request_valid=1;tick();request_valid=0;
+        while(!response_valid) tick();
+        if(error || response_value!==vectors[fixed_first][391:0]
+            || hash_count!=(PROFILE ? 1 : 0)
+            || visible_permutations!=vectors[fixed_first][414:407])
+            $fatal(1,"final-round reset replay mismatch");
+        response_ready=1;tick();response_ready=0;tick();
+        $display("FINAL_ROUND_RESET_REPLAY_PASS");
         if(stream_first>=0) turnover_pair(stream_first,fixed_next,0);
         if(list_first>=0) turnover_pair(list_first,fixed_first,3);
         // A chained XMSS PRF/MASK/F may hand over without an idle cycle.

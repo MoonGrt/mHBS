@@ -151,3 +151,4 @@
 | image_chain_stateful_20261021_121656 | [Stateful_Extension](image_chain_stateful_20261021_121656/reports/Stateful_Extension.md) | [证据](image_chain_stateful_20261021_121656/ARTIFACTS.json) |
 
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。
+| image_chain_atp_20261021_125914 | [Chain_ATP_Optimization](image_chain_atp_20261021_125914/reports/Chain_ATP_Optimization.md) | [证据](image_chain_atp_20261021_125914/ARTIFACTS.json) |
