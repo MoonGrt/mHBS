@@ -40,7 +40,7 @@ def render(result):
     else:rows.append(f'| {result["hash_backend"]} | | | | | | {result["status"]} |')
     if result.get('relative_delta'):
         rows+=['',f'SHAKE source-area comparison: LUT {100*result["relative_delta"]["lut"]:+.4f}%, FF {100*result["relative_delta"]["ff"]:+.4f}%. '
-               f'Within 1%: {result["area_gate_passed"]}.']
+               'The source-import 1% gate does not apply after adding XMSS/LMS.']
     if result.get('analysis_deferred'):rows+=['','Analysis deferred after 600 seconds; the synthesis process continues.']
     if result.get('error'):rows+=['','Error: '+result['error']]
     if result.get('performance'):
@@ -59,7 +59,7 @@ def main():
         validation=json.loads((args.regression/'rtl.json').read_text())
         if not validation.get('passed'):raise ValueError('RTL regression did not pass')
         if state['hash_backend']!='shake':raise ValueError('ABI4 source supports SHAKE only')
-        if state.get('status')!='passed':raise ValueError('Synthesis must pass first')
+        if state.get('status') not in ('passed','measured'):raise ValueError('Synthesis must pass first')
         # The actual source-flow receipt binds its observed cases directly to production RTL.
         synth_files=json.loads((args.run/'SOURCE.json').read_text())['files']
         reg_files=validation['source_sha256']

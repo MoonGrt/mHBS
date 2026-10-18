@@ -43,6 +43,15 @@ static const char *digest_text(EVP_MD_CTX *source, char *output) {
     output[64] = 0; return output;
 }
 
+// Stateful task framing extends the legacy 81-byte record with ADRS type.
+extern "C" void micro_trace_sample_stateful(unsigned long long recipe, unsigned layer,
+    unsigned long long tree, unsigned leaf, unsigned a, unsigned b,
+    const svBitVecVal *result, unsigned address_type) {
+    micro_trace_sample(recipe,layer,tree,leaf,a,b,result);
+    std::array<unsigned char,4> bytes{};
+    for(unsigned i=0;i<4;++i) bytes[i]=(address_type>>(8*i))&255;
+    if(EVP_DigestUpdate(context,bytes.data(),bytes.size())!=1) std::abort();
+}
 extern "C" const char *micro_trace_digest() {
     static char output[65]; return digest_text(context,output);
 }

@@ -6,6 +6,10 @@ module tb;
     import "DPI-C" function void micro_trace_sample(input longint unsigned recipe,
         input int unsigned layer,input longint unsigned tree,
         input int unsigned leaf,input int unsigned a,input int unsigned b,input bit [391:0] result);
+    import "DPI-C" function void micro_trace_sample_stateful(input longint unsigned recipe,
+        input int unsigned layer,input longint unsigned tree,
+        input int unsigned leaf,input int unsigned a,input int unsigned b,
+        input bit [391:0] result,input int unsigned address_type);
     import "DPI-C" function string micro_trace_digest();
     import "DPI-C" function int unsigned micro_trace_samples();
     import "DPI-C" function void micro_owner_sample(input int unsigned owner,
@@ -21,7 +25,12 @@ module tb;
     wire [8:0] program_address;logic [63:0] program_data;
     wire [4:0] descriptor_address;wire [63:0] descriptor_data=descriptor_memory[descriptor_address];
     always @(posedge clk)program_data<=program_memory[program_address];
-    reg [255:0] job[0:7];
+    reg [255:0] job[0:9];
+    wire [31:0] job_index=job[8][31:0];
+    wire [127:0] job_identifier=job[9][127:0];
+    wire [255:0] job_lms_c=job[3];
+    wire is_stateful=descriptor_memory[1][4:0]>=8;
+    wire is_xmss=descriptor_memory[1][4:0]>=8 && descriptor_memory[1][4:0]<=10;
     wire [255:0] job_secret_seed=job[0],job_secret_prf=job[1],job_public_seed=job[2],
         job_randomizer=job[3],job_public_root=job[4];
     wire [1:0] job_operation=job[5][1:0];
@@ -31,41 +40,46 @@ module tb;
     logic [63:0] message_data=0;logic [255:0] verify_data=0;
     wire message_ready,verify_ready,verify_pass,busy,done,keygen_done,error,out_valid;
     wire [1:0] result_kind;wire [15:0] error_code;
-    wire [31:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
+    wire [63:0] boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count;
     wire [255:0] out_data;wire [5:0] out_bytes;
     common #(.SWAP_PHYSICAL_LANES(SWAP),.PROFILE_ENABLE(PROFILE_ENABLE)) dut(.*);
     reg [7:0] message_bytes[0:86],expected_bytes[0:65535];
-    reg [255:0] signature[0:2047];reg [31:0] metadata[0:5];
-    integer sent=0,node_sent=0,cursor=0,cycles=0,waits=0,stall=0,replay=0,cut=0;
-    integer flip=-1,bad_message=0,expected=1,interrupt_run=0,chain_interrupt=0,fault=0,watchdog=500000000;
+    reg [255:0] signature[0:2047];reg [63:0] metadata[0:5];
+    integer sent=0,node_sent=0,cursor=0,stall=0,replay=0,cut=0;
+    longint unsigned cycles=0,waits=0;
+    integer flip=-1,bad_message=0,expected=1,interrupt_run=0,chain_interrupt=0,fault=0;
+    longint unsigned watchdog=500000000;
     integer tree_interrupt=0,tree_snapshot_test=0;
     integer root_bit=-1,root_noise=0,node_noise=0,tail_noise=0,bad_length=-1,bad_operation=-1;
-    integer retired=0,hash_waits=0,overlap=0,round_cycles[0:1];
-    integer observed_hashes=0,observed_permutations=0,operation_cycles=0,entry_pc=0;
+    longint unsigned retired=0,hash_waits=0,overlap=0,round_cycles[0:1];
+    longint unsigned observed_hashes=0,observed_permutations=0,operation_cycles=0;
+    integer entry_pc=0;
     wire [1:0] round_active,round_end,hash_end,context_start;
-    integer issue_credit[0:1],authorized_hashes=0,started_hashes=0;
+    integer issue_credit[0:1];
+    longint unsigned authorized_hashes=0,started_hashes=0;
     logic outstanding_issue=0,snapshot_valid=0,macro_owned=0,tree_owned=0,child_owned=0;
-    integer observed_macros=0,observed_macro_cycles=0,observed_macro_hashes=0,completed_macros=0;
-    integer macro_budget=0,macro_starts=0,macro_responses=0,macro_mode_snapshot=0;
+    longint unsigned observed_macros=0,observed_macro_cycles=0,observed_macro_hashes=0,completed_macros=0;
+    longint unsigned macro_budget=0,macro_starts=0,macro_responses=0;
+    integer macro_mode_snapshot=0;
     logic macro_slot_snapshot=0;
     logic [3:0] macro_digit_snapshot=0;
     logic [4:0] macro_layer_snapshot=0;
     logic [63:0] macro_tree_snapshot=0;
-    logic [9:0] macro_leaf_snapshot=0;
+    logic [19:0] macro_leaf_snapshot=0;
     logic [6:0] macro_chain_snapshot=0;
     logic [63:0] macro_prf_recipe=0,macro_f_recipe=0;
-    integer observed_trees=0,observed_tree_cycles=0,observed_tree_hashes=0,observed_tree_chains=0;
-    integer observed_tree_input_waits=0,completed_trees=0,tree_budget=0,tree_chain_budget=0;
-    integer observed_tree_child_cycles=0;
-    integer tree_starts=0,tree_responses=0,tree_children=0,tree_children_done=0;
+    longint unsigned observed_trees=0,observed_tree_cycles=0,observed_tree_hashes=0,observed_tree_chains=0;
+    longint unsigned observed_tree_input_waits=0,completed_trees=0,tree_budget=0,tree_chain_budget=0;
+    longint unsigned observed_tree_child_cycles=0;
+    longint unsigned tree_starts=0,tree_responses=0,tree_children=0,tree_children_done=0;
     integer tree_kind_snapshot=0,tree_mode_snapshot=0,tree_height_snapshot=0;
     logic tree_shortcut_snapshot=0;
     logic [4:0] tree_layer_snapshot=0;
     logic [63:0] tree_address_snapshot=0;
-    logic [9:0] tree_leaf_snapshot=0;
+    logic [19:0] tree_leaf_snapshot=0;
     logic [5:0] tree_group_snapshot=0;
     logic [8:0] tree_offset_snapshot=0;
-    logic [13:0] tree_target_snapshot=0;
+    logic [19:0] tree_target_snapshot=0;
     logic [255:0] tree_v_snapshot[0:3];
     logic [391:0] tree_digest_snapshot=0;
     logic [255:0] tree_digit_message_snapshot=0;
@@ -73,13 +87,24 @@ module tb;
     logic tree_hmsg_valid_snapshot=0,tree_digits_valid_snapshot=0;
     logic [63:0] tree_recipe_snapshot[0:10];
     integer request_owner=0,normal_instances=0;
-    logic [232:0] request_snapshot;
-    wire [232:0] request_context={dut.core.group_recipe,dut.core.group_tree,dut.core.group_layer,
+    logic [252:0] request_snapshot;
+    wire [252:0] request_context={dut.core.group_recipe,dut.core.group_tree,dut.core.group_layer,
         dut.core.group_leaf[0],dut.core.group_leaf[1],dut.core.group_a[0],dut.core.group_a[1],
         dut.core.group_b[0],dut.core.group_b[1],dut.core.group_mask};
-    wire [232:0] launch_context={dut.core.physical_recipe,dut.core.group_tree,dut.core.group_layer,
+    wire [252:0] launch_context={dut.core.physical_recipe,dut.core.group_tree,dut.core.group_layer,
         dut.core.group_leaf[0],dut.core.group_leaf[1],dut.core.group_a[0],dut.core.group_a[1],
         dut.core.physical_b_value,dut.core.physical_b_value,dut.core.physical_mask};
+    logic [193:0] sf_request_snapshot=0;
+    wire [193:0] sf_request_context={dut.core.lanes[0].lane.request_recipe,
+        dut.core.lanes[0].lane.request_tree,dut.core.lanes[0].lane.request_layer,
+        dut.core.lanes[0].lane.request_leaf,dut.core.lanes[0].lane.request_a,
+        dut.core.lanes[0].lane.request_b,dut.core.lanes[0].lane.request_address_type};
+    function automatic integer sf_digit(input integer index);
+        if(index<64) sf_digit=integer'(dut.core.digit_message[(index^1)*4+:4]);
+        else if(index==64) sf_digit=integer'(dut.core.digit_checksum[11:8]);
+        else if(index==65) sf_digit=integer'(dut.core.digit_checksum[7:4]);
+        else sf_digit=integer'(dut.core.digit_checksum[3:0]);
+    endfunction
     // One physical Hash lane serves two logical result slots. A normal ISSUE
     // authorizes one Hash; CHAIN and TREE each own a bounded request sequence.
     // A TREE child chain remains owned by TREE and is never double counted.
@@ -97,6 +122,28 @@ module tb;
                 dut.core.group_leaf[active_logical],dut.core.group_a[active_logical],
                 dut.core.physical_b_value})
             $fatal(1,"Hash launch context differs from issue snapshot logical=%0d",active_logical);
+    end
+    // Independent ownership scoreboard. Stateful Jobs borrow H_msg storage
+    // for KEY only; no stateful image may claim an SLH parseable digest.
+    logic sf_key_valid=0;
+    logic [255:0] sf_key_value=0;
+    always @(posedge clk)begin: stateful_storage_owner
+        if(rst)begin sf_key_valid=0;sf_key_value=0;end
+        else if(is_stateful && !error)begin
+            if(dut.core.hmsg_valid)$fatal(1,"stateful KEY scratch escaped as a parseable SLH H_msg");
+            if(dut.core.retire && dut.core.opcode==OP_PARSE)
+                $fatal(1,"stateful image retired forbidden SLH PARSE");
+            for(integer lane=0;lane<2;lane=lane+1)
+                if(dut.core.trace_hash_valid[lane] && dut.core.trace_recipe[59:56]==5
+                    && dut.core.trace_recipe[55:48]==2)begin
+                    sf_key_value=dut.core.trace_result[lane][255:0];sf_key_valid=1;
+                end
+            if(physical_start && (dut.core.lanes[0].lane.request_recipe[59:56]==6
+                || dut.core.lanes[0].lane.request_recipe[59:56]==7))begin
+                if(!sf_key_valid || dut.core.lanes[0].lane.request_key!==sf_key_value)
+                    $fatal(1,"XMSS F/H KEY was missing or overwritten by an intervening MASK");
+            end
+        end
     end
     // The message store has one dedicated word port. Check accepted payload
     // bytes independently of its storage representation; padding may replace
@@ -169,7 +216,7 @@ module tb;
             macro_digit_snapshot=dut.core.chain_digit;
             macro_layer_snapshot=dut.core.ctx_layer;macro_tree_snapshot=dut.core.ctx_tree;
             macro_leaf_snapshot=child ? dut.core.group_leaf[macro_slot_snapshot]
-                : dut.core.b==1 ? dut.core.ctx_leaf : dut.core.ctx_cursor[9:0];
+                : dut.core.b==1 ? dut.core.ctx_leaf : dut.core.ctx_cursor[19:0];
             macro_chain_snapshot=dut.core.ctx_chain+7'(macro_slot_snapshot);
             macro_prf_recipe=child ? tree_recipe_snapshot[7] : descriptor_memory[7];
             macro_f_recipe=child ? tree_recipe_snapshot[8] : descriptor_memory[8];
@@ -227,6 +274,7 @@ module tb;
             tree_starts=0;tree_responses=0;tree_children=0;tree_children_done=0;
         end
         else begin
+            if(!is_stateful)begin
             if(error)begin
                 if(physical_start || (|dut.core.trace_hash_valid) || dut.core.chain_issue || dut.core.tree_issue
                     || out_valid || verify_ready)
@@ -413,6 +461,154 @@ module tb;
                     outstanding_issue=0;
                 end
             end
+            end else begin
+            if(error)begin
+                if(physical_start || (|dut.core.trace_hash_valid) || dut.core.chain_issue || dut.core.tree_issue)
+                    $fatal(1,"stateful Hash activity after architectural fault");
+                outstanding_issue=0;macro_owned=0;snapshot_valid=0;
+                issue_credit[0]=0;issue_credit[1]=0;tree_owned=0;child_owned=0;
+            end else begin
+                if(dut.core.chain_active && !dut.core.tree_active) observed_macro_cycles=observed_macro_cycles+1;
+                if(dut.core.tree_active)observed_tree_cycles=observed_tree_cycles+1;
+                if(dut.core.tree_active && dut.core.chain_active)observed_tree_child_cycles=observed_tree_child_cycles+1;
+                if(dut.core.tree_active && verify_ready && !verify_valid)observed_tree_input_waits=observed_tree_input_waits+1;
+                if(dut.core.retire && dut.core.opcode==OP_HASH)begin
+                    if(outstanding_issue || macro_owned || tree_owned || snapshot_valid)
+                        $fatal(1,"stateful ISSUE overlaps another owner");
+                    if(dut.core.issue_mask!=1 && dut.core.issue_mask!=2)
+                        $fatal(1,"stateful ISSUE requires one logical slot");
+                    outstanding_issue=1;
+                    for(integer lane=0;lane<2;lane=lane+1)if(dut.core.issue_mask[lane])begin
+                        issue_credit[lane]=1;authorized_hashes=authorized_hashes+1;
+                    end
+                end
+                if(dut.core.tree_start)begin: sf_tree_start
+                    longint unsigned leaves,chain_work,leaf_work;
+                    integer digit_sum;
+                    if(outstanding_issue || macro_owned || tree_owned || child_owned || snapshot_valid)
+                        $fatal(1,"stateful TREE overlaps another owner");
+                    tree_owned=1;observed_trees=observed_trees+1;
+                    tree_height_snapshot=integer'(dut.core.tree_height);
+                    tree_mode_snapshot=integer'(dut.core.tree_mode);tree_kind_snapshot=0;
+                    leaves=64'd1<<tree_height_snapshot;digit_sum=0;
+                    for(integer i=0;i<67;i=i+1)digit_sum=digit_sum+sf_digit(i);
+                    if(tree_mode_snapshot==2)begin
+                        tree_chain_budget=67;
+                        chain_work=(is_xmss ? 3 : 1)*(15*67-digit_sum);
+                        tree_budget=chain_work+(is_xmss ? 4*66+4*tree_height_snapshot : 2+tree_height_snapshot);
+                    end else begin
+                        tree_chain_budget=leaves*67;
+                        leaf_work=is_xmss ? 67*46+4*66 : 67*16+2;
+                        tree_budget=leaves*leaf_work+(leaves-1)*(is_xmss ? 4 : 1);
+                    end
+                    tree_starts=0;tree_responses=0;tree_children=0;tree_children_done=0;
+                end
+                if(dut.core.chain_start || dut.core.chain_child_start)begin: sf_chain_start
+                    integer steps;
+                    if(macro_owned || child_owned || snapshot_valid || outstanding_issue)
+                        $fatal(1,"stateful CHAIN overlaps another request owner");
+                    if(dut.core.chain_start)begin macro_owned=1;observed_macros=observed_macros+1;end
+                    if(dut.core.chain_child_start)begin
+                        if(!tree_owned)$fatal(1,"stateful child CHAIN has no TREE owner");
+                        child_owned=1;tree_children=tree_children+1;observed_tree_chains=observed_tree_chains+1;
+                    end
+                    macro_mode_snapshot=integer'(dut.core.chain_mode);
+                    macro_slot_snapshot=dut.core.chain_slot;macro_digit_snapshot=dut.core.chain_digit;
+                    macro_layer_snapshot=dut.core.group_layer;macro_tree_snapshot=dut.core.group_tree;
+                    macro_leaf_snapshot=dut.core.group_leaf[macro_slot_snapshot];
+                    macro_chain_snapshot=dut.core.group_a[macro_slot_snapshot];
+                    steps=macro_mode_snapshot==3 ? 15-integer'(macro_digit_snapshot)
+                        : macro_mode_snapshot==2 ? integer'(macro_digit_snapshot) : 15;
+                    macro_budget=(macro_mode_snapshot==3 ? 0 : 1)+(is_xmss ? 3 : 1)*steps;
+                    if(dut.core.chain_expected_hashes!=macro_budget)
+                        $fatal(1,"stateful CHAIN independent Hash budget differs");
+                    macro_starts=0;macro_responses=0;
+                end
+                if(snapshot_valid && !(|dut.core.trace_hash_valid) && sf_request_context!==sf_request_snapshot)
+                    $fatal(1,"stateful outstanding physical request address changed old=%h new=%h trace=%0b phase=%0d",sf_request_snapshot,sf_request_context,|dut.core.trace_hash_valid,dut.core.phase);
+                // Retire the predecessor before accepting a same-edge successor.
+                for(integer lane=0;lane<2;lane=lane+1)if(dut.core.trace_hash_valid[lane])begin
+                    if(!snapshot_valid)$fatal(1,"stateful Hash completion has no accepted request");
+                    snapshot_valid=0;
+                    if(tree_owned)begin
+                        if(dut.core.trace_owner!=2 || tree_responses>=tree_starts)$fatal(1,"stateful TREE completion owner mismatch");
+                        tree_responses=tree_responses+1;
+                    end
+                    if(macro_owned || child_owned)begin
+                        if(lane!=integer'(macro_slot_snapshot) || macro_responses>=macro_starts)
+                            $fatal(1,"stateful CHAIN response owner mismatch");
+                        macro_responses=macro_responses+1;
+                    end
+                end
+                for(integer lane=0;lane<2;lane=lane+1)if(context_start[lane])begin: sf_launch
+                    integer work_index,step,kind;
+                    if(snapshot_valid)$fatal(1,"stateful physical Hash lane accepted two tasks");
+                    if(tree_owned)begin
+                        if(!dut.core.tree_issue || tree_starts>=tree_budget)$fatal(1,"stateful TREE Hash budget exceeded");
+                        tree_starts=tree_starts+1;observed_tree_hashes=observed_tree_hashes+1;authorized_hashes=authorized_hashes+1;
+                    end
+                    if(macro_owned || child_owned)begin
+                        if(!dut.core.chain_issue || lane!=integer'(macro_slot_snapshot) || macro_starts>=macro_budget)
+                            $fatal(1,"stateful CHAIN Hash exceeds bounded authorization");
+                        work_index=integer'(macro_starts)-(macro_mode_snapshot==3 ? 0 : 1);
+                        if(work_index<0)begin
+                            if(dut.core.physical_recipe[59:56]!=(is_xmss ? 5 : 9)
+                                || dut.core.physical_recipe[55:48]!=0)
+                                $fatal(1,"stateful CHAIN does not start with its SECRET Hash");
+                        end else begin
+                            step=(macro_mode_snapshot==3 ? integer'(macro_digit_snapshot) : 0)
+                                +(is_xmss ? work_index/3 : work_index);
+                            kind=is_xmss ? work_index%3 : 2;
+                            if(dut.core.physical_b_value!=step
+                                || dut.core.physical_recipe[59:56]!=(is_xmss ? (kind==2 ? 6 : 5) : 10)
+                                || dut.core.physical_recipe[55:48]!=(is_xmss && kind!=2 ? kind+2 : 0))
+                                $fatal(1,"stateful CHAIN KEY/MASK/F sequence or step differs");
+                        end
+                        if(dut.core.group_layer!==macro_layer_snapshot || dut.core.group_tree!==macro_tree_snapshot
+                            || dut.core.group_leaf[lane]!==macro_leaf_snapshot || dut.core.group_a[lane]!==macro_chain_snapshot)
+                            $fatal(1,"stateful CHAIN escaped captured ADRS");
+                        macro_starts=macro_starts+1;
+                        if(macro_owned)begin
+                            observed_macro_hashes=observed_macro_hashes+1;authorized_hashes=authorized_hashes+1;
+                        end
+                    end else if(!tree_owned)begin
+                        if(!outstanding_issue || issue_credit[lane]!=1)
+                            $fatal(1,"stateful Hash lacks one explicit ISSUE authorization");
+                        issue_credit[lane]=0;
+                    end
+                    micro_owner_sample(tree_owned ? 2 : macro_owned ? 1 : 0,
+                        tree_owned ? int'(observed_trees) : macro_owned ? int'(observed_macros) : 0,
+                        0,tree_owned ? tree_mode_snapshot : macro_mode_snapshot,
+                        tree_owned ? int'(dut.core.trace_tree_stage) : int'(dut.core.chain_hash_kind),
+                        int'(dut.core.group_leaf[lane]),int'(dut.core.group_a[lane]),
+                        int'(dut.core.ctx_level),dut.core.physical_b_value);
+                    started_hashes=started_hashes+1;sf_request_snapshot=sf_request_context;snapshot_valid=1;
+                end
+                if(dut.core.chain_complete)begin
+                    if(!macro_owned || snapshot_valid || macro_starts!=macro_budget || macro_responses!=macro_budget
+                        || !dut.core.retire || dut.core.opcode!=OP_CHAIN)
+                        $fatal(1,"stateful CHAIN retired without exact authorized work");
+                    macro_owned=0;completed_macros=completed_macros+1;
+                end
+                if(dut.core.chain_child_complete)begin
+                    if(!tree_owned || !child_owned || snapshot_valid || macro_starts!=macro_budget || macro_responses!=macro_budget)
+                        $fatal(1,"stateful TREE child retired without exact chain work");
+                    child_owned=0;tree_children_done=tree_children_done+1;
+                end
+                if(dut.core.tree_complete)begin
+                    if(!tree_owned || child_owned || snapshot_valid || tree_starts!=tree_budget || tree_responses!=tree_budget
+                        || tree_children!=tree_chain_budget || tree_children_done!=tree_chain_budget
+                        || !dut.core.retire || dut.core.opcode!=OP_TREE)
+                        $fatal(1,"stateful TREE retired without exact bounded Hash/chain work");
+                    tree_owned=0;completed_trees=completed_trees+1;
+                end
+                if(dut.core.retire && dut.core.opcode==OP_WAIT)begin
+                    if(!outstanding_issue || snapshot_valid || issue_credit[0] || issue_credit[1])
+                        $fatal(1,"stateful WAIT has no uniquely completed ISSUE");
+                    outstanding_issue=0;
+                end
+            end
+            end
             if(dut.core.retire)retired=retired+1;
             if(dut.core.ir_valid && dut.core.opcode==OP_WAIT && !dut.core.group_complete)hash_waits=hash_waits+1;
             if(dut.core.group_valid && dut.core.retire && typed_metadata(dut.core.opcode))overlap=overlap+1;
@@ -421,10 +617,19 @@ module tb;
                 if(round_end[lane])observed_permutations=observed_permutations+1;
                 if(hash_end[lane])observed_hashes=observed_hashes+1;
             end
-            for(integer lane=0;lane<2;lane=lane+1)if(dut.core.trace_hash_valid[lane])
-                micro_trace_sample(dut.core.trace_recipe,int'(dut.core.trace_layer),dut.core.trace_tree,
+            for(integer lane=0;lane<2;lane=lane+1)if(dut.core.trace_hash_valid[lane]) begin
+                if(trace_file) $fdisplay(trace_file,"%016h %0d %016h %0d %0d %0d %0d %098h",
+                    dut.core.trace_recipe,int'(dut.core.trace_layer),dut.core.trace_tree,
+                    int'(dut.core.trace_leaf[lane]),int'(dut.core.trace_a[lane]),
+                    dut.core.trace_b[lane],int'(dut.core.trace_address_type),dut.core.trace_result[lane]);
+                if(dut.core.trace_stateful)
+                    micro_trace_sample_stateful(dut.core.trace_recipe,int'(dut.core.trace_layer),dut.core.trace_tree,
+                        int'(dut.core.trace_leaf[lane]),int'(dut.core.trace_a[lane]),
+                        dut.core.trace_b[lane],dut.core.trace_result[lane],int'(dut.core.trace_address_type));
+                else micro_trace_sample(dut.core.trace_recipe,int'(dut.core.trace_layer),dut.core.trace_tree,
                     int'(dut.core.trace_leaf[lane]),int'(dut.core.trace_a[lane]),
                     dut.core.trace_b[lane],dut.core.trace_result[lane]);
+            end
             cycles=cycles+1;
             if(message_valid && message_ready)sent=sent+8;
             if(verify_valid && verify_ready)node_sent=node_sent+1;
@@ -443,6 +648,7 @@ module tb;
         end
     end
     initial begin
+        if($value$plusargs("TRACE=%s",trace_path))trace_file=$fopen(trace_path,"w");
         if(!$value$plusargs("IMAGE=%s",image_dir))$fatal(1,"IMAGE required");
         if(!$value$plusargs("VECTOR=%s",vector_dir))$fatal(1,"VECTOR required");
         if($value$plusargs("STALL=%d",stall))begin end
@@ -465,6 +671,7 @@ module tb;
         if($value$plusargs("WATCHDOG=%d",watchdog))begin end
         $readmemh({image_dir,"/program.mem"},program_memory);
         $readmemh({image_dir,"/descriptor.mem"},descriptor_memory);
+        for(integer i=0;i<10;i=i+1)job[i]=0;
         $readmemh({vector_dir,"/job.mem"},job);
         $readmemh({vector_dir,"/metadata.mem"},metadata);
         // Read the just-loaded array directly: continuous aliases settle in a
@@ -580,7 +787,7 @@ module tb;
             if(!PROFILE_ENABLE && {boot_cycles,keygen_cycles,sign_cycles,hash_count,permutation_count,
                 dut.core.macro_count,dut.core.macro_busy_cycles,dut.core.macro_hashes,
                 dut.core.tree_count,dut.core.tree_busy_cycles,dut.core.tree_hashes,dut.core.tree_chains,
-                dut.core.tree_input_wait_cycles,dut.core.tree_child_busy_cycles}!==448'd0)
+                dut.core.tree_input_wait_cycles,dut.core.tree_child_busy_cycles}!=='0)
                 $fatal(1,"statistics not pruned");
             if(job_operation==1)begin
                 if(!signature_valid || signature_error || signature_length!=metadata[0])$fatal(1,"signature metadata");

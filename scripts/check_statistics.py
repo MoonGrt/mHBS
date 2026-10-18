@@ -37,7 +37,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run',type=Path,default=ROOT/'build/image-chain-tree/typed_opt_final')
     parser.add_argument('--out',type=Path)
-    parser.add_argument('--profile',choices=('slh_128f','all'),default='slh_128f')
+    parser.add_argument('--profile',type=flow.profile_arg,choices=('all',*flow.ALL_NAMES),default='slh_128f')
     parser.add_argument('--verilator',default='verilator')
     parser.add_argument('--jobs',type=int,default=4)
     args=parser.parse_args()
@@ -48,7 +48,7 @@ def main():
     normal=json.loads((run/'rtl.json').read_text())
     if normal.get('passed') is not True or normal.get('source_sha256')!=identity:
         raise ValueError('standard RTL evidence is incomplete or stale')
-    profiles=flow.SLH_NAMES if args.profile=='all' else ('slh_128f',)
+    profiles=flow.ALL_NAMES if args.profile=='all' else (args.profile,)
     if not set(profiles)<=set(model_gate['profiles']):
         raise ValueError('requested profile is missing from model evidence')
     inputs=flow.model_inputs(run)
@@ -73,7 +73,8 @@ def main():
     # Always compile, preserving the exact command and log for this gate.
     flow.run(command,out/'compile.log')
     rows={}
-    tasks=[(profile,operation) for profile in profiles for operation in OPERATIONS]
+    tasks=[(profile,operation) for profile in profiles for operation in OPERATIONS
+        if operation in model_gate['profiles'][profile]]
     with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
         pending={(profile,operation):pool.submit(flow.simulate,out,profile,operation,binary,
             image_folder=run/'images',vector_folder=run/'vectors') for profile,operation in tasks}
@@ -83,11 +84,25 @@ def main():
             if any(row[field]!=baseline[field] for field in COMPARE_FIELDS):
                 raise ValueError('SYNTHESIS mode differs from normal integration build: '+key)
             rows[key]=row
+    off_binary=flow.build_binary(out,stats=False,synthesis=True)
+    off_rows={}
+    selected=[(p,'verify') for p in ('slh_128f','xmss_h10','lms_h10') if p in profiles]
+    for profile,operation in selected:
+        key=profile+'/'+operation
+        off=flow.simulate(out,profile,operation,off_binary,suffix='_no_stats',
+            image_folder=run/'images',vector_folder=run/'vectors')
+        baseline=normal['cases'][key]
+        for field in ('operation','n','bytes','nodes','cycles','waits','instructions',
+                      'hash_trace_sha256','image_sha256','vector_sha256'):
+            if off[field]!=baseline[field]: raise ValueError('statistics-off function differs: '+key+' '+field)
+        if off['stats'] or off['hashes'] or off['permutations']:
+            raise ValueError('statistics survive PROFILE_ENABLE=0')
+        off_rows[key]=off
     if flow.source_identity()!=identity or flow.model_inputs(run)!=inputs or flow.sha(Path(__file__).resolve())!=bindings['scripts/check_statistics.py']:
         raise ValueError('sources or oracle inputs changed during SYNTHESIS-mode verification')
     logs={str(path.relative_to(out)):flow.sha(path) for path in sorted((out/'logs').glob('*.log'))}
     logs['compile.log']=flow.sha(out/'compile.log')
-    result=dict(format=FORMAT,passed=True,defines=['SYNTHESIS'],configuration=CONFIG,cases=rows,
+    result=dict(format=FORMAT,passed=True,defines=['SYNTHESIS'],configuration=CONFIG,cases=rows,statistics_off_cases=off_rows,
         source_sha256=bindings,input_sha256=inputs,standard_rtl_sha256=flow.sha(run/'rtl.json'),
         models_sha256=flow.sha(run/'models.json'),binary_sha256=flow.sha(binary),logs=logs,
         generated_sha256={name:flow.sha(out/name) for name in ('common.sv','bench.sv')},compile_command=command,

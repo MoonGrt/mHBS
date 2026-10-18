@@ -149,5 +149,6 @@
 | timing_targets_20261020_154052 | [Timing_Targets_20261020_154052](timing_targets_20261020_154052/reports/Timing_Targets_20261020_154052.md) | [证据](timing_targets_20261020_154052/ARTIFACTS.json) |
 
 | image_chain_tree_import_20261021 | [image-chain-tree direct ABI4 import](image_chain_tree_import_20261021/reports/Import.md) | [证据](image_chain_tree_import_20261021/ARTIFACTS.json) |
+| image_chain_tree_stateful_20261021_121656 | [Stateful_Extension](image_chain_tree_stateful_20261021_121656/reports/Stateful_Extension.md) | [证据](image_chain_tree_stateful_20261021_121656/ARTIFACTS.json) |
 
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。

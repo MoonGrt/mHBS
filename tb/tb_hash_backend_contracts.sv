@@ -6,10 +6,12 @@ module tb_hash_backend_contracts;
     logic [1:0] job_operation=0;
     logic [6:0] job_message_length=0;
     logic [63:0] image_header=64'h4842535020000000;
+    logic [63:0] profile_identity=0;
+    logic [31:0] job_index=0;logic [127:0] job_identifier=0;
     logic [63:0] profile_descriptor=64'h2342220621160310;
     wire job_ready,message_ready,verify_ready,verify_pass,busy,done,error,out_valid;
     wire [15:0] error_code;
-    wire [31:0] hash_count,permutation_count,cycles;
+    wire [63:0] hash_count,permutation_count,cycles;
     wire [255:0] out_data;
     wire [5:0] out_bytes;
     logic message_valid=0,verify_valid=0;
@@ -31,21 +33,28 @@ module tb_hash_backend_contracts;
     logic check_digit_snapshot=0;
     logic [3:0] expected_digits[0:66];
     integer expected_checks=0;
+    logic check_stateful_tree=0;
     executor #(.PROFILE_ENABLE(1)) dut (
-        .clk,.rst,.image_header,.profile_descriptor,
+        .clk,.rst,.image_header,.profile_descriptor,.profile_identity,
         .program_address,.program_data,.job_entry(9'd0),.descriptor_address,.descriptor_data,
-        .job_valid,.job_ready,.job_operation,.job_message_length,
+        .job_valid,.job_ready,.job_operation,.job_message_length,.job_index,.job_identifier,
         .job_secret_seed,.job_secret_prf,.job_public_seed,.job_randomizer,.job_public_root,
         .message_valid,.message_ready,.message_data,.verify_valid,.verify_ready,.verify_data,.verify_pass,
         .out_valid,.out_data,.out_bytes,.busy,.done,.error,.error_code,.hash_count,.permutation_count,.cycles
     );
     always #5 clk=~clk;
+    always @(posedge clk)if(check_stateful_tree && !rst && dut.tree_complete)begin
+        if(dut.node[2]!==job_public_seed || dut.hmsg_valid || dut.hmsg_digest || dut.ctx_address_type
+            || dut.accepted_index!==job_index || dut.accepted_identifier!==job_identifier
+            || dut.accepted_randomizer!==job_randomizer)
+            $fatal(1,"stateful TREE changed V2/Job inputs or retained private KEY/ADRS type");
+    end
     always @(posedge clk) if(!rst && (dut.illegal || dut.lane_fault) && dut.node_memory_write)
         $fatal(1,"fault instruction modified node memory");
     always @(posedge clk) begin
         program_data<=program_memory[program_address];
         clocks=clocks+1;
-        if(clocks>2000000) $fatal(1,"typed processor timeout");
+        if(clocks>20000000) $fatal(1,"typed processor timeout");
         if(!rst) begin
             if(out_valid) begin
                 if(outputs<64) observed_output[outputs]=out_data;
@@ -138,11 +147,11 @@ module tb_hash_backend_contracts;
     task tick;begin @(posedge clk);#1;end endtask
     task reset_program;
         begin
-            rst=1;job_valid=0;message_valid=0;verify_valid=0;check_outputs=0;check_tree_trace=0;
+            rst=1;job_valid=0;message_valid=0;verify_valid=0;check_outputs=0;check_tree_trace=0;check_stateful_tree=0;
             check_digit_snapshot=0;check_target_window=0;check_tree_turnover=0;
             tree_turnover_count=0;
             job_operation=0;job_message_length=0;image_header=64'h4842535020000000;
-            profile_descriptor=64'h2342220621160310;
+            profile_descriptor=64'h2342220621160310;profile_identity=0;job_index=0;job_identifier=0;
             repeat(2)tick();
             for(integer j=0;j<512;j=j+1) program_memory[j]=0;
             p=0;outputs=0;traces=0;
@@ -648,9 +657,9 @@ module tb_hash_backend_contracts;
             // Hashes, streams, stack, digits and result use the real datapath.
             @(negedge clk);
             dut.ctx_layer=5'(tree_case_layer(which));dut.ctx_tree=tree_case_tree(which);
-            dut.ctx_leaf=10'(tree_case_leaf(which));dut.ctx_group=6'(tree_case_group(which));
+            dut.ctx_leaf=20'(tree_case_leaf(which));dut.ctx_group=6'(tree_case_group(which));
             dut.ctx_fors_offset=9'(tree_case_group(which)*tree_case_a(which));
-            dut.ctx_target=14'(tree_case_target(which));
+            dut.ctx_target=20'(tree_case_target(which));
         end
     endtask
     task automatic tree_finish(input integer which,input bit disturb=0);
@@ -679,7 +688,7 @@ module tb_hash_backend_contracts;
                 tick();
             end
             verify_valid=0;
-            if(error) $fatal(1,"TREE oracle case=%0d fault=%h state=%0d rid=%0d recipe=%h",which,error_code,dut.tree_state,dut.tree_recipe_id,descriptor_data);
+            if(error) $fatal(1,"TREE oracle case=%0d fault=%h state=%0d rid=%0d recipe=%h op=%0d profile=%h",which,error_code,dut.tree_state,dut.tree_recipe_id,descriptor_data,dut.opcode,profile_descriptor);
             if(consumed!=tree_case_input_count(which)) $fatal(1,"TREE stream count case=%0d consumed=%0d",which,consumed);
             if(dut.node_memory[116]!==tree_case_root(which))
                 $fatal(1,"TREE root case=%0d actual=%h expected=%h",which,dut.node_memory[116],tree_case_root(which));
@@ -835,6 +844,183 @@ module tb_hash_backend_contracts;
             $display("MICRO_TREE_MACRO_PASS cases=%0d primitive_oracle ht_root_sign_verify fors_sign_verify shortcut tree64 max_height14 stalls profile_recipe_snapshot cleanup atomic_preflight late_fault reset_replay",TREE_CASES);
         end
     endtask
+    // Full-height stateful verification uses an independent hashlib-only
+    // fixture; no compiler/VM task or macro result is reused as its oracle.
+    task automatic stateful_tree_program(input integer which);
+        integer height,profile;
+        begin
+            reset_program();check_stateful_tree=1;profile=stateful_tree_profile(which);height=stateful_tree_height(which);
+            profile_identity=64'(profile);job_operation=2;job_message_length=0;
+            job_index=32'(stateful_tree_q(which));
+            for(integer j=0;j<16;j=j+1)job_identifier[j*8+:8]=8'(j+160);
+            job_public_root=stateful_tree_root(which);
+            profile_descriptor=(64'h4300200000010020 | (64'(height)<<48) | (64'(height)<<8));
+            if(profile<11) begin
+                descriptor_memory[4]=64'h0502012001000000;
+                descriptor_memory[5]=64'h0503012001000000;
+                descriptor_memory[6]=64'h0504012001000000;
+                descriptor_memory[7]=64'h0500012001000000;
+                descriptor_memory[8]=64'h0600012001000000;
+                descriptor_memory[10]=64'h0700022001000000;
+            end else begin
+                descriptor_memory[7]=64'h0900012001000000;
+                descriptor_memory[8]=64'h0a00012001000000;
+                descriptor_memory[9]=64'h0f00432010000000;
+                descriptor_memory[10]=64'h0e00022001000000;
+                descriptor_memory[11]=64'h0d00012001000000;
+            end
+            emit(OP_NMOV,2,13);emit(OP_DIGITS);emit(OP_HEIGHT,0);emit(OP_TARGET,1);
+            // A legal earlier HT address must not leak out of TREE cleanup.
+            if(profile<11)begin emit(OP_NODE_BEGIN,2);emit(OP_NODE_PARENT);emit(OP_ADRS,5);end
+            emit(OP_TREE,0,2);emit(OP_NMOV,2,4);emit(OP_ROOT_COMPARE);emit(OP_END);
+        end
+    endtask
+    task automatic stateful_tree_cases;
+        integer consumed,waits,total,which;
+        begin
+            for(integer sample=0;sample<STATEFUL_TREE_CASES;sample=sample+1)begin
+                stateful_tree_program(sample);consumed=0;waits=0;total=67+stateful_tree_height(sample);
+                launch();
+                while(!done && !error)begin
+                    @(negedge clk);verify_valid=0;
+                    if(verify_ready)begin
+                        waits=waits+1;
+                        if(waits%4==0 && consumed<total)begin
+                            verify_data=stateful_tree_input(sample,consumed);verify_valid=1;consumed=consumed+1;
+                        end
+                    end
+                    tick();
+                end
+                verify_valid=0;
+                if(error)$fatal(1,"stateful TREE case=%0d fault=%h state=%0d recipe=%h",sample,error_code,dut.tree_state,dut.group_recipe);
+                if(!verify_pass || consumed!=total || outputs || dut.node_memory[116]!==stateful_tree_root(sample))
+                    $fatal(1,"stateful TREE root case=%0d verify=%b actual=%h expected=%h consumed=%0d",sample,verify_pass,dut.node_memory[116],stateful_tree_root(sample),consumed);
+                if(hash_count!=stateful_tree_hash_count(sample) || permutation_count!=stateful_tree_permutation_count(sample)
+                    || dut.tree_hashes!=hash_count || dut.tree_count!=1 || dut.tree_chains!=67 || dut.macro_count
+                    || dut.node[2]!==stateful_tree_root(sample) || dut.hmsg_valid || dut.hmsg_digest || dut.ctx_mask!=1 || dut.ctx_address_type!=0)
+                    $fatal(1,"stateful TREE counts/context case=%0d actual=%0d/%0d expected=%0d/%0d",sample,hash_count,permutation_count,stateful_tree_hash_count(sample),stateful_tree_permutation_count(sample));
+                $display("STATEFUL_TREE_CASE_PASS case=%0d profile=%0d h=%0d q=%0d hashes=%0d permutations=%0d cycles=%0d",sample,stateful_tree_profile(sample),stateful_tree_height(sample),stateful_tree_q(sample),hash_count,permutation_count,cycles);
+            end
+            // Every recipe is preflighted, including the seed recipe unused
+            // by Verify. A malformed descriptor authorizes no Hash or input.
+            for(integer family=0;family<2;family=family+1)begin
+                for(integer rid=4;rid<=11;rid=rid+1)begin
+                    if((family==0 && (rid==4 || rid==5 || rid==6 || rid==7 || rid==8 || rid==10))
+                        || (family==1 && rid>=7))begin
+                        stateful_tree_program(family==0 ? 0 : 3);descriptor_memory[rid][31]=1;
+                        launch();expect_fault();
+                        if(hash_count || permutation_count || dut.tree_count || verify_ready)
+                            $fatal(1,"stateful TREE malformed recipe authorized work family=%0d rid=%0d",family,rid);
+                    end
+                end
+            end
+            // Stateful profiles never authorize FORS or the SLH root shortcut.
+            for(integer bad=0;bad<2;bad=bad+1)begin
+                stateful_tree_program(0);
+                for(integer pc=0;pc<p;pc=pc+1)if(program_memory[pc][63:56]==OP_TREE)
+                    program_memory[pc]=ins(OP_TREE,bad==0 ? 1 : 0,2,bad==0 ? 0 : 1,0);
+                launch();expect_fault();
+                if(hash_count || permutation_count || dut.tree_count || dut.node_memory_write)
+                    $fatal(1,"stateful TREE illegal kind/shortcut committed work");
+            end
+            descriptor_memory[2]=64'h0105011001000000;descriptor_memory[3]=64'h0200011001000000;
+            descriptor_memory[4]=64'h0400013102000000;descriptor_memory[5]=64'h0202021001000000;
+            for(integer j=0;j<32;j=j+1)job_public_root[j*8+:8]=8'(j+128);
+            $display("STATEFUL_TREE_VERIFY_PASS cases=6 real_h10_h15_h16_h20 q_max_20bit lms_21bit_nodes 67_odd_ltree input_stalls atomic_recipe_all atomic_kind_shortcut");
+        end
+    endtask
+    task stateful_boundary_cases;
+        integer cases,height,index_value;
+        logic [31:0] expected_node_number;
+        begin
+            cases=0;
+            for(integer profile=8;profile<=13;profile=profile+1) begin
+                height=profile==8 || profile==11 ? 10 : profile==9 ? 16 : profile==12 ? 15 : 20;
+                for(integer sample=0;sample<9;sample=sample+1) begin
+                    case(sample)
+                        0:index_value=0;1:index_value=1;2:index_value=(1<<height)-1;
+                        3:index_value=1023;4:index_value=1024;
+                        5:index_value=32767;6:index_value=32768;
+                        7:index_value=65535;default:index_value=65536;
+                    endcase
+                    if(index_value<(1<<height)) begin
+                        reset_program();profile_identity=64'(profile);
+                        profile_descriptor={8'd67,8'(height),8'd32,16'd0,8'd1,8'(height),8'd32};
+                        job_operation=1;job_index=32'(index_value);
+                        emit(OP_HEIGHT);emit(OP_TARGET,1);emit(OP_NODE_BEGIN,2);
+                        if(profile>=11)emit(OP_ADRS,5);
+                        emit(OP_NODE_PARENT);emit(OP_ADRS,5);emit(OP_END);
+                        launch();finish_job();
+                        expected_node_number=profile>=11 ? (32'd1<<(height-1))+32'(index_value>>1) : 32'(index_value>>1);
+                        if(dut.accepted_index!==32'(index_value) || dut.ctx_leaf!==20'(index_value)
+                            || dut.ctx_target!==20'(index_value) || dut.ctx_index!==20'(index_value>>1)
+                            || dut.ctx_height!==5'(height) || dut.ctx_level!==5'd1
+                            || dut.addr_b[0]!==expected_node_number || hash_count || traces)
+                            $fatal(1,"stateful index/parent width profile=%0d q=%0d",profile,index_value);
+                        cases=cases+1;
+                    end
+                end
+                reset_program();profile_identity=64'(profile);
+                profile_descriptor={8'd67,8'(height),8'd32,16'd0,8'd1,8'(height),8'd32};
+                job_operation=1;job_index=32'd1<<height;emit(OP_END);launch();
+                while(!error && !done)tick();
+                if(!error || error_code!=16'h3008 || hash_count || traces || outputs || dut.scratch_valid)
+                    $fatal(1,"stateful out-of-range q accepted profile=%0d",profile);
+                cases=cases+1;
+            end
+            for(integer family=0;family<2;family=family+1) begin
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);emit(OP_NMOV,4,11);emit(OP_NMOV,5,13);
+                emit(OP_STORE,1,4,IDX_LEVEL);repeat(20)emit(OP_LEVEL_NEXT);
+                emit(OP_STORE,1,5,IDX_LEVEL);emit(OP_LOAD,0,1,IDX_LEVEL);emit(OP_EMIT,0,0);
+                emit(OP_LEVEL_INIT);repeat(19)emit(OP_LEVEL_NEXT);
+                emit(OP_STORE,2,4,IDX_LEVEL);emit(OP_LOAD,0,2,IDX_LEVEL);emit(OP_EMIT,0,0);
+                emit(OP_LEVEL_INIT);emit(OP_LOAD,0,1,IDX_LEVEL);emit(OP_EMIT,0,0);emit(OP_END);
+                launch();finish_job();
+                if(outputs!=3 || observed_output[0]!==job_public_seed
+                    || observed_output[1]!==job_secret_seed || observed_output[2]!==job_secret_seed
+                    || dut.node_memory[88]!==job_public_seed || dut.node_memory[108]!==job_secret_seed
+                    || hash_count || traces)$fatal(1,"stateful STACK20/AUTH19 overlap family=%0d",family);
+                cases=cases+1;
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);repeat(20)emit(OP_LEVEL_NEXT);emit(OP_STORE,2,11,IDX_LEVEL);emit(OP_END);
+                launch();expect_fault();if(hash_count || traces)$fatal(1,"AUTH20 started Hash");cases=cases+1;
+                reset_program();profile_identity=family==0 ? 10 : 13;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);repeat(21)emit(OP_LEVEL_NEXT);emit(OP_END);
+                launch();expect_fault();if(dut.ctx_level!=20)$fatal(1,"level21 not atomic");cases=cases+1;
+            end
+            // Existing SLH ABI4 images retain their original logical limits;
+            // the added stateful RAM ranges and selectors grant no permission.
+            for(integer bad=0;bad<7;bad=bad+1) begin
+                reset_program();
+                case(bad)
+                    0:begin profile_descriptor[39:32]=14;emit(OP_HEIGHT,1);repeat(16)emit(OP_LEVEL_NEXT);end
+                    1:emit(OP_ADRS,9);
+                    2:emit(OP_REDUCE_INIT,2);
+                    3:emit(OP_REDUCE_NEXT,2);
+                    4:emit(OP_XMSS_MASK);
+                    5:emit(OP_BR,COND_LTREE_PAIR,0,0,0);
+                    6:emit(OP_BR,COND_LTREE_MORE,0,0,0);
+                endcase
+                emit(OP_END);launch();expect_fault();if(hash_count || traces)$fatal(1,"SLH extension violation started Hash");cases=cases+1;
+            end
+            // The final cursor value 2^20 must be representable and stop the
+            // bounded loop, while a further update is an atomic fault. This
+            // executes metadata only: no h20 leaf or tree Hash is evaluated.
+            for(integer overflow=0;overflow<2;overflow=overflow+1) begin
+                reset_program();profile_identity=10;profile_descriptor=64'h4314200000011420;
+                emit(OP_HEIGHT);emit(OP_CURSOR_INIT);emit(OP_CURSOR_NEXT,0,0,0,2);
+                emit(OP_BR,COND_CURSOR_MORE,0,0,2);
+                if(overflow)emit(OP_CURSOR_NEXT,0,0,0,1);
+                emit(OP_END);launch();
+                if(overflow)expect_fault();else finish_job();
+                if(dut.ctx_cursor!==21'h100000 || hash_count || traces)
+                    $fatal(1,"stateful cursor21 terminal/overflow");
+                cases=cases+1;
+            end
+            $display("MICRO_STATEFUL_BOUNDARY_PASS cases=%0d q_width20 parent_width21 heights10_15_16_20 STACK21 AUTH20 family_permissions cursor21_atomic",cases);
+        end
+    endtask
     initial begin
         for(integer j=0;j<32;j=j+1) descriptor_memory[j]=0;
         descriptor_memory[2]=64'h0105011001000000;
@@ -846,6 +1032,8 @@ module tb_hash_backend_contracts;
             job_public_seed[j*8+:8]=8'(j+64);job_randomizer[j*8+:8]=8'(j+96);
             job_public_root[j*8+:8]=8'(j+128);
         end
+        if($test$plusargs("STATEFUL_TREE_ONLY")) begin stateful_tree_cases();stateful_boundary_cases();$finish;end
+        if($test$plusargs("TREE_CASE6_ONLY")) begin tree_program(6);tree_launch(6);tree_finish(6);$finish;end
         storage_cases();
         if($test$plusargs("STORAGE_ONLY")) begin
             $display("MICRO_STORAGE_PASS all_n fixed_partitions independent_rw node_zero_job retained_spaces atomic_faults");
@@ -854,7 +1042,9 @@ module tb_hash_backend_contracts;
         if(!$test$plusargs("TREE_ONLY")) chain_cases();
         if($test$plusargs("CHAIN_ONLY")) $finish;
         tree_cases();
-        if($test$plusargs("TREE_ONLY") || $test$plusargs("MACROS_ONLY")) $finish;
+        if($test$plusargs("TREE_ONLY") || $test$plusargs("MACROS_ONLY")) begin
+            stateful_tree_cases();stateful_boundary_cases();$finish;
+        end
         for(integer j=0;j<32;j=j+1)job_randomizer[j*8+:8]=8'(j+96);
         // Snapshot every request field; long metadata work cannot relaunch a
         // completed lane. A taken branch discards its invalid prefetched word.
@@ -1078,6 +1268,7 @@ module tb_hash_backend_contracts;
         reset_program();job_operation=2;job_message_length=1;
         emit(OP_ROOT_COMPARE);emit(OP_NMOV,2,15);emit(OP_END);launch();send_message();expect_fault();
         $display("MICRO_PROCESSOR_PASS K1U1 onehot_issue typed_permissions snapshots64 overlap branch_flush atomic_wait inactive_lane digest_retention checksum snapshot_digits_all_n target_widths1_14 group_offset_atomic cursor14 chain_terminal parent14 atomic_step faults verify_stall message_ram_long_short_all_n both_recipes reset_replay");
+        stateful_tree_cases();stateful_boundary_cases();
         $finish;
     end
 endmodule

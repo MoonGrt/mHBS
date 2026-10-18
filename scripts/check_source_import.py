@@ -9,7 +9,7 @@ def sha(p):return hashlib.sha256(Path(p).read_bytes()).hexdigest()
 def tokens(text):
     text=re.sub(r'/\*.*?\*/|//[^\n]*','',text,flags=re.S)
     return re.findall(r"[A-Za-z_$][A-Za-z0-9_$]*|\d+'[sS]?[bBoOdDhH][0-9a-fA-F_xXzZ?]+|\d+|[^\s]",text)
-def check(archive):
+def check(archive, *, historical=True):
     info=json.loads((archive/'SOURCE.json').read_text())
     assert sha(archive/'upstream.tar.gz')==info['upstream_sha256']
     with tarfile.open(archive/'upstream.tar.gz') as tar:
@@ -19,13 +19,18 @@ def check(archive):
         return text
     namespace={};exec(original['scripts/micro_common_partition.py'],namespace)
     common,shell=namespace['partition'](original['rtl/top/mhbs_top.sv'])
+    with tarfile.open(archive/'rtl.tar.gz') as sealed:
+        frozen={m.name:sealed.extractfile(m).read() for m in sealed if m.isfile()}
     rows={}
     for row in info['production']:
         raw=common if row['mode']=='partition_common' else shell if row['mode']=='partition_shell' else '\n'.join(original[p] for p in row['sources'])
         target=ROOT/row['target'];expected=norm(raw)
-        assert tokens(target.read_text())==tokens(expected),row['target']+' differs from controlled upstream mapping'
-        assert sha(target)==info['files'][row['target']],row['target']+' hash differs from final freeze'
-        rows[row['target']]={'passed':True,'sha256':sha(target),'upstream_sources':row['sources']}
+        actual=frozen[row['target']] if historical else target.read_bytes()
+        identity=hashlib.sha256(actual).hexdigest()
+        assert tokens(actual.decode())==tokens(expected),row['target']+' differs from controlled upstream mapping'
+        assert identity==info['files'][row['target']],row['target']+' hash differs from final freeze'
+        rows[row['target']]={'passed':True,'sha256':identity,'upstream_sources':row['sources']}
+
     from model.mHBS import compile_micro
     from model.microcode import ABI,MAGIC,MicroImage
     from model.profiles import SLH_NAMES
@@ -45,7 +50,7 @@ def check(archive):
             try:MicroImage(image.program,tuple(desc)).validate()
             except ValueError:pass
             else:raise AssertionError('Accepted ABI'+str(abi))
-    return {'passed':True,'abi':4,'source_commit':info['source_commit'],'production_token_equivalence':rows,'canonical_regenerated_images':images,'rejected_abis':[1,2,3,5],'formal_equivalence_tool':False}
+    return {'passed':True,'abi':4,'source_commit':info['source_commit'],'production_token_equivalence':rows,'canonical_regenerated_images':images,'rejected_abis':[1,2,3,5],'formal_equivalence_tool':False,'historical_frozen_sources_checked':historical,'current_extended_sources_claimed_equal':False if historical else True}
 
 def check_rtl_rejection(folder):
     import subprocess
@@ -80,6 +85,6 @@ endmodule
     (folder/'results.json').write_text(json.dumps(result,indent=2,sort_keys=True)+'\n');return result
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--rtl-reject',type=Path);p.add_argument('--archive',type=Path,default=DEFAULT);p.add_argument('--out',type=Path,default=ROOT/'build/image-chain-tree/import_check.json');a=p.parse_args()
-    result=check(a.archive);result.update(rtl_rejection=check_rtl_rejection(a.rtl_reject)) if a.rtl_reject else None;a.out.parent.mkdir(parents=True,exist_ok=True);a.out.write_text(json.dumps(result,indent=2,sort_keys=True)+'\n');print('SOURCE_IMPORT_PASS',len(result['production_token_equivalence']),'production files;',len(result['canonical_regenerated_images']),'identical images')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--strict-current',dest='historical',action='store_false');p.add_argument('--historical',action='store_true',default=True);p.add_argument('--rtl-reject',type=Path);p.add_argument('--archive',type=Path,default=DEFAULT);p.add_argument('--out',type=Path,default=ROOT/'build/image-chain-tree/import_check.json');a=p.parse_args()
+    result=check(a.archive,historical=a.historical);result.update(rtl_rejection=check_rtl_rejection(a.rtl_reject)) if a.rtl_reject else None;a.out.parent.mkdir(parents=True,exist_ok=True);a.out.write_text(json.dumps(result,indent=2,sort_keys=True)+'\n');print('SOURCE_IMPORT_PASS',len(result['production_token_equivalence']),'production files;',len(result['canonical_regenerated_images']),'identical images')
 if __name__=='__main__':main()

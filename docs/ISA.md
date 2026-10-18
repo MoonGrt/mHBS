@@ -302,3 +302,9 @@ root mismatch is reported by the image's final ROOT_COMPARE, not a TREE fault.
 Trace ownership is HASH, standalone CHAIN or TREE. TREE records include instance,
 leaf, chain, phase, step and level. TREE busy cycles include its children and must
 not be added to child busy cycles; standalone CHAIN counters exclude TREE children.
+
+## XMSS／LMS 加法扩展（ABI号不变）
+
+opcode38 `XMSS_MASK d=0/1`：将NODE/TMPNODE与RIGHT中的MASK摘要异或，结果写入L0，仅XMSS且结果有效时允许，其他字段零；不发Hash、不推进链步。CHAIN36四种模式沿用，按family选择SLH、XMSS或LMS标准前像；TREE37仅在ABI4分支存在，stateful仅HT且不得TOP_SHORTCUT。
+
+XMSS专用ADRS9/10选择L-tree cursor/leaf；cond18/19处理归约跨度/奇数尾项；REDUCE_INIT/NEXT选择器2执行L-tree的ceil(span/2)层推进。stateful允许20位叶/target/index/path、21位cursor、5位height/level及32位ADRS B。SLH与LMS不得借这些选择器访问XMSS权限，原SLH逻辑STACK/AUTH限制仍为16/16。

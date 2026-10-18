@@ -1,7 +1,7 @@
 """ABI 4 HBS programs: image layer/group control and bounded tree/chain macros."""
 from __future__ import annotations
 
-from model.microcode import (ABI, MAGIC, PROFILE_CODES, Addr, Assembler, ChainLeaf, ChainMode, Cond, Height,
+from model.microcode import (Op,ABI, MAGIC, PROFILE_CODES, Addr, Assembler, ChainLeaf, ChainMode, Cond, Height,
     Index, Lanes, LayerInit, ListLeaf, Mask, MicroImage, N, NodeSource, ReduceNext,
     Space, StepSource, Target, TreeFlags, TreeKind, TreeMode)
 from model.profiles import get_profile
@@ -469,7 +469,7 @@ def _image(p,asm,entries,base=None):
     return MicroImage(words+(0,)*(512-len(words)),tuple(desc)).validate()
 
 
-def compile_micro(name,*,serial=False,chain_macros=True,tree_macros=True):
+def _compile_slh(name,*,serial=False,chain_macros=True,tree_macros=True):
     p=get_profile(name)
     if name not in PROFILE_CODES: raise ValueError('SLH-only microprogram')
     c=Compiler(p,serial=True) if serial else (TreeCompiler(p) if tree_macros and chain_macros
@@ -500,3 +500,216 @@ def compile_test_tree(name='slh_128f',height=3,*,level_order=False):
     for _ in range(6): c.e('EMIT',a=N.L0)
     c.e('END')
     return _image(p,c.asm,None,compile_micro(name))
+
+
+class StatefulCompiler(Compiler):
+    """Standard XMSS/LMS: all chain, L-tree and tree loops live in image."""
+    def __init__(self,profile,chain_unroll=1):
+        super().__init__(profile,serial=True); self.chain_unroll=chain_unroll
+        self.xmss=profile.family=='xmss'
+
+    def hash(self,recipe):
+        self.e('HASH',recipe,Lanes.L0); self.e('WAIT')
+
+    def chain_f(self,*,wait=True):
+        if self.xmss:
+            self.nm(N.NODE,N.L0)
+            self.hash(4); self.nm(N.V2,N.L0)
+            self.hash(5); self.nm(N.RIGHT,N.L0)
+            self.e('XMSS_MASK',0)
+        self.e('HASH',8,Lanes.L0)
+        if wait: self.e('WAIT')
+
+    def parent_h(self,*,preloaded=False,wait=True):
+        if self.xmss:
+            if not preloaded: self.nm(N.NODE,N.L0); self.nm(N.TMPNODE,N.RIGHT)
+            self.hash(4); self.nm(N.V2,N.L0)
+            self.hash(5); self.nm(N.RIGHT,N.L0); self.e('XMSS_MASK',0)
+            self.nm(N.NODE,N.L0)
+            self.hash(6); self.nm(N.RIGHT,N.L0); self.e('XMSS_MASK',1)
+            self.nm(N.RIGHT,N.L0); self.nm(N.L0,N.NODE)
+        self.e('HASH',10,Lanes.L0)
+        if wait: self.e('WAIT')
+
+    def leaf_compress(self,*,verify=False):
+        if self.xmss:
+            row,pair,odd,stored,done=[self.label(x) for x in ('ltree_row','ltree_pair','ltree_odd','ltree_stored','ltree_done')]
+            self.e('REDUCE_INIT',TreeKind.LTREE); self.at(row); self.at(pair)
+            self.load(N.NODE,Space.LIST,Index.REDUCE_LEFT)
+            self.br(Cond.LTREE_PAIR,odd,invert=True)
+            self.load(N.TMPNODE,Space.LIST,Index.REDUCE_RIGHT)
+            self.e('ADRS',Addr.LTREE_LEAF if verify else Addr.LTREE_CURSOR)
+            self.parent_h(preloaded=True)
+            self.at(stored)
+            self.store(Space.LIST,N.L0,Index.REDUCE_OUT)
+            self.e('REDUCE_NEXT',ReduceNext.INDEX); self.br(Cond.LTREE_MORE,pair)
+            self.e('REDUCE_NEXT',ReduceNext.LTREE_LEVEL); self.br(Cond.REDUCE_AGAIN,row)
+            self.jump(done)
+            self.at(odd); self.nm(N.L0,N.NODE); self.jump(stored); self.at(done)
+        else:
+            self.e('ADRS',Addr.WOTS_LIST,ListLeaf.LEAF if verify else ListLeaf.CURSOR)
+            self.hash(9)
+            self.e('NODE_BEGIN',NodeSource.TARGET if verify else NodeSource.CURSOR,TreeKind.HT)
+            self.e('ADRS',Addr.HT_NODE); self.hash(11)
+
+    def chains_fast(self):
+        chain,step=[self.label(x) for x in ("explicit_stateful_chain","explicit_stateful_step")]
+        self.e('CHAIN_INIT');self.mask(1);self.at(chain)
+        self.e('STEP_INIT',Lanes.L0,StepSource.ZERO);self.e('ADRS',Addr.WOTS_CURSOR);self.hash(7)
+        self.at(step);self.chain_f();self.e('STEP_NEXT',Lanes.L0);self.e('ADRS',Addr.WOTS_CURSOR)
+        self.br(Cond.STEP_MORE,step);self.store(Space.LIST,N.L0,Index.CHAIN0)
+        self.e('CHAIN_NEXT',imm=1);self.br(Cond.CHAIN_MORE,chain)
+
+    def chains(self,*,signing=False):
+        if not signing: return self.chains_fast()
+        chain,step,done=[self.label(x) for x in ('stateful_chain','stateful_step','stateful_endpoint')]
+        self.e('CHAIN_INIT'); self.at(chain); self.e('STEP_INIT',Lanes.L0,StepSource.ZERO)
+        self.e('ADRS',Addr.WOTS_CURSOR); self.e('DIGIT_LOAD',Lanes.L0); self.hash(7)
+        self.at(step)
+        no_capture=self.label('not_capture')
+        self.br(Cond.STEP_EQ_DIGIT,no_capture,invert=True); self.e('EMIT',a=N.L0); self.at(no_capture)
+        self.br(Cond.STEP_MORE,done,invert=True)
+        self.e('ADRS',Addr.WOTS_CURSOR); self.chain_f(); self.e('STEP_NEXT',Lanes.L0)
+        self.jump(step); self.at(done)
+        self.store(Space.LIST,N.L0,Index.CHAIN0)
+        self.e('CHAIN_NEXT',imm=1); self.br(Cond.CHAIN_MORE,chain)
+
+    def push_stateful(self,*,signing=False):
+        if not signing:
+            merge_wait,tail,save=[self.label(x) for x in
+                ('stateful_merge_wait','stateful_merge_tail','stateful_save')]
+            self.e('NODE_BEGIN',NodeSource.CURSOR,TreeKind.HT)
+            self.br(Cond.INDEX_ODD,save,invert=True)
+            def parent():
+                if self.xmss:
+                    self.nm(N.TMPNODE,N.L0); self.load(N.NODE,Space.STACK)
+                else:
+                    self.nm(N.RIGHT,N.L0); self.load(N.L0,Space.STACK)
+                self.e('NODE_PARENT'); self.e('ADRS',Addr.HT_NODE)
+                self.parent_h(preloaded=self.xmss,wait=False)
+            # A single entry body avoids an uncovered jump into a WAIT head.
+            # Remaining parents are generated by a visible conditional loop.
+            parent(); self.br(Cond.INDEX_ODD,tail,invert=True)
+            self.at(merge_wait); self.e('WAIT'); parent()
+            self.br(Cond.INDEX_ODD,merge_wait)
+            self.at(tail); self.e('WAIT')
+            self.at(save); self.store(Space.STACK,N.L0)
+            return
+        merge,save=[self.label(x) for x in ('stateful_merge','stateful_save')]
+        self.e('NODE_BEGIN',NodeSource.CURSOR,TreeKind.HT)
+        def capture_auth():
+            if signing:
+                skip=self.label('not_auth'); self.br(Cond.AUTH_MATCH,skip,invert=True)
+                self.store(Space.AUTH,N.L0); self.at(skip)
+        capture_auth(); self.br(Cond.INDEX_ODD,save,invert=True)
+        self.at(merge)
+        if self.xmss:
+            self.nm(N.TMPNODE,N.L0); self.load(N.NODE,Space.STACK)
+        else:
+            self.nm(N.RIGHT,N.L0); self.load(N.L0,Space.STACK)
+        self.e('NODE_PARENT'); self.e('ADRS',Addr.HT_NODE); self.parent_h(preloaded=self.xmss)
+        capture_auth(); self.br(Cond.INDEX_ODD,merge)
+        self.at(save); self.store(Space.STACK,N.L0)
+
+    def tree(self,*,signing=False):
+        leaves=self.label('stateful_leaves')
+        self.e('HEIGHT',Height.HT); self.e('CURSOR_INIT'); self.at(leaves)
+        if signing:
+            selected,compress=[self.label(x) for x in ('stateful_selected_leaf','stateful_compress')]
+            # Only the selected leaf requires DIGIT/CAP decisions. All other
+            # leaves use the same explicit full-chain image loop as Keygen.
+            self.br(Cond.TARGET_LEAF,selected)
+            self.chains_fast(); self.jump(compress)
+            self.at(selected); self.chains(signing=True); self.at(compress)
+        else: self.chains_fast()
+        self.leaf_compress(); self.push_stateful(signing=signing)
+        self.e('CURSOR_NEXT',imm=1); self.br(Cond.CURSOR_MORE,leaves)
+        if signing: self.emit_auth()
+
+    def keygen(self):
+        self.asm.label('keygen'); self.mask(1); self.tree(); self.e('EMIT',a=N.L0); self.e('END')
+
+    def sign(self):
+        self.asm.label('sign'); self.mask(1)
+        if self.xmss: self.hash(2); self.nm(N.V0,N.L0)
+        else: self.nm(N.V0,N.RANDOM)
+        self.e('EMIT',a=N.V0); self.hash(3); self.nm(N.V2,N.L0); self.e('DIGITS')
+        self.e('TARGET',Target.LEAF); self.tree(signing=True); self.e('END')
+
+    def verify(self):
+        self.asm.label('verify'); self.mask(1); self.e('INPUT',N.V0)
+        self.hash(3); self.nm(N.V2,N.L0); self.e('DIGITS')
+        self.e('HEIGHT',Height.HT); self.e('TARGET',Target.LEAF); self.e('CHAIN_INIT')
+        chain,step,done=[self.label(x) for x in ('stateful_verify_chain','stateful_verify_step','stateful_verify_endpoint')]
+        self.at(chain); self.e('DIGIT_LOAD',Lanes.L0); self.e('STEP_INIT',Lanes.L0,StepSource.DIGIT)
+        self.e('INPUT',N.L0); self.at(step); self.br(Cond.STEP_MORE,done,invert=True)
+        self.e('ADRS',Addr.WOTS_LEAF); self.chain_f(); self.e('STEP_NEXT',Lanes.L0); self.jump(step)
+        self.at(done); self.store(Space.LIST,N.L0,Index.CHAIN0)
+        self.e('CHAIN_NEXT',imm=1); self.br(Cond.CHAIN_MORE,chain)
+        self.leaf_compress(verify=True); self.e('NODE_BEGIN',NodeSource.TARGET,TreeKind.HT)
+        auth,odd,ready=[self.label(x) for x in ('stateful_verify_auth','stateful_verify_odd','stateful_verify_parent')]
+        self.at(auth); self.br(Cond.INDEX_ODD,odd)
+        self.e('INPUT',N.RIGHT); self.jump(ready)
+        self.at(odd); self.nm(N.RIGHT,N.L0); self.e('INPUT',N.L0)
+        self.at(ready); self.e('NODE_PARENT'); self.e('ADRS',Addr.HT_NODE); self.parent_h()
+        self.br(Cond.LEVEL_MORE,auth); self.nm(N.V2,N.L0); self.e('ROOT_COMPARE'); self.e('END')
+
+
+def _stateful_image(p,c):
+    c.asm.schedule_metadata_overlap(); words=c.asm.assemble(); desc=[0]*32
+    entries=[c.asm.labels[x] for x in ('keygen','sign','verify')]
+    desc[0]=(MAGIC<<32)|(ABI<<27)|(entries[0]<<18)|(entries[1]<<9)|entries[2]
+    desc[1]=PROFILE_CODES[p.name]
+    if p.family=='xmss':
+        recipes={2:(5,1,1,1),3:(8,0,1,2),4:(5,2,1,1),5:(5,3,1,1),6:(5,4,1,1),
+                 7:(5,0,1,1),8:(6,0,1,1),9:(6,0,1,1),10:(7,0,2,1),11:(6,0,1,1)}
+    else:
+        recipes={2:(11,0,1,2),3:(11,0,1,2),4:(9,0,1,1),5:(10,0,1,1),6:(14,0,2,1),
+                 7:(9,0,1,1),8:(10,0,1,1),9:(15,0,67,16),10:(14,0,2,1),11:(13,0,1,1)}
+    for rid,(shape,domain,arity,blocks) in recipes.items():
+        desc[rid]=(shape<<56)|(domain<<48)|(arity<<40)|(32<<32)|(blocks<<24)
+    desc[12]=len(words); desc[13]=p.hardware_keygen_bytes|(p.hardware_signature_bytes<<32)
+    desc[14]=sum(x<<(8*i) for i,x in enumerate((p.n,p.hp,p.d,p.k,p.a,p.m,p.h,p.chains)))
+    return MicroImage(words+(0,)*(512-len(words)),tuple(desc)).validate()
+
+
+class MacroStatefulCompiler(StatefulCompiler):
+    """Only a single chain is a macro; all reductions remain explicit image loops."""
+    def chains_fast(self): return self.chains(signing=False)
+    def chains(self,*,signing=False):
+        chain=self.label('macro_stateful_chain');self.e('CHAIN_INIT');self.mask(1);self.at(chain)
+        if signing:self.e('DIGIT_LOAD',Lanes.L0)
+        self.e('CHAIN',ChainMode.CAP_FULL if signing else ChainMode.FULL,Lanes.L0,ChainLeaf.CURSOR)
+        if signing:self.e('EMIT',a=N.CAP0)
+        self.store(Space.LIST,N.L0,Index.CHAIN0);self.e('CHAIN_NEXT',imm=1);self.br(Cond.CHAIN_MORE,chain)
+    def verify(self):
+        self.asm.label('verify');self.mask(1);self.e('INPUT',N.V0);self.hash(3)
+        self.nm(N.V2,N.L0);self.e('DIGITS');self.e('HEIGHT',Height.HT);self.e('TARGET',Target.LEAF)
+        self.e('CHAIN_INIT');chain=self.label('macro_stateful_verify_chain');self.at(chain)
+        self.e('DIGIT_LOAD',Lanes.L0);self.e('INPUT',N.L0);self.e('CHAIN',ChainMode.SUFFIX,Lanes.L0,ChainLeaf.LEAF)
+        self.store(Space.LIST,N.L0,Index.CHAIN0);self.e('CHAIN_NEXT',imm=1);self.br(Cond.CHAIN_MORE,chain)
+        self.leaf_compress(verify=True);self.e('NODE_BEGIN',NodeSource.TARGET,TreeKind.HT)
+        auth,odd,ready=[self.label(x) for x in ('macro_auth','macro_odd','macro_parent')]
+        self.at(auth);self.br(Cond.INDEX_ODD,odd);self.e('INPUT',N.RIGHT);self.jump(ready)
+        self.at(odd);self.nm(N.RIGHT,N.L0);self.e('INPUT',N.L0);self.at(ready)
+        self.e('NODE_PARENT');self.e('ADRS',Addr.HT_NODE);self.parent_h();self.br(Cond.LEVEL_MORE,auth)
+        self.nm(N.V2,N.L0);self.e('ROOT_COMPARE');self.e('END')
+
+class TreeStatefulCompiler(MacroStatefulCompiler):
+    """One complete stateful tree per TREE instruction, never one whole Job."""
+    def tree(self,*,signing=False):
+        self.e('HEIGHT',Height.HT);self.e('TREE',TreeKind.HT,TreeMode.SIGN if signing else TreeMode.ROOT)
+    def verify(self):
+        self.asm.label('verify');self.mask(1);self.e('INPUT',N.V0);self.hash(3)
+        self.nm(N.V2,N.L0);self.e('DIGITS');self.e('TARGET',Target.LEAF);self.e('HEIGHT',Height.HT)
+        self.e('TREE',TreeKind.HT,TreeMode.VERIFY);self.nm(N.V2,N.L0);self.e('ROOT_COMPARE');self.e('END')
+
+
+def compile_micro(name,*,serial=False,chain_macros=True,tree_macros=True,hash_backend="shake"):
+    p=get_profile(name,hash_backend)
+    if p.family=="slh": return _compile_slh(p.name,serial=serial,chain_macros=chain_macros,tree_macros=tree_macros)
+    cls=TreeStatefulCompiler if tree_macros and not serial else MacroStatefulCompiler if chain_macros and not serial else StatefulCompiler
+    c=cls(p);c.keygen();c.sign();c.verify();return _stateful_image(p,c)
+
+compile_image=compile_micro
+Image=MicroImage

@@ -2,6 +2,7 @@
 `default_nettype none
 module common #(parameter integer LANES=1,UNROLL=1,parameter bit SWAP_PHYSICAL_LANES=0,PROFILE_ENABLE=1) (
  input wire clk,rst,
+ input wire [31:0] job_index,input wire [127:0] job_identifier,input wire [255:0] job_lms_c,
  output wire [8:0] program_address,input wire [63:0] program_data,
  output wire [4:0] descriptor_address,input wire [63:0] descriptor_data,
  input wire [255:0] job_secret_seed,job_secret_prf,job_public_seed,job_randomizer,job_public_root,
@@ -11,35 +12,35 @@ module common #(parameter integer LANES=1,UNROLL=1,parameter bit SWAP_PHYSICAL_L
  input wire [63:0] message_data,input wire message_valid,output wire message_ready,
  output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
  output wire [1:0] result_kind,output logic busy,done,keygen_done,error,
- output logic [15:0] error_code,output logic [31:0] boot_cycles,keygen_cycles,sign_cycles,
- output wire [31:0] hash_count,permutation_count
+ output logic [15:0] error_code,output logic [63:0] boot_cycles,keygen_cycles,sign_cycles,
+ output wire [63:0] hash_count,permutation_count
 );
     typedef enum logic [2:0] {HEADER,PROFILE,RELEASE,REQUEST,RUN,HALTED} phase_t;
     phase_t phase;
-    logic [63:0] image_header,profile_descriptor;
+    logic [63:0] image_header,profile_descriptor,profile_identity;
     logic core_released;
     wire [4:0] core_descriptor_address;
     wire core_message_ready,core_verify_ready,core_job_ready,core_done,core_error;
     wire [15:0] core_error_code;
-    wire [31:0] core_cycles;
+    wire [63:0] core_cycles;
     wire [8:0] entry=job_operation==0 ? image_header[26:18]
         : job_operation==1 ? image_header[17:9] : image_header[8:0];
     wire message_length_valid=job_operation<=2 && (job_operation
-        ? (message_length>=1 && message_length<=87) : message_length==0);
+        ? ((profile_identity>=8 || message_length>=1) && message_length<=87) : message_length==0);
     wire core_rst=rst || !core_released;
     assign descriptor_address=!core_released
-        ? (phase==HEADER ? 5'd0 : 5'd14) : core_descriptor_address;
+        ? (phase==HEADER ? 5'd0 : 5'd14) : phase==RELEASE ? 5'd1 : core_descriptor_address;
     assign result_kind=job_operation;
     assign message_ready=phase==RUN && core_message_ready;
     assign verify_ready=phase==RUN && core_verify_ready;
     executor #(.LANES(LANES),.UNROLL(UNROLL),
         .SWAP_PHYSICAL_LANES(SWAP_PHYSICAL_LANES),.PROFILE_ENABLE(PROFILE_ENABLE)) core (
-        .clk,.rst(core_rst),.image_header,.profile_descriptor,.job_entry(entry),
+        .clk,.rst(core_rst),.image_header,.profile_descriptor,.profile_identity,.job_entry(entry),
         .program_address,.program_data,.descriptor_address(core_descriptor_address),.descriptor_data,
         .job_valid(phase==REQUEST && message_length_valid),.job_ready(core_job_ready),
-        .job_operation(job_operation),.job_message_length(message_length),
+        .job_operation(job_operation),.job_message_length(message_length),.job_index,.job_identifier,
         .job_secret_seed(job_secret_seed),.job_secret_prf(job_secret_prf),
-        .job_public_seed(job_public_seed),.job_randomizer(job_randomizer),.job_public_root(job_public_root),
+        .job_public_seed(job_public_seed),.job_randomizer(profile_identity>=11 && profile_identity<=13 ? job_lms_c : job_randomizer),.job_public_root(job_public_root),
         .message_valid(message_valid && phase==RUN),.message_ready(core_message_ready),.message_data,
         .verify_valid(verify_valid && phase==RUN),.verify_ready(core_verify_ready),.verify_data,.verify_pass,
         .out_valid,.out_data,.out_bytes,.busy(),.done(core_done),.error(core_error),
@@ -47,7 +48,7 @@ module common #(parameter integer LANES=1,UNROLL=1,parameter bit SWAP_PHYSICAL_L
     );
     always_ff @(posedge clk) begin
         if(rst) begin
-            phase<=HEADER;core_released<=0;image_header<=0;profile_descriptor<=0;
+            phase<=HEADER;core_released<=0;image_header<=0;profile_descriptor<=0;profile_identity<=0;
             busy<=1;done<=0;keygen_done<=0;error<=0;error_code<=0;
             boot_cycles<=0;keygen_cycles<=0;sign_cycles<=0;
         end else begin
@@ -63,7 +64,7 @@ module common #(parameter integer LANES=1,UNROLL=1,parameter bit SWAP_PHYSICAL_L
                         error<=1;error_code<=16'h3101;busy<=0;phase<=HALTED;
                     end else begin core_released<=1;phase<=RELEASE;end
                 end
-                RELEASE:phase<=REQUEST;
+                RELEASE:begin profile_identity<=descriptor_data;phase<=REQUEST;end
                 REQUEST:begin
                     if(!message_length_valid) begin
                         error<=1;error_code<=16'h3002;busy<=0;phase<=HALTED;

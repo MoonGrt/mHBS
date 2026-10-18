@@ -19,9 +19,20 @@ sys.path.insert(0, str(ROOT))
 from model.mHBS import compile_micro, compile_test_tree
 from model.executor import MicroMachine
 from model.profiles import SLH_NAMES, get_profile
+from model.stateful import STATEFUL_NAMES
+from model.vectors import generate_fixture,check_fixture,write_fixture
+ALL_NAMES=(*SLH_NAMES,*STATEFUL_NAMES)
 from model.reference import slh_dsa
 from model.vectors import default_job, Observation, KAT
 from scripts.common_partition import partition
+
+def profile_arg(value):
+    if value=='all': return value
+    if 'omega' in value.lower():
+        raise argparse.ArgumentTypeError('omega 配置已移除；请迁移为 xmss_h10/h16/h20 或 lms_h10/h15/h20')
+    try: return get_profile(value).name
+    except ValueError as error: raise argparse.ArgumentTypeError(str(error)) from error
+
 
 OPERATIONS = ('keygen', 'sign', 'verify')
 MACRO_FIELDS = ('macro_count','macro_busy_cycles','macro_hashes')
@@ -142,13 +153,33 @@ def tree_metrics(output, expected, stats, log, *, compare=True):
 
 
 def task_trace_update(digest, task):
-    recipe, layer, tree, leaf, a, b, result = task
-    digest.update(struct.pack('<QIQIII', recipe, layer, tree, leaf, a, b) + result)
+    recipe,layer,tree,leaf,a,b,result=task[:7]
+    digest.update(struct.pack('<QIQIII',recipe,layer,tree,leaf,a,b)+result)
+    if len(task)==8: digest.update(struct.pack('<I',task[7]))
+
+
+def stateful_models_profile(name,folder):
+    folder=Path(folder);profile=get_profile(name)
+    image=compile_micro(name);image.write(folder/'images'/name)
+    rows={}
+    for label in (OPERATIONS if profile.h==10 else ('verify',)):
+        fixture=generate_fixture(name,label,synthetic=profile.h!=10)
+        checked=check_fixture(fixture)
+        row=write_fixture(fixture,folder/'vectors'/name/label,checked=checked,write_image=False)
+        output=fixture['expected'] if label!='verify' else b''
+        row.update(passed=True,profile=name,operation=OPERATIONS.index(label),
+            instruction_words=image.used,output_sha256=hashlib.sha256(output).hexdigest(),
+            **macro_work(checked['machine']),**tree_work(checked['machine']))
+        write(folder/'vectors'/name/label/'result.json',row);rows[label]=row
+        print('MICRO_MODEL_PASS',name,label,'words',image.used,'instructions',row['instructions'],flush=True)
+    write(folder/'models'/f'{name}.json',rows)
+    return name,rows
 
 
 def models_profile(name, folder, serial=False, chain_macros=True, tree_macros=True):
     """The VM only executes instructions; this gate owns independent oracles."""
     folder = Path(folder); profile = get_profile(name)
+    if profile.stateful: return stateful_models_profile(name,folder)
     image = compile_micro(name, serial=serial, chain_macros=chain_macros,tree_macros=tree_macros)
     image_dir = folder/'images'/name; image.write(image_dir)
     job, message = default_job(name)
@@ -209,11 +240,11 @@ def models_profile(name, folder, serial=False, chain_macros=True, tree_macros=Tr
     return name, rows
 
 
-def build_binary(folder, swap=0, stats=True):
+def build_binary(folder, swap=0, stats=True, *, synthesis=False):
     if swap:
         raise ValueError("fixed K1U1 has one physical Hash lane and cannot swap lanes")
     folder = Path(folder)
-    identity = (source_identity(), swap, stats)
+    identity = (source_identity(), swap, stats, synthesis)
     key = hashlib.sha256(json.dumps(identity,sort_keys=True).encode()).hexdigest()[:16]
     build = folder/'binaries'/key; exe=build/'obj/Vtb'
     if not exe.exists():
@@ -222,7 +253,7 @@ def build_binary(folder, swap=0, stats=True):
         common,_=partition((ROOT/top_path).read_text()); (build/'common.sv').write_text(common)
         rtl=[p for p in sources() if p!=top_path]+[str(build/'common.sv')]
         run(['verilator','--binary','--timing','-O3','-j','2','-Wno-fatal','-Wno-WIDTH',
-            '-Wno-UNOPTFLAT','--top-module','tb',f'-GSWAP={swap}',
+            '-Wno-UNOPTFLAT',*(['-DSYNTHESIS'] if synthesis else []),'--top-module','tb',f'-GSWAP={swap}',
             f'-GPROFILE_ENABLE={int(stats)}','--Mdir',str(exe.parent),*rtl,
             'tb/tb.sv',str(ROOT/'tb/hash_trace.cpp'),
             '-LDFLAGS','-lcrypto'],build/'compile.log')
@@ -273,6 +304,53 @@ def simulate(folder, name, label, exe, *, suffix='', options=(), image_folder=No
         vector_sha256={p.name:sha(p) for p in vector.iterdir() if p.is_file()})
     print('MICRO_SIM_PASS',name,label,suffix,'cycles',row['cycles'],flush=True)
     return row
+
+
+def stateful_variant(folder,name,label,exe,*,q=0,synthetic=False,configuration=None,case_name=None,options=()):
+    """Independent standard fixture with an explicitly selected macro schedule."""
+    folder=Path(folder);configuration=configuration or {}
+    fixture=generate_fixture(name,label,q=q,synthetic=synthetic)
+    configuration=dict(configuration)
+    if configuration.get('chain_macros') is False: configuration.setdefault('tree_macros',False)
+    image=compile_micro(name,**configuration)
+    digest=hashlib.sha256()
+    machine=MicroMachine(image,fixture['job'],fixture['root'],fixture['message'],fixture['operation'],
+        fixture['signature'] if label=='verify' else b'',
+        task_observe=lambda t:task_trace_update(digest,t),instruction_limit=(1<<64)-1)
+    output=machine.run()
+    if output!=fixture['expected'] or (machine.hash_count,machine.permutation_count)!=tuple(fixture['independent_counts']):
+        raise ValueError('explicit/macro image differs from independent standard oracle')
+    checked=dict(image=image,machine=machine,output=output,counts=(machine.hash_count,machine.permutation_count),
+        instructions=machine.instructions,work_trace_sha256=machine.trace_digest.hexdigest(),
+        hash_trace_sha256=digest.hexdigest(),independent_order_matches=machine.trace_digest.hexdigest()==fixture['independent_trace_sha256'])
+    case_name=case_name or f'{name}_q{q}_{label}'
+    variant=folder/'variants'/case_name;image.write(variant/'images'/name)
+    row=write_fixture(fixture,variant/'vectors'/name/label,checked=checked,write_image=False)
+    row.update(passed=True,profile=name,operation=fixture['operation'],
+        output_sha256=hashlib.sha256(output if label!='verify' else b'').hexdigest(),
+        **macro_work(machine),**tree_work(machine))
+    write(variant/'vectors'/name/label/'result.json',row)
+    return simulate(folder,name,label,exe,suffix='_'+case_name,options=options,
+        image_folder=variant/'images',vector_folder=variant/'vectors')
+
+
+def stateful_boundary_signs(folder,names,exe):
+    rows={}
+    for name in names:
+        p=get_profile(name)
+        if not p.stateful: continue
+        for q in (1,(1<<p.h)-1):
+            key=f'stateful_{name}_q{q}_verify'
+            rows[key]=stateful_variant(folder,name,'verify',exe,q=q,synthetic=True,
+                case_name=key,options=('+STALL=1','+NOISE=1','+TAIL_NOISE=1'))
+            if p.h==10:
+                key=f'stateful_{name}_q{q}_sign'
+                rows[key]=stateful_variant(folder,name,'sign',exe,q=q,case_name=key,options=('+STALL=1',))
+        if p.h==10:
+            key=f'stateful_{name}_explicit_verify'
+            rows[key]=stateful_variant(folder,name,'verify',exe,q=1,synthetic=True,
+                configuration={'chain_macros':False},case_name=key)
+    return rows
 
 
 def image_variants(folder, name, exe):
@@ -404,15 +482,19 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action',choices=('images','models','rtl','all'))
     parser.add_argument('--tag',default='micro_v4')
-    parser.add_argument('--profile',choices=('all',*SLH_NAMES),default='all')
+    parser.add_argument('--profile',type=profile_arg,choices=('all',*ALL_NAMES,'xmss','lms'),default='all')
     parser.add_argument('--operation',choices=('all',*OPERATIONS),default='all')
     parser.add_argument('--jobs',type=int,default=3)
     parser.add_argument('--extended',action='store_true')
+    parser.add_argument('--stateful-boundaries',action='store_true',help='q=1/max real-height Verify, h10 complete Sign and explicit Verify; never large-tree Sign')
     args=parser.parse_args()
     if not re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.-]*',args.tag): parser.error('invalid tag')
     folder=ROOT/'build/image-chain-tree'/args.tag; folder.mkdir(parents=True,exist_ok=True)
     identity=source_identity()
-    names=[n for n in SLH_NAMES if args.profile in ('all',n)]
+    selected=args.profile if args.profile=='all' else get_profile(args.profile).name
+    names=[n for n in ALL_NAMES if selected in ('all',n)]
+    if selected!='all' and get_profile(selected).stateful and get_profile(selected).h!=10 and args.operation in ('keygen','sign'):
+        parser.error('higher-tree complete Keygen/Sign remain stopped; use --operation verify')
     if args.action=='images':
         for name in names:
             image=compile_micro(name); image.write(ROOT/'tb/vectors'/name)
@@ -431,14 +513,15 @@ def main():
             raise ValueError('requested profiles are missing from model evidence; regenerate models')
         exe=build_binary(folder)
         cases={}
-        tasks=[(n,o) for n in names for o in OPERATIONS if args.operation in ('all',o)]
+        tasks=[(n,o) for n in names for o in OPERATIONS
+            if args.operation in ('all',o) and o in gate['profiles'][n]]
         with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
             pending={(n,o):pool.submit(simulate,folder,n,o,exe) for n,o in tasks}
             for (n,o),future in pending.items(): cases[n+'/'+o]=future.result()
-        if args.extended:
+        if args.extended and any(n in SLH_NAMES for n in names):
             # Representative protocol checks include all input domains and
             # asymmetric paired Verify chains without rebuilding for each Job.
-            name=names[0]
+            name=next(n for n in names if n in SLH_NAMES)
             for label,options in [('stall',('+STALL=1',)),('reset',('+INTERRUPT=1',)),
                                    ('replay',('+REPLAY=1',)),('truncated',('+CUT=5',))]:
                 cases[label]=simulate(folder,name,'verify',exe,suffix='_'+label,options=options)
@@ -472,7 +555,7 @@ def main():
             cases.update(image_variants(folder,name,exe))
             if name.endswith('f'):
                 for length in (7,8,9,87): cases.update(message_variant(folder,name,length,exe))
-            for other in names:
+            for other in (n for n in names if n in SLH_NAMES):
                 if other!=name and other.endswith('f'):
                     cases.update(message_variant(folder,other,87,exe))
                 n=get_profile(other).n
@@ -482,6 +565,7 @@ def main():
                 if n==32:
                     cases[other+'_root192']=simulate(folder,other,'verify',exe,suffix='_root192',
                         options=('+ROOT_BIT=192','+EXPECT=0'),trace=False)
+        if args.stateful_boundaries: cases.update(stateful_boundary_signs(folder,names,exe))
         if source_identity()!=identity: raise ValueError('sources changed during RTL gate; use a fresh tag')
         write(folder/'rtl.json',dict(passed=True,cases=cases,source_sha256=identity))
 

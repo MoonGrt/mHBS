@@ -1,13 +1,17 @@
 `timescale 1ns/1ps
 module tb_recipe;
     parameter integer UNROLL=2;
+    parameter bit PROFILE=1;
     parameter [15:0] MASK=16'h101e;
     logic clk=0,rst=1,request_valid=0,response_ready=0;
     logic [5:0] node_bytes;
     wire request_ready,response_valid,error;
     logic [63:0] request_recipe;
-    logic [6:0] message_length;
-    logic [255:0] secret_seed,secret_prf,public_seed,root,randomizer,left_value,right_value;
+    logic [6:0] message_length,request_a;
+    logic [1:0] request_address_type;
+    logic [19:0] request_leaf;
+    logic [31:0] request_b,request_index;
+    logic [255:0] secret_seed,secret_prf,public_seed,root,randomizer,left_value,right_value,key_value;
     logic [695:0] message_buffer;
     wire [3:0] message_word_address;
     wire [703:0] padded_message={8'd0,message_buffer};
@@ -16,8 +20,8 @@ module tb_recipe;
     wire [6:0] list_index0,list_index1;
     logic [255:0] list_data0,list_data1;
     wire [391:0] response_value;
-    wire [31:0] hash_count,permutation_count;
-    logic [447:0] vectors[0:511];
+    wire [63:0] hash_count,permutation_count;
+    logic [540:0] vectors[0:1023];
     logic [391:0] retained;
     integer i,j,cycles=0,count,old_hashes,old_permutations,observed_permutations=0,old_observed;
     integer n;
@@ -25,13 +29,16 @@ module tb_recipe;
     integer accepted_requests=0,accepted_responses=0;
     integer fixed_first,fixed_next,stream_first,list_first,invalid_next,turnover_cases=0;
     integer latency_count[0:15],latency_sum[0:15],latency_min[0:15],latency_max[0:15];
-    string vector_file;
-    recipe #(.UNROLL(UNROLL),.RECIPE_MASK(MASK),.PROFILE_ENABLE(1)) dut (
+    string vector_file,chain_file;
+    logic [391:0] chain_expected[0:2];
+    recipe #(.UNROLL(UNROLL),.RECIPE_MASK(MASK),.PROFILE_ENABLE(PROFILE)) dut (
         .clk,.rst,.node_bytes,.request_valid,.request_ready,.request_recipe,
         .secret_seed,.secret_prf,.public_seed,.root,.randomizer,
         .message_word_address,.message_word_data,.message_length,
         .request_layer(5'd9),.request_tree(64'hfedcba9876543210),
-        .request_leaf(10'd341),.request_a(7'd37),.request_b(32'h89abcdef),
+        .request_leaf,.request_address_type,.request_index,
+        .request_identifier(128'hf0e0d0c0b0a090807060504030201000),.request_key(key_value),
+        .request_a,.request_b,
         .request_left(left_value),.request_right(right_value),
         .list_index0,.list_index1,.list_data0,.list_data1,
         .response_valid,.response_ready,.response_value,.error,.hash_count,.permutation_count
@@ -58,7 +65,11 @@ module tb_recipe;
     task tick; begin @(posedge clk);#1;end endtask
     task automatic load_vector(input integer index);
         begin
+            key_value=secret_prf;
             node_bytes=vectors[index][447:442];
+            request_address_type=vectors[index][449:448];
+            request_b=vectors[index][481:450];request_a=vectors[index][488:482];
+            request_leaf=vectors[index][508:489];request_index=vectors[index][540:509];
             request_recipe=0;
             request_recipe[59:56]=vectors[index][441:438];
             request_recipe[47:40]=vectors[index][437:430];
@@ -88,7 +99,7 @@ module tb_recipe;
             for(k=0;k<stall_cycles;k=k+1) begin
                 tick();
                 if(!response_valid || request_ready || response_value!==old_digest
-                    || accepted_requests!=requests_before+1 || hash_count!=hashes_before+1)
+                    || accepted_requests!=requests_before+1 || hash_count!=hashes_before+PROFILE)
                     $fatal(1,"turnover old response changed or request accepted under backpressure first=%0d next=%0d",first,second);
             end
             response_ready=1;#1;
@@ -96,7 +107,7 @@ module tb_recipe;
                 $fatal(1,"turnover failed to expose old digest and next ready on same edge first=%0d next=%0d",first,second);
             tick();response_ready=0;
             if(accepted_requests!=requests_before+2 || accepted_responses!=responses_before+1
-                || hash_count!=hashes_before+(vectors[second][406] ? 1 : 2))
+                || hash_count!=hashes_before+(PROFILE ? (vectors[second][406] ? 1 : 2) : 0))
                 $fatal(1,"turnover handshake not counted exactly once first=%0d next=%0d",first,second);
             if(!vectors[second][406] && response_valid)
                 $fatal(1,"turnover exposed stale response after starting next hash first=%0d next=%0d",first,second);
@@ -114,8 +125,8 @@ module tb_recipe;
                 || (!error && response_value!==vectors[second][391:0])
                 || (error && response_value!==old_digest))
                 $fatal(1,"turnover next digest/error mismatch first=%0d next=%0d",first,second);
-            if(hash_count-hashes_before!=(vectors[second][406] ? 1 : 2)
-                || permutation_count-permutations_before!=vectors[first][414:407]+vectors[second][414:407]
+            if(hash_count-hashes_before!=(PROFILE ? (vectors[second][406] ? 1 : 2) : 0)
+                || permutation_count-permutations_before!=(PROFILE ? vectors[first][414:407]+vectors[second][414:407] : 0)
                 || observed_permutations-observed_before!=vectors[first][414:407]+vectors[second][414:407])
                 $fatal(1,"turnover Hash/permutation count mismatch first=%0d next=%0d",first,second);
             next_digest=response_value;
@@ -139,6 +150,8 @@ module tb_recipe;
         if(!$value$plusargs("VECTORS=%s",vector_file)) $fatal(1,"missing vectors");
         if(!$value$plusargs("COUNT=%d",count)) $fatal(1,"missing vector count");
         $readmemh(vector_file,vectors,0,count-1);
+        if(!$value$plusargs("XMSS_CHAIN=%s",chain_file)) $fatal(1,"missing XMSS chain oracle");
+        $readmemh(chain_file,chain_expected,0,2);
         for(i=0;i<16;i=i+1) begin
             latency_count[i]=0;latency_sum[i]=0;latency_min[i]=1000000;latency_max[i]=0;
         end
@@ -150,19 +163,13 @@ module tb_recipe;
         for(i=0;i<87;i=i+1) message_buffer[i*8+:8]=8'(i*3+1);
         repeat(3) tick();rst=0;tick();
         for(j=0;j<count;j=j+1) begin
-            node_bytes=vectors[j][447:442];
-            request_recipe=0;
-            request_recipe[59:56]=vectors[j][441:438];
-            request_recipe[47:40]=vectors[j][437:430];
-            request_recipe[55:48]=vectors[j][429:422];
-            message_length=vectors[j][421:415];
+            load_vector(j);
             // Abort a multiblock hash, then replay it from a cleared context.
             if(j==0 && MASK[12]) begin
                 node_bytes=32;request_recipe[59:56]=12;request_recipe[47:40]=128;
                 request_valid=1;tick();request_valid=0;repeat(11) tick();
                 rst=1;repeat(2) tick();rst=0;tick();
-                node_bytes=vectors[j][447:442];request_recipe[59:56]=vectors[j][441:438];
-                request_recipe[47:40]=vectors[j][437:430];
+                load_vector(j);
             end
             old_hashes=hash_count;old_permutations=permutation_count;old_observed=observed_permutations;
             if(!request_ready) $fatal(1,"request not ready case=%0d",j);
@@ -181,8 +188,8 @@ module tb_recipe;
                 $display("actual=%098h expected=%098h",response_value,vectors[j][391:0]);
                 $fatal(1,"single hash bytes case=%0d n=%0d shape=%0d arity=%0d len=%0d",j,node_bytes,request_recipe[59:56],request_recipe[47:40],message_length);
             end
-            if(hash_count-old_hashes!=(error ? 0 : 1)
-                || permutation_count-old_permutations!=vectors[j][414:407]
+            if(hash_count-old_hashes!=(PROFILE && !error ? 1 : 0)
+                || permutation_count-old_permutations!=(PROFILE ? vectors[j][414:407] : 0)
                 || observed_permutations-old_observed!=vectors[j][414:407])
                 $fatal(1,"single hash counts case=%0d hashes=%0d permutations=%0d observed=%0d expected=%0d",j,hash_count-old_hashes,permutation_count-old_permutations,observed_permutations-old_observed,vectors[j][414:407]);
             retained=response_value;
@@ -214,6 +221,65 @@ module tb_recipe;
         turnover_pair(fixed_first,invalid_next,2);
         if(stream_first>=0) turnover_pair(stream_first,fixed_next,0);
         if(list_first>=0) turnover_pair(list_first,fixed_first,3);
+        // A chained XMSS PRF/MASK/F may hand over without an idle cycle.
+        // LMS stream alignment also has to survive that same handover.
+        if(MASK[5] && MASK[6] && MASK[7] && MASK[11] && MASK[15]) begin: standard_turnover
+            integer xp,xf,xh,lm,ll;
+            xp=-1;xf=-1;xh=-1;lm=-1;ll=-1;
+            for(j=0;j<count;j=j+1) if(!vectors[j][406]) begin
+                case(vectors[j][441:438])
+                    5:if(vectors[j][429:422]==3) xp=j;
+                    6:xf=j;
+                    7:xh=j;
+                    11:if(vectors[j][421:415]==87) lm=j;
+                    15:ll=j;
+                    default:begin end
+                endcase
+            end
+            if(xp<0 || xf<0 || xh<0 || lm<0 || ll<0) $fatal(1,"missing standard handover vectors");
+            turnover_pair(xp,xf,0);turnover_pair(xf,xp,3);
+            turnover_pair(xp,xh,0);turnover_pair(lm,xp,2);
+            turnover_pair(ll,lm,0);turnover_pair(xh,ll,3);
+            begin: key_mask_f
+                reg [255:0] saved_key,saved_mask;
+                // Three successive single-Hash requests. The KEY result must
+                // remain live while MASK is computed, then F consumes both.
+                node_bytes=32;request_leaf=20'habcde;request_address_type=0;
+                request_a=37;request_b=32'h89abcdef;request_index=32'habcde;
+                request_recipe=64'h0502010000000000;request_valid=1;
+                tick();request_valid=0;while(!response_valid) tick();
+                if(error || response_value!==chain_expected[0]) $fatal(1,"XMSS KEY hash");
+                saved_key=response_value[255:0];
+                request_recipe[55:48]=3;response_ready=1;request_valid=1;#1;
+                if(!request_ready) $fatal(1,"XMSS KEY to MASK handover");
+                tick();response_ready=0;request_valid=0;
+                while(!response_valid) tick();
+                if(error || response_value!==chain_expected[1]) $fatal(1,"XMSS MASK hash");
+                saved_mask=response_value[255:0];
+                key_value=saved_key;left_value=left_value^saved_mask;
+                request_recipe=64'h0600010000000000;response_ready=1;request_valid=1;#1;
+                if(!request_ready) $fatal(1,"XMSS MASK to F handover");
+                tick();response_ready=0;request_valid=0;
+                while(!response_valid) tick();
+                if(error || response_value!==chain_expected[2]) $fatal(1,"XMSS KEY/MASK/F result");
+                response_ready=1;tick();response_ready=0;tick();
+                left_value=left_value^saved_mask;key_value=secret_prf;
+                $display("XMSS_KEY_MASK_F_TURNOVER_PASS");
+            end
+            // Discard one partially absorbed prefix and one active permutation,
+            // then replay the 16-block LMS public-key list after each reset.
+            for(integer cutpoint=0;cutpoint<3;cutpoint=cutpoint+1) begin
+                load_vector(ll);request_valid=1;tick();request_valid=0;
+                repeat(cutpoint==0 ? 3 : cutpoint==1 ? 20 : 100) tick();
+                rst=1;tick();rst=0;tick();
+                if(response_valid || !request_ready || hash_count!=0 || permutation_count!=0)
+                    $fatal(1,"LMS reset did not discard in-flight hash");
+                load_vector(ll);request_valid=1;tick();request_valid=0;
+                while(!response_valid) tick();
+                if(error || response_value!==vectors[ll][391:0]) $fatal(1,"LMS alignment reset replay");
+                response_ready=1;tick();response_ready=0;tick();
+            end
+        end
         $display("SINGLE_HASH_TURNOVER_PASS cases=%0d UNROLL=%0d MASK=%04h",turnover_cases,UNROLL,MASK);
         for(i=0;i<16;i=i+1) if(latency_count[i])
             $display("SINGLE_HASH_LATENCY shape=%0d cases=%0d min=%0d max=%0d sum=%0d",i,

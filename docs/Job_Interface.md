@@ -1,6 +1,6 @@
 # mHBS 微程序核 Job 与流接口
 
-唯一生产顶层为 `rtl/top/top.sv`。支持 SLH-DSA SHAKE 128f、192f、256f、128s、192s、256s，每次复位执行一次 Keygen、Sign 或 Verify。
+唯一生产顶层为 `rtl/top/top.sv`。支持六组SLH-DSA SHAKE及XMSS h10/h16/h20、LMS h10/h15/h20，每次复位执行一次Keygen、Sign或Verify。
 
 ## 配置
 
@@ -13,12 +13,12 @@ ROM 路径使用 `PROGRAM_INIT_FILE` 和 `DESCRIPTOR_INIT_FILE` 参数指定；�
 | 端口 | 语义 |
 |---|---|
 | `clk` / `rst` | 时钟；高有效同步复位，至少覆盖一个上升沿 |
-| `message_length[6:0]` | Keygen 为 0；Sign/Verify 为 1–87，在内部 Job 接受时锁存 |
+| `message_length[6:0]` | Keygen 为 0；SLH Sign/Verify为1～87，stateful为0～87，在内部 Job 接受时锁存 |
 | `message_data[63:0]` | 低字节先传，尾拍多余字节忽略 |
 | `message_valid` / `message_ready` | 上升沿两者同时为 1 时接收一拍；等待 ready 时保持 valid 和 data |
 | `out_valid` / `out_data[255:0]` | 每个有效拍直接输出一个完整节点，无 out_ready；接收方必须及时接收 |
 | `out_bytes[5:0]` | 有效低位字节数（16/24/32），按低字节到高字节拼接；未用高位忽略 |
-| `result_kind[1:0]` | 0 为 Keygen 的 SK\|\|PK；1 为签名；2 为 Verify |
+| `result_kind[1:0]` | 0为Keygen（SLH SK\|\|PK、stateful root）；1为签名payload；2为Verify |
 | `busy` | 复位时置 1，完成或错误时清零 |
 | `done` | 整项结果输出结束后保持为 1，直到复位；不再提供 out_last/out_keep |
 | `keygen_done` | Keygen 完成单周期脉冲 |
@@ -55,7 +55,7 @@ ABI 4 的 TREE 在宏内流式输出和接收节点，不增加端口。预检�
 
 只有 `signature_valid=1` 且地址小于 `signature_nodes` 的请求产生读响应；其余请求的
 `signature_read_valid=0`。读数据仅在 valid 为 1 时有意义，未使用高位忽略。
-按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，即为完整签名。
+按地址递增，将每节点的低 `signature_node_bytes` 字节按低字节在先拼接，SLH得到完整签名，stateful得到待软件组装的payload。
 缓存可重复随机读取，读操作不影响 `done` 或原输出。缓存错误不改变原核心 `error`，调用方
 须检查 `signature_valid` 和 `signature_error` 后再使用缓存。
 
@@ -78,3 +78,11 @@ ABI 4 的 TREE 在宏内流式输出和接收节点，不增加端口。预检�
 Verify 不输出 out 数据流。done=1、error=0 时读取 verify_pass：1 为根匹配，0 为签名不匹配；不匹配不是协议或执行故障。done/verify_pass 保持到复位。节点供应不足时等待输入，不把停顿判成无效签名；完成后的额外节点不被接受。完整签名字节流的长度及分帧检查由外部负责。
 
 Verify 的 keygen_cycles、sign_cycles 保持零；仿真可观察共同核 cycles，hash/permutation 统计沿用 PROFILE_ENABLE。生产统计仍关闭。消息范围和每次复位一项操作的约束不变。
+
+## 标准 stateful Job 扩展
+
+新增 `job_index[31:0]`、`job_identifier[127:0]`、`job_lms_c[255:0]` 输入，Job接受时锁存；LMS C取代该算法的randomizer。stateful q范围0≤q<2^h；消息0～87字节，SLH仍为1～87字节。消息及节点仍低字节在先。所有周期、Hash、置换和宏统计扩为64位，关闭PROFILE_ENABLE后为零。
+
+XMSS/LMS Keygen输出32字节root。Sign及签名缓存仅保存payload：32字节R/C、67个32字节链节点、h个32字节认证节点。它不是可直接发送的标准签名字节流。软件先检查原签名类型、长度、q和树高，再经 `model/stateful.py` 拆分Verify节点或组装标准签名、公钥。XMSS标准公钥68字节、LMS56字节。签名长度XMSS h10/h16/h20为2500/2692/2820字节；LMS h10/h15/h20为2508/2668/2828字节。
+
+签名缓存与源模块共用，容量不变；缓存的节点payload可按序读回，再由软件添加标准整数/类型字段。高树Verify为真实高度路径验证；合成兄弟节点不构成完整Keygen/Sign验收。

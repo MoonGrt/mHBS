@@ -58,17 +58,17 @@ def main():
     run([sys.executable,"scripts/generate_tree_vectors.py","--check"],tree_fixture_log)
     run([sys.executable, "scripts/check_recipes.py", "--unroll", "1"], lane_log)
     lane_passes = re.findall(r"SINGLE_HASH_LANE_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
-    if {mask for _, mask in lane_passes} != {"101e", "0006"}:
+    if len(lane_passes)!=3 or {mask: int(count) for count,mask in lane_passes} != {"101e":329,"0006":329,"fffe":329}:
         raise RuntimeError(f"Missing lane unit success marker; see {lane_log}")
     turnover_passes = re.findall(r"SINGLE_HASH_TURNOVER_PASS cases=(\d+) UNROLL=1 MASK=([0-9a-f]+)", lane_log.read_text())
     turnover_cases = {mask: int(count) for count, mask in turnover_passes}
-    if len(turnover_passes) != 2 or turnover_cases != {"101e": 5, "0006": 3}:
+    if len(turnover_passes) != 3 or turnover_cases != {"101e": 5, "0006": 3,"fffe":11}:
         raise RuntimeError(f"Missing single-Hash turnover protocol coverage; see {lane_log}")
 
     obj = folder/"processor"/key; obj.mkdir(parents=True, exist_ok=True)
     executable = obj/"micro_unit"
     if not executable.exists():
-        run([args.verilator, "--binary", "--timing", "-O2", "-j", "2",
+        run([args.verilator, "--binary", "--timing", "-O1", "-j", "2", "-MAKEFLAGS", "OPT_FAST=-O0 OPT_SLOW=-O0",
              "-Wno-fatal", "-Wno-WIDTH", "-Wno-UNOPTFLAT", "--top-module", "tb_hash_backend_contracts",
              "--Mdir", str(obj), "-o", "micro_unit", *PROCESSOR_SOURCES], obj/"compile.log")
     processor_log = folder/"processor.log"
@@ -83,7 +83,12 @@ def main():
     if ABI>=4 and (len(tree_passes)!=1 or int(tree_passes[0][0])<1):
         raise RuntimeError(f"Missing ABI 4 TREE unit coverage; see {processor_log}")
     tree_cases=int(tree_passes[0][0]) if tree_passes else 0
+    stateful_trees=re.findall(r'STATEFUL_TREE_VERIFY_PASS cases=(\d+)',processor_log.read_text())
+    boundary=re.findall(r'MICRO_STATEFUL_BOUNDARY_PASS cases=(\d+)',processor_log.read_text())
+    if stateful_trees != ["6"] or len(boundary)!=1 or int(boundary[0])<1:
+        raise RuntimeError(f"Missing stateful TREE or address-boundary units; see {processor_log}")
     result = dict(passed=True,abi=ABI,macro_cases=macro_cases,tree_cases=tree_cases,
+                  stateful_tree_cases=int(stateful_trees[0]),stateful_boundary_cases=int(boundary[0]),
                   source_sha256=inputs, verilator_version=version,
                   lane_cases={mask: int(count) for count, mask in lane_passes},
                   turnover_cases=turnover_cases,
@@ -92,7 +97,7 @@ def main():
     (folder/"results.json").write_text(json.dumps(result, indent=2, sort_keys=True)+"\n")
     print("MICRO_UNITS_PASS", sum(result["lane_cases"].values()), "lane cases;",
           sum(turnover_cases.values()), "turnover cases; processor protocol unit;",macro_cases,"CHAIN cases;",
-          tree_cases,"TREE cases", folder)
+          tree_cases,"SLH TREE cases;",result["stateful_tree_cases"],"stateful TREE cases;",result["stateful_boundary_cases"],"stateful boundary cases", folder)
 
 
 if __name__ == "__main__":

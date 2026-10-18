@@ -1,28 +1,51 @@
-# mHBS image-chain-tree
+# mHBS — image-chain-tree
 
-移植父项目固定提交 `cc1f60b408f38f2c1346f2300681ce1692d0ce16` 的 ABI4 设计。分支独立基于 `050512998fea28cc44667a1cd694d5ad5077767c`，保留源 ABI、镜像和 K1U1 执行语义。
+本分支在移植基线 `a6d113e8` 上增加标准 XMSS／LMS。固定 **SHAKE256、K1U1、一个物理 Hash 通道、一个 Hash 在途**，保留 ABI4、512×64 程序、32×64 描述符及 9 位 PC。原六组 SLH 镜像逐字保留。
 
-单物理 SHAKE256 通道，每周期一轮 Keccak，仅一个 Hash 在途。支持 SLH-DSA-SHAKE 128f/192f/256f/128s/192s/256s 的 Keygen、Sign、Verify。`CHAIN` 完成单条链，`TREE` 完成当前 GROUP/LAYER 的单棵树；外层组、层和列表压缩仍由 image 控制。本分支不提供 SHA2、XMSS/LMS 或 P/U 扩展。
+| 算法 | 配置名 | 标准参数 |
+|---|---|---|
+| SLH-DSA-SHAKE | slh_128f/128s、slh_192f/192s、slh_256f/256s | 原六参数 |
+| XMSS | xmss_h10/h16/h20 | n=32、w=16、67链、15步 |
+| LMS | lms_h10/h15/h20 | m=32、LMOTS w=4、类型0x0B、67链、15步 |
 
-## 构建与检查
+全部实现 Keygen、Sign、Verify。`xmss`／`lms` 默认 h10；旧 omega 名称报迁移错误。Sign 完整重算认证路径，无 BDS。本轮不增加 SHA2 或并发流水。
+
+CHAIN=36执行选中单链；TREE=37按family执行整棵树，包括链、XMSS L-tree／LMS叶压缩、主树与认证路径。image保留R/C、消息摘要、DIGITS、目标q和根比较。stateful禁止TOP_SHORTCUT。 两分支增加 `XMSS_MASK=38`，仅允许 XMSS。XMSS 完整链为 SECRET + 15×(KEY/MASK/F)，共46次 Hash；LMS 完整链为16次 Hash。
+
+## 源码与接口
+
+生产列表为 `sources.txt`：executor、SHAKE recipe/context、Keccak、common、top及可选signature。节点工作区仍为128×256单读单写RAM；XMSS KEY复用SLH专属摘要暂存，无新增节点银行。端口和例化保持紧凑分组。
+
+`common` 使用外部 program/descriptor；`top` 包含ROM和可选签名缓存。新增运行时 `job_index[31:0]`、`job_identifier[127:0]`、`job_lms_c[255:0]`，在Job接受时锁存；SLH连接零。种子及根按现有合同在整个Job期间保持稳定。消息为64位、节点和输出为256位、低字节在先。SLH消息1～87字节，XMSS/LMS为0～87字节。
+
+XMSS/LMS Keygen仅输出32字节root；Sign及缓存保存R/C、67条链节点和h个认证节点。`model/stateful.py` 负责标准公钥和签名的组装、类型、长度、q及端序检查。q的持久化及随机输入由调用方管理。统计全链路64位，保留 `PROFILE_ENABLE`；生产综合显式设为0。
+
+详见 [ABI](docs/ABI.md)、[指令表](docs/ISA.md)、[接口](docs/Job_Interface.md)。
+
+## 生成与验证
 
 ```bash
-python3 scripts/check_source_import.py
-python3 scripts/check_standard_models.py -q
-python3 scripts/check_hash_backend_contracts.py --out build/image-chain-tree/units
-python3 scripts/run_hash_backends.py all --tag check --jobs 4 --extended
-python3 scripts/check_hash_work.py --image-root build/image-chain-tree/check/images --out build/image-chain-tree/check/hash_work --jobs 3
-python3 scripts/check_statistics.py --run build/image-chain-tree/check --profile all --jobs 2
-python3 scripts/check_top_signature.py --vector build/image-chain-tree/check/vectors/slh_128f/sign --out build/image-chain-tree/check/top --jobs 2
-./scripts/synthesize.sh --background
+python3 scripts/check_source_import.py --historical
+python3 scripts/run_hash_backends.py images
+python3 scripts/run_hash_backends.py all --tag example --profile all --jobs 4
+python3 scripts/check_stateful_models.py --mode quick
+python3 scripts/check_stateful_models.py --mode full --profile xmss_h10
+python3 scripts/check_stateful_models.py --mode full --profile lms_h10
+python3 scripts/check_recipes.py
+python3 scripts/check_hash_backend_contracts.py
 ```
 
-程序位于 `tb/vectors/<profile>/program.mem`（512×64），描述符位于相邻的 `descriptor.mem`（32×64），没有 template。`model/microcode.py`、`model/mHBS.py`、`model/executor.py` 分别定义 ISA、编译器和逐指令 VM；三个入口共用同一份镜像。重新生成镜像：`python3 scripts/run_hash_backends.py images`。
+默认整核回归28项：六组SLH三操作、XMSS/LMS h10三操作、四组高树真实高度Verify。高树Verify使用明确标注的合成认证兄弟节点，不代表完整树生成。h16/h15/h20完整Keygen／Sign不自动生成或执行，h20保持停止。
 
-`rtl/top/common.sv` 是源顶层按原 partition 工具提取的共同核；`rtl/top/top.sv` 保存 ROM 和签名缓存外壳。生产清单为 `sources.txt`。端口与 32 位统计保持源设计，面积测量使用 `PROFILE_ENABLE=0`；程序 ROM 和签名缓存不计入共同核面积。
+原SLH输出、缓存、Hash／置换及周期须精确匹配移植基线；新算法核对独立标准参考的完整输出、标准签名、缓存及有序逐Hash轨迹。独立模型另比较宏／显式执行的完整Hash前像和结果多重集，保留重复次数。`--historical` 将原源码映射证明绑定历史冻结快照，只对当前SLH ROM检查逐字兼容，不宣称扩展RTL仍与旧源逐字相同。
 
-源校验不依赖父仓库：原始源文件、12个镜像和原回归证据保存在[移植实验](docs/manifests/experiments/image_chain_tree_import_20261021/reports/Import.md)。检查器对生产文件执行受控标识符/路径映射后的代码 token 比较，并逐字核对原始及重新生成的镜像。这不宣称形式验证工具等价。
+## 综合与证据
 
-[ABI](docs/ABI.md) · [ISA](docs/ISA.md) · [Job接口](docs/Job_Interface.md) · [架构](docs/Architecture.md)
+```bash
+python3 scripts/synthesize.py --background
+python3 scripts/report_atp.py --run <综合运行目录> --regression <回归目录>
+```
 
-100 MHz 综合结果仅用于面积与诊断路径，不代表完成布线或已验证板上频率。历史报告对应各自冻结源码，不能作为本分支当前结果。
+Vivado2025.2、xc7a200tffg1156-3、100MHz OOC、每任务2线程、PROFILE_ENABLE=0，仅综合common，不布线。面积不含程序ROM及签名缓存。原SLH基线为 **15,698 LUT／4,205 FF**；增加算法后报告面积增量，不再应用原移植±1%闸门。100MHz ATP为假定频率指标，不能证明布线频率。
+
+新结果归档于 [标准stateful扩展报告](docs/manifests/experiments/image_chain_tree_stateful_20261021_121656/reports/Stateful_Extension.md)，历史移植报告保留。运行日志在build，归档仅保留摘要、冻结RTL、源码与镜像校验及综合证据。

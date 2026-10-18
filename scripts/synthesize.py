@@ -56,7 +56,7 @@ def prepare(run,archive,backend):
     with tarfile.open(run/'rtl.tar.gz','w:gz') as tar:
         for name in sorted(paths):tar.add(source/name,arcname=name,recursive=False)
     state=dict(status='prepared',hash_backend=backend,run_root=str(run),archive_root=str(archive),
-        started_at=stamp(),started_epoch=time.time(),area_gate_applicable=backend=='shake',area_gate_passed=None)
+        started_at=stamp(),started_epoch=time.time(),area_gate_applicable=False,area_gate_passed=None,area_gate_reason='standard XMSS/LMS feature extension; report increments, no source-import 1% gate')
     publish(run,state);return state
 
 
@@ -82,6 +82,7 @@ def worker(run):
         if any(sha(source/name)!=value for name,value in identity.items()):raise ValueError('Frozen source changed')
         if 'MHBS_SYNTH_PASS' not in (out/'driver.log').read_text():raise ValueError('Missing synthesis pass marker')
         resources=area(out);state['resources']=resources;state['source_unchanged']=True
+        state['relative_delta']={k:resources[k]/BASELINE[k]-1 for k in BASELINE}
         if state['area_gate_applicable']:
             delta={k:resources[k]/BASELINE[k]-1 for k in BASELINE}
             state.update(relative_delta=delta,area_gate_passed=all(abs(v)<=.01 for v in delta.values()))
