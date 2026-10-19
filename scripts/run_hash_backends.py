@@ -126,6 +126,8 @@ class Runner:
    for n in ('xmss_h10','lms_h10'):
     checks.append((f'{b}_{n}_q_overflow',['bash','scripts/simulate.sh',n,'verify','1','1','+Q=1024','+INVALID=1'],dict(HASH_BACKEND=b)))
   checks.extend([('backend_contracts',[sys.executable,'scripts/check_hash_backend_contracts.py'],None),('sha256_primitive',[sys.executable,'scripts/check_sha256.py','--pipeline','1','--unroll','1'],None),('keccak_primitive',[sys.executable,'scripts/check_keccak.py'],None)])
+  checks.append(('empty_message_sign',[sys.executable,'scripts/check_empty_messages.py','--source',str(self.src),
+                 '--run',str(self.run/'empty_messages'),'--archive',str(self.out)],None))
   with ThreadPoolExecutor(max_workers=4) as sim,ThreadPoolExecutor(max_workers=2) as base,ThreadPoolExecutor(max_workers=2) as synth,ThreadPoolExecutor(max_workers=2) as aux:
    jobs=[sim.submit(self.simulate,c) for c in cases()]+[base.submit(self.baseline,b) for b in LOW]+[synth.submit(self.synthesize,b) for b in LOW]+[aux.submit(self.check,*c) for c in checks]
    jobs += [aux.submit(self.boundary,row) for row in json.loads((self.run/'BOUNDARY_FIXTURES.json').read_text())]

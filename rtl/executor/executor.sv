@@ -1,6 +1,6 @@
 `timescale 1ns / 1ps
 `default_nettype none
-// Single-lane ABI 4 macro executor for SLH and standard SHAKE256 XMSS/LMS.
+// Single-lane template macro executor for SLH, XMSS and LMS; SHAKE/SHA2.
 // verilog_format: off
 module executor #(
     parameter integer UNROLL=1, PIPELINE=1

@@ -97,7 +97,9 @@ if [[ $mode == smoke ]]; then
 elif [[ $mode == all ]]; then
     for name in "${profiles[@]}"; do
         for op in keygen sign verify; do
-            if [[ $name == *_h20 && $op != verify ]]; then continue; fi
+            # High trees are Verify-only in the default suite. Complete trees
+            # require an explicit later request rather than --all expansion.
+            if [[ $name =~ _h(15|16|20)$ && $op != verify ]]; then continue; fi
             run_case "$name" "$op" "$@"
         done
     done
