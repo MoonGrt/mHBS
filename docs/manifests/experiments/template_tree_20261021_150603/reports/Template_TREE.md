@@ -70,3 +70,5 @@ program16×64、template16×64、descriptor32×64；CHAIN为整组链及叶构�
 附加空消息完整Sign：两后端XMSS/LMS h10共4/4通过，独立固定C参考生成预期，完整输出/缓存/Hash/块数及任务指纹均匹配。原main非空默认36项周期完全一致。
 
 签名缓存开关与SYNTHESIS两开关的八个组合均为K1U1，证据见K1_SIGNATURE_VIEWS.json。最终源码与实际测试RTL仅有一行头注释不同，见FINAL_SOURCE.json；原测试快照保持不变。
+
+q=1／1023完整Sign补充：SHAKE/SHA2各XMSS/LMS h10共8/8通过，消息为主基线42。独立固定C参考生成全部预期，逐字节输出与签名缓存、64位Hash/块计数、实际原语输入/结果指纹均匹配。仅h10完整树，未启动任何高树完整操作。详见SIGN_INDEX_VALIDATION.json及SIGN_INDEX_SOURCE.json。

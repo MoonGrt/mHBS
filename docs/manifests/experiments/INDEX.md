@@ -156,4 +156,4 @@
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。
 
 | 20261021_150527 | template TREE 启动检查失败 | [记录](template_tree_20261021_150527/reports/Launch_Failure.md) | 未启动测试/综合；后续已修复 |
-| 20261021_150603 | main template TREE K1U1 SHAKE/SHA2 | [报告](template_tree_20261021_150603/reports/Template_TREE.md) | 44整核＋139附加＋36周期基线＋4空消息Sign通过；两综合通过 |
+| 20261021_150603 | main template TREE K1U1 SHAKE/SHA2 | [报告](template_tree_20261021_150603/reports/Template_TREE.md) | 44整核＋139附加＋36周期基线＋4空消息Sign＋8索引Sign通过；两综合通过 |
