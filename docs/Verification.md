@@ -1,9 +1,7 @@
-# image-chain-tree 验证
+# 当前验证合同
 
-当前入口见根 README。先执行源身份与镜像检查，再执行模型单元、lane/CHAIN/TREE协议单元、六SLH参数三操作回归、扩展故障/停顿检查、逐Hash工作核对、SYNTHESIS视图和top/cache等价检查。
+SHAKE28项、SHA2 16项，合计每分支44项：六/两组SLH完整三操作，XMSS/LMS h10完整三操作，XMSS h16/h20与LMS h15/h20真实高度Verify。高树Verify使用独立单叶与合成兄弟路径，不表示完整树Keygen/Sign已验证。
 
-`run_hash_backends.py all --tag <新tag> --extended` 在 `build/image-chain-tree/<tag>/` 留下原始日志和JSON。源输入、镜像或RTL改变后使用新tag；门禁拒绝绑定旧源码的验证摘要。宏和Hash监视区分普通HASH、独立CHAIN和TREE子链，不将子链Hash重复计入授权。
+逐字节核对输出和签名缓存，独立统计Hash及压缩/置换块数。仿真独立观察实际输入填充块和完整Hash结果，以每项SHA256指纹的count、SUM256、XOR256核对与VM/独立Verify的任务多重集；允许合法树遍历顺序不同，指纹属于概率校验。
 
-本分支仅SHAKE六SLH参数，不启动XMSS/LMS大树。程序ROM512条、descriptor32条、单物理lane、K1U1；ABI1/2/3/5镜像拒绝。本轮综合使用100MHz、2线程、共同核、PROFILE_ENABLE=0，不自动布线。
-
-实验归档只保存Markdown/JSON验证摘要、冻结RTL、源校验和综合报告；原始仿真明细保留build。
+冻结原mainRTL复跑非空默认向量，要求周期、Hash/块计数相同。补充stateful零长度消息、q/地址边界、消息停顿、截断、篡改、复位、后端拒绝、统计裁剪及签名缓存开关。综合仅100MHz诊断，不当作布线频率证明。完成状态以新实验报告为准，不复用历史ABI4通过状态。

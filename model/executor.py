@@ -1,16 +1,407 @@
-"""Instruction-level model of the typed HBS processor; each HASH is one backend primitive."""
+"""Executable HBS image ABI 4: 128-bit tokens/templates, 64-bit descriptors.
+
+The interpreter executes the same five macro operations for every image. It
+does not call an algorithm oracle. hashlib supplies the hash primitives.
+Recipe shapes describe byte construction, including compound masked hashes.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
-import hashlib
+from enum import IntEnum
+from typing import Callable
+from model.profiles import get_profile
+from model.hashes import block_count, digest
 
-from model.microcode import (Addr, Cond, Height, Instruction, LayerInit, ListLeaf, Mask, N,
-    Op, PENDING_SAFE, ReduceNext, SPACE_DEPTHS, StepSource, Target, TreeKind, Lanes, ChainMode, ChainLeaf, TreeMode, TreeFlags)
+from model.microcode import (
+    StaticTaskToken as Token, TOKEN_SINGLE, TOKEN_RUN, TOKEN_LOOP, TOKEN_HALT,
+    issue_word, expand,
+)
+
+
+class Macro(IntEnum):
+    HASH = 1
+    CHAIN = 2
+    TREE = 3
+    TRANSFORM = 4
+    EMIT = 5
+
+
+class Kind(IntEnum):
+    HASH = 1
+    SEGMENT = 2
+    CHAIN = 4
+    TREE = 5
+    ROUTE = 6
+    TRANSFORM = 8
+    EMIT = 9
+    IMAGE = 10
+    PROFILE = 11
+
+
+class Shape(IntEnum):
+    ADDRESS_SEED = 1
+    ADDRESS_VALUE = 2
+    MESSAGE_PRF = 3
+    MESSAGE_DIGEST = 4
+    INDEX_PRF = 5
+    ROOT_MESSAGE = 6
+    MASKED_SEED = 7
+    MASKED_VALUE = 8
+    PREFIX_SEED = 9
+    PREFIX_VALUE = 10
+    PREFIX_MESSAGE = 11
+    ADDRESS_LIST = 12
+    PREFIX_LIST = 13
+    PREFIX_LEAF = 14
+    PREFIX_PARENT = 15
+
+
+class Source(IntEnum):
+    SECRET = 0
+    PRF = 1
+    PUBLIC = 2
+    ROOT = 3
+    RANDOM = 4
+    IDENTIFIER = 5
+    INDEX = 6
+    CONSTANT = 7
+
+
+CAPTURE, AUTH, SIGN_ONLY, EXTERNAL_ROOT = 1, 2, 4, 8
+
+
+def record(kind: Kind, **fields: tuple[int, int, int]) -> int:
+    word = int(kind) << 60
+    used = 0
+    for name, (value, shift, bits) in fields.items():
+        mask = ((1 << bits) - 1) << shift
+        if value < 0 or value >= 1 << bits or mask & used or shift + bits > 60:
+            raise ValueError(f"invalid or overlapping {kind.name}.{name}")
+        word |= value << shift
+        used |= mask
+    return word
+
+
+def field(word: int, shift: int, bits: int) -> int:
+    return (word >> shift) & ((1 << bits) - 1)
+
+
+def recipe(shape: Shape, n: int, domain: int = 0, arity: int = 1,
+           blocks: int = 1) -> int:
+    return record(Kind.HASH, shape=(shape, 56, 4), domain=(domain, 48, 8),
+                  arity=(arity, 40, 8), output=(n, 32, 6), blocks=(blocks, 24, 6))
+
+
+def chain(seed: int, step: int, count: int, steps: int,
+          reduce: int = 0, leaf: int = 0, mode: int = 0) -> int:
+    return record(Kind.CHAIN, seed=(seed, 52, 8), step=(step, 44, 8),
+                  reduce=(reduce, 36, 8), leaf=(leaf, 28, 8), count=(count, 20, 8),
+                  steps=(steps, 15, 5), mode=(mode, 12, 2))
+
+
+def tree(chain_id: int, parent: int, height: int, target: int = 0,
+         indexing: int = 0, cache: bool = False, lookup: bool = False,
+         full_cache: bool = False) -> int:
+    return record(Kind.TREE, chain=(chain_id, 52, 8), parent=(parent, 44, 8),
+                  height=(height & 15, 40, 4), height_high=(height >> 4, 39, 1), target=(target, 36, 2),
+                  indexing=(indexing, 32, 2), cache=(int(cache), 31, 1),
+                  lookup=(int(lookup), 30, 1), full_cache=(int(full_cache), 29, 1))
+
+
+def route(slot: int, emit: bool = False, parse: bool = False,
+          group: bool = False) -> int:
+    return record(Kind.ROUTE, slot=(slot, 56, 2), emit=(int(emit), 55, 1),
+                  parse=(int(parse), 54, 1), group=(int(group), 53, 1))
+
+
+def segment(source: Source, length: int, value: int = 0) -> int:
+    return record(Kind.SEGMENT, source=(source, 56, 4), length=(length, 48, 8),
+                  constant=(value, 0, 32))
+
+
+def command(op: Macro, desc: int, result: int = 0, flags: int = 0) -> int:
+    return (int(op) << 44) | (desc << 36) | (result << 28) | (flags << 24)
+
+
+@dataclass(frozen=True)
+class Image:
+    name: str
+    tokens: tuple[int, ...]
+    templates: tuple[int, ...]
+    descriptors: tuple[int, ...]
+    # Software metadata, separate from the descriptor's height bits.
+    hash_backend: str = "shake"
+
+    @property
+    def n(self) -> int:
+        return field(self.descriptors[1], 48, 8)
+
+    @property
+    def stateful(self) -> bool:
+        return bool(field(self.descriptors[1], 59, 1))
+
+    @property
+    def omega(self): return field(self.descriptors[1], 44, 4)
+
+    @property
+    def hp(self): return self.h if self.stateful else field(self.descriptors[1], 40, 4)
+
+    @property
+    def a(self): return field(self.descriptors[1], 36, 4)
+
+    @property
+    def k(self): return field(self.descriptors[1], 18, 6)
+
+    @property
+    def h(self): return field(self.descriptors[1], 0, 7)
+
+    @property
+    def m(self): return field(self.descriptors[1], 7, 6)
+
+    def entry(self, sign: bool) -> int:
+        return field(self.descriptors[0], 38 if sign else 47, 9)
+
+    def output_bytes(self, sign: bool) -> int:
+        return field(self.descriptors[0], 0 if sign else 18, 18)
+
+    def words(self, sign: bool) -> tuple[int, ...]:
+        objects = []
+        for raw in self.tokens[self.entry(sign):]:
+            kind = raw >> 126
+            if kind == TOKEN_HALT:
+                if raw != 3 << 126:
+                    raise ValueError("HALT reserved bits")
+                objects.append(Token(kind))
+                break
+            if kind == TOKEN_LOOP:
+                if raw & ((1 << 60) - 1):
+                    raise ValueError("LOOP reserved bits")
+                t = Token(kind, back_count=field(raw, 114, 12)+1,
+                          loop_repeats=field(raw, 108, 6),
+                          delta0=field(raw, 84, 24), delta1=field(raw, 60, 24))
+                if t.back_count > len(objects):
+                    raise ValueError("LOOP escapes entry")
+            else:
+                if raw & ((1 << 18) - 1):
+                    raise ValueError("token reserved bits")
+                t = Token(kind, template=field(raw, 120, 6),
+                          coord0=field(raw, 96, 24), coord1=field(raw, 72, 24),
+                          repeat=field(raw, 66, 6)+1,
+                          stride0=field(raw, 42, 24), stride1=field(raw, 18, 24))
+            t.encode()  # range and SINGLE/RUN consistency checks
+            objects.append(t)
+        if not objects or objects[-1].kind != TOKEN_HALT:
+            raise ValueError("entry has no HALT")
+        return tuple(expand(self.templates, objects))
+
+
+def compile_image(name: str, *, full_cache: bool = False, hash_backend="shake") -> Image:
+    """Compile one of seven static profiles; jobs are separate from images."""
+    p = get_profile(name, hash_backend)
+    name, n = p.family, p.n
+    records = [0] * 128
+    records[1] = record(Kind.PROFILE, stateful=(int(p.stateful), 59, 1),
+        family=({"slh":1,"xmss":2,"lms":3}[name], 56, 3), n=(n,48,8),
+        omega=(p.omega,44,4), height=(p.hp & 15,40,4), fors_a=(p.a,36,4),
+        message_limit=(87,24,8), fors_k=(p.k,18,6), layers=(p.d,13,5),
+        digest_bytes=(p.m,7,6), total_height=(p.h,0,7))
+    records[40] = route(0, emit=True)
+    records[41] = route(1, parse=True)
+    records[42] = route(2)
+    records[43] = route(2, group=True)
+    records[44] = route(3)
+    records[45] = route(0)
+    records[48] = record(Kind.TRANSFORM, operation=(1, 56, 4), source=(2, 48, 2))
+    records[49] = record(Kind.TRANSFORM, operation=(2, 56, 4), shift=(0 if p.stateful else p.hp, 40, 4))
+
+    def emit(desc: int, base: int, parts: list[tuple]) -> None:
+        records[desc] = record(Kind.EMIT, base=(base, 52, 8), count=(len(parts), 48, 4))
+        for offset, args in enumerate(parts):
+            records[base+offset] = segment(*args)
+
+    templates: list[int] = []
+    def single(op: Macro, desc: int, result: int = 0, flags: int = 0,
+               coord: int = 0, first: bool = False, repeat: int = 1,
+               stride: int = 0) -> Token:
+        tid = len(templates)
+        templates.append(issue_word(command(op, desc, result, flags), first=first))
+        return Token(TOKEN_SINGLE if repeat == 1 else TOKEN_RUN,
+                     template=tid, coord0=coord, repeat=repeat, stride0=stride)
+
+    if name == "slh":
+        for i, args in {
+            2: (Shape.MESSAGE_PRF, n, 0, 1, (2*n+87)//136+1),
+            3: (Shape.MESSAGE_DIGEST, p.m, 0, 1, (3*n+87)//136+1),
+            4: (Shape.ADDRESS_SEED, n, 6), 5: (Shape.ADDRESS_VALUE, n, 3),
+            6: (Shape.ADDRESS_VALUE, n, 3, 2),
+            7: (Shape.ADDRESS_SEED, n, 5), 8: (Shape.ADDRESS_VALUE, n, 0),
+            9: (Shape.ADDRESS_LIST, n, 1, p.chains, (n+32+n*p.chains)//136+1),
+            10: (Shape.ADDRESS_VALUE, n, 2, 2),
+            11: (Shape.ADDRESS_LIST, n, 4, p.k, (n+32+n*p.k)//136+1),
+        }.items():
+            records[i] = recipe(*args)
+        records[16] = chain(4, 5, 1, 1)
+        records[17] = chain(7, 8, p.chains, 15, reduce=9, mode=1)
+        records[20] = tree(16, 6, p.a, target=1, indexing=1)
+        records[21] = tree(17, 10, p.hp)
+        emit(50, 64, [(Source.SECRET, n), (Source.PRF, n), (Source.PUBLIC, n),
+                      (Source.ROOT, n), (Source.PUBLIC, n), (Source.ROOT, n)])
+        kg = [single(Macro.TREE, 21, 44, coord=(p.d-1) << 19, first=True),
+              single(Macro.EMIT, 50), Token(TOKEN_HALT)]
+        sg = [single(Macro.HASH, 2, 40, first=True), single(Macro.HASH, 3, 41),
+              single(Macro.TREE, 20, 43, CAPTURE|AUTH, repeat=p.k, stride=1 << 13),
+              single(Macro.HASH, 11, 42), single(Macro.TRANSFORM, 48),
+              single(Macro.TREE, 21, 42, CAPTURE|AUTH),
+              single(Macro.TRANSFORM, 49), single(Macro.TRANSFORM, 48),
+              Token(TOKEN_LOOP, back_count=3, loop_repeats=p.d-2, delta0=1 << 19),
+              single(Macro.TREE, 21, 42, CAPTURE|AUTH|EXTERNAL_ROOT, coord=(p.d-1) << 19),
+              Token(TOKEN_HALT)]
+        kg_bytes, sg_bytes = p.keygen_bytes, p.signature_bytes
+    else:
+        masked = name == "xmss"
+        recipes = ((Shape.INDEX_PRF, 32), (Shape.ROOT_MESSAGE, 32, 0, 1, 2),
+                   (Shape.MASKED_SEED, 32), (Shape.MASKED_VALUE, 32, 0),
+                   (Shape.MASKED_VALUE, 32, 1, 2), (Shape.MASKED_VALUE, 32, 2, 2)) \
+            if masked else ((Shape.PREFIX_MESSAGE, 32, 0, 1, 2),
+                            (Shape.PREFIX_SEED, 32), (Shape.PREFIX_VALUE, 32),
+                            (Shape.PREFIX_LIST, 32, 0, p.chains, (22+32*p.chains)//136+1),
+                            (Shape.PREFIX_LEAF, 32), (Shape.PREFIX_PARENT, 32, 0, 2))
+        for i, args in enumerate(recipes, 2):
+            records[i] = recipe(*args)
+        records[16] = chain(4, 5, p.chains, (1 << p.omega)-1, reduce=6, mode=2) if masked \
+            else chain(3, 4, p.chains, (1 << p.omega)-1, reduce=5, leaf=6, mode=1)
+        records[20] = tree(16, 7, p.h, target=2, indexing=0 if masked else 2,
+                           cache=True, full_cache=full_cache)
+        records[21] = tree(16, 7, p.h, target=2, indexing=0 if masked else 2, lookup=True)
+        parts = [(Source.CONSTANT, 4, p.typecode), (Source.ROOT, n), (Source.PUBLIC, n)] \
+            if masked else [(Source.CONSTANT, 4, p.typecode), (Source.CONSTANT, 4, p.lmots_typecode),
+                            (Source.IDENTIFIER, 16), (Source.ROOT, n)]
+        emit(50, 64, parts)
+        emit(51, 80, [(Source.INDEX, 4)] + ([] if masked else [(Source.CONSTANT, 4, p.lmots_typecode)])
+             + [(Source.RANDOM, n)])
+        if not masked:
+            emit(52, 84, [(Source.CONSTANT, 4, p.typecode)])
+        kg = [single(Macro.TREE, 20, 44, first=True), single(Macro.EMIT, 50), Token(TOKEN_HALT)]
+        sg = [single(Macro.HASH, 2, 45 if masked else 42, first=True)]
+        if masked:
+            sg.append(single(Macro.HASH, 3, 42))
+        sg += [single(Macro.TRANSFORM, 48), single(Macro.EMIT, 51),
+               single(Macro.CHAIN, 16, flags=SIGN_ONLY)]
+        if not masked:
+            sg.append(single(Macro.EMIT, 52))
+        sg += [single(Macro.TREE, 21, flags=AUTH), Token(TOKEN_HALT)]
+        kg_bytes, sg_bytes = p.keygen_bytes, p.signature_bytes
+    records[0] = record(Kind.IMAGE, version=(4, 56, 4), keygen=(0, 47, 9),
+                        sign=(len(kg), 38, 9), kg_bytes=(kg_bytes, 18, 18),
+                        sg_bytes=(sg_bytes, 0, 18))
+    if hash_backend == "sha2":
+        # Bounds apply to individual primitive invocations of compound recipes.
+        maximum_lengths = {
+            Shape.ADDRESS_SEED: 64 + 22 + n,
+            Shape.ADDRESS_VALUE: 64 + 22 + 2*n,
+            Shape.MESSAGE_PRF: 64 + n + 87,
+            Shape.MESSAGE_DIGEST: max(3*n + 87, 2*n + 32 + 4),
+            Shape.INDEX_PRF: 96, Shape.ROOT_MESSAGE: 128 + 87,
+            Shape.MASKED_SEED: 128, Shape.MASKED_VALUE: 128,
+            Shape.PREFIX_SEED: 55, Shape.PREFIX_VALUE: 55,
+            Shape.PREFIX_MESSAGE: 54 + 87,
+            Shape.PREFIX_LIST: 22 + n*p.chains,
+            Shape.PREFIX_LEAF: 54, Shape.PREFIX_PARENT: 86,
+        }
+        for i, word in enumerate(records):
+            if word >> 60 != Kind.HASH:
+                continue
+            shape = Shape(field(word, 56, 4))
+            length = (64 + 22 + n*field(word, 40, 8)) if shape == Shape.ADDRESS_LIST else maximum_lengths[shape]
+            records[i] = (word & ~(63 << 24)) | (block_count(length, hash_backend) << 24)
+    image = Image(p.name, tuple(t.encode() for t in kg+sg), tuple(templates), tuple(records), hash_backend)
+    validate(image)
+    return image
+
+
+def validate(image: Image) -> None:
+    if image.hash_backend not in ('shake', 'sha2'):
+        raise ValueError('unknown hash backend')
+    d = image.descriptors
+    if not 2 <= len(d) <= 256 or len(image.tokens) > 384 or len(image.templates) > 64:
+        raise ValueError("image storage bounds")
+    if any(x < 0 or x >= 1 << 64 for x in d):
+        raise ValueError("descriptor width")
+    if d[0] >> 60 != Kind.IMAGE or field(d[0], 56, 4) != 4:
+        raise ValueError("unsupported image ABI")
+    if d[1] >> 60 != Kind.PROFILE or image.n not in (16, 24, 32):
+        raise ValueError("unsupported node size")
+    if image.hash_backend == 'sha2' and not image.stateful and image.n != 16:
+        raise ValueError('unsupported SHA2 SLH node size')
+    family = field(d[1],56,3)
+    if family not in (1,2,3) or image.stateful != (family != 1) or image.omega != 4:
+        raise ValueError("invalid profile identity/Winternitz width")
+    if image.stateful and (image.n != 32 or image.h not in ((10,16,20) if family==2 else (10,15,20)) or image.hp != image.h):
+        raise ValueError("unsupported stateful profile")
+    if not image.stateful and (image.omega != 4 or (image.n,image.h,image.hp,image.k,image.a,image.m) not in
+            ((16,66,3,33,6,34),(24,66,3,33,8,42),(32,68,4,35,9,49),
+             (16,63,9,14,12,30),(24,63,9,17,14,39),(32,64,8,22,14,47))):
+        raise ValueError("unsupported stateless profile")
+    if not 0 <= image.entry(False) < image.entry(True) < len(image.tokens):
+        raise ValueError("invalid entry table")
+    def ref(i: int, kind: Kind) -> int:
+        if not 0 <= i < len(d) or d[i] >> 60 != kind:
+            raise ValueError(f"descriptor {i}: expected {kind.name}")
+        return d[i]
+    for w in d:
+        if not w:
+            continue
+        kind = Kind(w >> 60)
+        if kind == Kind.HASH:
+            Shape(field(w, 56, 4))
+            if not 1 <= field(w, 32, 6) <= 49 or not 1 <= field(w, 24, 6) <= (63 if image.hash_backend == 'sha2' else 32):
+                raise ValueError("recipe result/block bound")
+        elif kind == Kind.CHAIN:
+            for shift in (52, 44): ref(field(w, shift, 8), Kind.HASH)
+            for shift in (36, 28):
+                if field(w, shift, 8): ref(field(w, shift, 8), Kind.HASH)
+            if not 1 <= field(w, 20, 8) <= 133 or field(w, 15, 5) > 15:
+                raise ValueError("chain bound")
+            if field(w, 12, 2) > 2:
+                raise ValueError("chain reduction mode")
+        elif kind == Kind.TREE:
+            ref(field(w, 52, 8), Kind.CHAIN)
+            ref(field(w, 44, 8), Kind.HASH)
+            if not 1 <= (field(w, 40, 4) | (field(w,39,1)<<4)) <= (20 if image.stateful else 14):
+                raise ValueError("tree height")
+            if field(w, 36, 2) > 2 or field(w, 32, 2) > 2:
+                raise ValueError("tree addressing mode")
+        elif kind == Kind.EMIT:
+            base, count = field(w, 52, 8), field(w, 48, 4)
+            if not count:
+                raise ValueError("empty emit")
+            for i in range(base, base+count): ref(i, Kind.SEGMENT)
+        elif kind == Kind.SEGMENT:
+            source = Source(field(w, 56, 4))
+            length = field(w, 48, 8)
+            if not 1 <= length <= (4 if source in (Source.INDEX, Source.CONSTANT)
+                                   else 16 if source == Source.IDENTIFIER else image.n):
+                raise ValueError("segment length")
+    for sign in (False, True):
+        words = image.words(sign)
+        allocated = False
+        for word in words[:-1]:
+            if word >> 124 != 1 or not field(word, 107, 1) or field(word, 106, 1):
+                raise ValueError("exclusive macro template required")
+            if field(word, 116, 8) != int(allocated) or field(word, 108, 8) != int(allocated):
+                raise ValueError("macro event dependency")
+            if field(word, 103, 3) or (word & 0xf) != 8:
+                raise ValueError("macro completion event")
+            allocated = True
+            op = Macro(field(word, 96, 4))
+            ref(field(word, 88, 8), {Macro.HASH: Kind.HASH, Macro.CHAIN: Kind.CHAIN,
+                Macro.TREE: Kind.TREE, Macro.TRANSFORM: Kind.TRANSFORM, Macro.EMIT: Kind.EMIT}[op])
+            rid = field(word, 80, 8)
+            if rid: ref(rid, Kind.ROUTE)
 
 
 @dataclass(frozen=True)
 class Job:
-    """Fixed job inputs; q persistence and random generation belong upstream."""
     secret: bytes
     prf: bytes
     public: bytes
@@ -19,715 +410,252 @@ class Job:
     q: int = 0
 
 
-@dataclass
-class Context:
-    """Named, independently bounded fields, never a general register file."""
-    layer: int = 0
-    tree: int = 0
-    leaf: int = 0
-    group: int = 0
-    target: int = 0
-    cursor: int = 0
-    chain: int = 0
-    step0: int = 0
-    step1: int = 0
-    digit0: int = 0
-    digit1: int = 0
-    level: int = 0
-    index: int = 0
-    path: int = 0
-    fors_base: int = 0
-    mask: int = 0
-    reduce_index: int = 0
-    reduce_span: int = 0
-    height: int = 0
-    addr_leaf0: int = 0
-    addr_leaf1: int = 0
-    addr_a0: int = 0
-    addr_a1: int = 0
-    addr_b0: int = 0
-    addr_b1: int = 0
-    address_type: int = 0
-    root_equal: bool = False
+class Machine:
+    def __init__(self, image: Image, job: Job,
+                 observe: Callable[[int, bytes, bytes], None] | None = None,
+                 *, index_policy: str = "guarded", recompute_auth: bool = False):
+        if index_policy not in ("guarded", "fixed_q_no_guard"):
+            raise ValueError("index policy")
+        self.recompute_auth = recompute_auth
+        self.index_policy = index_policy
+        validate(image)
+        if any(len(v) != image.n for v in (job.secret, job.prf, job.public, job.random)):
+            raise ValueError("job node width")
+        if len(job.identifier) != 16 or not (0 <= job.q < (1 << image.h) if image.stateful else job.q == 0):
+            raise ValueError("job identifier/index")
+        self.image, self.job, self.n, self.observe = image, job, image.n, observe
+        self.values = [bytes(image.m) for _ in range(4)]
+        self.roots: dict[int, bytes] = {}
+        self.cache: dict[tuple[int, int], bytes] = {}
+        self.cache_valid = False
+        self.cache_q = job.q
+        self.q = job.q
+        self.hashes = self.permutations = 0
+        self.digits: list[int] = []
+        self.scalar_tree = self.scalar_leaf = 0
+        self.output = bytearray()
+        self.message = b""
+        self.trace: list[tuple[int, int, int, int]] = []
 
-
-class MicroMachine:
-    def __init__(self, image, job, root, message, operation, signature=b"", observe=None,
-                 task_observe=None, *, record_tasks=False, instruction_limit=200_000_000):
-        image.validate()
-        if operation not in (0,1,2): raise ValueError("operation")
-        self.image=image; self.job=job; self.operation=operation
-        self.hash_backend=image.hash_backend
-        self.params=tuple((image.descriptors[14]>>(8*i))&255 for i in range(8))
-        self.n,self.hp,self.d,self.k,self.a,self.m,self.h,self.chains=self.params
-        from model.profiles import get_profile
-        from model.microcode import PROFILE_CODES
-        self.profile=get_profile(next(name for name,code in PROFILE_CODES.items() if code==(image.descriptors[1]&31)),self.hash_backend)
-        self.family=self.profile.family
-        if any(len(v)!=self.n for v in (job.secret,job.prf,job.public,job.random,root)):
-            raise ValueError("Job/root node width")
-        if len(job.identifier)!=16 or not 0<=job.q<1<<32: raise ValueError("Job identifier/index width")
-        if self.family=="slh" and (job.q or any(job.identifier)): raise ValueError("SLH-only Job")
-        if self.family!="slh" and operation in (1,2) and job.q>=1<<self.h: raise ValueError("signature index exhausted")
-        if not (len(message)==0 if operation==0 else (0 if self.family!="slh" else 1)<=len(message)<=87):
-            raise ValueError("message length")
-        if operation==2 and len(signature)!=(image.descriptors[13]>>32):
-            raise ValueError("Verify signature byte count")
-        if operation!=2 and signature: raise ValueError("signature supplied to non-Verify")
-        self.message=bytes(message); self.signature=bytes(signature); self.signature_cursor=0
-        self.ctx=Context(leaf=job.q if self.family!="slh" and operation!=0 else 0)
-        self.used_index=job.q if self.family!="slh" and operation==1 else None
-        self.next_index=job.q+1 if self.used_index is not None else job.q
-        self.exhausted=self.family!="slh" and self.next_index>=1<<self.h
-        self.trace_digest=hashlib.sha256()
-        self.nodes=[bytes(self.n) for _ in range(16)]
-        self.nodes[N.V3]=bytes(root)
-        for i,v in ((N.SECRET,job.secret),(N.PRF,job.prf),(N.PUBLIC,job.public),(N.RANDOM,job.random)):
-            self.nodes[i]=bytes(v)
-        self.spaces=[[bytes(self.n) for _ in range(depth)] for depth in (SPACE_DEPTHS if self.family!="slh" else (68,16,16))]
-        self.digest=b""; self.digits=[]; self.digit_valid=0; self.pending=None
-        self.observe=observe; self.task_observe=task_observe
-        self.task_trace=[] if record_tasks else None
-        self.hash_count=0; self.permutation_count=0; self.instructions=0; self.root_compare_valid=False
-        self.macro_count=0;self.macro_hashes=0
-        self.tree_count=0;self.tree_hashes=0;self.tree_chains=0
-        self.output=bytearray(); self.halted=False; self.error=None
-        if type(instruction_limit) is not int or not 1<=instruction_limit<1<<64:
-            raise ValueError("unsigned-64 instruction budget must be positive")
-        self.instruction_limit=instruction_limit
-        self.decoded=tuple((int(i.op),i.d,i.a,i.b,i.imm)
-                           for i in map(Instruction.decode,image.program[:image.used]))
-
-    def _issue(self, recipe_id, mask):
-        if self.pending is not None: raise ValueError("second outstanding Hash group")
-        if mask not in (1,2): raise ValueError("K1U1 Hash mask must select exactly one logical lane")
-        c=self.ctx; n=self.nodes; recipe=self.image.descriptors[recipe_id]
-        shape=(recipe>>56)&15; domain=(recipe>>48)&255; arity=(recipe>>40)&255
-        out=(recipe>>32)&63; tasks=[]
-        for lane in range(2):
-            if not mask&(1<<lane): continue
-            if lane and shape not in (1,2,5,6,9,10): raise ValueError("unsupported lane1 recipe")
-            layer,tree=c.layer,c.tree
-            leaf=(c.addr_leaf0,c.addr_leaf1)[lane]
-            a=(c.addr_a0,c.addr_a1)[lane]; b=(c.addr_b0,c.addr_b1)[lane]
-            if layer>=32 or leaf>=1<<20 or a>=128 or b>0xffffffff:
-                raise ValueError("Hash address field range")
-            address=b"".join(x.to_bytes(4,"big") for x in (layer,0,tree>>32,tree&0xffffffff,domain,leaf,a,b))
-            if shape==1: data=self.job.public+address+self.job.secret
-            elif shape==2:
-                if lane and arity==2: raise ValueError("lane1 parent Hash")
-                data=self.job.public+address+n[N.L0+lane]+(n[N.RIGHT] if arity==2 else b"")
-            elif shape==3: data=self.job.prf+self.job.random+self.message
-            elif shape==4: data=n[N.V0]+self.job.public+n[N.V3]+self.message
-            elif shape==12: data=self.job.public+address+b"".join(self.spaces[0][:arity])
-            elif shape==5:
-                # XMSS address is eight words: layer, tree[64], type, ots,
-                # chain/height, hash/index, keyAndMask (RFC8391/NIST208).
-                address=b"".join(x.to_bytes(4,"big") for x in (0,0,0,c.address_type,
-                    0 if c.address_type==2 else leaf,a,b,max(0,domain-2)))
-                if domain==0: data=(4).to_bytes(32,"big")+self.job.secret+self.job.public+address
-                elif domain==1: data=(3).to_bytes(32,"big")+self.job.prf+self.job.q.to_bytes(32,"big")
-                else: data=(3).to_bytes(32,"big")+self.job.public+address
-            elif shape==6: data=bytes(32)+n[N.V2]+n[N.L0+lane]
-            elif shape==7: data=(1).to_bytes(32,"big")+n[N.V2]+n[N.L0]+n[N.RIGHT]
-            elif shape==8: data=(2).to_bytes(32,"big")+n[N.V0]+n[N.V3]+self.job.q.to_bytes(32,"big")+self.message
-            elif shape==9: data=self.job.identifier+leaf.to_bytes(4,"big")+a.to_bytes(2,"big")+b"\xff"+self.job.secret
-            elif shape==10: data=self.job.identifier+leaf.to_bytes(4,"big")+a.to_bytes(2,"big")+b.to_bytes(1,"big")+n[N.L0+lane]
-            elif shape==11: data=self.job.identifier+self.job.q.to_bytes(4,"big")+b"\x81\x81"+n[N.V0]+self.message
-            elif shape==13: data=self.job.identifier+b.to_bytes(4,"big")+b"\x82\x82"+n[N.L0]
-            elif shape==14: data=self.job.identifier+b.to_bytes(4,"big")+b"\x83\x83"+n[N.L0]+n[N.RIGHT]
-            elif shape==15: data=self.job.identifier+leaf.to_bytes(4,"big")+b"\x80\x80"+b"".join(self.spaces[0][:arity])
-            else: raise ValueError("unsupported recipe shape")
-            blocks=len(data)//136+1
-            if blocks>((recipe>>24)&63): raise ValueError("recipe block bound")
-            tasks.append((lane,recipe_id,recipe,layer,tree,leaf,a,b,out,data,c.address_type))
-        self.pending=tasks
-
-    def _wait(self):
-        if self.pending is None: raise ValueError("WAIT without Hash group")
-        for lane,rid,recipe,layer,tree,leaf,a,b,out,data,address_type in self.pending:
-            permutations=len(data)//136+1
-            if self.hash_count==(1<<64)-1 or self.permutation_count>(1<<64)-1-permutations:
-                raise OverflowError("Hash statistics exceed unsigned-64 range")
-            result=hashlib.shake_256(data).digest(out)
-            self.nodes[N.L0+lane]=result[:self.n].ljust(self.n,b"\0")
-            if (recipe>>56)&15==4: self.digest=result
-            self.hash_count+=1; self.permutation_count+=permutations
-            self.trace_digest.update(len(data).to_bytes(4,"little")+data+result)
-            if self.observe: self.observe(rid,data,result)
-            task=(recipe,layer,tree,leaf,a,b,result.ljust(49,b"\0"))
-            if self.family!="slh": task=(*task,address_type)
-            if self.task_trace is not None: self.task_trace.append(task)
-            if self.task_observe: self.task_observe(task)
-        self.pending=None
-
-    def _chain(self, mode, selector, leaf_source, *, _tree=False, _recipes=None):
-        """One bounded WOTS chain, independent of the explicit instruction loop.
-
-        Validate both recipes before work, retain private address/step values,
-        and publish only the selected result, optional capture and final step.
-        Every internal SHAKE reports the same byte and task observations as
-        ordinary ISSUE/WAIT; no tree helper or old macro interpreter is used.
-        """
-        if self.family!="slh": return self._chain_stateful(mode,selector,leaf_source,_tree=_tree,_recipes=_recipes)
-        if self.pending is not None: raise ValueError('CHAIN before WAIT')
-        mask=self.lane_mask(selector)
-        if mask not in (1,2): raise ValueError('CHAIN requires exactly one logical slot')
-        slot=int(mask==2); c=self.ctx; chain=c.chain+slot
-        if not 0<=chain<self.chains: raise ValueError('CHAIN index out of bounds')
-        leaf=c.cursor if leaf_source==ChainLeaf.CURSOR else c.leaf
-        if not 0<=leaf<1024: raise ValueError('CHAIN leaf out of bounds')
-        if not 0<=c.layer<32 or not 0<=c.tree<1<<64: raise ValueError('CHAIN context out of bounds')
-        digit=(c.digit0,c.digit1)[slot]
-        if mode!=ChainMode.FULL and (not self.digits or not self.digit_valid&mask or not 0<=digit<=15):
-            raise ValueError('CHAIN before valid digit load')
-        layer,tree=c.layer,c.tree
-        recipes={rid:(_recipes[rid] if _recipes is not None else self.image.descriptors[rid]) for rid in (7,8)}
-        allowed=(15<<56)|(255<<48)|(255<<40)|(63<<32)|(63<<24)
-        for rid,shape,domain in ((7,1,5),(8,2,0)):
-            recipe=recipes[rid]
-            if (recipe&~allowed or (recipe>>56)&15!=shape or (recipe>>48)&255!=domain
-                or (recipe>>40)&255!=1 or (recipe>>32)&63!=self.n
-                or not 1<=((recipe>>24)&63)<=32):
-                raise ValueError('CHAIN recipe mismatch')
-        if _tree: self.tree_chains+=1
-        else: self.macro_count+=1
-        def hashed(rid,step,payload):
-            recipe=recipes[rid];domain=(recipe>>48)&255
-            address=b''.join(x.to_bytes(4,'big') for x in
-                (layer,0,tree>>32,tree&0xffffffff,domain,leaf,chain,step))
-            data=self.job.public+address+payload
-            value=hashlib.shake_256(data).digest(self.n)
-            self.hash_count+=1;self.permutation_count+=len(data)//136+1
-            if _tree: self.tree_hashes+=1
-            else: self.macro_hashes+=1
-            self.trace_digest.update(len(data).to_bytes(4,"little")+data+value)
-            if self.observe: self.observe(rid,data,value)
-            task=(recipe,layer,tree,leaf,chain,step,value.ljust(49,b'\0'))
-            if self.task_trace is not None: self.task_trace.append(task)
-            if self.task_observe: self.task_observe(task)
-            return value
-        value=self.nodes[N.L0+slot];captured=None
-        if mode==ChainMode.SUFFIX: start=digit
-        else:
-            value=hashed(7,0,self.job.secret);start=0
-            if mode!=ChainMode.FULL and digit==0: captured=value
-        end=digit if mode==ChainMode.CAP_PREFIX else 15
-        for step in range(start,end):
-            value=hashed(8,step,value)
-            if mode in (ChainMode.CAP_FULL,ChainMode.CAP_PREFIX) and step+1==digit:
-                captured=value
-        # No architectural node or step changes until the entire macro succeeds.
-        self.nodes[N.L0+slot]=value
-        if captured is not None: self.nodes[N.CAP0+slot]=captured
-        self._commit(**{'step'+str(slot):end})
-
-    def _tree(self, kind, mode, flags=0):
-        """Execute one bounded HT/FORS tree using only individual SHAKE calls.
-
-        Outer context and prepared digits are owned by the image.  This model
-        deliberately does not dispatch an old algorithm/macro interpreter;
-        Hash order, stack merges and stream boundaries are spelled out here.
-        A runtime failure aborts the Job and may leave scratch/output modified.
-        """
-        if self.family!="slh": return self._tree_stateful(kind,mode,flags)
-        c=self.ctx; nodes=self.nodes
-        if self.pending is not None: raise ValueError('TREE before WAIT')
-        if kind not in (TreeKind.HT,TreeKind.FORS) or mode not in tuple(TreeMode):
-            raise ValueError('TREE kind/mode')
-        if (kind==TreeKind.FORS and mode==TreeMode.ROOT or flags not in (0,1)
-            or flags and (kind!=TreeKind.HT or mode!=TreeMode.SIGN)):
-            raise ValueError('TREE kind/mode/flags')
-        if int(mode)!=self.operation: raise ValueError('TREE mode does not match Job')
-        if not 0<=c.layer<self.d or not 0<=c.tree<1<<64 or not 0<=c.leaf<1<<self.hp:
-            raise ValueError('TREE outer context out of bounds')
-        if kind==TreeKind.FORS and not 0<=c.group<self.k:
-            raise ValueError('TREE FORS group out of bounds')
-        height=self.hp if kind==TreeKind.HT else self.a
-        if not 1<=height<=14 or kind==TreeKind.HT and height>10:
-            raise ValueError('TREE height out of bounds')
-        if mode!=TreeMode.ROOT and not 0<=c.target<1<<height:
-            raise ValueError('TREE target out of bounds')
-        if kind==TreeKind.HT and mode!=TreeMode.ROOT and (
-            len(self.digits)!=self.chains or any(not 0<=digit<=15 for digit in self.digits)):
-            raise ValueError('TREE before valid DIGITS')
-        if flags and c.layer!=self.d-1: raise ValueError('TREE shortcut outside final layer')
-        expected={7:(1,5,1),8:(2,0,1),9:(12,1,self.chains),10:(2,2,2)} if kind==TreeKind.HT else {
-            **({4:(1,6,1)} if mode==TreeMode.SIGN else {}),5:(2,3,1),6:(2,3,2)}
-        allowed=(15<<56)|(255<<48)|(255<<40)|(63<<32)|(63<<24)
-        recipes={rid:self.image.descriptors[rid] for rid in expected}
-        for rid,(shape,domain,arity) in expected.items():
-            recipe=recipes[rid];blocks=(recipe>>24)&63
-            length=self.n+32+(self.n if shape==1 else arity*self.n)
-            if (recipe&~allowed or (recipe>>56)&15!=shape or (recipe>>48)&255!=domain
-                or (recipe>>40)&255!=arity or (recipe>>32)&63!=self.n
-                or not length//136+1<=blocks<=32):
-                raise ValueError('TREE recipe mismatch/capacity')
-        # All checks above precede the first scratch write, stream access or Hash.
-        outer={key:getattr(c,key) for key in ('layer','tree','leaf','group','target')}
-        layer,tree,leaf,group,target=(outer[key] for key in ('layer','tree','leaf','group','target'))
-        shortcut=bool(flags&TreeFlags.TOP_SHORTCUT)
-        self.tree_count+=1
-        def hashed(rid,addr_leaf,a,b,payload):
-            recipe=recipes[rid];domain=(recipe>>48)&255
-            address=b''.join(x.to_bytes(4,'big') for x in
-                (layer,0,tree>>32,tree&0xffffffff,domain,addr_leaf,a,b))
-            data=self.job.public+address+payload
-            value=hashlib.shake_256(data).digest(self.n)
-            self.hash_count+=1;self.permutation_count+=len(data)//136+1;self.tree_hashes+=1
-            self.trace_digest.update(len(data).to_bytes(4,"little")+data+value)
-            if self.observe: self.observe(rid,data,value)
-            task=(recipe,layer,tree,addr_leaf,a,b,value.ljust(49,b'\0'))
-            if self.task_trace is not None: self.task_trace.append(task)
-            if self.task_observe: self.task_observe(task)
-            return value
-        def take():
-            offset=self.signature_cursor
-            if offset+self.n>len(self.signature): raise ValueError('Verify input exhausted')
-            self.signature_cursor+=self.n
-            return self.signature[offset:offset+self.n]
-        def parent(value,left,index,level):
-            # index is the already advanced parent index.
-            return hashed(6 if kind==TreeKind.FORS else 10,
-                leaf if kind==TreeKind.FORS else 0,level,
-                (group<<(self.a-level))+index if kind==TreeKind.FORS else index,left+value)
-        def capture(value,index,level):
-            if mode==TreeMode.SIGN and index==((target>>level)^1):
-                self.spaces[2][level]=value
-        def push(value,index,level=0):
-            capture(value,index,level)
-            while index&1:
-                same_parent=index>>1==(target>>level)>>1
-                value=(bytes(self.n) if shortcut and same_parent else
-                    parent(value,self.spaces[1][level],index>>1,level+1))
-                index>>=1;level+=1;capture(value,index,level)
-            self.spaces[1][level]=value
-            return value
-        def chain(index,cursor,mode,source=ChainLeaf.CURSOR,value=None):
-            self._commit(chain=index,cursor=cursor,mask=1,digit0=self.digits[index]
-                if mode!=ChainMode.FULL else 0)
-            self.digit_valid=1 if mode!=ChainMode.FULL else 0
-            if value is not None: nodes[N.L0]=value
-            self._chain(mode,Lanes.L0,source,_tree=True,_recipes=recipes)
-            return nodes[N.L0]
-        if mode==TreeMode.VERIFY:
-            if kind==TreeKind.HT:
-                for index in range(self.chains):
-                    self.spaces[0][index]=chain(index,0,ChainMode.SUFFIX,ChainLeaf.LEAF,take())
-                root=hashed(9,leaf,0,0,b''.join(self.spaces[0][:self.chains]))
-            else:
-                root=hashed(5,leaf,0,(group<<self.a)+target,take())
-            index=target
-            for level in range(1,height+1):
-                sibling=take()
-                left,right=(sibling,root) if index&1 else (root,sibling)
-                index>>=1;root=parent(right,left,index,level)
-        elif kind==TreeKind.HT:
-            for cursor in range(1<<height):
-                selected=mode==TreeMode.SIGN and cursor==target
-                chain_mode=(ChainMode.CAP_PREFIX if shortcut else ChainMode.CAP_FULL) if selected else ChainMode.FULL
-                for index in range(self.chains):
-                    value=chain(index,cursor,chain_mode)
-                    if selected: self.output.extend(nodes[N.CAP0])
-                    if not (selected and shortcut): self.spaces[0][index]=value
-                value=bytes(self.n) if selected and shortcut else hashed(
-                    9,cursor,0,0,b''.join(self.spaces[0][:self.chains]))
-                root=push(value,cursor)
-            if mode==TreeMode.SIGN:
-                for level in range(height): self.output.extend(self.spaces[2][level])
-            if shortcut: root=nodes[N.V3]
-        else:
-            captured=None
-            for cursor in range(0,1<<height,2):
-                # Preserve the K1 image's PRF0, PRF1, F0, F1, first-parent order.
-                secret0=hashed(4,leaf,0,(group<<self.a)+cursor,self.job.secret)
-                secret1=hashed(4,leaf,0,(group<<self.a)+cursor+1,self.job.secret)
-                if cursor==(target&~1): captured=(secret0,secret1)[target&1]
-                value0=hashed(5,leaf,0,(group<<self.a)+cursor,secret0)
-                value1=hashed(5,leaf,0,(group<<self.a)+cursor+1,secret1)
-                if cursor==(target&~1): self.spaces[2][0]=(value1,value0)[target&1]
-                value=parent(value1,value0,cursor>>1,1)
-                root=push(value,cursor>>1,1)
-            self.output.extend(captured)
-            for level in range(height): self.output.extend(self.spaces[2][level])
-        # The result and preserved outer fields form TREE's complete ABI.
-        for name in c.__dataclass_fields__:
-            setattr(c,name,outer.get(name,1 if name=='mask' else False if name=='root_equal' else 0))
-        for node in (N.L1,N.RIGHT,N.CAP0,N.CAP1,N.NODE,N.TMPNODE): nodes[node]=bytes(self.n)
-        nodes[N.L0]=root;self.digit_valid=0;self.root_compare_valid=False
-
-    def _macro_hash(self,rid,leaf,a,b,*,left=b'',right=b'',key=b'',address_type=0,tree=False):
-        """One raw SHAKE call. The recipe model is independent of reference algorithms."""
-        recipe=self.image.descriptors[rid];shape=(recipe>>56)&15;domain=(recipe>>48)&255
-        if shape==5:
-            address=b''.join(x.to_bytes(4,'big') for x in (0,0,0,address_type,0 if address_type==2 else leaf,a,b,max(0,domain-2)))
-            data=(4).to_bytes(32,'big')+self.job.secret+self.job.public+address if domain==0 else (3).to_bytes(32,'big')+self.job.public+address
-        elif shape==6:data=bytes(32)+key+left
-        elif shape==7:data=(1).to_bytes(32,'big')+key+left+right
-        elif shape==9:data=self.job.identifier+leaf.to_bytes(4,'big')+a.to_bytes(2,'big')+b'\xff'+self.job.secret
-        elif shape==10:data=self.job.identifier+leaf.to_bytes(4,'big')+a.to_bytes(2,'big')+b.to_bytes(1,'big')+left
-        elif shape==13:data=self.job.identifier+b.to_bytes(4,'big')+b'\x82\x82'+left
-        elif shape==14:data=self.job.identifier+b.to_bytes(4,'big')+b'\x83\x83'+left+right
-        elif shape==15:data=self.job.identifier+leaf.to_bytes(4,'big')+b'\x80\x80'+b''.join(self.spaces[0][:67])
-        else:raise ValueError('unexpected macro recipe')
-        if len(data)//136+1>((recipe>>24)&63):raise ValueError('macro recipe capacity')
-        result=hashlib.shake_256(data).digest(self.n)
-        self.hash_count+=1;self.permutation_count+=len(data)//136+1
-        if tree:self.tree_hashes+=1
-        else:self.macro_hashes+=1
-        self.trace_digest.update(len(data).to_bytes(4,'little')+data+result)
-        if self.observe:self.observe(rid,data,result)
-        task=(recipe,self.ctx.layer,self.ctx.tree,leaf,a,b,result.ljust(49,b'\0'),address_type)
-        if self.task_trace is not None:self.task_trace.append(task)
-        if self.task_observe:self.task_observe(task)
+    def _hash(self, rid: int, data: bytes, length: int | None = None) -> bytes:
+        r = self.image.descriptors[rid]
+        blocks = block_count(len(data), self.image.hash_backend)
+        if blocks > field(r, 24, 6):
+            raise ValueError("recipe exceeds block bound")
+        result = digest(data, length or field(r, 32, 6), self.image.hash_backend)
+        self.hashes += 1
+        self.permutations += blocks
+        if self.observe: self.observe(rid, data, result)
         return result
 
-    def _chain_stateful(self,mode,selector,leaf_source,*,_tree=False,_recipes=None):
-        from model.microcode import validate_recipe
-        if self.pending is not None:raise ValueError('CHAIN before WAIT')
-        mask=self.lane_mask(selector)
-        if mask not in (1,2):raise ValueError('CHAIN needs one slot')
-        slot=int(mask==2);c=self.ctx;chain=c.chain+slot
-        leaf=c.cursor if leaf_source==ChainLeaf.CURSOR else c.leaf
-        if not 0<=leaf<1<<self.h or not 0<=chain<67:raise ValueError('CHAIN address bound')
-        digit=(c.digit0,c.digit1)[slot]
-        if mode!=ChainMode.FULL and (not self.digits or not self.digit_valid&mask or not 0<=digit<=15):raise ValueError('CHAIN invalid digit')
-        required={7:(5,0),4:(5,2),5:(5,3),8:(6,0)} if self.family=='xmss' else {7:(9,0),8:(10,0)}
-        for rid,(shape,domain) in required.items():
-            recipe=self.image.descriptors[rid];validate_recipe(recipe,self.profile)
-            if (recipe>>56)&15!=shape or (recipe>>48)&255!=domain:raise ValueError('CHAIN standard recipe mismatch')
-        if _tree:self.tree_chains+=1
-        else:self.macro_count+=1
-        value=self.nodes[N.L0+slot];capture=None;start=digit if mode==ChainMode.SUFFIX else 0
-        if mode!=ChainMode.SUFFIX:
-            value=self._macro_hash(7,leaf,chain,0,tree=_tree)
-            if mode!=ChainMode.FULL and digit==0:capture=value
-        end=digit if mode==ChainMode.CAP_PREFIX else 15
-        for step in range(start,end):
-            if self.family=='xmss':
-                key=self._macro_hash(4,leaf,chain,step,tree=_tree)
-                mask_value=self._macro_hash(5,leaf,chain,step,tree=_tree)
-                value=self._macro_hash(8,leaf,chain,step,key=key,left=bytes(x^y for x,y in zip(value,mask_value)),tree=_tree)
-            else:value=self._macro_hash(8,leaf,chain,step,left=value,tree=_tree)
-            if mode in (ChainMode.CAP_FULL,ChainMode.CAP_PREFIX) and step+1==digit:capture=value
-        self.nodes[N.L0+slot]=value
-        if capture is not None:self.nodes[N.CAP0+slot]=capture
-        self._commit(**{'step'+str(slot):end})
+    def hash_recipe(self, rid: int, *, layer: int = 0, leaf: int = 0,
+                    a: int = 0, b: int = 0, left: bytes = b"", right: bytes = b"",
+                    values: list[bytes] | None = None) -> bytes:
+        r = self.image.descriptors[rid]
+        shape, domain, arity = Shape(field(r, 56, 4)), field(r, 48, 8), field(r, 40, 8)
+        j = self.job
+        def be(x: int, count: int = 4) -> bytes: return x.to_bytes(count, "big")
+        address = b"".join(be(x) for x in (layer, 0, self.scalar_tree >> 32,
+            self.scalar_tree & 0xffffffff, domain, leaf, a, b))
+        mask_address = b"".join(be(x) for x in (0, 0, 0, domain, leaf, a, b))
+        if self.image.hash_backend == "sha2" and not self.image.stateful:
+            compressed = address[3:4] + address[8:16] + address[19:20] + address[20:32]
+            prefix = j.public + bytes(64-self.n) + compressed
+            if shape == Shape.ADDRESS_SEED:
+                return self._hash(rid, prefix + j.secret)
+            if shape == Shape.ADDRESS_VALUE:
+                return self._hash(rid, prefix + left + (right if arity == 2 else b""))
+            if shape == Shape.ADDRESS_LIST:
+                return self._hash(rid, prefix + b"".join(values or []))
+            if shape == Shape.MESSAGE_PRF:
+                key = j.prf.ljust(64, b"\0")
+                inner = self._hash(rid, bytes(x ^ 0x36 for x in key) + j.random + self.message, 32)
+                return self._hash(rid, bytes(x ^ 0x5c for x in key) + inner, self.n)
+            if shape == Shape.MESSAGE_DIGEST:
+                random = self.values[0][:self.n]
+                inner = self._hash(rid, random + j.public + self.values[3][:self.n] + self.message, 32)
+                seed = random + j.public + inner
+                output = b"".join(self._hash(rid, seed + be(i), 32) for i in range((self.image.m+31)//32))
+                return output[:self.image.m]
+        if shape == Shape.ADDRESS_SEED: data = j.public + address + j.secret
+        elif shape == Shape.ADDRESS_VALUE: data = j.public + address + left + (right if arity == 2 else b"")
+        elif shape == Shape.MESSAGE_PRF: data = j.prf + j.random + self.message
+        elif shape == Shape.MESSAGE_DIGEST: data = self.values[0][:self.n] + j.public + self.values[3][:self.n] + self.message
+        elif shape == Shape.INDEX_PRF: data = be(3, self.n) + j.prf + be(self.active_q, 32)
+        elif shape == Shape.ROOT_MESSAGE: data = be(2, self.n) + self.values[0][:self.n] + self.values[3][:self.n] + be(self.active_q, self.n) + self.message
+        elif shape == Shape.MASKED_SEED: data = be(4, self.n) + j.secret + j.public + mask_address + be(0)
+        elif shape == Shape.MASKED_VALUE:
+            key = self._hash(rid, be(3, self.n) + j.public + mask_address + be(0))
+            masks = b"".join(self._hash(rid, be(3, self.n) + j.public + mask_address + be(k)) for k in range(1, arity+1))
+            value = left + (right if arity == 2 else b"")
+            data = be(arity-1, self.n) + key + bytes(x ^ y for x, y in zip(value, masks, strict=True))
+        elif shape == Shape.PREFIX_SEED: data = j.identifier + be(leaf) + be(a, 2) + b"\xff" + j.secret
+        elif shape == Shape.PREFIX_VALUE: data = j.identifier + be(leaf) + be(a, 2) + be(b, 1) + left
+        elif shape == Shape.PREFIX_MESSAGE: data = j.identifier + be(self.active_q) + b"\x81\x81" + j.random + self.message
+        elif shape == Shape.ADDRESS_LIST: data = j.public + address + b"".join(values or [])
+        elif shape == Shape.PREFIX_LIST: data = j.identifier + be(leaf) + b"\x80\x80" + b"".join(values or [])
+        elif shape == Shape.PREFIX_LEAF: data = j.identifier + be(b) + b"\x82\x82" + left
+        elif shape == Shape.PREFIX_PARENT: data = j.identifier + be(b) + b"\x83\x83" + left + right
+        else: raise ValueError("unimplemented recipe")
+        return self._hash(rid, data)
 
-    def _tree_stateful(self,kind,mode,flags=0):
-        from model.microcode import validate_recipe
-        if kind!=TreeKind.HT or flags or int(mode)!=self.operation or self.pending is not None:raise ValueError('stateful TREE preflight')
-        c=self.ctx;target=c.target;h=self.h
-        if mode!=TreeMode.ROOT and (not 0<=target<1<<h or len(self.digits)!=67):raise ValueError('TREE target/digits')
-        required=(4,5,6,7,8,10) if self.family=='xmss' else (7,8,9,10,11)
-        for rid in required:validate_recipe(self.image.descriptors[rid],self.profile)
-        self.tree_count+=1
-        outer={k:getattr(c,k) for k in ('layer','tree','leaf','group','target')}
-        def take():
-            p=self.signature_cursor
-            if p+32>len(self.signature):raise ValueError('TREE truncated input')
-            self.signature_cursor+=32;return self.signature[p:p+32]
-        def hashed(rid,leaf,a,b,**kw):return self._macro_hash(rid,leaf,a,b,tree=True,**kw)
-        def parent(left,right,leaf,level,index,ltree=False):
-            if self.family=='lms':return hashed(10,0,level,(1<<(h-level))+index,left=left,right=right)
-            at=1 if ltree else 2;adrleaf=leaf if ltree else 0;adrlevel=level if ltree else level-1
-            key=hashed(4,adrleaf,adrlevel,index,address_type=at)
-            m0=hashed(5,adrleaf,adrlevel,index,address_type=at)
-            m1=hashed(6,adrleaf,adrlevel,index,address_type=at)
-            return hashed(10,adrleaf,adrlevel,index,address_type=at,key=key,left=bytes(x^y for x,y in zip(left,m0)),right=bytes(x^y for x,y in zip(right,m1)))
-        def compress(leaf):
-            if self.family=='lms':
-                k=hashed(9,leaf,0,0);return hashed(11,0,0,(1<<h)+leaf,left=k)
-            span=67;level=0
-            while span>1:
-                for i in range((span+1)//2):
-                    left=self.spaces[0][2*i]
-                    self.spaces[0][i]=parent(left,self.spaces[0][2*i+1],leaf,level,i,True) if 2*i+1<span else left
-                span=(span+1)//2;level+=1
-            return self.spaces[0][0]
-        def chain(i,leaf,mode,value=None):
-            self._commit(chain=i,cursor=leaf,mask=1,digit0=self.digits[i] if mode!=ChainMode.FULL else 0)
-            self.digit_valid=1 if mode!=ChainMode.FULL else 0
-            if value is not None:self.nodes[N.L0]=value
-            self._chain_stateful(mode,Lanes.L0,ChainLeaf.LEAF if self.operation==2 else ChainLeaf.CURSOR,_tree=True)
-            return self.nodes[N.L0]
-        if mode==TreeMode.VERIFY:
-            for i in range(67):self.spaces[0][i]=chain(i,c.leaf,ChainMode.SUFFIX,take())
-            root=compress(c.leaf);idx=target
-            for level in range(1,h+1):
-                sibling=take();left,right=(sibling,root) if idx&1 else (root,sibling);idx>>=1
-                root=parent(left,right,0,level,idx)
-        else:
-            for leaf in range(1<<h):
-                selected=mode==TreeMode.SIGN and leaf==target
-                for i in range(67):
-                    self.spaces[0][i]=chain(i,leaf,ChainMode.CAP_FULL if selected else ChainMode.FULL)
-                    if selected:self.output.extend(self.nodes[N.CAP0])
-                value=compress(leaf);idx=leaf;level=0
-                def capture(v,idx,level):
-                    if mode==TreeMode.SIGN and level<h and idx==((target>>level)^1):self.spaces[2][level]=v
-                capture(value,idx,level)
-                while idx&1:
-                    value=parent(self.spaces[1][level],value,0,level+1,idx>>1);idx>>=1;level+=1;capture(value,idx,level)
-                self.spaces[1][level]=value;root=value
-            if mode==TreeMode.SIGN:
-                for level in range(h):self.output.extend(self.spaces[2][level])
-        for name in c.__dataclass_fields__:setattr(c,name,outer.get(name,1 if name=='mask' else False if name=='root_equal' else 0))
-        for node in (N.L1,N.RIGHT,N.CAP0,N.CAP1,N.NODE,N.TMPNODE):self.nodes[node]=bytes(32)
-        self.nodes[N.L0]=root;self.digit_valid=0;self.root_compare_valid=False
+    def chains(self, did: int, layer: int, leaf: int, index: int,
+               fors: bool, capture: bool, sign_only: bool) -> bytes:
+        d = self.image.descriptors[did]
+        seed, step, reduce, leaf_recipe = (field(d, s, 8) for s in (52, 44, 36, 28))
+        count, steps, mode = field(d, 20, 8), field(d, 15, 5), field(d, 12, 2)
+        endpoints = []
+        for item in range(count):
+            b = index if fors else 0
+            value = self.hash_recipe(seed, layer=layer, leaf=leaf, a=item, b=b)
+            digit = 0 if fors else self.digits[item] if capture or sign_only else steps
+            if (capture or sign_only) and digit == 0: self.output.extend(value)
+            for iteration in range(digit if sign_only else steps):
+                value = self.hash_recipe(step, layer=layer, leaf=leaf, a=item,
+                    b=b if fors else iteration, left=value)
+                if (capture or sign_only) and iteration+1 == digit: self.output.extend(value)
+            endpoints.append(value)
+        if sign_only:
+            return bytes(self.n)
+        if mode == 1:
+            value = self.hash_recipe(reduce, layer=layer, leaf=leaf, values=endpoints)
+        elif mode == 2:
+            level = 0
+            while len(endpoints) > 1:
+                endpoints = [self.hash_recipe(reduce, leaf=leaf, a=level, b=i//2,
+                    left=endpoints[i], right=endpoints[i+1]) for i in range(0, len(endpoints)-1, 2)] \
+                    + (endpoints[-1:] if len(endpoints) & 1 else [])
+                level += 1
+            value = endpoints[0]
+        else: value = endpoints[0]
+        if leaf_recipe:
+            value = self.hash_recipe(leaf_recipe, leaf=leaf, b=index, left=value)
+        return value
 
-    def lane_mask(self,selector):
-        return self.ctx.mask if not selector else self.ctx.mask&(1<<(selector-1))
+    def tree(self, did: int, flags: int, coord: int) -> bytes:
+        d = self.image.descriptors[did]
+        cid, parent, height = field(d, 52, 8), field(d, 44, 8), (field(d, 40, 4) | (field(d,39,1)<<4))
+        target_mode, indexing = field(d, 36, 2), field(d, 32, 2)
+        layer, group = coord >> 19, (coord >> 13) & 63
+        target = self.active_q if target_mode == 2 else self.scalar_leaf
+        if target_mode == 1:
+            fb = (self.image.k*self.image.a+7)//8
+            digest = int.from_bytes(self.values[1][:fb], "big")
+            target = (digest >> (8*fb-self.image.a*(group+1))) & ((1<<self.image.a)-1)
+        if field(d, 30, 1):
+            if not self.cache_valid: raise ValueError("authentication cache is invalid")
+            for level in range(height): self.output.extend(self.cache[level, (target >> level) ^ 1])
+            return self.values[3][:self.n]
+        nodes = []
+        for i in range(1 << height):
+            leaf = self.scalar_leaf if indexing == 1 else i
+            index = group*(1 << height)+i if indexing == 1 else (1 << height)+i if indexing == 2 else i
+            capture = bool(flags & CAPTURE) and i == target
+            sign_only = capture and bool(flags & EXTERNAL_ROOT)
+            nodes.append(self.chains(cid, layer, leaf, index, indexing == 1, capture, sign_only))
+        for level in range(height+1):
+            if field(d, 31, 1):
+                self.cache_q = target
+                for i, value in enumerate(nodes):
+                    if field(d, 29, 1) or level == height or i == ((target >> level) ^ 1):
+                        self.cache[level, i] = value
+            if level == height: break
+            if flags & AUTH: self.output.extend(nodes[(target >> level) ^ 1])
+            next_nodes = []
+            for i in range(len(nodes)//2):
+                index = (group*(1 << height) >> (level+1))+i if indexing == 1 \
+                    else (1 << (height-level-1))+i if indexing == 2 else i
+                if flags & EXTERNAL_ROOT and i == target >> (level+1):
+                    value = bytes(self.n)
+                else:
+                    a = level if Shape(field(self.image.descriptors[parent], 56, 4)) == Shape.MASKED_VALUE else level+1
+                    value = self.hash_recipe(parent, layer=layer,
+                        leaf=self.scalar_leaf if indexing == 1 else 0,
+                        a=a, b=index, left=nodes[2*i], right=nodes[2*i+1])
+                next_nodes.append(value)
+            nodes = next_nodes
+        if field(d, 31, 1): self.cache_valid = True
+        return self.values[3][:self.n] if flags & EXTERNAL_ROOT else nodes[0]
 
-    def _commit(self,**updates):
-        limits={'layer':31,'tree':(1<<64)-1,'leaf':(1<<20)-1,'group':63,'target':(1<<20)-1,
-            'cursor':1<<20,'chain':127,'step0':15,'step1':15,'digit0':15,'digit1':15,
-            'level':20,'index':(1<<20)-1,'path':(1<<20)-1,'fors_base':(1<<20)-1,'mask':3,
-            'reduce_index':127,'reduce_span':127,'height':20,'addr_leaf0':(1<<20)-1,
-            'addr_leaf1':(1<<20)-1,'addr_a0':127,'addr_a1':127,'addr_b0':0xffffffff,'addr_b1':0xffffffff,
-            'address_type':2,'root_equal':1}
-        if self.family=='slh':
-            limits.update(leaf=1023,target=16383,cursor=32767,level=15,index=16383,
-                          path=16383,height=14,addr_leaf0=1023,addr_leaf1=1023,address_type=0)
-        if any(k not in limits or not 0<=v<=limits[k] for k,v in updates.items()):
-            raise ValueError('typed update out of bounds')
-        for name,value in updates.items(): setattr(self.ctx,name,value)
-
-    def predicate(self,condition,lane=0):
-        c=self.ctx
-        if condition==Cond.CURSOR_MORE: return c.cursor<(1<<c.height)
-        if condition==Cond.CHAIN_MORE: return c.chain<self.chains
-        if condition==Cond.GROUP_MORE: return c.group<self.k
-        if condition==Cond.LAYER_MORE: return c.layer<self.d
-        if condition==Cond.FINAL_LAYER: return c.layer==self.d-1
-        if condition==Cond.LEVEL_MORE: return c.level<c.height
-        if condition==Cond.TARGET_LEAF: return c.cursor==c.target
-        if condition==Cond.INDEX_ODD: return bool(c.index&1)
-        if condition==Cond.AUTH_MATCH: return c.index==(c.path^1)
-        if condition==Cond.SAME_PARENT: return c.index>>1==c.path>>1
-        if condition==Cond.STEP_EQ_DIGIT:
-            if not self.digit_valid&(1<<lane): raise ValueError("comparison before digit load")
-            return (c.step0,c.step1)[lane]==(c.digit0,c.digit1)[lane]
-        if condition==Cond.STEP_MORE: return (c.step0,c.step1)[lane]<15
-        if condition==Cond.LANE_ENABLED: return bool(c.mask&(1<<lane))
-        if condition==Cond.MASK_ZERO: return not c.mask
-        if condition==Cond.FORS_PAIR_TARGET: return c.cursor==(c.target&~1)
-        if condition==Cond.REDUCE_MORE: return c.reduce_index<c.reduce_span
-        if condition==Cond.REDUCE_AGAIN: return c.reduce_span>1
-        if condition in (Cond.LTREE_PAIR,Cond.LTREE_MORE):
-            if self.family!='xmss': raise ValueError('L-tree predicate outside XMSS')
-            return 2*c.reduce_index+(condition==Cond.LTREE_PAIR)<c.reduce_span
-        if condition==Cond.ROOT_EQUAL:
-            if not self.root_compare_valid: raise ValueError("root comparison unavailable")
-            return c.root_equal
-        raise ValueError('invalid predicate')
-
-    def _address(self,kind,variant):
-        c=self.ctx; leaf0=leaf1=a0=a1=b0=b1=0; address_type=0
-        if kind in (Addr.WOTS_CURSOR,Addr.WOTS_LEAF):
-            leaf0=leaf1=c.cursor if kind==Addr.WOTS_CURSOR else c.leaf
-            if c.chain>=self.chains: raise ValueError('chain address out of bounds')
-            a0=c.chain; a1=c.chain+1; b0=c.step0; b1=c.step1
-        elif kind in (Addr.FORS_CURSOR,Addr.FORS_TARGET):
-            leaf0=leaf1=c.leaf
-            index=c.cursor if kind==Addr.FORS_CURSOR else c.target
-            if index>=(1<<self.a) or c.group>=self.k: raise ValueError('FORS address out of bounds')
-            b0=(c.group<<self.a)+index; b1=b0+(kind==Addr.FORS_CURSOR)
-        elif kind==Addr.FORS_NODE:
-            if c.group>=self.k: raise ValueError("FORS group out of bounds")
-            leaf0=leaf1=c.leaf; a0=a1=c.level; b0=b1=c.fors_base+c.index
-        elif kind==Addr.HT_NODE:
-            if c.level>c.height: raise ValueError("tree level out of bounds")
-            a0=a1=c.level-(1 if self.family=="xmss" else 0); b0=b1=c.index
-            if self.family=="xmss":
-                if not c.level: raise ValueError("XMSS parent level zero")
-                address_type=2
-            elif self.family=="lms": b0=b1=(1<<(self.h-c.level))+c.index
-        elif kind==Addr.WOTS_LIST:
-            leaf0=leaf1=c.cursor if variant==ListLeaf.CURSOR else c.leaf
-        elif kind in (Addr.LTREE_CURSOR,Addr.LTREE_LEAF):
-            if self.family!="xmss" or c.reduce_span<=1 or 2*c.reduce_index+1>=c.reduce_span:
-                raise ValueError("L-tree address outside valid pair")
-            leaf0=leaf1=c.cursor if kind==Addr.LTREE_CURSOR else c.leaf
-            a0=a1=c.level; b0=b1=c.reduce_index; address_type=1
-        elif kind==Addr.FORS_LIST: leaf0=leaf1=c.leaf
-        elif kind==Addr.REDUCE_NODE:
-            if c.reduce_index>=c.reduce_span or not c.level: raise ValueError("reduction address out of bounds")
-            leaf0=leaf1=c.leaf if variant==TreeKind.FORS else 0
-            a0=a1=c.level; b0=b1=c.reduce_index+(c.fors_base if variant==TreeKind.FORS else 0)
-        else: raise ValueError('invalid address operation')
-        self._commit(address_type=address_type,addr_leaf0=leaf0,addr_leaf1=leaf1,addr_a0=a0,addr_a1=a1,addr_b0=b0,addr_b1=b1)
-
-    def _node_index(self,kind,imm):
-        c=self.ctx
-        return (c.level,c.chain,c.chain+1,c.group,c.cursor,c.reduce_index*2,
-                c.reduce_index*2+1,c.reduce_index,imm)[kind]
-
-    def _write_node(self,d,value):
-        self.nodes[d]=value
-        if d in (N.V2,N.V3): self.root_compare_valid=False
-
-    def run(self):
-        if self.halted: raise ValueError('halted until reset')
-        self.halted=True; self.root_compare_valid=False
-        c=self.ctx; n=self.nodes; spaces=self.spaces; code=self.decoded
-        pc=self.image.entries[self.operation]; count=0; limit=self.instruction_limit
+    def run(self, sign: bool, message: bytes = b"", *, commit: bool = True) -> bytes:
+        if sign and not (0 if self.image.stateful else 1) <= len(message) <= 87:
+            raise ValueError("message length")
+        if sign and self.image.stateful:
+            if not self.recompute_auth and not self.cache_valid: raise ValueError("keygen required")
+            if self.q >= (1 << self.image.h): raise ValueError("index exhausted")
+            if not self.recompute_auth and not field(self.image.descriptors[20], 29, 1) and self.q != self.cache_q:
+                raise ValueError("authentication cache belongs to another index")
+            if self.index_policy == "guarded" and not commit:
+                raise ValueError("state commit required before execution/output")
+        self.active_q = self.q
+        if sign and self.image.stateful and self.index_policy == "guarded":
+            self.q += 1  # historical guarded policy: never rolled back
+        if not sign:
+            self.cache_valid = False
+            self.cache.clear()
+            self.roots.clear()
+        self.output = bytearray()
+        self.hashes = self.permutations = 0
+        self.scalar_tree = self.scalar_leaf = 0
+        self.message = message
+        self.trace = []
         try:
-            while True:
-                if not 0<=pc<len(code): raise ValueError('PC outside code')
-                op,d,a,b,imm=code[pc]; pc+=1; count+=1
-                if count>limit: raise ValueError('instruction execution limit')
-                if self.pending is not None and op not in PENDING_SAFE:
-                    raise ValueError('unsafe operation before WAIT')
-                if op==Op.LAYER_INIT:
-                    self._commit(layer=self.d-1 if d==LayerInit.TOP else 0)
-                elif op==Op.LAYER_NEXT:
-                    if c.layer>=self.d: raise ValueError('layer update out of bounds')
-                    self._commit(layer=c.layer+1)
-                elif op==Op.TREE_NEXT:
-                    self._commit(leaf=c.tree&((1<<self.hp)-1),tree=c.tree>>self.hp)
-                elif op==Op.GROUP_INIT: self._commit(group=0)
-                elif op==Op.GROUP_NEXT:
-                    if c.group>=self.k: raise ValueError('group update out of bounds')
-                    self._commit(group=c.group+1)
-                elif op==Op.CURSOR_INIT: self._commit(cursor=0)
-                elif op==Op.CURSOR_NEXT:
-                    if c.cursor+imm>(1<<c.height): raise ValueError('cursor update out of bounds')
-                    self._commit(cursor=c.cursor+imm)
-                elif op==Op.CHAIN_INIT:
-                    self._commit(chain=0); self.digit_valid=0
-                elif op==Op.CHAIN_NEXT:
-                    if c.chain>=self.chains or c.chain+imm>self.chains+1:
-                        raise ValueError('chain update out of bounds')
-                    self._commit(chain=c.chain+imm); self.digit_valid=0
-                elif op==Op.HEIGHT:
-                    self._commit(height=self.hp if d==Height.HT else self.a if d==Height.FORS else imm)
-                elif op==Op.TARGET:
-                    if d==Target.LEAF: self._commit(target=c.leaf)
-                    else:
-                        if len(self.digest)!=self.m or c.group>=self.k: raise ValueError('TARGET index/digest')
-                        fb=(self.k*self.a+7)//8
-                        target=(int.from_bytes(self.digest[:fb],'big')>>(8*fb-self.a*(c.group+1)))&((1<<self.a)-1)
-                        self._commit(target=target)
-                elif op==Op.DIGITS:
-                    digits=[v for byte in n[N.V2][:self.n] for v in (byte>>4,byte&15)]
-                    checksum=sum(15-v for v in digits)
-                    self.digits=digits+[(checksum>>s)&15 for s in (8,4,0)]; self.digit_valid=0
-                elif op==Op.DIGIT_LOAD:
-                    if not self.digits: raise ValueError("DIGIT before digits")
-                    mask=self.lane_mask(d); updates={}
-                    for lane in range(2):
-                        if mask&(1<<lane):
-                            if c.chain+lane>=len(self.digits): raise ValueError('DIGIT index/uninitialized digits')
-                            updates['digit'+str(lane)]=self.digits[c.chain+lane]
-                    self._commit(**updates); self.digit_valid|=mask
-                elif op==Op.STEP_INIT:
-                    mask=self.lane_mask(d)
-                    if a==StepSource.DIGIT and (not self.digits or mask&~self.digit_valid): raise ValueError('STEP before digit load')
-                    self._commit(**{'step'+str(lane):(c.digit0,c.digit1)[lane] if a==StepSource.DIGIT else 0
-                        for lane in range(2) if mask&(1<<lane)})
-                elif op==Op.STEP_NEXT:
-                    mask=self.lane_mask(d); updates={}
-                    for lane in range(2):
-                        if mask&(1<<lane):
-                            step=(c.step0,c.step1)[lane]
-                            if step>=15: raise ValueError('step update out of bounds')
-                            updates['step'+str(lane)]=step+1
-                    self._commit(**updates)
-                elif op==Op.MASK:
-                    pair=(1 if c.chain<self.chains else 0)|(2 if c.chain+1<self.chains else 0)
-                    if d==Mask.FIXED: mask=imm
-                    elif d==Mask.PAIR: mask=pair
-                    elif d==Mask.SUFFIX: mask=pair&((c.step0<15)|(2*(c.step1<15)))
-                    else:
-                        if not self.digits or pair&~self.digit_valid: raise ValueError("prefix before digit load")
-                        mask=pair&((c.step0<c.digit0)|(2*(c.step1<c.digit1)))
-                    self._commit(mask=mask)
-                elif op==Op.NODE_BEGIN:
-                    index=(c.cursor,c.target,c.leaf,imm)[d]
-                    if not c.height or index>=(1<<c.height) or c.target>=(1<<c.height) or (a==TreeKind.FORS and c.group>=self.k):
-                        raise ValueError('node source out of bounds')
-                    self._commit(level=0,index=index,path=c.target,fors_base=c.group<<self.a if a==TreeKind.FORS else 0)
-                elif op==Op.NODE_PARENT:
-                    if c.level>=c.height: raise ValueError('parent update out of bounds')
-                    self._commit(level=c.level+1,index=c.index>>1,path=c.path>>1,fors_base=c.fors_base>>1)
-                elif op==Op.LEVEL_INIT: self._commit(level=0)
-                elif op==Op.LEVEL_NEXT:
-                    if c.level>=c.height: raise ValueError('level update out of bounds')
-                    self._commit(level=c.level+1)
-                elif op==Op.ADRS: self._address(d,a)
-                elif op==Op.REDUCE_INIT:
-                    if d==TreeKind.LTREE:
-                        if self.family!="xmss": raise ValueError("L-tree only valid for XMSS")
-                        self._commit(reduce_span=self.chains,reduce_index=0,level=0,fors_base=0)
-                        continue
-                    if not c.height or (1<<c.height)>SPACE_DEPTHS[0] or (d==TreeKind.FORS and c.group>=self.k):
-                        raise ValueError('reduction span out of bounds')
-                    self._commit(reduce_span=1<<c.height,reduce_index=0,level=0,
-                        fors_base=c.group<<self.a if d==TreeKind.FORS else 0)
-                elif op==Op.REDUCE_NEXT:
-                    if d==ReduceNext.INDEX:
-                        if c.reduce_index>=c.reduce_span: raise ValueError('reduction index out of bounds')
-                        self._commit(reduce_index=c.reduce_index+1)
-                    else:
-                        if c.reduce_span<=1 or c.level>=c.height: raise ValueError('reduction level out of bounds')
-                        if d==ReduceNext.LTREE_LEVEL and self.family!="xmss": raise ValueError("L-tree level only valid for XMSS")
-                        self._commit(reduce_span=(c.reduce_span+(d==ReduceNext.LTREE_LEVEL))>>1,
-                            reduce_index=0,level=c.level+1,fors_base=c.fors_base>>1)
-                elif op==Op.PARSE:
-                    if len(self.digest)!=self.m: raise ValueError('PARSE before H_msg')
-                    fb=(self.k*self.a+7)//8; tb=(self.h-self.hp+7)//8; lb=(self.hp+7)//8
-                    self._commit(tree=int.from_bytes(self.digest[fb:fb+tb],'big')&((1<<(self.h-self.hp))-1),
-                        leaf=int.from_bytes(self.digest[fb+tb:fb+tb+lb],'big')&((1<<self.hp)-1))
-                elif op==Op.XMSS_MASK:
-                    if self.family!="xmss": raise ValueError("XMSS mask outside XMSS")
-                    self._write_node(N.L0,bytes(x^y for x,y in zip(n[N.NODE+d],n[N.RIGHT])))
-                elif op==Op.NMOV: self._write_node(d,n[a][:self.n])
-                elif op==Op.CHAIN: self._chain(d,a,b)
-                elif op==Op.TREE: self._tree(d,a,b)
-                elif op==Op.LOAD:
-                    index=self._node_index(b,imm)
-                    if index>=len(spaces[a]): raise ValueError('node load out of bounds')
-                    self._write_node(d,spaces[a][index])
-                elif op==Op.STORE:
-                    index=self._node_index(b,imm)
-                    if index>=len(spaces[d]): raise ValueError('node store out of bounds')
-                    spaces[d][index]=n[a][:self.n]
-                elif op==Op.HASH: self._issue(d,self.lane_mask(a))
-                elif op==Op.WAIT: self._wait()
-                elif op==Op.INPUT:
-                    if self.operation!=2: raise ValueError('INPUT outside Verify')
-                    offset=self.signature_cursor
-                    if offset+self.n>len(self.signature): raise ValueError('Verify input exhausted')
-                    self._write_node(d,self.signature[offset:offset+self.n]); self.signature_cursor+=self.n
-                elif op==Op.EMIT:
-                    if self.operation==2: raise ValueError('EMIT during Verify')
-                    self.output.extend(n[a][:self.n])
-                elif op==Op.ROOT_COMPARE:
-                    if self.operation!=2: raise ValueError("root comparison outside Verify")
-                    c.root_equal=n[N.V2][:self.n]==n[N.V3][:self.n]; self.root_compare_valid=True
-                elif op==Op.JMP: pc=imm
-                elif op==Op.BR:
-                    if self.predicate(d,a)!=bool(b): pc=imm
-                elif op==Op.END:
-                    self.instructions=count
-                    if self.operation==2:
-                        if not self.root_compare_valid: raise ValueError('Verify END before root comparison')
-                        if self.signature_cursor!=len(self.signature): raise ValueError('unconsumed Verify input')
-                        return c.root_equal
-                    expected=(self.image.descriptors[13]>>(32*self.operation))&0xffffffff
-                    if len(self.output)!=expected: raise ValueError('output length')
-                    return bytes(self.output)
-                else: raise ValueError('invalid typed opcode')
-        except Exception as exc:
-            self.instructions=count; self.error=str(exc)
+            for word in self.image.words(sign)[:-1]:
+                op, did, rid, flags, coord = (field(word, s, b) for s, b in
+                    ((96, 4), (88, 8), (80, 8), (76, 4), (52, 24)))
+                self.trace.append((op, did, flags, coord))
+                d = self.image.descriptors[did]
+                result = bytes(self.n)
+                if op == Macro.HASH:
+                    result = self.hash_recipe(did, leaf=self.scalar_leaf,
+                                              values=[self.roots[k] for k in sorted(self.roots)])
+                elif op == Macro.CHAIN:
+                    result = self.chains(did, coord >> 19, self.active_q, 0, False,
+                                         bool(flags & CAPTURE), bool(flags & SIGN_ONLY))
+                elif op == Macro.TREE: result = self.tree(did, flags, coord)
+                elif op == Macro.TRANSFORM:
+                    if field(d, 56, 4) == 1:
+                        value = self.values[field(d, 48, 2)][:self.n]
+                        omega = self.image.omega
+                        mask = (1 << omega)-1
+                        self.digits = [(x >> shift) & mask for x in value
+                                       for shift in range(8-omega, -1, -omega)]
+                        checksum = sum(mask-x for x in self.digits)
+                        len2 = (len(self.digits)*mask).bit_length() // omega + 1
+                        self.digits += [(checksum >> shift) & mask
+                                        for shift in range((len2-1)*omega, -1, -omega)]
+                    elif field(d, 56, 4) == 2:
+                        shift = field(d, 40, 4)
+                        self.scalar_leaf = self.scalar_tree & ((1 << shift)-1)
+                        self.scalar_tree >>= shift
+                    else: raise ValueError("transform operation")
+                elif op == Macro.EMIT:
+                    for i in range(field(d, 52, 8), field(d, 52, 8)+field(d, 48, 4)):
+                        seg = self.image.descriptors[i]
+                        src, length = Source(field(seg, 56, 4)), field(seg, 48, 8)
+                        value = {Source.SECRET:self.job.secret, Source.PRF:self.job.prf,
+                            Source.PUBLIC:self.job.public, Source.ROOT:self.values[3],
+                            Source.RANDOM:self.values[0] if self.image.descriptors[2] >> 56 & 15 == Shape.INDEX_PRF else self.job.random,
+                            Source.IDENTIFIER:self.job.identifier,
+                            Source.INDEX:self.active_q.to_bytes(4, "big"),
+                            Source.CONSTANT:field(seg, 0, 32).to_bytes(4, "big")}[src]
+                        self.output.extend(value[:length])
+                else: raise ValueError("macro operation")
+                if rid:
+                    r = self.image.descriptors[rid]
+                    if field(r, 53, 1): self.roots[(coord >> 13) & 63] = result
+                    else: self.values[field(r, 56, 2)] = result
+                    if field(r, 55, 1): self.output.extend(result)
+                    if field(r, 54, 1):
+                        fb = (self.image.k*self.image.a+7)//8
+                        tb = (self.image.h-self.image.hp+7)//8
+                        self.scalar_tree = int.from_bytes(result[fb:fb+tb], "big") & ((1 << (self.image.h-self.image.hp))-1)
+                        lb = (self.image.hp+7)//8
+                        self.scalar_leaf = int.from_bytes(result[fb+tb:fb+tb+lb], "big") & ((1<<self.image.hp)-1)
+            if len(self.output) != self.image.output_bytes(sign):
+                raise ValueError("output length")
+            return bytes(self.output)
+        except Exception:
+            self.output.clear()
+            self.cache_valid = False
             raise
-
-
-# Preserve the project's compact public model API.
-Machine = MicroMachine
-from model.microcode import MicroImage as Image
-
-def compile_image(name, **kwargs):
-    from model.mHBS import compile_micro
-    return compile_micro(name, **kwargs)
