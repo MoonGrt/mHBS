@@ -194,6 +194,7 @@ def begin_synthesis(results):
     output = ARCHIVES / ('synth_' + results.name + '_' + stamp)
     source = output / 'source'
     names = (ROOT / 'sources.txt').read_text().splitlines()
+    names += [str(p.relative_to(ROOT)) for p in sorted((ROOT/'rtl').rglob('*.svh'))]
     names += ['sources.txt', 'scripts/clock.xdc', 'scripts/audit_debug.tcl']
     hashes = {}
     for name in names:

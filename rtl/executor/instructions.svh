@@ -1,119 +1,64 @@
-// Generated from model/microcode.py; do not edit.
-localparam [7:0] OP_LAYER_INIT=8'd1;
-localparam [7:0] OP_LAYER_NEXT=8'd2;
-localparam [7:0] OP_TREE_NEXT=8'd3;
-localparam [7:0] OP_GROUP_INIT=8'd4;
-localparam [7:0] OP_GROUP_NEXT=8'd5;
-localparam [7:0] OP_CURSOR_INIT=8'd6;
-localparam [7:0] OP_CURSOR_NEXT=8'd7;
-localparam [7:0] OP_CHAIN_INIT=8'd8;
-localparam [7:0] OP_CHAIN_NEXT=8'd9;
-localparam [7:0] OP_HEIGHT=8'd10;
-localparam [7:0] OP_TARGET=8'd11;
-localparam [7:0] OP_DIGITS=8'd12;
-localparam [7:0] OP_DIGIT_LOAD=8'd13;
-localparam [7:0] OP_STEP_INIT=8'd14;
-localparam [7:0] OP_STEP_NEXT=8'd15;
-localparam [7:0] OP_MASK=8'd16;
-localparam [7:0] OP_NODE_BEGIN=8'd17;
-localparam [7:0] OP_NODE_PARENT=8'd18;
-localparam [7:0] OP_LEVEL_INIT=8'd19;
-localparam [7:0] OP_LEVEL_NEXT=8'd20;
-localparam [7:0] OP_ADRS=8'd21;
-localparam [7:0] OP_REDUCE_INIT=8'd22;
-localparam [7:0] OP_REDUCE_NEXT=8'd23;
-localparam [7:0] OP_PARSE=8'd24;
-localparam [7:0] OP_NMOV=8'd25;
-localparam [7:0] OP_LOAD=8'd26;
-localparam [7:0] OP_STORE=8'd27;
-localparam [7:0] OP_HASH=8'd28;
-localparam [7:0] OP_WAIT=8'd29;
-localparam [7:0] OP_INPUT=8'd30;
-localparam [7:0] OP_EMIT=8'd31;
-localparam [7:0] OP_ROOT_COMPARE=8'd32;
-localparam [7:0] OP_END=8'd33;
-localparam [7:0] OP_JMP=8'd34;
-localparam [7:0] OP_BR=8'd35;
-localparam [7:0] OP_CHAIN=8'd36;
-localparam [7:0] OP_XMSS_MASK=8'd38;
-localparam [7:0] COND_CURSOR_MORE=8'd0;
-localparam [7:0] COND_CHAIN_MORE=8'd1;
-localparam [7:0] COND_GROUP_MORE=8'd2;
-localparam [7:0] COND_LAYER_MORE=8'd3;
-localparam [7:0] COND_FINAL_LAYER=8'd4;
-localparam [7:0] COND_LEVEL_MORE=8'd5;
-localparam [7:0] COND_TARGET_LEAF=8'd6;
-localparam [7:0] COND_INDEX_ODD=8'd7;
-localparam [7:0] COND_AUTH_MATCH=8'd8;
-localparam [7:0] COND_SAME_PARENT=8'd9;
-localparam [7:0] COND_STEP_EQ_DIGIT=8'd10;
-localparam [7:0] COND_STEP_MORE=8'd11;
-localparam [7:0] COND_LANE_ENABLED=8'd12;
-localparam [7:0] COND_MASK_ZERO=8'd13;
-localparam [7:0] COND_FORS_PAIR_TARGET=8'd14;
-localparam [7:0] COND_REDUCE_MORE=8'd15;
-localparam [7:0] COND_REDUCE_AGAIN=8'd16;
-localparam [7:0] COND_ROOT_EQUAL=8'd17;
-localparam [7:0] COND_LTREE_PAIR=8'd18;
-localparam [7:0] COND_LTREE_MORE=8'd19;
-localparam [7:0] IDX_LEVEL=8'd0;
-localparam [7:0] IDX_CHAIN0=8'd1;
-localparam [7:0] IDX_CHAIN1=8'd2;
-localparam [7:0] IDX_GROUP=8'd3;
-localparam [7:0] IDX_CURSOR=8'd4;
-localparam [7:0] IDX_REDUCE_LEFT=8'd5;
-localparam [7:0] IDX_REDUCE_RIGHT=8'd6;
-localparam [7:0] IDX_REDUCE_OUT=8'd7;
-localparam [7:0] IDX_IMMEDIATE=8'd8;
-function automatic typed_metadata(input [7:0] op);
-    case(op)
-        OP_LAYER_INIT,OP_LAYER_NEXT,OP_TREE_NEXT,OP_GROUP_INIT,OP_GROUP_NEXT,OP_CURSOR_INIT,OP_CURSOR_NEXT,OP_CHAIN_INIT,OP_CHAIN_NEXT,OP_HEIGHT,OP_STEP_INIT,OP_STEP_NEXT,OP_MASK,OP_NODE_BEGIN,OP_NODE_PARENT,OP_LEVEL_INIT,OP_LEVEL_NEXT,OP_ADRS,OP_REDUCE_INIT,OP_REDUCE_NEXT,OP_JMP,OP_BR:typed_metadata=1;
-        default:typed_metadata=0;
-    endcase
-endfunction
-function automatic typed_encoding_valid(input [63:0] word);
-    reg [7:0] d,a,b;reg [31:0] i;
-    begin
-    d=word[55:48];a=word[47:40];b=word[39:32];i=word[31:0];
-    case(word[63:56])
-        OP_LAYER_INIT:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 1);
-        OP_LAYER_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_TREE_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_GROUP_INIT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_GROUP_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_CURSOR_INIT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_CURSOR_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i >= 1) && (i <= 2);
-        OP_CHAIN_INIT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_CHAIN_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i >= 1) && (i <= 2);
-        OP_HEIGHT:typed_encoding_valid=(a == 0) && (b == 0) && (d <= 2) && ((d == 2 && i >= 1 && i <= 20) || (d != 2 && i == 0));
-        OP_TARGET:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 1);
-        OP_DIGITS:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_DIGIT_LOAD:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 2);
-        OP_STEP_INIT:typed_encoding_valid=(b == 0) && (i == 0) && (d <= 2) && (a <= 1);
-        OP_STEP_NEXT:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 2);
-        OP_MASK:typed_encoding_valid=(a == 0) && (b == 0) && (d <= 3) && ((d == 0 && i <= 3) || (d != 0 && i == 0));
-        OP_NODE_BEGIN:typed_encoding_valid=(b == 0) && (d <= 3) && (a <= 1) && ((d == 3 && i <= 1048575) || (d != 3 && i == 0));
-        OP_NODE_PARENT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_LEVEL_INIT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_LEVEL_NEXT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_ADRS:typed_encoding_valid=(b == 0) && (i == 0) && (d <= 10) && (a <= 1) && (d == 6 || d == 8 || a == 0);
-        OP_REDUCE_INIT:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 2);
-        OP_REDUCE_NEXT:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 2);
-        OP_PARSE:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_NMOV:typed_encoding_valid=(b == 0) && (i == 0) && (d <= 10) && (a <= 15);
-        OP_LOAD:typed_encoding_valid=(d <= 10) && (a <= 2) && (b <= 8) && (a == 0 || b == 0) && (a != 0 || b != 0) && ((b == 8 && i < (a == 0 ? 68 : (a == 1 ? 21 : 20))) || (b != 8 && i == 0));
-        OP_STORE:typed_encoding_valid=(d <= 2) && (a <= 15) && (b <= 8) && (d == 0 || b == 0) && (d != 0 || b != 0) && ((b == 8 && i < (d == 0 ? 68 : (d == 1 ? 21 : 20))) || (b != 8 && i == 0));
-        OP_HASH:typed_encoding_valid=(b == 0) && (i == 0) && (d <= 11) && (a <= 2) && (d >= 2);
-        OP_WAIT:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_INPUT:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 10);
-        OP_EMIT:typed_encoding_valid=(d == 0) && (b == 0) && (i == 0) && (a <= 15);
-        OP_ROOT_COMPARE:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_END:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i == 0);
-        OP_JMP:typed_encoding_valid=(d == 0) && (a == 0) && (b == 0) && (i <= 511);
-        OP_BR:typed_encoding_valid=(d <= 19) && (a <= 1) && (b <= 1) && (i <= 511) && (d == 10 || d == 11 || d == 12 || a == 0);
-        OP_CHAIN:typed_encoding_valid=(i == 0) && (d <= 3) && (a <= 2) && (b <= 1);
-        OP_XMSS_MASK:typed_encoding_valid=(a == 0) && (b == 0) && (i == 0) && (d <= 1);
-        default:typed_encoding_valid=0;
-    endcase
-    end
-endfunction
+// Layout 4: explicit tree software, main-compatible macro templates.
+`ifndef MHBS_CHAIN_INSTRUCTIONS_SVH
+`define MHBS_CHAIN_INSTRUCTIONS_SVH
+`define CHAIN_HEADER_MAGIC 7'h53
+`define CTRL_HALT 5'd0
+`define CTRL_SET 5'd1
+`define CTRL_MOV 5'd2
+`define CTRL_INC 5'd3
+`define CTRL_SHR 5'd4
+`define CTRL_XOR1 5'd5
+`define CTRL_ADD 5'd6
+`define CTRL_BR 5'd7
+`define CTRL_CALL 5'd8
+`define CTRL_RET 5'd9
+`define CTRL_LOAD 5'd10
+`define CTRL_STORE 5'd11
+`define CTRL_INPUT 5'd12
+`define CTRL_OUTPUT 5'd13
+`define CTRL_WMOV 5'd14
+`define CTRL_SHL 5'd15
+`define CTX_LEAF 5'd0
+`define CTX_A 5'd1
+`define CTX_B 5'd2
+`define CTX_CURSOR 5'd3
+`define CTX_INDEX 5'd4
+`define CTX_LEVEL 5'd5
+`define CTX_TARGET 5'd6
+`define CTX_PATH 5'd7
+`define CTX_BASE 5'd8
+`define CTX_HEIGHT 5'd9
+`define CTX_LIMIT 5'd10
+`define CTX_LAYER 5'd11
+`define CTX_GROUP 5'd12
+`define CTX_AUTH_LEVEL 5'd13
+`define CTX_FLAGS 5'd14
+`define CTX_MODE 5'd15
+`define CTX_Q 5'd16
+`define CTX_SCALAR_LEAF 5'd17
+`define CTX_FORS_TARGET 5'd18
+`define CTX_PROFILE_HEIGHT 5'd19
+`define CTX_ZERO 5'd20
+`define CTX_ONE 5'd21
+`define CTX_OPERATION 5'd22
+`define CTX_XMSS 5'd23
+`define CTX_STATEFUL 5'd24
+`define WIDE_NODE 5'd0
+`define WIDE_LEFT 5'd1
+`define WIDE_V0 5'd2
+`define WIDE_V1 5'd3
+`define WIDE_V2 5'd4
+`define WIDE_V3 5'd5
+`define WIDE_EMIT 5'd6
+`define WIDE_ZERO 5'd7
+`define COND_ALWAYS 4'd0
+`define COND_EQ 4'd1
+`define COND_NE 4'd2
+`define COND_LT 4'd3
+`define COND_GE 4'd4
+`define COND_ODD 4'd5
+`define COND_ZERO 4'd6
+`define COND_BITSET 4'd7
+`define COND_SIBLING 4'd8
+`define COND_SAME_PARENT 4'd9
+`endif

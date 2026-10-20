@@ -152,3 +152,8 @@
 
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。
 | image_chain_atp_20261021_125914 | [Chain_ATP_Optimization](image_chain_atp_20261021_125914/reports/Chain_ATP_Optimization.md) | [证据](image_chain_atp_20261021_125914/ARTIFACTS.json) |
+| 2026-10-21 14:49:36 | [macro_granularity_20261021_144936](macro_granularity_20261021_144936/reports/Macro_Granularity.md) | K1U1 template reconstruction; SHAKE/SHA2 comparison; measured |
+
+| 20261021_151056 | program tree + CHAIN template K1U1 SHAKE/SHA2 | [报告](template_chain_20261021_151056/reports/Template_CHAIN.md) | 测试入口缺陷；保留，最终验收见151824 |
+
+| 20261021_151824 | program tree + CHAIN template K1U1 SHAKE/SHA2 | [报告](template_chain_20261021_151824/reports/Template_CHAIN.md) | 44整核＋142附加＋12补充Sign通过 |

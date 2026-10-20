@@ -1,51 +1,55 @@
-# mHBS — image-chain
+# mHBS — image-chain 模板架构
 
-本分支在移植基线 `3e682545` 上增加标准 XMSS／LMS。固定 **SHAKE256、K1U1、一个物理 Hash 通道、一个 Hash 在途**，保留 ABI3、512×64 程序、32×64 描述符及 9 位 PC。原六组 SLH 镜像逐字保留。
+本分支以 `main@050512998fea28cc44667a1cd694d5ad5077767c` 的 `program + template + descriptor` 架构为基础，固定 K1U1、单物理 Hash 通道、单任务在途。默认 SHAKE；定义 `MHBS_SHA2` 选择 SHA2。硬件只包含所选后端。
 
-| 算法 | 配置名 | 标准参数 |
+| 分支 | 控制粒度 | Program / Template / Descriptor 容量（64位字） |
 |---|---|---|
-| SLH-DSA-SHAKE | slh_128f/128s、slh_192f/192s、slh_256f/256s | 原六参数 |
-| XMSS | xmss_h10/h16/h20 | n=32、w=16、67链、15步 |
-| LMS | lms_h10/h15/h20 | m=32、LMOTS w=4、类型0x0B、67链、15步 |
+| image | image 显式控制 Hash、链和树 | 512 / 0 / 32 |
+| image-chain | template 执行整组 CHAIN，program 控制主树及 FORS 树 | 128 / 32 / 32 |
+| image-chain-tree | main 的 CHAIN＋TREE 模板架构 | 16 / 16 / 32 |
 
-全部实现 Keygen、Sign、Verify。`xmss`／`lms` 默认 h10；旧 omega 名称报迁移错误。Sign 完整重算认证路径，无 BDS。本轮不增加 SHA2 或并发流水。
+CHAIN 包含整组 WOTS／LMOTS、端点归约、XMSS L-tree 和叶压缩。主树和 FORS 树的叶遍历、父 Hash、树栈、认证路径均由 program 的显式指令控制，硬件没有 TREE 操作。控制器复用128×256位工作区，不增加通用寄存器文件或第二个节点银行。
 
-CHAIN=36执行选中的单链；链号、L-tree、LMS列表压缩、主树和认证路径均由image控制。opcode37仍拒绝执行。 两分支增加 `XMSS_MASK=38`，仅允许 XMSS。XMSS 完整链为 SECRET + 15×(KEY/MASK/F)，共46次 Hash；LMS 完整链为16次 Hash。
+本分支使用独立的模板控制镜像版本，header 标识为 `0x53`。它不是历史 HashFlow ABI3／ABI4 的 opcode36／37 镜像；旧镜像与 main TREE 镜像均不得混用。具体编码、权限及故障语义见 [Chain_Template_ISA.md](docs/Chain_Template_ISA.md)。历史尝试保留在 Git 和原实验目录中。
 
-## 源码与接口
+## 参数和数据接口
 
-生产列表为 `sources.txt`：executor、SHAKE recipe/context、Keccak、common、top及可选signature。节点工作区仍为128×256单读单写RAM；XMSS KEY复用SLH专属摘要暂存，无新增节点银行。端口和例化保持紧凑分组。
+- SHAKE：SLH-DSA 128f/s、192f/s、256f/s；XMSS h10/h16/h20；LMS h10/h15/h20。
+- SHA2：SLH-DSA 128f/s，以及相同六组 XMSS/LMS 参数。
+- XMSS n=32、w=16；LMS m=32、LMOTS w=4。配置名称只按树高命名，旧 omega 名称报错。
+- XMSS/LMS Keygen 输出标准公钥，Sign 输出标准完整签名。Verify 接收拆分后的 R/C、链节点和认证节点；上游检查标准类型、签名长度及 q。
+- 消息输入64位，节点及输出256位。SLH 消息1～87字节；XMSS/LMS 消息0～87字节。LMS C 使用 `job_randomizer`，q 持久化由上游负责。
+- 三算法按 Job 互斥执行，每次复位执行一项 Job。Sign 完整重算认证路径，不使用 BDS。
+- `SYNTHESIS` 裁剪调试端口和统计寄存器，不使用 `PROFILE_ENABLE`。签名缓存沿用 `MHBS_SIGNATURE_STORE` 宏。
 
-`common` 使用外部 program/descriptor；`top` 包含ROM和可选签名缓存。新增运行时 `job_index[31:0]`、`job_identifier[127:0]`、`job_lms_c[255:0]`，在Job接受时锁存；SLH连接零。种子及根按现有合同在整个Job期间保持稳定。消息为64位、节点和输出为256位、低字节在先。SLH消息1～87字节，XMSS/LMS为0～87字节。
+## 生成与仿真
 
-XMSS/LMS Keygen仅输出32字节root；Sign及缓存保存R/C、67条链节点和h个认证节点。`model/stateful.py` 负责标准公钥和签名的组装、类型、长度、q及端序检查。q的持久化及随机输入由调用方管理。统计全链路64位，保留 `PROFILE_ENABLE`；生产综合显式设为0。
+```sh
+python3 -m model.vectors --profile slh_128f --hash shake
+HASH_BACKEND=shake scripts/simulate_fast.sh slh_128f sign 1 1
 
-详见 [ABI](docs/ABI.md)、[指令表](docs/Micro_ISA.md)、[接口](docs/Job_Interface.md)。
+python3 -m model.vectors --profile xmss_h10 --hash sha2
+HASH_BACKEND=sha2 scripts/simulate_fast.sh xmss_h10 sign 1 1
 
-## 生成与验证
-
-```bash
-python3 scripts/check_source_import.py --historical
-python3 scripts/run_hash_backends.py images
-python3 scripts/run_hash_backends.py all --tag example --profile all --jobs 4
-python3 scripts/check_stateful_models.py --mode quick
-python3 scripts/check_stateful_models.py --mode full --profile xmss_h10
-python3 scripts/check_stateful_models.py --mode full --profile lms_h10
-python3 scripts/check_recipes.py
-python3 scripts/check_hash_backend_contracts.py
+SIM_SYNTHESIS=1 HASH_BACKEND=shake scripts/simulate_fast.sh slh_128f verify 1 1
 ```
 
-默认整核回归28项：六组SLH三操作、XMSS/LMS h10三操作、四组高树真实高度Verify。高树Verify使用明确标注的合成认证兄弟节点，不代表完整树生成。h16/h15/h20完整Keygen／Sign不自动生成或执行，h20保持停止。
+镜像为每个操作目录下的 `program.mem`、`template.mem`、`descriptor.mem`；构建使用本分支的 `sources.txt`，不依赖父仓库。生成器检查容量和后端身份，不静默扩容。
 
-原SLH输出、缓存、Hash／置换及周期须精确匹配移植基线；新算法核对独立标准参考的完整输出、标准签名、缓存及有序逐Hash轨迹。独立模型另比较宏／显式执行的完整Hash前像和结果多重集，保留重复次数。`--historical` 将原源码映射证明绑定历史冻结快照，只对当前SLH ROM检查逐字兼容，不宣称扩展RTL仍与旧源逐字相同。
+h16／h15 本轮只执行真实高度 Verify；h20 完整 Keygen／Sign 继续停止。高树 Verify 使用独立构造的认证路径，不先生成完整树：
 
-## 综合与证据
-
-```bash
-python3 scripts/synthesize.py --background
-python3 scripts/report_atp.py --run <综合运行目录> --regression <回归目录>
+```sh
+python3 -m model.vectors --profile xmss_h20 --hash shake --verify-only
+HASH_BACKEND=shake scripts/simulate_fast.sh xmss_h20 verify 1 1
 ```
 
-Vivado2025.2、xc7a200tffg1156-3、100MHz OOC、每任务2线程、PROFILE_ENABLE=0，仅综合common，不布线。面积不含程序ROM及签名缓存。原SLH基线为 **12,339 LUT／4,113 FF**；增加算法后报告面积增量，不再应用原移植±1%闸门。100MHz ATP为假定频率指标，不能证明布线频率。
+## 综合与实验
 
-新结果归档于 [标准stateful扩展报告](docs/manifests/experiments/image_chain_stateful_20261021_121656/reports/Stateful_Extension.md)，历史移植报告保留。运行日志在build，归档仅保留摘要、冻结RTL、源码与镜像校验及综合证据。
+```sh
+HASH_BACKEND=shake scripts/synthesize.sh 1 1
+HASH_BACKEND=sha2 scripts/synthesize.sh 1 1
+```
+
+面积使用 `common`，不包含程序／模板／描述符 ROM 和签名缓存。实验使用 Vivado2025.2、`xc7a200tffg1156-3`、100MHz OOC、每任务2线程；不自动布局布线。100MHz ATP 是假定频率指标，综合时序不能当作布线频率证据。
+
+[实验索引](docs/manifests/experiments/INDEX.md) 保存各次冻结源码、镜像校验、验证摘要、分层面积和时序报告。程序有效字数、模板记录数、描述符记录数与动态宏调用次数分别统计；TREE 子 CHAIN 与 program 直接 CHAIN 不混计。

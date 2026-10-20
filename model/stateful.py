@@ -1,175 +1,70 @@
-"""Strict standard wire-format adapters for 32-byte stateful node streams.
+"""Layout-3 SHAKE256/SHA256 XMSS/LMS; external index, cold authentication.
 
-These routines do not execute microcode.  The hardware payload omits the
-index and type codes: R/C, 67 chain signature nodes, then h auth nodes.
-LMS's LMS type code occurs *between* its LMOTS signature and auth path on
-the standard wire, so a payload is not simply the standard signature with
-a fixed-length prefix removed.
+The legacy model remains the cached-execution oracle. Standard images use RFC 8391/SP 800-208 and RFC 8554/9858
+recipes and encodings and recompute the authentication tree during Sign.
 """
+from dataclasses import replace
+from model.executor import compile_image, field, Kind, Macro, Image, validate
 
-from __future__ import annotations
+PROFILE_CODES={0x18:'xmss_h10',0x19:'xmss_h16',0x1a:'xmss_h20',
+               0x1b:'lms_h10',0x1c:'lms_h15',0x1d:'lms_h20'}
+REFS={Kind.CHAIN:(52,44,36,28),Kind.TREE:(52,44),Kind.EMIT:(52,)}
 
-from dataclasses import dataclass
-import hashlib
-from typing import Callable, Sequence
+def cold_image(name, hash_backend="shake"):
+    image=compile_image(name, hash_backend=hash_backend)
+    if not image.stateful:raise ValueError('stateful profile required')
+    d=list(image.descriptors)
+    for i,w in enumerate(d):
+        if w>>60==Kind.TREE:d[i]=w & ~(7<<29)
+    image=replace(image,descriptors=tuple(d));validate(image);return image
 
-from model.reference import lms, xmss
-from model.reference.stateful_shake import reference
+def descriptor_map(image):
+    used={0,1}
+    def visit(i):
+        if i==0 or i in used:return
+        used.add(i);w=image.descriptors[i];kind=w>>60
+        for shift in REFS.get(kind,()):visit(field(w,shift,8))
+        if kind==Kind.EMIT:
+            for j in range(field(w,52,8),field(w,52,8)+field(w,48,4)):visit(j)
+    for sign in (False,True):
+        for w in image.words(sign)[:-1]:visit(field(w,88,8));visit(field(w,80,8))
+    order=sorted(used)
+    if len(order)>32:raise ValueError('descriptor capacity')
+    return order
 
-MAX_U64 = (1 << 64) - 1
-STATEFUL_NAMES = tuple(xmss.PARAMS) + tuple(lms.PARAMS)
+def encode(name, hash_backend="shake"):
+    from model.mHBS import _MainExternalImage
+    image=cold_image(name, hash_backend);order=descriptor_map(image);mapping={v:i for i,v in enumerate(order)}
+    name=image.name
+    d=[0]*32;t=[0]*16;p=[0]*16
+    for j,i in enumerate(order):
+        w=image.descriptors[i]&((1<<60)-1)
+        for shift in REFS.get(image.descriptors[i]>>60,()):
+            r=field(w,shift,8)
+            if r:w=(w&~(255<<shift))|(mapping[r]<<shift)
+        d[j]=w
+    d[0]=(d[0]&((1<<36)-1))|(image.entry(True)<<41)
+    d[1]=next(c for c,n in PROFILE_CODES.items() if n==name) | (int(hash_backend == "sha2") << 5)
+    for j,w in enumerate(image.templates):
+        flags=field(w,76,4)
+        t[j]=field(w,96,4)|(mapping[field(w,88,8)]<<3)|(mapping[field(w,80,8)]<<8)|((flags&3)<<13)|((flags&8)<<12)|((flags&4)<<14)
+    if len(image.tokens)>16 or len(image.templates)>16:raise ValueError('code capacity')
+    for j,w in enumerate(image.tokens):
+        kind=w>>126
+        if kind>=2:
+            if kind!=3:raise ValueError('unexpected stateful loop')
+            p[j]=3<<62
+        else:p[j]=(kind<<62)|(field(w,120,6)<<58)|((field(w,96,24)>>13)<<47)|(field(w,66,6)<<41)|((field(w,42,24)>>13)<<30)
+    return _MainExternalImage(tuple(p),tuple(t),tuple(d))
 
-
-def _module(profile: str, hash_backend="shake"):
-    if profile in xmss.PARAMS:
-        return reference("xmss",hash_backend)
-    if profile in lms.PARAMS:
-        return reference("lms",hash_backend)
-    raise ValueError(f"unsupported standard stateful profile: {profile!r}")
-
-
-def profile_params(profile: str, hash_backend="shake") -> xmss.XmssParams | lms.LmsParams:
-    return _module(profile,hash_backend).get_params(profile)
-
-
-def validate_message(message: bytes) -> bytes:
-    if not isinstance(message, bytes) or not 0 <= len(message) <= 87:
-        raise ValueError("stateful hardware messages must contain 0..87 bytes")
-    return message
-
-
-def payload_to_nodes(profile: str, payload: bytes, *, hash_backend="shake") -> tuple[bytes, ...]:
-    p = profile_params(profile,hash_backend)
-    if not isinstance(payload, bytes) or len(payload) != p.payload_bytes:
-        raise ValueError("stateful hardware signature payload length mismatch")
-    return tuple(payload[i:i + 32] for i in range(0, len(payload), 32))
-
-
-def nodes_to_payload(profile: str, nodes: Sequence[bytes], *, hash_backend="shake") -> bytes:
-    p = profile_params(profile,hash_backend)
-    if len(nodes) != 68 + p.h:
-        raise ValueError("stateful signature node count mismatch")
-    if any(not isinstance(node, bytes) or len(node) != 32 for node in nodes):
-        raise ValueError("stateful signature nodes must each contain exactly 32 bytes")
-    return b"".join(nodes)
-
-
-def nodes_to_signature(profile: str, index: int, nodes: Sequence[bytes], *, hash_backend="shake") -> bytes:
-    module = _module(profile,hash_backend)
-    # Validate the payload independently of reference signature assembly.
-    nodes_to_payload(profile, nodes,hash_backend=hash_backend)
-    return module.signature_from_nodes(profile, index, nodes)
-
-
-def signature_to_nodes(profile: str, signature: bytes, *, hash_backend="shake") -> tuple[int, tuple[bytes, ...]]:
-    return _module(profile,hash_backend).signature_to_nodes(profile, signature)
-
-
-def payload_to_signature(profile: str, index: int, payload: bytes, *, hash_backend="shake") -> bytes:
-    return nodes_to_signature(profile,index,payload_to_nodes(profile,payload,hash_backend=hash_backend),hash_backend=hash_backend)
-
-
-def signature_to_payload(profile: str, signature: bytes, *, hash_backend="shake") -> tuple[int, bytes]:
-    index, nodes = signature_to_nodes(profile, signature,hash_backend=hash_backend)
-    return index, nodes_to_payload(profile, nodes,hash_backend=hash_backend)
-
-
-def public_key_from_root(profile: str, root: bytes, *, public_seed: bytes | None = None,
-                         identifier: bytes | None = None, hash_backend="shake") -> xmss.PublicKey | lms.PublicKey:
-    p = profile_params(profile,hash_backend)
-    if profile in xmss.PARAMS:
-        if public_seed is None or identifier is not None:
-            raise ValueError("XMSS key construction requires a public seed")
-        return _module(profile,hash_backend).PublicKey(p, root, public_seed)
-    if identifier is None or public_seed is not None:
-        raise ValueError("LMS key construction requires an identifier")
-    return _module(profile,hash_backend).PublicKey(p, identifier, root)
-
-
-def decode_public_key(profile: str, encoded: bytes, *, hash_backend="shake") -> xmss.PublicKey | lms.PublicKey:
-    return _module(profile,hash_backend).PublicKey.from_bytes(encoded, profile)
-
-
-@dataclass(frozen=True)
-class IndexReservation:
-    """A caller-persisted reservation; reset/failure must not roll it back."""
-
-    profile: str
-    used_index: int
-    next_index: int
-    exhausted: bool
-
-
-def reserve_sign_index(profile: str, next_index: int,
-                        persist: Callable[[int], None], *, hash_backend="shake") -> IndexReservation:
-    """Persist next=q+1 *before* returning permission to start Sign.
-
-    ``persist`` must provide the application's durable, atomic update.
-    Exceptions propagate; no reservation is returned on persistence failure.
-    This helper cannot make an in-memory callback durable, prevent races
-    between applications, or recover a rolled-back external database.
-    """
-    p = profile_params(profile,hash_backend)
-    q = _module(profile,hash_backend).check_index(p, next_index)
-    if not callable(persist):
-        raise ValueError("a durable index-persistence callback is required")
-    persist(q + 1)
-    return IndexReservation(profile, q, q + 1, q + 1 == p.capacity)
-
-
-class HashAudit:
-    """O(1) trace storage, backend block counts, and unsigned-64 bounds.
-
-    The optional callback receives the original complete input and result
-    once per physical Hash.  The rolling SHA-256 digest uses length prefixes
-    and a fixed ABI-independent framing; it never stores the full trace.
-    SHAKE padding consumes ``len(data)//136 + 1`` permutations, including
-    an exact-rate message; SHA256 consumes ``(len(data)+72)//64`` blocks.
-    """
-
-    def __init__(self, observe: Callable[[str, bytes, bytes], None] | None = None,
-                 *, initial_hash_count: int = 0, initial_permutations: int = 0, hash_backend="shake") -> None:
-        for label, value in (("hash count", initial_hash_count), ("permutation count", initial_permutations)):
-            if type(value) is not int or not 0 <= value <= MAX_U64:
-                raise ValueError(f"invalid unsigned-64 initial {label}")
-        if hash_backend not in ("shake","sha2"): raise ValueError("unknown hash backend")
-        self.hash_backend=hash_backend
-        self.hash_count = initial_hash_count
-        self.permutations = initial_permutations
-        self.by_kind: dict[str, int] = {}
-        self._digest = hashlib.sha256()
-        self._work_digest = hashlib.sha256()
-        self._observe = observe
-
-    def __call__(self, kind: str, data: bytes, result: bytes) -> None:
-        if not isinstance(kind, str) or not isinstance(data, bytes) or not isinstance(result, bytes) or len(result) != 32:
-            raise ValueError("malformed stateful Hash observation")
-        encoded_kind = kind.encode("ascii")
-        if len(encoded_kind) > 65535:
-            raise ValueError("Hash observation kind is too long")
-        permutations = (len(data)+72)//64 if self.hash_backend == "sha2" else len(data)//136+1
-        if self.hash_count == MAX_U64 or self.permutations > MAX_U64 - permutations:
-            raise OverflowError("stateful Hash statistics exceed unsigned-64 range")
-        self.hash_count += 1
-        self.permutations += permutations
-        self.by_kind[kind] = self.by_kind.get(kind, 0) + 1
-        self._digest.update(len(encoded_kind).to_bytes(2, "big") + encoded_kind)
-        self._digest.update(len(data).to_bytes(8, "big") + data + result)
-        self._work_digest.update(len(data).to_bytes(4, "little") + data + result)
-        if self._observe is not None:
-            self._observe(kind, data, result)
-
-    @property
-    def trace_sha256(self) -> str:
-        return self._digest.hexdigest()
-
-    @property
-    def work_trace_sha256(self) -> str:
-        """Existing micro-flow framing, independent of algorithm kind labels."""
-        return self._work_digest.hexdigest()
-
-    def as_dict(self) -> dict:
-        return {"hash_count": self.hash_count, "permutations": self.permutations,
-                "by_kind": dict(self.by_kind), "trace_sha256": self.trace_sha256,
-                "hash_trace_sha256": self.work_trace_sha256,
-                "counts": [self.hash_count, self.permutations]}
+def decode(external):
+    # New families have canonical offline-generated images. Require every word
+    # to match: no unknown recipe, padding, address or flag reaches hardware.
+    code=external.descriptors[1]
+    if code >> 6:raise ValueError('stateful profile reserved bits')
+    hash_backend="sha2" if code & 32 else "shake"
+    try:name=PROFILE_CODES[code & 31]
+    except KeyError:raise ValueError('stateful profile code') from None
+    expected=encode(name, hash_backend)
+    if external!=expected:raise ValueError('noncanonical stateful image')
+    return cold_image(name, hash_backend)

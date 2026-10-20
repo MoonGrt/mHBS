@@ -1,1575 +1,2245 @@
-`timescale 1ns/1ps
+`ifndef MHBS_SHA2
+`timescale 1ns / 1ps
 `default_nettype none
-
-// Typed HBS SHAKE byte recipes. Each accepted request performs exactly one
-// complete hash. Fields stay stable until its response is consumed. A caller
-// may present a new request on that same edge; the lane never creates one.
+// ABI 4 byte recipes: scalar execution for P1, scheduled contexts for P>1.
+// Requests and their shared coordinates stay stable until results are consumed.
+// verilog_format: off
 module recipe #(
     parameter integer N = 32,
-    parameter integer DIGEST_BYTES = 49, INDEX_BITS = 7,
-    parameter integer UNROLL = 1,
+    parameter integer DIGEST_BYTES = N==16 ? 34 : 32, INDEX_BITS = 7,
+    parameter integer UNROLL = 2, PIPELINE = 1,
     parameter integer MAX_MESSAGE_BYTES = 87,
-    parameter [15:0] RECIPE_MASK = 16'h101e,
-    parameter bit PROFILE_ENABLE = 0
+    parameter [15:0] RECIPE_MASK = 16'hffff,
+    parameter bit SHARED_STATE=0,
+    localparam integer TAG_BITS=PIPELINE>1 ? $clog2(PIPELINE) : 1
 ) (
-    input wire clk, rst,
-    input wire [5:0] node_bytes,
-    input wire request_valid,
-    output wire request_ready,
-    input wire [63:0] request_recipe,
+`ifndef SYNTHESIS
+    output wire [63:0] batch_hashes,batch_permutations,
+    output logic [63:0] hash_count,permutation_count,
+`endif
+    input wire clk, rst, output logic error,
+    input wire batch_mode,batch_request_valid, output wire batch_request_ready,
+    input wire [TAG_BITS-1:0] batch_request_tag,
+    input wire [4:0] batch_steps, batch_capture_after, input wire batch_capture_enable,
+    input wire [19:0] batch_leaf, input wire [7:0] batch_a, input wire [31:0] batch_b,
+    input wire [1:0] batch_family, input wire batch_no_seed,
+    input wire [3:0] batch_start, input wire [255:0] batch_initial_value,
+    input wire [3:0] batch_fixed_shape, input wire batch_pair, input wire [255:0] batch_right,
+    input wire [7:0] batch_seed_domain, batch_step_domain,
+    output wire batch_response_valid, input wire batch_response_ready,
+    output wire [TAG_BITS-1:0] batch_response_tag,
+    output wire [255:0] batch_response_digest, batch_response_capture,
+    input wire [TAG_BITS-1:0] batch_read_tag,
+    output wire [255:0] batch_read_digest,batch_read_capture,
+    input wire [5:0] node_bytes, input wire [127:0] identifier,
+    input wire request_valid, output wire request_ready,
+    input wire [63:0] request_recipe, request_step_recipe, input wire request_chain,
+    input wire [4:0] request_steps, request_capture_after, input wire request_capture,
     input wire [N*8-1:0] secret_seed, secret_prf, public_seed, root, randomizer,
-    output wire [3:0] message_word_address,
-    input wire [63:0] message_word_data,
-    input wire [6:0] message_length,
-    input wire [4:0] request_layer,
-    input wire [63:0] request_tree,
-    input wire [19:0] request_leaf,
-    input wire [1:0] request_address_type,
-    input wire [31:0] request_index,
-    input wire [127:0] request_identifier,
-    input wire [N*8-1:0] request_key,
-    input wire [INDEX_BITS-1:0] request_a,
-    input wire [31:0] request_b,
+    input wire [MAX_MESSAGE_BYTES*8-1:0] message_buffer, input wire [6:0] message_length,
+    input wire [4:0] request_layer, input wire [63:0] request_tree, input wire [19:0] request_leaf,
+    input wire [INDEX_BITS-1:0] request_a, input wire [31:0] request_b,
     input wire [N*8-1:0] request_left, request_right,
-    output wire [INDEX_BITS-1:0] list_index0, list_index1,
+    output wire [INDEX_BITS-1:0] list_index0, list_index1, list_next_index0,
     input wire [N*8-1:0] list_data0, list_data1,
-    output wire response_valid,
-    input wire response_ready,
-    output wire [DIGEST_BYTES*8-1:0] response_value,
-    output logic error,
-    output logic [63:0] hash_count, permutation_count
+    output wire response_valid, input wire response_ready,
+    output wire [DIGEST_BYTES*8-1:0] response_value, output wire [N*8-1:0] response_capture
 );
-    localparam [3:0] ADDRESS_SEED=1, ADDRESS_VALUE=2, MESSAGE_PRF=3,
-        MESSAGE_DIGEST=4, XMSS_PRF=5, XMSS_F=6, XMSS_H=7, XMSS_MESSAGE=8,
-        LMS_SECRET=9, LMS_CHAIN=10, LMS_MESSAGE=11, ADDRESS_LIST=12,
-        LMS_LEAF=13, LMS_PARENT=14, LMS_PUBLIC=15;
-    localparam bit STREAM_ENABLE=(RECIPE_MASK & 16'h9918)!=0;
-    typedef enum logic [1:0] {IDLE, STREAM, WAIT_HASH, RESPONSE} state_t;
-    state_t state;
-    wire [3:0] shape=request_recipe[59:56];
-    wire [7:0] domain=request_recipe[55:48];
-    wire [7:0] arity=request_recipe[47:40];
-    logic [12:0] input_length;
-    logic [2:0] node_words;
-    logic [12:0] position;
-    logic [4:0] beat;
-    logic [INDEX_BITS-1:0] list_cursor;
-    logic [4:0] list_remainder;
-    logic [63:0] alignment_carry;
-    wire fixed_block=shape==ADDRESS_SEED || shape==ADDRESS_VALUE
-        || shape==XMSS_PRF || shape==XMSS_F || shape==XMSS_H
-        || shape==LMS_SECRET || shape==LMS_CHAIN || shape==LMS_LEAF || shape==LMS_PARENT;
-    // Only the seventeenth word can finish a rate block. At that word the
-    // absolute cursor already gives its end; no second block-base counter
-    // is needed. block_last is consumed only with that final beat.
-    wire stream_last=position+13'd8>input_length;
-    wire [5:0] stream_node_bytes={node_words,3'b0};
-    wire [6:0] prefix_bytes={1'b0,stream_node_bytes}+7'd32;
-    wire [5:0] next_remainder={1'b0,list_remainder}+6'd8;
-    // The interface admits only these three node sizes. Use fixed shifts
-    // rather than synthesizing an arbitrary 8-by-6-bit length multiplier.
-    wire [12:0] list_length=node_bytes==16 ? 13'd48+{1'b0,arity,4'b0}
-        : node_bytes==24 ? 13'd56+{1'b0,arity,4'b0}+{2'b0,arity,3'b0}
-        : 13'd64+{arity,5'b0};
-    wire [6:0] message_prefix=node_bytes==16 ? (shape==MESSAGE_PRF ? 7'd32 : 7'd48)
-        : node_bytes==24 ? (shape==MESSAGE_PRF ? 7'd48 : 7'd72)
-        : (shape==MESSAGE_PRF ? 7'd64 : 7'd96);
-    wire hash_ready, fast_ready, block_ready, digest_valid;
-    // Absorb each source word directly into the SHAKE state. The private
-    // 64-bit port avoids a second copy of the low word in a staging register.
-    // Later rate blocks wait for permutation completion before their first word.
-    wire stream_emit=STREAM_ENABLE && state==STREAM;
-    wire stream_accept=!stream_emit || block_ready;
-    wire [63:0] stream_block_data=STREAM_ENABLE ? stream_data : 64'd0;
-    wire new_shape=shape>=XMSS_PRF && shape!=ADDRESS_LIST;
-    wire valid_shape=shape!=0;
-    wire bad_request=!valid_shape || !RECIPE_MASK[shape]
-        || !(node_bytes==16 || node_bytes==24 || node_bytes==32) || 32'(node_bytes)>N
-        || (shape==ADDRESS_VALUE && arity!=1 && arity!=2)
-        || (shape==ADDRESS_LIST && (arity==0 || 32'(arity)>(1<<INDEX_BITS)))
-        || ((shape==MESSAGE_PRF || shape==MESSAGE_DIGEST) && 32'(message_length)>MAX_MESSAGE_BYTES);
-    wire bad_standard_request=new_shape && (node_bytes!=32
-        || ((shape==XMSS_PRF) && (domain>4 || arity!=1 || request_address_type>2))
-        || ((shape==XMSS_F || shape==XMSS_MESSAGE || shape==LMS_SECRET
-            || shape==LMS_CHAIN || shape==LMS_MESSAGE || shape==LMS_LEAF) && (domain!=0 || arity!=1))
-        || ((shape==XMSS_H || shape==LMS_PARENT) && (domain!=0 || arity!=2))
-        || (shape==LMS_PUBLIC && (domain!=0 || arity!=67))
-        || ((shape==XMSS_MESSAGE || shape==LMS_MESSAGE) && 32'(message_length)>MAX_MESSAGE_BYTES));
-    wire reject_request=bad_request || bad_standard_request;
-
-    assign request_ready=hash_ready && (state==IDLE || (response_valid && response_ready));
-    // The SHAKE state already retains the digest. Expose completion directly,
-    // then retain only the valid flag when the consumer applies backpressure.
-    assign response_valid=state==RESPONSE || (state==WAIT_HASH && digest_valid);
-    wire [12:0] lms_list_last_offset=position>=13'd16 ? position-13'd15 : 13'd0;
-    assign list_index0=shape==LMS_PUBLIC ? INDEX_BITS'(lms_list_last_offset>>5) : list_cursor;
-    assign list_index1=list_index0+1'b1;
+// verilog_format: on
+    // Shared pure formatting helpers. Execution state, registers and handshake
+    // timing remain local to the scalar and scheduled implementations.
+    wire [703:0] padded_message = {8'd0, message_buffer};
+    localparam [3:0] ADDRESS_SEED = 1, ADDRESS_VALUE = 2, MESSAGE_PRF = 3,
+        MESSAGE_DIGEST = 4, INDEX_PRF = 5, ROOT_MESSAGE = 6, MASKED_SEED = 7,
+        MASKED_VALUE = 8, PREFIX_SEED = 9, PREFIX_VALUE = 10, PREFIX_MESSAGE = 11,
+        ADDRESS_LIST = 12, PREFIX_LIST = 13, PREFIX_LEAF = 14, PREFIX_PARENT = 15;
+    localparam bit STREAM_ENABLE = (RECIPE_MASK & 16'h3858) != 0;
+    localparam logic [1:0] HASH_IDLE = 2'd0;
+    localparam logic [1:0] HASH_WAIT_BLOCK = 2'd1;
+    localparam logic [1:0] HASH_RUN = 2'd2;
     function automatic [31:0] be32(input [31:0] value);
-        be32={value[7:0],value[15:8],value[23:16],value[31:24]};
+        be32 = {value[7:0], value[15:8], value[23:16], value[31:24]};
     endfunction
-    wire [255:0] address={be32(request_b),be32(32'(request_a)),
-        be32({12'd0,request_leaf}),be32({24'd0,request_recipe[55:48]}),
-        be32(request_tree[31:0]),be32(request_tree[63:32]),32'd0,
-        be32({27'd0,request_layer})};
-    wire [31:0] xmss_keymask=domain>=2 ? {24'd0,domain}-32'd2 : 32'd0;
-    wire [255:0] xmss_address={be32(xmss_keymask),be32(request_b),
-        be32(32'(request_a)),be32(request_address_type==2 ? 32'd0 : {12'd0,request_leaf}),
-        be32({30'd0,request_address_type}),be32(request_tree[31:0]),
-        be32(request_tree[63:32]),be32({27'd0,request_layer})};
-    wire [255:0] index_bytes={be32(request_index),224'd0};
-    wire [31:0] lms_q=shape==LMS_MESSAGE ? request_index : {12'd0,request_leaf};
-    function automatic [63:0] node_word(input [255:0] data,input [9:0] index);
-        case(index)
-            0:node_word=data[63:0];
-            1:node_word=data[127:64];
-            2:node_word=data[191:128];
-            3:node_word=data[255:192];
-            default:node_word=0;
-        endcase
-    endfunction
-    localparam integer MESSAGE_WORDS=(MAX_MESSAGE_BYTES+7)/8;
-    wire [9:0] message_prefix_words=shape==XMSS_MESSAGE ? 10'd16
-        : shape==LMS_MESSAGE ? 10'd6
-        : shape==MESSAGE_PRF ? 2*10'(node_words) : 3*10'(node_words);
-    wire [9:0] message_word_index=position[12:3]-message_prefix_words;
-    assign message_word_address=message_word_index[3:0];
-    function automatic [63:0] source_word(input [9:0] index);
-        reg [2:0] source;
-        reg [9:0] selected_index;
+    function automatic [63:0] node_word(input [255:0] data, input [5:0] index);
         begin
-            source=0;
-            selected_index=index;
-            case(shape)
-                MESSAGE_PRF: if(RECIPE_MASK[MESSAGE_PRF]) begin
-                    if(index<10'(node_words)) source=1;
-                    else if(index<2*10'(node_words)) begin source=2;selected_index=index-10'(node_words);end
-                end
-                MESSAGE_DIGEST: if(RECIPE_MASK[MESSAGE_DIGEST]) begin
-                    if(index<10'(node_words)) source=2;
-                    else if(index<2*10'(node_words)) begin source=3;selected_index=index-10'(node_words);end
-                    else if(index<3*10'(node_words)) begin source=4;selected_index=index-2*10'(node_words);end
-                end
-                ADDRESS_LIST: if(RECIPE_MASK[ADDRESS_LIST]) begin
-                    if(index<10'(node_words)) source=3;
-                    else if(index<10'(node_words)+10'd4) begin source=6;selected_index=index-10'(node_words);end
-                end
-                XMSS_MESSAGE: if(RECIPE_MASK[XMSS_MESSAGE]) begin
-                    if(index<4) begin source=7;selected_index=index;end
-                    else if(index<8) begin source=2;selected_index=index-4;end
-                    else if(index<12) begin source=4;selected_index=index-8;end
-                    else if(index<16) begin source=5;selected_index=index-12;end
-                end
-                default:begin end
-            endcase
-            case(source)
-                1:source_word=node_word(256'(secret_prf),selected_index);
-                2:source_word=node_word(256'(randomizer),selected_index);
-                3:source_word=node_word(256'(public_seed),selected_index);
-                4:source_word=node_word(256'(root),selected_index);
-                5:source_word=node_word(index_bytes,selected_index);
-                6:source_word=node_word(address,selected_index);
-                7:source_word=selected_index==3 ? 64'h0200000000000000 : 64'd0;
-                default:source_word=0;
+            case (index)
+                0: node_word = data[63:0];
+                1: node_word = data[127:64];
+                2: node_word = data[191:128];
+                3: node_word = data[255:192];
+                default: node_word = 0;
             endcase
         end
     endfunction
-
-    // Fixed HBS frame layouts, transposed by source bit. This builds one
-    // primitive frame, and adds no storage, traversal or Hash control.
-    wire [255:0] frame_public=256'(public_seed),frame_secret=256'(secret_seed);
-    wire [255:0] frame_prf=256'(secret_prf),frame_key=256'(request_key);
-    wire [255:0] frame_left=256'(request_left),frame_right=256'(request_right);
-    wire [255:0] frame_payload=shape==ADDRESS_SEED ? frame_secret : frame_left;
-    wire [31:0] frame_lms_q=be32(lms_q),frame_heap=be32(request_b);
-    wire [14:0] fast_layout;
-    assign fast_layout[0]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd16 && !(shape==ADDRESS_VALUE && arity==2))); // slh16_1
-    assign fast_layout[1]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd16 && (shape==ADDRESS_VALUE && arity==2))); // slh16_2
-    assign fast_layout[2]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd24 && !(shape==ADDRESS_VALUE && arity==2))); // slh24_1
-    assign fast_layout[3]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd24 && (shape==ADDRESS_VALUE && arity==2))); // slh24_2
-    assign fast_layout[4]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd32 && !(shape==ADDRESS_VALUE && arity==2))); // slh32_1
-    assign fast_layout[5]=(((shape==ADDRESS_SEED || shape==ADDRESS_VALUE) && node_bytes==6'd32 && (shape==ADDRESS_VALUE && arity==2))); // slh32_2
-    assign fast_layout[6]=(shape==XMSS_PRF && domain==0); // xmss_keygen
-    assign fast_layout[7]=(shape==XMSS_PRF && domain==1); // xmss_r
-    assign fast_layout[8]=(shape==XMSS_PRF && domain>=2); // xmss_addr
-    assign fast_layout[9]=(shape==XMSS_F); // xmss_f
-    assign fast_layout[10]=(shape==XMSS_H); // xmss_h
-    assign fast_layout[11]=(shape==LMS_SECRET); // lms_secret
-    assign fast_layout[12]=(shape==LMS_CHAIN); // lms_chain
-    assign fast_layout[13]=(shape==LMS_LEAF); // lms_leaf
-    assign fast_layout[14]=(shape==LMS_PARENT); // lms_parent
-    wire fast_select_0= fast_layout[0] | fast_layout[1] | fast_layout[2] | fast_layout[3] | fast_layout[4] | fast_layout[5];
-    wire fast_select_1= fast_layout[11] | fast_layout[12] | fast_layout[13] | fast_layout[14];
-    wire fast_select_2= fast_layout[0] | fast_layout[1];
-    wire fast_select_3= fast_layout[2] | fast_layout[3] | fast_layout[4] | fast_layout[5];
-    wire fast_select_4= fast_layout[11] | fast_layout[12];
-    wire fast_select_5= fast_layout[13] | fast_layout[14];
-    wire fast_select_6= fast_layout[2] | fast_layout[3];
-    wire fast_select_7= fast_layout[4] | fast_layout[5];
-    wire fast_select_8= fast_layout[7] | fast_layout[8] | fast_layout[10];
-    wire fast_select_9= fast_layout[7] | fast_layout[8];
-    wire fast_select_10= fast_layout[9] | fast_layout[10];
-    wire fast_select_11= fast_layout[1] | fast_layout[2];
-    wire fast_select_12= fast_layout[4] | fast_layout[7] | fast_layout[8] | fast_layout[9];
-    wire fast_select_13= fast_layout[5] | fast_layout[10];
-    wire fast_select_14= fast_layout[5] | fast_layout[6] | fast_layout[10];
-    wire [1087:0] fast_block;
-    assign fast_block[0]= (frame_public[0] & fast_select_0) | (request_identifier[0] & fast_select_1);
-    assign fast_block[1]= (frame_public[1] & fast_select_0) | (request_identifier[1] & fast_select_1);
-    assign fast_block[2]= (frame_public[2] & fast_select_0) | (request_identifier[2] & fast_select_1);
-    assign fast_block[3]= (frame_public[3] & fast_select_0) | (request_identifier[3] & fast_select_1);
-    assign fast_block[4]= (frame_public[4] & fast_select_0) | (request_identifier[4] & fast_select_1);
-    assign fast_block[5]= (frame_public[5] & fast_select_0) | (request_identifier[5] & fast_select_1);
-    assign fast_block[6]= (frame_public[6] & fast_select_0) | (request_identifier[6] & fast_select_1);
-    assign fast_block[7]= (frame_public[7] & fast_select_0) | (request_identifier[7] & fast_select_1);
-    assign fast_block[8]= (frame_public[8] & fast_select_0) | (request_identifier[8] & fast_select_1);
-    assign fast_block[9]= (frame_public[9] & fast_select_0) | (request_identifier[9] & fast_select_1);
-    assign fast_block[10]= (frame_public[10] & fast_select_0) | (request_identifier[10] & fast_select_1);
-    assign fast_block[11]= (frame_public[11] & fast_select_0) | (request_identifier[11] & fast_select_1);
-    assign fast_block[12]= (frame_public[12] & fast_select_0) | (request_identifier[12] & fast_select_1);
-    assign fast_block[13]= (frame_public[13] & fast_select_0) | (request_identifier[13] & fast_select_1);
-    assign fast_block[14]= (frame_public[14] & fast_select_0) | (request_identifier[14] & fast_select_1);
-    assign fast_block[15]= (frame_public[15] & fast_select_0) | (request_identifier[15] & fast_select_1);
-    assign fast_block[16]= (frame_public[16] & fast_select_0) | (request_identifier[16] & fast_select_1);
-    assign fast_block[17]= (frame_public[17] & fast_select_0) | (request_identifier[17] & fast_select_1);
-    assign fast_block[18]= (frame_public[18] & fast_select_0) | (request_identifier[18] & fast_select_1);
-    assign fast_block[19]= (frame_public[19] & fast_select_0) | (request_identifier[19] & fast_select_1);
-    assign fast_block[20]= (frame_public[20] & fast_select_0) | (request_identifier[20] & fast_select_1);
-    assign fast_block[21]= (frame_public[21] & fast_select_0) | (request_identifier[21] & fast_select_1);
-    assign fast_block[22]= (frame_public[22] & fast_select_0) | (request_identifier[22] & fast_select_1);
-    assign fast_block[23]= (frame_public[23] & fast_select_0) | (request_identifier[23] & fast_select_1);
-    assign fast_block[24]= (frame_public[24] & fast_select_0) | (request_identifier[24] & fast_select_1);
-    assign fast_block[25]= (frame_public[25] & fast_select_0) | (request_identifier[25] & fast_select_1);
-    assign fast_block[26]= (frame_public[26] & fast_select_0) | (request_identifier[26] & fast_select_1);
-    assign fast_block[27]= (frame_public[27] & fast_select_0) | (request_identifier[27] & fast_select_1);
-    assign fast_block[28]= (frame_public[28] & fast_select_0) | (request_identifier[28] & fast_select_1);
-    assign fast_block[29]= (frame_public[29] & fast_select_0) | (request_identifier[29] & fast_select_1);
-    assign fast_block[30]= (frame_public[30] & fast_select_0) | (request_identifier[30] & fast_select_1);
-    assign fast_block[31]= (frame_public[31] & fast_select_0) | (request_identifier[31] & fast_select_1);
-    assign fast_block[32]= (frame_public[32] & fast_select_0) | (request_identifier[32] & fast_select_1);
-    assign fast_block[33]= (frame_public[33] & fast_select_0) | (request_identifier[33] & fast_select_1);
-    assign fast_block[34]= (frame_public[34] & fast_select_0) | (request_identifier[34] & fast_select_1);
-    assign fast_block[35]= (frame_public[35] & fast_select_0) | (request_identifier[35] & fast_select_1);
-    assign fast_block[36]= (frame_public[36] & fast_select_0) | (request_identifier[36] & fast_select_1);
-    assign fast_block[37]= (frame_public[37] & fast_select_0) | (request_identifier[37] & fast_select_1);
-    assign fast_block[38]= (frame_public[38] & fast_select_0) | (request_identifier[38] & fast_select_1);
-    assign fast_block[39]= (frame_public[39] & fast_select_0) | (request_identifier[39] & fast_select_1);
-    assign fast_block[40]= (frame_public[40] & fast_select_0) | (request_identifier[40] & fast_select_1);
-    assign fast_block[41]= (frame_public[41] & fast_select_0) | (request_identifier[41] & fast_select_1);
-    assign fast_block[42]= (frame_public[42] & fast_select_0) | (request_identifier[42] & fast_select_1);
-    assign fast_block[43]= (frame_public[43] & fast_select_0) | (request_identifier[43] & fast_select_1);
-    assign fast_block[44]= (frame_public[44] & fast_select_0) | (request_identifier[44] & fast_select_1);
-    assign fast_block[45]= (frame_public[45] & fast_select_0) | (request_identifier[45] & fast_select_1);
-    assign fast_block[46]= (frame_public[46] & fast_select_0) | (request_identifier[46] & fast_select_1);
-    assign fast_block[47]= (frame_public[47] & fast_select_0) | (request_identifier[47] & fast_select_1);
-    assign fast_block[48]= (frame_public[48] & fast_select_0) | (request_identifier[48] & fast_select_1);
-    assign fast_block[49]= (frame_public[49] & fast_select_0) | (request_identifier[49] & fast_select_1);
-    assign fast_block[50]= (frame_public[50] & fast_select_0) | (request_identifier[50] & fast_select_1);
-    assign fast_block[51]= (frame_public[51] & fast_select_0) | (request_identifier[51] & fast_select_1);
-    assign fast_block[52]= (frame_public[52] & fast_select_0) | (request_identifier[52] & fast_select_1);
-    assign fast_block[53]= (frame_public[53] & fast_select_0) | (request_identifier[53] & fast_select_1);
-    assign fast_block[54]= (frame_public[54] & fast_select_0) | (request_identifier[54] & fast_select_1);
-    assign fast_block[55]= (frame_public[55] & fast_select_0) | (request_identifier[55] & fast_select_1);
-    assign fast_block[56]= (frame_public[56] & fast_select_0) | (request_identifier[56] & fast_select_1);
-    assign fast_block[57]= (frame_public[57] & fast_select_0) | (request_identifier[57] & fast_select_1);
-    assign fast_block[58]= (frame_public[58] & fast_select_0) | (request_identifier[58] & fast_select_1);
-    assign fast_block[59]= (frame_public[59] & fast_select_0) | (request_identifier[59] & fast_select_1);
-    assign fast_block[60]= (frame_public[60] & fast_select_0) | (request_identifier[60] & fast_select_1);
-    assign fast_block[61]= (frame_public[61] & fast_select_0) | (request_identifier[61] & fast_select_1);
-    assign fast_block[62]= (frame_public[62] & fast_select_0) | (request_identifier[62] & fast_select_1);
-    assign fast_block[63]= (frame_public[63] & fast_select_0) | (request_identifier[63] & fast_select_1);
-    assign fast_block[64]= (frame_public[64] & fast_select_0) | (request_identifier[64] & fast_select_1);
-    assign fast_block[65]= (frame_public[65] & fast_select_0) | (request_identifier[65] & fast_select_1);
-    assign fast_block[66]= (frame_public[66] & fast_select_0) | (request_identifier[66] & fast_select_1);
-    assign fast_block[67]= (frame_public[67] & fast_select_0) | (request_identifier[67] & fast_select_1);
-    assign fast_block[68]= (frame_public[68] & fast_select_0) | (request_identifier[68] & fast_select_1);
-    assign fast_block[69]= (frame_public[69] & fast_select_0) | (request_identifier[69] & fast_select_1);
-    assign fast_block[70]= (frame_public[70] & fast_select_0) | (request_identifier[70] & fast_select_1);
-    assign fast_block[71]= (frame_public[71] & fast_select_0) | (request_identifier[71] & fast_select_1);
-    assign fast_block[72]= (frame_public[72] & fast_select_0) | (request_identifier[72] & fast_select_1);
-    assign fast_block[73]= (frame_public[73] & fast_select_0) | (request_identifier[73] & fast_select_1);
-    assign fast_block[74]= (frame_public[74] & fast_select_0) | (request_identifier[74] & fast_select_1);
-    assign fast_block[75]= (frame_public[75] & fast_select_0) | (request_identifier[75] & fast_select_1);
-    assign fast_block[76]= (frame_public[76] & fast_select_0) | (request_identifier[76] & fast_select_1);
-    assign fast_block[77]= (frame_public[77] & fast_select_0) | (request_identifier[77] & fast_select_1);
-    assign fast_block[78]= (frame_public[78] & fast_select_0) | (request_identifier[78] & fast_select_1);
-    assign fast_block[79]= (frame_public[79] & fast_select_0) | (request_identifier[79] & fast_select_1);
-    assign fast_block[80]= (frame_public[80] & fast_select_0) | (request_identifier[80] & fast_select_1);
-    assign fast_block[81]= (frame_public[81] & fast_select_0) | (request_identifier[81] & fast_select_1);
-    assign fast_block[82]= (frame_public[82] & fast_select_0) | (request_identifier[82] & fast_select_1);
-    assign fast_block[83]= (frame_public[83] & fast_select_0) | (request_identifier[83] & fast_select_1);
-    assign fast_block[84]= (frame_public[84] & fast_select_0) | (request_identifier[84] & fast_select_1);
-    assign fast_block[85]= (frame_public[85] & fast_select_0) | (request_identifier[85] & fast_select_1);
-    assign fast_block[86]= (frame_public[86] & fast_select_0) | (request_identifier[86] & fast_select_1);
-    assign fast_block[87]= (frame_public[87] & fast_select_0) | (request_identifier[87] & fast_select_1);
-    assign fast_block[88]= (frame_public[88] & fast_select_0) | (request_identifier[88] & fast_select_1);
-    assign fast_block[89]= (frame_public[89] & fast_select_0) | (request_identifier[89] & fast_select_1);
-    assign fast_block[90]= (frame_public[90] & fast_select_0) | (request_identifier[90] & fast_select_1);
-    assign fast_block[91]= (frame_public[91] & fast_select_0) | (request_identifier[91] & fast_select_1);
-    assign fast_block[92]= (frame_public[92] & fast_select_0) | (request_identifier[92] & fast_select_1);
-    assign fast_block[93]= (frame_public[93] & fast_select_0) | (request_identifier[93] & fast_select_1);
-    assign fast_block[94]= (frame_public[94] & fast_select_0) | (request_identifier[94] & fast_select_1);
-    assign fast_block[95]= (frame_public[95] & fast_select_0) | (request_identifier[95] & fast_select_1);
-    assign fast_block[96]= (frame_public[96] & fast_select_0) | (request_identifier[96] & fast_select_1);
-    assign fast_block[97]= (frame_public[97] & fast_select_0) | (request_identifier[97] & fast_select_1);
-    assign fast_block[98]= (frame_public[98] & fast_select_0) | (request_identifier[98] & fast_select_1);
-    assign fast_block[99]= (frame_public[99] & fast_select_0) | (request_identifier[99] & fast_select_1);
-    assign fast_block[100]= (frame_public[100] & fast_select_0) | (request_identifier[100] & fast_select_1);
-    assign fast_block[101]= (frame_public[101] & fast_select_0) | (request_identifier[101] & fast_select_1);
-    assign fast_block[102]= (frame_public[102] & fast_select_0) | (request_identifier[102] & fast_select_1);
-    assign fast_block[103]= (frame_public[103] & fast_select_0) | (request_identifier[103] & fast_select_1);
-    assign fast_block[104]= (frame_public[104] & fast_select_0) | (request_identifier[104] & fast_select_1);
-    assign fast_block[105]= (frame_public[105] & fast_select_0) | (request_identifier[105] & fast_select_1);
-    assign fast_block[106]= (frame_public[106] & fast_select_0) | (request_identifier[106] & fast_select_1);
-    assign fast_block[107]= (frame_public[107] & fast_select_0) | (request_identifier[107] & fast_select_1);
-    assign fast_block[108]= (frame_public[108] & fast_select_0) | (request_identifier[108] & fast_select_1);
-    assign fast_block[109]= (frame_public[109] & fast_select_0) | (request_identifier[109] & fast_select_1);
-    assign fast_block[110]= (frame_public[110] & fast_select_0) | (request_identifier[110] & fast_select_1);
-    assign fast_block[111]= (frame_public[111] & fast_select_0) | (request_identifier[111] & fast_select_1);
-    assign fast_block[112]= (frame_public[112] & fast_select_0) | (request_identifier[112] & fast_select_1);
-    assign fast_block[113]= (frame_public[113] & fast_select_0) | (request_identifier[113] & fast_select_1);
-    assign fast_block[114]= (frame_public[114] & fast_select_0) | (request_identifier[114] & fast_select_1);
-    assign fast_block[115]= (frame_public[115] & fast_select_0) | (request_identifier[115] & fast_select_1);
-    assign fast_block[116]= (frame_public[116] & fast_select_0) | (request_identifier[116] & fast_select_1);
-    assign fast_block[117]= (frame_public[117] & fast_select_0) | (request_identifier[117] & fast_select_1);
-    assign fast_block[118]= (frame_public[118] & fast_select_0) | (request_identifier[118] & fast_select_1);
-    assign fast_block[119]= (frame_public[119] & fast_select_0) | (request_identifier[119] & fast_select_1);
-    assign fast_block[120]= (frame_public[120] & fast_select_0) | (request_identifier[120] & fast_select_1);
-    assign fast_block[121]= (frame_public[121] & fast_select_0) | (request_identifier[121] & fast_select_1);
-    assign fast_block[122]= (frame_public[122] & fast_select_0) | (request_identifier[122] & fast_select_1);
-    assign fast_block[123]= (frame_public[123] & fast_select_0) | (request_identifier[123] & fast_select_1);
-    assign fast_block[124]= (frame_public[124] & fast_select_0) | (request_identifier[124] & fast_select_1);
-    assign fast_block[125]= (frame_public[125] & fast_select_0) | (request_identifier[125] & fast_select_1);
-    assign fast_block[126]= (frame_public[126] & fast_select_0) | (request_identifier[126] & fast_select_1);
-    assign fast_block[127]= (frame_public[127] & fast_select_0) | (request_identifier[127] & fast_select_1);
-    assign fast_block[128]= (address[0] & fast_select_2) | (frame_public[128] & fast_select_3) | (frame_lms_q[0] & fast_select_4) | (frame_heap[0] & fast_select_5);
-    assign fast_block[129]= (address[1] & fast_select_2) | (frame_public[129] & fast_select_3) | (frame_lms_q[1] & fast_select_4) | (frame_heap[1] & fast_select_5);
-    assign fast_block[130]= (address[2] & fast_select_2) | (frame_public[130] & fast_select_3) | (frame_lms_q[2] & fast_select_4) | (frame_heap[2] & fast_select_5);
-    assign fast_block[131]= (address[3] & fast_select_2) | (frame_public[131] & fast_select_3) | (frame_lms_q[3] & fast_select_4) | (frame_heap[3] & fast_select_5);
-    assign fast_block[132]= (address[4] & fast_select_2) | (frame_public[132] & fast_select_3) | (frame_lms_q[4] & fast_select_4) | (frame_heap[4] & fast_select_5);
-    assign fast_block[133]= (address[5] & fast_select_2) | (frame_public[133] & fast_select_3) | (frame_lms_q[5] & fast_select_4) | (frame_heap[5] & fast_select_5);
-    assign fast_block[134]= (address[6] & fast_select_2) | (frame_public[134] & fast_select_3) | (frame_lms_q[6] & fast_select_4) | (frame_heap[6] & fast_select_5);
-    assign fast_block[135]= (address[7] & fast_select_2) | (frame_public[135] & fast_select_3) | (frame_lms_q[7] & fast_select_4) | (frame_heap[7] & fast_select_5);
-    assign fast_block[136]= (address[8] & fast_select_2) | (frame_public[136] & fast_select_3) | (frame_lms_q[8] & fast_select_4) | (frame_heap[8] & fast_select_5);
-    assign fast_block[137]= (address[9] & fast_select_2) | (frame_public[137] & fast_select_3) | (frame_lms_q[9] & fast_select_4) | (frame_heap[9] & fast_select_5);
-    assign fast_block[138]= (address[10] & fast_select_2) | (frame_public[138] & fast_select_3) | (frame_lms_q[10] & fast_select_4) | (frame_heap[10] & fast_select_5);
-    assign fast_block[139]= (address[11] & fast_select_2) | (frame_public[139] & fast_select_3) | (frame_lms_q[11] & fast_select_4) | (frame_heap[11] & fast_select_5);
-    assign fast_block[140]= (address[12] & fast_select_2) | (frame_public[140] & fast_select_3) | (frame_lms_q[12] & fast_select_4) | (frame_heap[12] & fast_select_5);
-    assign fast_block[141]= (address[13] & fast_select_2) | (frame_public[141] & fast_select_3) | (frame_lms_q[13] & fast_select_4) | (frame_heap[13] & fast_select_5);
-    assign fast_block[142]= (address[14] & fast_select_2) | (frame_public[142] & fast_select_3) | (frame_lms_q[14] & fast_select_4) | (frame_heap[14] & fast_select_5);
-    assign fast_block[143]= (address[15] & fast_select_2) | (frame_public[143] & fast_select_3) | (frame_lms_q[15] & fast_select_4) | (frame_heap[15] & fast_select_5);
-    assign fast_block[144]= (address[16] & fast_select_2) | (frame_public[144] & fast_select_3) | (frame_lms_q[16] & fast_select_4) | (frame_heap[16] & fast_select_5);
-    assign fast_block[145]= (address[17] & fast_select_2) | (frame_public[145] & fast_select_3) | (frame_lms_q[17] & fast_select_4) | (frame_heap[17] & fast_select_5);
-    assign fast_block[146]= (address[18] & fast_select_2) | (frame_public[146] & fast_select_3) | (frame_lms_q[18] & fast_select_4) | (frame_heap[18] & fast_select_5);
-    assign fast_block[147]= (address[19] & fast_select_2) | (frame_public[147] & fast_select_3) | (frame_lms_q[19] & fast_select_4) | (frame_heap[19] & fast_select_5);
-    assign fast_block[148]= (address[20] & fast_select_2) | (frame_public[148] & fast_select_3) | (frame_lms_q[20] & fast_select_4) | (frame_heap[20] & fast_select_5);
-    assign fast_block[149]= (address[21] & fast_select_2) | (frame_public[149] & fast_select_3) | (frame_lms_q[21] & fast_select_4) | (frame_heap[21] & fast_select_5);
-    assign fast_block[150]= (address[22] & fast_select_2) | (frame_public[150] & fast_select_3) | (frame_lms_q[22] & fast_select_4) | (frame_heap[22] & fast_select_5);
-    assign fast_block[151]= (address[23] & fast_select_2) | (frame_public[151] & fast_select_3) | (frame_lms_q[23] & fast_select_4) | (frame_heap[23] & fast_select_5);
-    assign fast_block[152]= (address[24] & fast_select_2) | (frame_public[152] & fast_select_3) | (frame_lms_q[24] & fast_select_4) | (frame_heap[24] & fast_select_5);
-    assign fast_block[153]= (address[25] & fast_select_2) | (frame_public[153] & fast_select_3) | (frame_lms_q[25] & fast_select_4) | (frame_heap[25] & fast_select_5);
-    assign fast_block[154]= (address[26] & fast_select_2) | (frame_public[154] & fast_select_3) | (frame_lms_q[26] & fast_select_4) | (frame_heap[26] & fast_select_5);
-    assign fast_block[155]= (address[27] & fast_select_2) | (frame_public[155] & fast_select_3) | (frame_lms_q[27] & fast_select_4) | (frame_heap[27] & fast_select_5);
-    assign fast_block[156]= (address[28] & fast_select_2) | (frame_public[156] & fast_select_3) | (frame_lms_q[28] & fast_select_4) | (frame_heap[28] & fast_select_5);
-    assign fast_block[157]= (address[29] & fast_select_2) | (frame_public[157] & fast_select_3) | (frame_lms_q[29] & fast_select_4) | (frame_heap[29] & fast_select_5);
-    assign fast_block[158]= (address[30] & fast_select_2) | (frame_public[158] & fast_select_3) | (frame_lms_q[30] & fast_select_4) | (frame_heap[30] & fast_select_5);
-    assign fast_block[159]= (address[31] & fast_select_2) | (frame_public[159] & fast_select_3) | (frame_lms_q[31] & fast_select_4) | (frame_heap[31] & fast_select_5);
-    assign fast_block[160]= (address[32] & fast_select_2) | (frame_public[160] & fast_select_3) | fast_layout[14];
-    assign fast_block[161]= (address[33] & fast_select_2) | (frame_public[161] & fast_select_3) | fast_select_5;
-    assign fast_block[162]= (address[34] & fast_select_2) | (frame_public[162] & fast_select_3);
-    assign fast_block[163]= (address[35] & fast_select_2) | (frame_public[163] & fast_select_3);
-    assign fast_block[164]= (address[36] & fast_select_2) | (frame_public[164] & fast_select_3);
-    assign fast_block[165]= (address[37] & fast_select_2) | (frame_public[165] & fast_select_3);
-    assign fast_block[166]= (address[38] & fast_select_2) | (frame_public[166] & fast_select_3);
-    assign fast_block[167]= (address[39] & fast_select_2) | (frame_public[167] & fast_select_3) | fast_select_5;
-    assign fast_block[168]= (address[40] & fast_select_2) | (frame_public[168] & fast_select_3) | (request_a[0] & fast_select_4) | fast_layout[14];
-    assign fast_block[169]= (address[41] & fast_select_2) | (frame_public[169] & fast_select_3) | (request_a[1] & fast_select_4) | fast_select_5;
-    assign fast_block[170]= (address[42] & fast_select_2) | (frame_public[170] & fast_select_3) | (request_a[2] & fast_select_4);
-    assign fast_block[171]= (address[43] & fast_select_2) | (frame_public[171] & fast_select_3) | (request_a[3] & fast_select_4);
-    assign fast_block[172]= (address[44] & fast_select_2) | (frame_public[172] & fast_select_3) | (request_a[4] & fast_select_4);
-    assign fast_block[173]= (address[45] & fast_select_2) | (frame_public[173] & fast_select_3) | (request_a[5] & fast_select_4);
-    assign fast_block[174]= (address[46] & fast_select_2) | (frame_public[174] & fast_select_3) | (request_a[6] & fast_select_4);
-    assign fast_block[175]= (address[47] & fast_select_2) | (frame_public[175] & fast_select_3) | fast_select_5;
-    assign fast_block[176]= (address[48] & fast_select_2) | (frame_public[176] & fast_select_3) | fast_layout[11] | (request_b[0] & fast_layout[12]) | (frame_left[0] & fast_select_5);
-    assign fast_block[177]= (address[49] & fast_select_2) | (frame_public[177] & fast_select_3) | fast_layout[11] | (request_b[1] & fast_layout[12]) | (frame_left[1] & fast_select_5);
-    assign fast_block[178]= (address[50] & fast_select_2) | (frame_public[178] & fast_select_3) | fast_layout[11] | (request_b[2] & fast_layout[12]) | (frame_left[2] & fast_select_5);
-    assign fast_block[179]= (address[51] & fast_select_2) | (frame_public[179] & fast_select_3) | fast_layout[11] | (request_b[3] & fast_layout[12]) | (frame_left[3] & fast_select_5);
-    assign fast_block[180]= (address[52] & fast_select_2) | (frame_public[180] & fast_select_3) | fast_layout[11] | (request_b[4] & fast_layout[12]) | (frame_left[4] & fast_select_5);
-    assign fast_block[181]= (address[53] & fast_select_2) | (frame_public[181] & fast_select_3) | fast_layout[11] | (request_b[5] & fast_layout[12]) | (frame_left[5] & fast_select_5);
-    assign fast_block[182]= (address[54] & fast_select_2) | (frame_public[182] & fast_select_3) | fast_layout[11] | (request_b[6] & fast_layout[12]) | (frame_left[6] & fast_select_5);
-    assign fast_block[183]= (address[55] & fast_select_2) | (frame_public[183] & fast_select_3) | fast_layout[11] | (request_b[7] & fast_layout[12]) | (frame_left[7] & fast_select_5);
-    assign fast_block[184]= (address[56] & fast_select_2) | (frame_public[184] & fast_select_3) | (frame_secret[0] & fast_layout[11]) | (frame_left[0] & fast_layout[12]) | (frame_left[8] & fast_select_5);
-    assign fast_block[185]= (address[57] & fast_select_2) | (frame_public[185] & fast_select_3) | (frame_secret[1] & fast_layout[11]) | (frame_left[1] & fast_layout[12]) | (frame_left[9] & fast_select_5);
-    assign fast_block[186]= (address[58] & fast_select_2) | (frame_public[186] & fast_select_3) | (frame_secret[2] & fast_layout[11]) | (frame_left[2] & fast_layout[12]) | (frame_left[10] & fast_select_5);
-    assign fast_block[187]= (address[59] & fast_select_2) | (frame_public[187] & fast_select_3) | (frame_secret[3] & fast_layout[11]) | (frame_left[3] & fast_layout[12]) | (frame_left[11] & fast_select_5);
-    assign fast_block[188]= (address[60] & fast_select_2) | (frame_public[188] & fast_select_3) | (frame_secret[4] & fast_layout[11]) | (frame_left[4] & fast_layout[12]) | (frame_left[12] & fast_select_5);
-    assign fast_block[189]= (address[61] & fast_select_2) | (frame_public[189] & fast_select_3) | (frame_secret[5] & fast_layout[11]) | (frame_left[5] & fast_layout[12]) | (frame_left[13] & fast_select_5);
-    assign fast_block[190]= (address[62] & fast_select_2) | (frame_public[190] & fast_select_3) | (frame_secret[6] & fast_layout[11]) | (frame_left[6] & fast_layout[12]) | (frame_left[14] & fast_select_5);
-    assign fast_block[191]= (address[63] & fast_select_2) | (frame_public[191] & fast_select_3) | (frame_secret[7] & fast_layout[11]) | (frame_left[7] & fast_layout[12]) | (frame_left[15] & fast_select_5);
-    assign fast_block[192]= (address[64] & fast_select_2) | (address[0] & fast_select_6) | (frame_public[192] & fast_select_7) | (frame_secret[8] & fast_layout[11]) | (frame_left[8] & fast_layout[12]) | (frame_left[16] & fast_select_5);
-    assign fast_block[193]= (address[65] & fast_select_2) | (address[1] & fast_select_6) | (frame_public[193] & fast_select_7) | (frame_secret[9] & fast_layout[11]) | (frame_left[9] & fast_layout[12]) | (frame_left[17] & fast_select_5);
-    assign fast_block[194]= (address[66] & fast_select_2) | (address[2] & fast_select_6) | (frame_public[194] & fast_select_7) | (frame_secret[10] & fast_layout[11]) | (frame_left[10] & fast_layout[12]) | (frame_left[18] & fast_select_5);
-    assign fast_block[195]= (address[67] & fast_select_2) | (address[3] & fast_select_6) | (frame_public[195] & fast_select_7) | (frame_secret[11] & fast_layout[11]) | (frame_left[11] & fast_layout[12]) | (frame_left[19] & fast_select_5);
-    assign fast_block[196]= (address[68] & fast_select_2) | (address[4] & fast_select_6) | (frame_public[196] & fast_select_7) | (frame_secret[12] & fast_layout[11]) | (frame_left[12] & fast_layout[12]) | (frame_left[20] & fast_select_5);
-    assign fast_block[197]= (address[69] & fast_select_2) | (address[5] & fast_select_6) | (frame_public[197] & fast_select_7) | (frame_secret[13] & fast_layout[11]) | (frame_left[13] & fast_layout[12]) | (frame_left[21] & fast_select_5);
-    assign fast_block[198]= (address[70] & fast_select_2) | (address[6] & fast_select_6) | (frame_public[198] & fast_select_7) | (frame_secret[14] & fast_layout[11]) | (frame_left[14] & fast_layout[12]) | (frame_left[22] & fast_select_5);
-    assign fast_block[199]= (address[71] & fast_select_2) | (address[7] & fast_select_6) | (frame_public[199] & fast_select_7) | (frame_secret[15] & fast_layout[11]) | (frame_left[15] & fast_layout[12]) | (frame_left[23] & fast_select_5);
-    assign fast_block[200]= (address[72] & fast_select_2) | (address[8] & fast_select_6) | (frame_public[200] & fast_select_7) | (frame_secret[16] & fast_layout[11]) | (frame_left[16] & fast_layout[12]) | (frame_left[24] & fast_select_5);
-    assign fast_block[201]= (address[73] & fast_select_2) | (address[9] & fast_select_6) | (frame_public[201] & fast_select_7) | (frame_secret[17] & fast_layout[11]) | (frame_left[17] & fast_layout[12]) | (frame_left[25] & fast_select_5);
-    assign fast_block[202]= (address[74] & fast_select_2) | (address[10] & fast_select_6) | (frame_public[202] & fast_select_7) | (frame_secret[18] & fast_layout[11]) | (frame_left[18] & fast_layout[12]) | (frame_left[26] & fast_select_5);
-    assign fast_block[203]= (address[75] & fast_select_2) | (address[11] & fast_select_6) | (frame_public[203] & fast_select_7) | (frame_secret[19] & fast_layout[11]) | (frame_left[19] & fast_layout[12]) | (frame_left[27] & fast_select_5);
-    assign fast_block[204]= (address[76] & fast_select_2) | (address[12] & fast_select_6) | (frame_public[204] & fast_select_7) | (frame_secret[20] & fast_layout[11]) | (frame_left[20] & fast_layout[12]) | (frame_left[28] & fast_select_5);
-    assign fast_block[205]= (address[77] & fast_select_2) | (address[13] & fast_select_6) | (frame_public[205] & fast_select_7) | (frame_secret[21] & fast_layout[11]) | (frame_left[21] & fast_layout[12]) | (frame_left[29] & fast_select_5);
-    assign fast_block[206]= (address[78] & fast_select_2) | (address[14] & fast_select_6) | (frame_public[206] & fast_select_7) | (frame_secret[22] & fast_layout[11]) | (frame_left[22] & fast_layout[12]) | (frame_left[30] & fast_select_5);
-    assign fast_block[207]= (address[79] & fast_select_2) | (address[15] & fast_select_6) | (frame_public[207] & fast_select_7) | (frame_secret[23] & fast_layout[11]) | (frame_left[23] & fast_layout[12]) | (frame_left[31] & fast_select_5);
-    assign fast_block[208]= (address[80] & fast_select_2) | (address[16] & fast_select_6) | (frame_public[208] & fast_select_7) | (frame_secret[24] & fast_layout[11]) | (frame_left[24] & fast_layout[12]) | (frame_left[32] & fast_select_5);
-    assign fast_block[209]= (address[81] & fast_select_2) | (address[17] & fast_select_6) | (frame_public[209] & fast_select_7) | (frame_secret[25] & fast_layout[11]) | (frame_left[25] & fast_layout[12]) | (frame_left[33] & fast_select_5);
-    assign fast_block[210]= (address[82] & fast_select_2) | (address[18] & fast_select_6) | (frame_public[210] & fast_select_7) | (frame_secret[26] & fast_layout[11]) | (frame_left[26] & fast_layout[12]) | (frame_left[34] & fast_select_5);
-    assign fast_block[211]= (address[83] & fast_select_2) | (address[19] & fast_select_6) | (frame_public[211] & fast_select_7) | (frame_secret[27] & fast_layout[11]) | (frame_left[27] & fast_layout[12]) | (frame_left[35] & fast_select_5);
-    assign fast_block[212]= (address[84] & fast_select_2) | (address[20] & fast_select_6) | (frame_public[212] & fast_select_7) | (frame_secret[28] & fast_layout[11]) | (frame_left[28] & fast_layout[12]) | (frame_left[36] & fast_select_5);
-    assign fast_block[213]= (address[85] & fast_select_2) | (address[21] & fast_select_6) | (frame_public[213] & fast_select_7) | (frame_secret[29] & fast_layout[11]) | (frame_left[29] & fast_layout[12]) | (frame_left[37] & fast_select_5);
-    assign fast_block[214]= (address[86] & fast_select_2) | (address[22] & fast_select_6) | (frame_public[214] & fast_select_7) | (frame_secret[30] & fast_layout[11]) | (frame_left[30] & fast_layout[12]) | (frame_left[38] & fast_select_5);
-    assign fast_block[215]= (address[87] & fast_select_2) | (address[23] & fast_select_6) | (frame_public[215] & fast_select_7) | (frame_secret[31] & fast_layout[11]) | (frame_left[31] & fast_layout[12]) | (frame_left[39] & fast_select_5);
-    assign fast_block[216]= (address[88] & fast_select_2) | (address[24] & fast_select_6) | (frame_public[216] & fast_select_7) | (frame_secret[32] & fast_layout[11]) | (frame_left[32] & fast_layout[12]) | (frame_left[40] & fast_select_5);
-    assign fast_block[217]= (address[89] & fast_select_2) | (address[25] & fast_select_6) | (frame_public[217] & fast_select_7) | (frame_secret[33] & fast_layout[11]) | (frame_left[33] & fast_layout[12]) | (frame_left[41] & fast_select_5);
-    assign fast_block[218]= (address[90] & fast_select_2) | (address[26] & fast_select_6) | (frame_public[218] & fast_select_7) | (frame_secret[34] & fast_layout[11]) | (frame_left[34] & fast_layout[12]) | (frame_left[42] & fast_select_5);
-    assign fast_block[219]= (address[91] & fast_select_2) | (address[27] & fast_select_6) | (frame_public[219] & fast_select_7) | (frame_secret[35] & fast_layout[11]) | (frame_left[35] & fast_layout[12]) | (frame_left[43] & fast_select_5);
-    assign fast_block[220]= (address[92] & fast_select_2) | (address[28] & fast_select_6) | (frame_public[220] & fast_select_7) | (frame_secret[36] & fast_layout[11]) | (frame_left[36] & fast_layout[12]) | (frame_left[44] & fast_select_5);
-    assign fast_block[221]= (address[93] & fast_select_2) | (address[29] & fast_select_6) | (frame_public[221] & fast_select_7) | (frame_secret[37] & fast_layout[11]) | (frame_left[37] & fast_layout[12]) | (frame_left[45] & fast_select_5);
-    assign fast_block[222]= (address[94] & fast_select_2) | (address[30] & fast_select_6) | (frame_public[222] & fast_select_7) | (frame_secret[38] & fast_layout[11]) | (frame_left[38] & fast_layout[12]) | (frame_left[46] & fast_select_5);
-    assign fast_block[223]= (address[95] & fast_select_2) | (address[31] & fast_select_6) | (frame_public[223] & fast_select_7) | (frame_secret[39] & fast_layout[11]) | (frame_left[39] & fast_layout[12]) | (frame_left[47] & fast_select_5);
-    assign fast_block[224]= (address[96] & fast_select_2) | (address[32] & fast_select_6) | (frame_public[224] & fast_select_7) | (frame_secret[40] & fast_layout[11]) | (frame_left[40] & fast_layout[12]) | (frame_left[48] & fast_select_5);
-    assign fast_block[225]= (address[97] & fast_select_2) | (address[33] & fast_select_6) | (frame_public[225] & fast_select_7) | (frame_secret[41] & fast_layout[11]) | (frame_left[41] & fast_layout[12]) | (frame_left[49] & fast_select_5);
-    assign fast_block[226]= (address[98] & fast_select_2) | (address[34] & fast_select_6) | (frame_public[226] & fast_select_7) | (frame_secret[42] & fast_layout[11]) | (frame_left[42] & fast_layout[12]) | (frame_left[50] & fast_select_5);
-    assign fast_block[227]= (address[99] & fast_select_2) | (address[35] & fast_select_6) | (frame_public[227] & fast_select_7) | (frame_secret[43] & fast_layout[11]) | (frame_left[43] & fast_layout[12]) | (frame_left[51] & fast_select_5);
-    assign fast_block[228]= (address[100] & fast_select_2) | (address[36] & fast_select_6) | (frame_public[228] & fast_select_7) | (frame_secret[44] & fast_layout[11]) | (frame_left[44] & fast_layout[12]) | (frame_left[52] & fast_select_5);
-    assign fast_block[229]= (address[101] & fast_select_2) | (address[37] & fast_select_6) | (frame_public[229] & fast_select_7) | (frame_secret[45] & fast_layout[11]) | (frame_left[45] & fast_layout[12]) | (frame_left[53] & fast_select_5);
-    assign fast_block[230]= (address[102] & fast_select_2) | (address[38] & fast_select_6) | (frame_public[230] & fast_select_7) | (frame_secret[46] & fast_layout[11]) | (frame_left[46] & fast_layout[12]) | (frame_left[54] & fast_select_5);
-    assign fast_block[231]= (address[103] & fast_select_2) | (address[39] & fast_select_6) | (frame_public[231] & fast_select_7) | (frame_secret[47] & fast_layout[11]) | (frame_left[47] & fast_layout[12]) | (frame_left[55] & fast_select_5);
-    assign fast_block[232]= (address[104] & fast_select_2) | (address[40] & fast_select_6) | (frame_public[232] & fast_select_7) | (frame_secret[48] & fast_layout[11]) | (frame_left[48] & fast_layout[12]) | (frame_left[56] & fast_select_5);
-    assign fast_block[233]= (address[105] & fast_select_2) | (address[41] & fast_select_6) | (frame_public[233] & fast_select_7) | (frame_secret[49] & fast_layout[11]) | (frame_left[49] & fast_layout[12]) | (frame_left[57] & fast_select_5);
-    assign fast_block[234]= (address[106] & fast_select_2) | (address[42] & fast_select_6) | (frame_public[234] & fast_select_7) | (frame_secret[50] & fast_layout[11]) | (frame_left[50] & fast_layout[12]) | (frame_left[58] & fast_select_5);
-    assign fast_block[235]= (address[107] & fast_select_2) | (address[43] & fast_select_6) | (frame_public[235] & fast_select_7) | (frame_secret[51] & fast_layout[11]) | (frame_left[51] & fast_layout[12]) | (frame_left[59] & fast_select_5);
-    assign fast_block[236]= (address[108] & fast_select_2) | (address[44] & fast_select_6) | (frame_public[236] & fast_select_7) | (frame_secret[52] & fast_layout[11]) | (frame_left[52] & fast_layout[12]) | (frame_left[60] & fast_select_5);
-    assign fast_block[237]= (address[109] & fast_select_2) | (address[45] & fast_select_6) | (frame_public[237] & fast_select_7) | (frame_secret[53] & fast_layout[11]) | (frame_left[53] & fast_layout[12]) | (frame_left[61] & fast_select_5);
-    assign fast_block[238]= (address[110] & fast_select_2) | (address[46] & fast_select_6) | (frame_public[238] & fast_select_7) | (frame_secret[54] & fast_layout[11]) | (frame_left[54] & fast_layout[12]) | (frame_left[62] & fast_select_5);
-    assign fast_block[239]= (address[111] & fast_select_2) | (address[47] & fast_select_6) | (frame_public[239] & fast_select_7) | (frame_secret[55] & fast_layout[11]) | (frame_left[55] & fast_layout[12]) | (frame_left[63] & fast_select_5);
-    assign fast_block[240]= (address[112] & fast_select_2) | (address[48] & fast_select_6) | (frame_public[240] & fast_select_7) | (frame_secret[56] & fast_layout[11]) | (frame_left[56] & fast_layout[12]) | (frame_left[64] & fast_select_5);
-    assign fast_block[241]= (address[113] & fast_select_2) | (address[49] & fast_select_6) | (frame_public[241] & fast_select_7) | (frame_secret[57] & fast_layout[11]) | (frame_left[57] & fast_layout[12]) | (frame_left[65] & fast_select_5);
-    assign fast_block[242]= (address[114] & fast_select_2) | (address[50] & fast_select_6) | (frame_public[242] & fast_select_7) | (frame_secret[58] & fast_layout[11]) | (frame_left[58] & fast_layout[12]) | (frame_left[66] & fast_select_5);
-    assign fast_block[243]= (address[115] & fast_select_2) | (address[51] & fast_select_6) | (frame_public[243] & fast_select_7) | (frame_secret[59] & fast_layout[11]) | (frame_left[59] & fast_layout[12]) | (frame_left[67] & fast_select_5);
-    assign fast_block[244]= (address[116] & fast_select_2) | (address[52] & fast_select_6) | (frame_public[244] & fast_select_7) | (frame_secret[60] & fast_layout[11]) | (frame_left[60] & fast_layout[12]) | (frame_left[68] & fast_select_5);
-    assign fast_block[245]= (address[117] & fast_select_2) | (address[53] & fast_select_6) | (frame_public[245] & fast_select_7) | (frame_secret[61] & fast_layout[11]) | (frame_left[61] & fast_layout[12]) | (frame_left[69] & fast_select_5);
-    assign fast_block[246]= (address[118] & fast_select_2) | (address[54] & fast_select_6) | (frame_public[246] & fast_select_7) | (frame_secret[62] & fast_layout[11]) | (frame_left[62] & fast_layout[12]) | (frame_left[70] & fast_select_5);
-    assign fast_block[247]= (address[119] & fast_select_2) | (address[55] & fast_select_6) | (frame_public[247] & fast_select_7) | (frame_secret[63] & fast_layout[11]) | (frame_left[63] & fast_layout[12]) | (frame_left[71] & fast_select_5);
-    assign fast_block[248]= (address[120] & fast_select_2) | (address[56] & fast_select_6) | (frame_public[248] & fast_select_7) | fast_select_8 | (frame_secret[64] & fast_layout[11]) | (frame_left[64] & fast_layout[12]) | (frame_left[72] & fast_select_5);
-    assign fast_block[249]= (address[121] & fast_select_2) | (address[57] & fast_select_6) | (frame_public[249] & fast_select_7) | fast_select_9 | (frame_secret[65] & fast_layout[11]) | (frame_left[65] & fast_layout[12]) | (frame_left[73] & fast_select_5);
-    assign fast_block[250]= (address[122] & fast_select_2) | (address[58] & fast_select_6) | (frame_public[250] & fast_select_7) | fast_layout[6] | (frame_secret[66] & fast_layout[11]) | (frame_left[66] & fast_layout[12]) | (frame_left[74] & fast_select_5);
-    assign fast_block[251]= (address[123] & fast_select_2) | (address[59] & fast_select_6) | (frame_public[251] & fast_select_7) | (frame_secret[67] & fast_layout[11]) | (frame_left[67] & fast_layout[12]) | (frame_left[75] & fast_select_5);
-    assign fast_block[252]= (address[124] & fast_select_2) | (address[60] & fast_select_6) | (frame_public[252] & fast_select_7) | (frame_secret[68] & fast_layout[11]) | (frame_left[68] & fast_layout[12]) | (frame_left[76] & fast_select_5);
-    assign fast_block[253]= (address[125] & fast_select_2) | (address[61] & fast_select_6) | (frame_public[253] & fast_select_7) | (frame_secret[69] & fast_layout[11]) | (frame_left[69] & fast_layout[12]) | (frame_left[77] & fast_select_5);
-    assign fast_block[254]= (address[126] & fast_select_2) | (address[62] & fast_select_6) | (frame_public[254] & fast_select_7) | (frame_secret[70] & fast_layout[11]) | (frame_left[70] & fast_layout[12]) | (frame_left[78] & fast_select_5);
-    assign fast_block[255]= (address[127] & fast_select_2) | (address[63] & fast_select_6) | (frame_public[255] & fast_select_7) | (frame_secret[71] & fast_layout[11]) | (frame_left[71] & fast_layout[12]) | (frame_left[79] & fast_select_5);
-    assign fast_block[256]= (address[128] & fast_select_2) | (address[64] & fast_select_6) | (address[0] & fast_select_7) | (frame_secret[0] & fast_layout[6]) | (frame_prf[0] & fast_layout[7]) | (frame_public[0] & fast_layout[8]) | (frame_key[0] & fast_select_10) | (frame_secret[72] & fast_layout[11]) | (frame_left[72] & fast_layout[12]) | (frame_left[80] & fast_select_5);
-    assign fast_block[257]= (address[129] & fast_select_2) | (address[65] & fast_select_6) | (address[1] & fast_select_7) | (frame_secret[1] & fast_layout[6]) | (frame_prf[1] & fast_layout[7]) | (frame_public[1] & fast_layout[8]) | (frame_key[1] & fast_select_10) | (frame_secret[73] & fast_layout[11]) | (frame_left[73] & fast_layout[12]) | (frame_left[81] & fast_select_5);
-    assign fast_block[258]= (address[130] & fast_select_2) | (address[66] & fast_select_6) | (address[2] & fast_select_7) | (frame_secret[2] & fast_layout[6]) | (frame_prf[2] & fast_layout[7]) | (frame_public[2] & fast_layout[8]) | (frame_key[2] & fast_select_10) | (frame_secret[74] & fast_layout[11]) | (frame_left[74] & fast_layout[12]) | (frame_left[82] & fast_select_5);
-    assign fast_block[259]= (address[131] & fast_select_2) | (address[67] & fast_select_6) | (address[3] & fast_select_7) | (frame_secret[3] & fast_layout[6]) | (frame_prf[3] & fast_layout[7]) | (frame_public[3] & fast_layout[8]) | (frame_key[3] & fast_select_10) | (frame_secret[75] & fast_layout[11]) | (frame_left[75] & fast_layout[12]) | (frame_left[83] & fast_select_5);
-    assign fast_block[260]= (address[132] & fast_select_2) | (address[68] & fast_select_6) | (address[4] & fast_select_7) | (frame_secret[4] & fast_layout[6]) | (frame_prf[4] & fast_layout[7]) | (frame_public[4] & fast_layout[8]) | (frame_key[4] & fast_select_10) | (frame_secret[76] & fast_layout[11]) | (frame_left[76] & fast_layout[12]) | (frame_left[84] & fast_select_5);
-    assign fast_block[261]= (address[133] & fast_select_2) | (address[69] & fast_select_6) | (address[5] & fast_select_7) | (frame_secret[5] & fast_layout[6]) | (frame_prf[5] & fast_layout[7]) | (frame_public[5] & fast_layout[8]) | (frame_key[5] & fast_select_10) | (frame_secret[77] & fast_layout[11]) | (frame_left[77] & fast_layout[12]) | (frame_left[85] & fast_select_5);
-    assign fast_block[262]= (address[134] & fast_select_2) | (address[70] & fast_select_6) | (address[6] & fast_select_7) | (frame_secret[6] & fast_layout[6]) | (frame_prf[6] & fast_layout[7]) | (frame_public[6] & fast_layout[8]) | (frame_key[6] & fast_select_10) | (frame_secret[78] & fast_layout[11]) | (frame_left[78] & fast_layout[12]) | (frame_left[86] & fast_select_5);
-    assign fast_block[263]= (address[135] & fast_select_2) | (address[71] & fast_select_6) | (address[7] & fast_select_7) | (frame_secret[7] & fast_layout[6]) | (frame_prf[7] & fast_layout[7]) | (frame_public[7] & fast_layout[8]) | (frame_key[7] & fast_select_10) | (frame_secret[79] & fast_layout[11]) | (frame_left[79] & fast_layout[12]) | (frame_left[87] & fast_select_5);
-    assign fast_block[264]= (address[136] & fast_select_2) | (address[72] & fast_select_6) | (address[8] & fast_select_7) | (frame_secret[8] & fast_layout[6]) | (frame_prf[8] & fast_layout[7]) | (frame_public[8] & fast_layout[8]) | (frame_key[8] & fast_select_10) | (frame_secret[80] & fast_layout[11]) | (frame_left[80] & fast_layout[12]) | (frame_left[88] & fast_select_5);
-    assign fast_block[265]= (address[137] & fast_select_2) | (address[73] & fast_select_6) | (address[9] & fast_select_7) | (frame_secret[9] & fast_layout[6]) | (frame_prf[9] & fast_layout[7]) | (frame_public[9] & fast_layout[8]) | (frame_key[9] & fast_select_10) | (frame_secret[81] & fast_layout[11]) | (frame_left[81] & fast_layout[12]) | (frame_left[89] & fast_select_5);
-    assign fast_block[266]= (address[138] & fast_select_2) | (address[74] & fast_select_6) | (address[10] & fast_select_7) | (frame_secret[10] & fast_layout[6]) | (frame_prf[10] & fast_layout[7]) | (frame_public[10] & fast_layout[8]) | (frame_key[10] & fast_select_10) | (frame_secret[82] & fast_layout[11]) | (frame_left[82] & fast_layout[12]) | (frame_left[90] & fast_select_5);
-    assign fast_block[267]= (address[139] & fast_select_2) | (address[75] & fast_select_6) | (address[11] & fast_select_7) | (frame_secret[11] & fast_layout[6]) | (frame_prf[11] & fast_layout[7]) | (frame_public[11] & fast_layout[8]) | (frame_key[11] & fast_select_10) | (frame_secret[83] & fast_layout[11]) | (frame_left[83] & fast_layout[12]) | (frame_left[91] & fast_select_5);
-    assign fast_block[268]= (address[140] & fast_select_2) | (address[76] & fast_select_6) | (address[12] & fast_select_7) | (frame_secret[12] & fast_layout[6]) | (frame_prf[12] & fast_layout[7]) | (frame_public[12] & fast_layout[8]) | (frame_key[12] & fast_select_10) | (frame_secret[84] & fast_layout[11]) | (frame_left[84] & fast_layout[12]) | (frame_left[92] & fast_select_5);
-    assign fast_block[269]= (address[141] & fast_select_2) | (address[77] & fast_select_6) | (address[13] & fast_select_7) | (frame_secret[13] & fast_layout[6]) | (frame_prf[13] & fast_layout[7]) | (frame_public[13] & fast_layout[8]) | (frame_key[13] & fast_select_10) | (frame_secret[85] & fast_layout[11]) | (frame_left[85] & fast_layout[12]) | (frame_left[93] & fast_select_5);
-    assign fast_block[270]= (address[142] & fast_select_2) | (address[78] & fast_select_6) | (address[14] & fast_select_7) | (frame_secret[14] & fast_layout[6]) | (frame_prf[14] & fast_layout[7]) | (frame_public[14] & fast_layout[8]) | (frame_key[14] & fast_select_10) | (frame_secret[86] & fast_layout[11]) | (frame_left[86] & fast_layout[12]) | (frame_left[94] & fast_select_5);
-    assign fast_block[271]= (address[143] & fast_select_2) | (address[79] & fast_select_6) | (address[15] & fast_select_7) | (frame_secret[15] & fast_layout[6]) | (frame_prf[15] & fast_layout[7]) | (frame_public[15] & fast_layout[8]) | (frame_key[15] & fast_select_10) | (frame_secret[87] & fast_layout[11]) | (frame_left[87] & fast_layout[12]) | (frame_left[95] & fast_select_5);
-    assign fast_block[272]= (address[144] & fast_select_2) | (address[80] & fast_select_6) | (address[16] & fast_select_7) | (frame_secret[16] & fast_layout[6]) | (frame_prf[16] & fast_layout[7]) | (frame_public[16] & fast_layout[8]) | (frame_key[16] & fast_select_10) | (frame_secret[88] & fast_layout[11]) | (frame_left[88] & fast_layout[12]) | (frame_left[96] & fast_select_5);
-    assign fast_block[273]= (address[145] & fast_select_2) | (address[81] & fast_select_6) | (address[17] & fast_select_7) | (frame_secret[17] & fast_layout[6]) | (frame_prf[17] & fast_layout[7]) | (frame_public[17] & fast_layout[8]) | (frame_key[17] & fast_select_10) | (frame_secret[89] & fast_layout[11]) | (frame_left[89] & fast_layout[12]) | (frame_left[97] & fast_select_5);
-    assign fast_block[274]= (address[146] & fast_select_2) | (address[82] & fast_select_6) | (address[18] & fast_select_7) | (frame_secret[18] & fast_layout[6]) | (frame_prf[18] & fast_layout[7]) | (frame_public[18] & fast_layout[8]) | (frame_key[18] & fast_select_10) | (frame_secret[90] & fast_layout[11]) | (frame_left[90] & fast_layout[12]) | (frame_left[98] & fast_select_5);
-    assign fast_block[275]= (address[147] & fast_select_2) | (address[83] & fast_select_6) | (address[19] & fast_select_7) | (frame_secret[19] & fast_layout[6]) | (frame_prf[19] & fast_layout[7]) | (frame_public[19] & fast_layout[8]) | (frame_key[19] & fast_select_10) | (frame_secret[91] & fast_layout[11]) | (frame_left[91] & fast_layout[12]) | (frame_left[99] & fast_select_5);
-    assign fast_block[276]= (address[148] & fast_select_2) | (address[84] & fast_select_6) | (address[20] & fast_select_7) | (frame_secret[20] & fast_layout[6]) | (frame_prf[20] & fast_layout[7]) | (frame_public[20] & fast_layout[8]) | (frame_key[20] & fast_select_10) | (frame_secret[92] & fast_layout[11]) | (frame_left[92] & fast_layout[12]) | (frame_left[100] & fast_select_5);
-    assign fast_block[277]= (address[149] & fast_select_2) | (address[85] & fast_select_6) | (address[21] & fast_select_7) | (frame_secret[21] & fast_layout[6]) | (frame_prf[21] & fast_layout[7]) | (frame_public[21] & fast_layout[8]) | (frame_key[21] & fast_select_10) | (frame_secret[93] & fast_layout[11]) | (frame_left[93] & fast_layout[12]) | (frame_left[101] & fast_select_5);
-    assign fast_block[278]= (address[150] & fast_select_2) | (address[86] & fast_select_6) | (address[22] & fast_select_7) | (frame_secret[22] & fast_layout[6]) | (frame_prf[22] & fast_layout[7]) | (frame_public[22] & fast_layout[8]) | (frame_key[22] & fast_select_10) | (frame_secret[94] & fast_layout[11]) | (frame_left[94] & fast_layout[12]) | (frame_left[102] & fast_select_5);
-    assign fast_block[279]= (address[151] & fast_select_2) | (address[87] & fast_select_6) | (address[23] & fast_select_7) | (frame_secret[23] & fast_layout[6]) | (frame_prf[23] & fast_layout[7]) | (frame_public[23] & fast_layout[8]) | (frame_key[23] & fast_select_10) | (frame_secret[95] & fast_layout[11]) | (frame_left[95] & fast_layout[12]) | (frame_left[103] & fast_select_5);
-    assign fast_block[280]= (address[152] & fast_select_2) | (address[88] & fast_select_6) | (address[24] & fast_select_7) | (frame_secret[24] & fast_layout[6]) | (frame_prf[24] & fast_layout[7]) | (frame_public[24] & fast_layout[8]) | (frame_key[24] & fast_select_10) | (frame_secret[96] & fast_layout[11]) | (frame_left[96] & fast_layout[12]) | (frame_left[104] & fast_select_5);
-    assign fast_block[281]= (address[153] & fast_select_2) | (address[89] & fast_select_6) | (address[25] & fast_select_7) | (frame_secret[25] & fast_layout[6]) | (frame_prf[25] & fast_layout[7]) | (frame_public[25] & fast_layout[8]) | (frame_key[25] & fast_select_10) | (frame_secret[97] & fast_layout[11]) | (frame_left[97] & fast_layout[12]) | (frame_left[105] & fast_select_5);
-    assign fast_block[282]= (address[154] & fast_select_2) | (address[90] & fast_select_6) | (address[26] & fast_select_7) | (frame_secret[26] & fast_layout[6]) | (frame_prf[26] & fast_layout[7]) | (frame_public[26] & fast_layout[8]) | (frame_key[26] & fast_select_10) | (frame_secret[98] & fast_layout[11]) | (frame_left[98] & fast_layout[12]) | (frame_left[106] & fast_select_5);
-    assign fast_block[283]= (address[155] & fast_select_2) | (address[91] & fast_select_6) | (address[27] & fast_select_7) | (frame_secret[27] & fast_layout[6]) | (frame_prf[27] & fast_layout[7]) | (frame_public[27] & fast_layout[8]) | (frame_key[27] & fast_select_10) | (frame_secret[99] & fast_layout[11]) | (frame_left[99] & fast_layout[12]) | (frame_left[107] & fast_select_5);
-    assign fast_block[284]= (address[156] & fast_select_2) | (address[92] & fast_select_6) | (address[28] & fast_select_7) | (frame_secret[28] & fast_layout[6]) | (frame_prf[28] & fast_layout[7]) | (frame_public[28] & fast_layout[8]) | (frame_key[28] & fast_select_10) | (frame_secret[100] & fast_layout[11]) | (frame_left[100] & fast_layout[12]) | (frame_left[108] & fast_select_5);
-    assign fast_block[285]= (address[157] & fast_select_2) | (address[93] & fast_select_6) | (address[29] & fast_select_7) | (frame_secret[29] & fast_layout[6]) | (frame_prf[29] & fast_layout[7]) | (frame_public[29] & fast_layout[8]) | (frame_key[29] & fast_select_10) | (frame_secret[101] & fast_layout[11]) | (frame_left[101] & fast_layout[12]) | (frame_left[109] & fast_select_5);
-    assign fast_block[286]= (address[158] & fast_select_2) | (address[94] & fast_select_6) | (address[30] & fast_select_7) | (frame_secret[30] & fast_layout[6]) | (frame_prf[30] & fast_layout[7]) | (frame_public[30] & fast_layout[8]) | (frame_key[30] & fast_select_10) | (frame_secret[102] & fast_layout[11]) | (frame_left[102] & fast_layout[12]) | (frame_left[110] & fast_select_5);
-    assign fast_block[287]= (address[159] & fast_select_2) | (address[95] & fast_select_6) | (address[31] & fast_select_7) | (frame_secret[31] & fast_layout[6]) | (frame_prf[31] & fast_layout[7]) | (frame_public[31] & fast_layout[8]) | (frame_key[31] & fast_select_10) | (frame_secret[103] & fast_layout[11]) | (frame_left[103] & fast_layout[12]) | (frame_left[111] & fast_select_5);
-    assign fast_block[288]= (address[160] & fast_select_2) | (address[96] & fast_select_6) | (address[32] & fast_select_7) | (frame_secret[32] & fast_layout[6]) | (frame_prf[32] & fast_layout[7]) | (frame_public[32] & fast_layout[8]) | (frame_key[32] & fast_select_10) | (frame_secret[104] & fast_layout[11]) | (frame_left[104] & fast_layout[12]) | (frame_left[112] & fast_select_5);
-    assign fast_block[289]= (address[161] & fast_select_2) | (address[97] & fast_select_6) | (address[33] & fast_select_7) | (frame_secret[33] & fast_layout[6]) | (frame_prf[33] & fast_layout[7]) | (frame_public[33] & fast_layout[8]) | (frame_key[33] & fast_select_10) | (frame_secret[105] & fast_layout[11]) | (frame_left[105] & fast_layout[12]) | (frame_left[113] & fast_select_5);
-    assign fast_block[290]= (address[162] & fast_select_2) | (address[98] & fast_select_6) | (address[34] & fast_select_7) | (frame_secret[34] & fast_layout[6]) | (frame_prf[34] & fast_layout[7]) | (frame_public[34] & fast_layout[8]) | (frame_key[34] & fast_select_10) | (frame_secret[106] & fast_layout[11]) | (frame_left[106] & fast_layout[12]) | (frame_left[114] & fast_select_5);
-    assign fast_block[291]= (address[163] & fast_select_2) | (address[99] & fast_select_6) | (address[35] & fast_select_7) | (frame_secret[35] & fast_layout[6]) | (frame_prf[35] & fast_layout[7]) | (frame_public[35] & fast_layout[8]) | (frame_key[35] & fast_select_10) | (frame_secret[107] & fast_layout[11]) | (frame_left[107] & fast_layout[12]) | (frame_left[115] & fast_select_5);
-    assign fast_block[292]= (address[164] & fast_select_2) | (address[100] & fast_select_6) | (address[36] & fast_select_7) | (frame_secret[36] & fast_layout[6]) | (frame_prf[36] & fast_layout[7]) | (frame_public[36] & fast_layout[8]) | (frame_key[36] & fast_select_10) | (frame_secret[108] & fast_layout[11]) | (frame_left[108] & fast_layout[12]) | (frame_left[116] & fast_select_5);
-    assign fast_block[293]= (address[165] & fast_select_2) | (address[101] & fast_select_6) | (address[37] & fast_select_7) | (frame_secret[37] & fast_layout[6]) | (frame_prf[37] & fast_layout[7]) | (frame_public[37] & fast_layout[8]) | (frame_key[37] & fast_select_10) | (frame_secret[109] & fast_layout[11]) | (frame_left[109] & fast_layout[12]) | (frame_left[117] & fast_select_5);
-    assign fast_block[294]= (address[166] & fast_select_2) | (address[102] & fast_select_6) | (address[38] & fast_select_7) | (frame_secret[38] & fast_layout[6]) | (frame_prf[38] & fast_layout[7]) | (frame_public[38] & fast_layout[8]) | (frame_key[38] & fast_select_10) | (frame_secret[110] & fast_layout[11]) | (frame_left[110] & fast_layout[12]) | (frame_left[118] & fast_select_5);
-    assign fast_block[295]= (address[167] & fast_select_2) | (address[103] & fast_select_6) | (address[39] & fast_select_7) | (frame_secret[39] & fast_layout[6]) | (frame_prf[39] & fast_layout[7]) | (frame_public[39] & fast_layout[8]) | (frame_key[39] & fast_select_10) | (frame_secret[111] & fast_layout[11]) | (frame_left[111] & fast_layout[12]) | (frame_left[119] & fast_select_5);
-    assign fast_block[296]= (address[168] & fast_select_2) | (address[104] & fast_select_6) | (address[40] & fast_select_7) | (frame_secret[40] & fast_layout[6]) | (frame_prf[40] & fast_layout[7]) | (frame_public[40] & fast_layout[8]) | (frame_key[40] & fast_select_10) | (frame_secret[112] & fast_layout[11]) | (frame_left[112] & fast_layout[12]) | (frame_left[120] & fast_select_5);
-    assign fast_block[297]= (address[169] & fast_select_2) | (address[105] & fast_select_6) | (address[41] & fast_select_7) | (frame_secret[41] & fast_layout[6]) | (frame_prf[41] & fast_layout[7]) | (frame_public[41] & fast_layout[8]) | (frame_key[41] & fast_select_10) | (frame_secret[113] & fast_layout[11]) | (frame_left[113] & fast_layout[12]) | (frame_left[121] & fast_select_5);
-    assign fast_block[298]= (address[170] & fast_select_2) | (address[106] & fast_select_6) | (address[42] & fast_select_7) | (frame_secret[42] & fast_layout[6]) | (frame_prf[42] & fast_layout[7]) | (frame_public[42] & fast_layout[8]) | (frame_key[42] & fast_select_10) | (frame_secret[114] & fast_layout[11]) | (frame_left[114] & fast_layout[12]) | (frame_left[122] & fast_select_5);
-    assign fast_block[299]= (address[171] & fast_select_2) | (address[107] & fast_select_6) | (address[43] & fast_select_7) | (frame_secret[43] & fast_layout[6]) | (frame_prf[43] & fast_layout[7]) | (frame_public[43] & fast_layout[8]) | (frame_key[43] & fast_select_10) | (frame_secret[115] & fast_layout[11]) | (frame_left[115] & fast_layout[12]) | (frame_left[123] & fast_select_5);
-    assign fast_block[300]= (address[172] & fast_select_2) | (address[108] & fast_select_6) | (address[44] & fast_select_7) | (frame_secret[44] & fast_layout[6]) | (frame_prf[44] & fast_layout[7]) | (frame_public[44] & fast_layout[8]) | (frame_key[44] & fast_select_10) | (frame_secret[116] & fast_layout[11]) | (frame_left[116] & fast_layout[12]) | (frame_left[124] & fast_select_5);
-    assign fast_block[301]= (address[173] & fast_select_2) | (address[109] & fast_select_6) | (address[45] & fast_select_7) | (frame_secret[45] & fast_layout[6]) | (frame_prf[45] & fast_layout[7]) | (frame_public[45] & fast_layout[8]) | (frame_key[45] & fast_select_10) | (frame_secret[117] & fast_layout[11]) | (frame_left[117] & fast_layout[12]) | (frame_left[125] & fast_select_5);
-    assign fast_block[302]= (address[174] & fast_select_2) | (address[110] & fast_select_6) | (address[46] & fast_select_7) | (frame_secret[46] & fast_layout[6]) | (frame_prf[46] & fast_layout[7]) | (frame_public[46] & fast_layout[8]) | (frame_key[46] & fast_select_10) | (frame_secret[118] & fast_layout[11]) | (frame_left[118] & fast_layout[12]) | (frame_left[126] & fast_select_5);
-    assign fast_block[303]= (address[175] & fast_select_2) | (address[111] & fast_select_6) | (address[47] & fast_select_7) | (frame_secret[47] & fast_layout[6]) | (frame_prf[47] & fast_layout[7]) | (frame_public[47] & fast_layout[8]) | (frame_key[47] & fast_select_10) | (frame_secret[119] & fast_layout[11]) | (frame_left[119] & fast_layout[12]) | (frame_left[127] & fast_select_5);
-    assign fast_block[304]= (address[176] & fast_select_2) | (address[112] & fast_select_6) | (address[48] & fast_select_7) | (frame_secret[48] & fast_layout[6]) | (frame_prf[48] & fast_layout[7]) | (frame_public[48] & fast_layout[8]) | (frame_key[48] & fast_select_10) | (frame_secret[120] & fast_layout[11]) | (frame_left[120] & fast_layout[12]) | (frame_left[128] & fast_select_5);
-    assign fast_block[305]= (address[177] & fast_select_2) | (address[113] & fast_select_6) | (address[49] & fast_select_7) | (frame_secret[49] & fast_layout[6]) | (frame_prf[49] & fast_layout[7]) | (frame_public[49] & fast_layout[8]) | (frame_key[49] & fast_select_10) | (frame_secret[121] & fast_layout[11]) | (frame_left[121] & fast_layout[12]) | (frame_left[129] & fast_select_5);
-    assign fast_block[306]= (address[178] & fast_select_2) | (address[114] & fast_select_6) | (address[50] & fast_select_7) | (frame_secret[50] & fast_layout[6]) | (frame_prf[50] & fast_layout[7]) | (frame_public[50] & fast_layout[8]) | (frame_key[50] & fast_select_10) | (frame_secret[122] & fast_layout[11]) | (frame_left[122] & fast_layout[12]) | (frame_left[130] & fast_select_5);
-    assign fast_block[307]= (address[179] & fast_select_2) | (address[115] & fast_select_6) | (address[51] & fast_select_7) | (frame_secret[51] & fast_layout[6]) | (frame_prf[51] & fast_layout[7]) | (frame_public[51] & fast_layout[8]) | (frame_key[51] & fast_select_10) | (frame_secret[123] & fast_layout[11]) | (frame_left[123] & fast_layout[12]) | (frame_left[131] & fast_select_5);
-    assign fast_block[308]= (address[180] & fast_select_2) | (address[116] & fast_select_6) | (address[52] & fast_select_7) | (frame_secret[52] & fast_layout[6]) | (frame_prf[52] & fast_layout[7]) | (frame_public[52] & fast_layout[8]) | (frame_key[52] & fast_select_10) | (frame_secret[124] & fast_layout[11]) | (frame_left[124] & fast_layout[12]) | (frame_left[132] & fast_select_5);
-    assign fast_block[309]= (address[181] & fast_select_2) | (address[117] & fast_select_6) | (address[53] & fast_select_7) | (frame_secret[53] & fast_layout[6]) | (frame_prf[53] & fast_layout[7]) | (frame_public[53] & fast_layout[8]) | (frame_key[53] & fast_select_10) | (frame_secret[125] & fast_layout[11]) | (frame_left[125] & fast_layout[12]) | (frame_left[133] & fast_select_5);
-    assign fast_block[310]= (address[182] & fast_select_2) | (address[118] & fast_select_6) | (address[54] & fast_select_7) | (frame_secret[54] & fast_layout[6]) | (frame_prf[54] & fast_layout[7]) | (frame_public[54] & fast_layout[8]) | (frame_key[54] & fast_select_10) | (frame_secret[126] & fast_layout[11]) | (frame_left[126] & fast_layout[12]) | (frame_left[134] & fast_select_5);
-    assign fast_block[311]= (address[183] & fast_select_2) | (address[119] & fast_select_6) | (address[55] & fast_select_7) | (frame_secret[55] & fast_layout[6]) | (frame_prf[55] & fast_layout[7]) | (frame_public[55] & fast_layout[8]) | (frame_key[55] & fast_select_10) | (frame_secret[127] & fast_layout[11]) | (frame_left[127] & fast_layout[12]) | (frame_left[135] & fast_select_5);
-    assign fast_block[312]= (address[184] & fast_select_2) | (address[120] & fast_select_6) | (address[56] & fast_select_7) | (frame_secret[56] & fast_layout[6]) | (frame_prf[56] & fast_layout[7]) | (frame_public[56] & fast_layout[8]) | (frame_key[56] & fast_select_10) | (frame_secret[128] & fast_layout[11]) | (frame_left[128] & fast_layout[12]) | (frame_left[136] & fast_select_5);
-    assign fast_block[313]= (address[185] & fast_select_2) | (address[121] & fast_select_6) | (address[57] & fast_select_7) | (frame_secret[57] & fast_layout[6]) | (frame_prf[57] & fast_layout[7]) | (frame_public[57] & fast_layout[8]) | (frame_key[57] & fast_select_10) | (frame_secret[129] & fast_layout[11]) | (frame_left[129] & fast_layout[12]) | (frame_left[137] & fast_select_5);
-    assign fast_block[314]= (address[186] & fast_select_2) | (address[122] & fast_select_6) | (address[58] & fast_select_7) | (frame_secret[58] & fast_layout[6]) | (frame_prf[58] & fast_layout[7]) | (frame_public[58] & fast_layout[8]) | (frame_key[58] & fast_select_10) | (frame_secret[130] & fast_layout[11]) | (frame_left[130] & fast_layout[12]) | (frame_left[138] & fast_select_5);
-    assign fast_block[315]= (address[187] & fast_select_2) | (address[123] & fast_select_6) | (address[59] & fast_select_7) | (frame_secret[59] & fast_layout[6]) | (frame_prf[59] & fast_layout[7]) | (frame_public[59] & fast_layout[8]) | (frame_key[59] & fast_select_10) | (frame_secret[131] & fast_layout[11]) | (frame_left[131] & fast_layout[12]) | (frame_left[139] & fast_select_5);
-    assign fast_block[316]= (address[188] & fast_select_2) | (address[124] & fast_select_6) | (address[60] & fast_select_7) | (frame_secret[60] & fast_layout[6]) | (frame_prf[60] & fast_layout[7]) | (frame_public[60] & fast_layout[8]) | (frame_key[60] & fast_select_10) | (frame_secret[132] & fast_layout[11]) | (frame_left[132] & fast_layout[12]) | (frame_left[140] & fast_select_5);
-    assign fast_block[317]= (address[189] & fast_select_2) | (address[125] & fast_select_6) | (address[61] & fast_select_7) | (frame_secret[61] & fast_layout[6]) | (frame_prf[61] & fast_layout[7]) | (frame_public[61] & fast_layout[8]) | (frame_key[61] & fast_select_10) | (frame_secret[133] & fast_layout[11]) | (frame_left[133] & fast_layout[12]) | (frame_left[141] & fast_select_5);
-    assign fast_block[318]= (address[190] & fast_select_2) | (address[126] & fast_select_6) | (address[62] & fast_select_7) | (frame_secret[62] & fast_layout[6]) | (frame_prf[62] & fast_layout[7]) | (frame_public[62] & fast_layout[8]) | (frame_key[62] & fast_select_10) | (frame_secret[134] & fast_layout[11]) | (frame_left[134] & fast_layout[12]) | (frame_left[142] & fast_select_5);
-    assign fast_block[319]= (address[191] & fast_select_2) | (address[127] & fast_select_6) | (address[63] & fast_select_7) | (frame_secret[63] & fast_layout[6]) | (frame_prf[63] & fast_layout[7]) | (frame_public[63] & fast_layout[8]) | (frame_key[63] & fast_select_10) | (frame_secret[135] & fast_layout[11]) | (frame_left[135] & fast_layout[12]) | (frame_left[143] & fast_select_5);
-    assign fast_block[320]= (address[192] & fast_select_2) | (address[128] & fast_select_6) | (address[64] & fast_select_7) | (frame_secret[64] & fast_layout[6]) | (frame_prf[64] & fast_layout[7]) | (frame_public[64] & fast_layout[8]) | (frame_key[64] & fast_select_10) | (frame_secret[136] & fast_layout[11]) | (frame_left[136] & fast_layout[12]) | (frame_left[144] & fast_select_5);
-    assign fast_block[321]= (address[193] & fast_select_2) | (address[129] & fast_select_6) | (address[65] & fast_select_7) | (frame_secret[65] & fast_layout[6]) | (frame_prf[65] & fast_layout[7]) | (frame_public[65] & fast_layout[8]) | (frame_key[65] & fast_select_10) | (frame_secret[137] & fast_layout[11]) | (frame_left[137] & fast_layout[12]) | (frame_left[145] & fast_select_5);
-    assign fast_block[322]= (address[194] & fast_select_2) | (address[130] & fast_select_6) | (address[66] & fast_select_7) | (frame_secret[66] & fast_layout[6]) | (frame_prf[66] & fast_layout[7]) | (frame_public[66] & fast_layout[8]) | (frame_key[66] & fast_select_10) | (frame_secret[138] & fast_layout[11]) | (frame_left[138] & fast_layout[12]) | (frame_left[146] & fast_select_5);
-    assign fast_block[323]= (address[195] & fast_select_2) | (address[131] & fast_select_6) | (address[67] & fast_select_7) | (frame_secret[67] & fast_layout[6]) | (frame_prf[67] & fast_layout[7]) | (frame_public[67] & fast_layout[8]) | (frame_key[67] & fast_select_10) | (frame_secret[139] & fast_layout[11]) | (frame_left[139] & fast_layout[12]) | (frame_left[147] & fast_select_5);
-    assign fast_block[324]= (address[196] & fast_select_2) | (address[132] & fast_select_6) | (address[68] & fast_select_7) | (frame_secret[68] & fast_layout[6]) | (frame_prf[68] & fast_layout[7]) | (frame_public[68] & fast_layout[8]) | (frame_key[68] & fast_select_10) | (frame_secret[140] & fast_layout[11]) | (frame_left[140] & fast_layout[12]) | (frame_left[148] & fast_select_5);
-    assign fast_block[325]= (address[197] & fast_select_2) | (address[133] & fast_select_6) | (address[69] & fast_select_7) | (frame_secret[69] & fast_layout[6]) | (frame_prf[69] & fast_layout[7]) | (frame_public[69] & fast_layout[8]) | (frame_key[69] & fast_select_10) | (frame_secret[141] & fast_layout[11]) | (frame_left[141] & fast_layout[12]) | (frame_left[149] & fast_select_5);
-    assign fast_block[326]= (address[198] & fast_select_2) | (address[134] & fast_select_6) | (address[70] & fast_select_7) | (frame_secret[70] & fast_layout[6]) | (frame_prf[70] & fast_layout[7]) | (frame_public[70] & fast_layout[8]) | (frame_key[70] & fast_select_10) | (frame_secret[142] & fast_layout[11]) | (frame_left[142] & fast_layout[12]) | (frame_left[150] & fast_select_5);
-    assign fast_block[327]= (address[199] & fast_select_2) | (address[135] & fast_select_6) | (address[71] & fast_select_7) | (frame_secret[71] & fast_layout[6]) | (frame_prf[71] & fast_layout[7]) | (frame_public[71] & fast_layout[8]) | (frame_key[71] & fast_select_10) | (frame_secret[143] & fast_layout[11]) | (frame_left[143] & fast_layout[12]) | (frame_left[151] & fast_select_5);
-    assign fast_block[328]= (address[200] & fast_select_2) | (address[136] & fast_select_6) | (address[72] & fast_select_7) | (frame_secret[72] & fast_layout[6]) | (frame_prf[72] & fast_layout[7]) | (frame_public[72] & fast_layout[8]) | (frame_key[72] & fast_select_10) | (frame_secret[144] & fast_layout[11]) | (frame_left[144] & fast_layout[12]) | (frame_left[152] & fast_select_5);
-    assign fast_block[329]= (address[201] & fast_select_2) | (address[137] & fast_select_6) | (address[73] & fast_select_7) | (frame_secret[73] & fast_layout[6]) | (frame_prf[73] & fast_layout[7]) | (frame_public[73] & fast_layout[8]) | (frame_key[73] & fast_select_10) | (frame_secret[145] & fast_layout[11]) | (frame_left[145] & fast_layout[12]) | (frame_left[153] & fast_select_5);
-    assign fast_block[330]= (address[202] & fast_select_2) | (address[138] & fast_select_6) | (address[74] & fast_select_7) | (frame_secret[74] & fast_layout[6]) | (frame_prf[74] & fast_layout[7]) | (frame_public[74] & fast_layout[8]) | (frame_key[74] & fast_select_10) | (frame_secret[146] & fast_layout[11]) | (frame_left[146] & fast_layout[12]) | (frame_left[154] & fast_select_5);
-    assign fast_block[331]= (address[203] & fast_select_2) | (address[139] & fast_select_6) | (address[75] & fast_select_7) | (frame_secret[75] & fast_layout[6]) | (frame_prf[75] & fast_layout[7]) | (frame_public[75] & fast_layout[8]) | (frame_key[75] & fast_select_10) | (frame_secret[147] & fast_layout[11]) | (frame_left[147] & fast_layout[12]) | (frame_left[155] & fast_select_5);
-    assign fast_block[332]= (address[204] & fast_select_2) | (address[140] & fast_select_6) | (address[76] & fast_select_7) | (frame_secret[76] & fast_layout[6]) | (frame_prf[76] & fast_layout[7]) | (frame_public[76] & fast_layout[8]) | (frame_key[76] & fast_select_10) | (frame_secret[148] & fast_layout[11]) | (frame_left[148] & fast_layout[12]) | (frame_left[156] & fast_select_5);
-    assign fast_block[333]= (address[205] & fast_select_2) | (address[141] & fast_select_6) | (address[77] & fast_select_7) | (frame_secret[77] & fast_layout[6]) | (frame_prf[77] & fast_layout[7]) | (frame_public[77] & fast_layout[8]) | (frame_key[77] & fast_select_10) | (frame_secret[149] & fast_layout[11]) | (frame_left[149] & fast_layout[12]) | (frame_left[157] & fast_select_5);
-    assign fast_block[334]= (address[206] & fast_select_2) | (address[142] & fast_select_6) | (address[78] & fast_select_7) | (frame_secret[78] & fast_layout[6]) | (frame_prf[78] & fast_layout[7]) | (frame_public[78] & fast_layout[8]) | (frame_key[78] & fast_select_10) | (frame_secret[150] & fast_layout[11]) | (frame_left[150] & fast_layout[12]) | (frame_left[158] & fast_select_5);
-    assign fast_block[335]= (address[207] & fast_select_2) | (address[143] & fast_select_6) | (address[79] & fast_select_7) | (frame_secret[79] & fast_layout[6]) | (frame_prf[79] & fast_layout[7]) | (frame_public[79] & fast_layout[8]) | (frame_key[79] & fast_select_10) | (frame_secret[151] & fast_layout[11]) | (frame_left[151] & fast_layout[12]) | (frame_left[159] & fast_select_5);
-    assign fast_block[336]= (address[208] & fast_select_2) | (address[144] & fast_select_6) | (address[80] & fast_select_7) | (frame_secret[80] & fast_layout[6]) | (frame_prf[80] & fast_layout[7]) | (frame_public[80] & fast_layout[8]) | (frame_key[80] & fast_select_10) | (frame_secret[152] & fast_layout[11]) | (frame_left[152] & fast_layout[12]) | (frame_left[160] & fast_select_5);
-    assign fast_block[337]= (address[209] & fast_select_2) | (address[145] & fast_select_6) | (address[81] & fast_select_7) | (frame_secret[81] & fast_layout[6]) | (frame_prf[81] & fast_layout[7]) | (frame_public[81] & fast_layout[8]) | (frame_key[81] & fast_select_10) | (frame_secret[153] & fast_layout[11]) | (frame_left[153] & fast_layout[12]) | (frame_left[161] & fast_select_5);
-    assign fast_block[338]= (address[210] & fast_select_2) | (address[146] & fast_select_6) | (address[82] & fast_select_7) | (frame_secret[82] & fast_layout[6]) | (frame_prf[82] & fast_layout[7]) | (frame_public[82] & fast_layout[8]) | (frame_key[82] & fast_select_10) | (frame_secret[154] & fast_layout[11]) | (frame_left[154] & fast_layout[12]) | (frame_left[162] & fast_select_5);
-    assign fast_block[339]= (address[211] & fast_select_2) | (address[147] & fast_select_6) | (address[83] & fast_select_7) | (frame_secret[83] & fast_layout[6]) | (frame_prf[83] & fast_layout[7]) | (frame_public[83] & fast_layout[8]) | (frame_key[83] & fast_select_10) | (frame_secret[155] & fast_layout[11]) | (frame_left[155] & fast_layout[12]) | (frame_left[163] & fast_select_5);
-    assign fast_block[340]= (address[212] & fast_select_2) | (address[148] & fast_select_6) | (address[84] & fast_select_7) | (frame_secret[84] & fast_layout[6]) | (frame_prf[84] & fast_layout[7]) | (frame_public[84] & fast_layout[8]) | (frame_key[84] & fast_select_10) | (frame_secret[156] & fast_layout[11]) | (frame_left[156] & fast_layout[12]) | (frame_left[164] & fast_select_5);
-    assign fast_block[341]= (address[213] & fast_select_2) | (address[149] & fast_select_6) | (address[85] & fast_select_7) | (frame_secret[85] & fast_layout[6]) | (frame_prf[85] & fast_layout[7]) | (frame_public[85] & fast_layout[8]) | (frame_key[85] & fast_select_10) | (frame_secret[157] & fast_layout[11]) | (frame_left[157] & fast_layout[12]) | (frame_left[165] & fast_select_5);
-    assign fast_block[342]= (address[214] & fast_select_2) | (address[150] & fast_select_6) | (address[86] & fast_select_7) | (frame_secret[86] & fast_layout[6]) | (frame_prf[86] & fast_layout[7]) | (frame_public[86] & fast_layout[8]) | (frame_key[86] & fast_select_10) | (frame_secret[158] & fast_layout[11]) | (frame_left[158] & fast_layout[12]) | (frame_left[166] & fast_select_5);
-    assign fast_block[343]= (address[215] & fast_select_2) | (address[151] & fast_select_6) | (address[87] & fast_select_7) | (frame_secret[87] & fast_layout[6]) | (frame_prf[87] & fast_layout[7]) | (frame_public[87] & fast_layout[8]) | (frame_key[87] & fast_select_10) | (frame_secret[159] & fast_layout[11]) | (frame_left[159] & fast_layout[12]) | (frame_left[167] & fast_select_5);
-    assign fast_block[344]= (address[216] & fast_select_2) | (address[152] & fast_select_6) | (address[88] & fast_select_7) | (frame_secret[88] & fast_layout[6]) | (frame_prf[88] & fast_layout[7]) | (frame_public[88] & fast_layout[8]) | (frame_key[88] & fast_select_10) | (frame_secret[160] & fast_layout[11]) | (frame_left[160] & fast_layout[12]) | (frame_left[168] & fast_select_5);
-    assign fast_block[345]= (address[217] & fast_select_2) | (address[153] & fast_select_6) | (address[89] & fast_select_7) | (frame_secret[89] & fast_layout[6]) | (frame_prf[89] & fast_layout[7]) | (frame_public[89] & fast_layout[8]) | (frame_key[89] & fast_select_10) | (frame_secret[161] & fast_layout[11]) | (frame_left[161] & fast_layout[12]) | (frame_left[169] & fast_select_5);
-    assign fast_block[346]= (address[218] & fast_select_2) | (address[154] & fast_select_6) | (address[90] & fast_select_7) | (frame_secret[90] & fast_layout[6]) | (frame_prf[90] & fast_layout[7]) | (frame_public[90] & fast_layout[8]) | (frame_key[90] & fast_select_10) | (frame_secret[162] & fast_layout[11]) | (frame_left[162] & fast_layout[12]) | (frame_left[170] & fast_select_5);
-    assign fast_block[347]= (address[219] & fast_select_2) | (address[155] & fast_select_6) | (address[91] & fast_select_7) | (frame_secret[91] & fast_layout[6]) | (frame_prf[91] & fast_layout[7]) | (frame_public[91] & fast_layout[8]) | (frame_key[91] & fast_select_10) | (frame_secret[163] & fast_layout[11]) | (frame_left[163] & fast_layout[12]) | (frame_left[171] & fast_select_5);
-    assign fast_block[348]= (address[220] & fast_select_2) | (address[156] & fast_select_6) | (address[92] & fast_select_7) | (frame_secret[92] & fast_layout[6]) | (frame_prf[92] & fast_layout[7]) | (frame_public[92] & fast_layout[8]) | (frame_key[92] & fast_select_10) | (frame_secret[164] & fast_layout[11]) | (frame_left[164] & fast_layout[12]) | (frame_left[172] & fast_select_5);
-    assign fast_block[349]= (address[221] & fast_select_2) | (address[157] & fast_select_6) | (address[93] & fast_select_7) | (frame_secret[93] & fast_layout[6]) | (frame_prf[93] & fast_layout[7]) | (frame_public[93] & fast_layout[8]) | (frame_key[93] & fast_select_10) | (frame_secret[165] & fast_layout[11]) | (frame_left[165] & fast_layout[12]) | (frame_left[173] & fast_select_5);
-    assign fast_block[350]= (address[222] & fast_select_2) | (address[158] & fast_select_6) | (address[94] & fast_select_7) | (frame_secret[94] & fast_layout[6]) | (frame_prf[94] & fast_layout[7]) | (frame_public[94] & fast_layout[8]) | (frame_key[94] & fast_select_10) | (frame_secret[166] & fast_layout[11]) | (frame_left[166] & fast_layout[12]) | (frame_left[174] & fast_select_5);
-    assign fast_block[351]= (address[223] & fast_select_2) | (address[159] & fast_select_6) | (address[95] & fast_select_7) | (frame_secret[95] & fast_layout[6]) | (frame_prf[95] & fast_layout[7]) | (frame_public[95] & fast_layout[8]) | (frame_key[95] & fast_select_10) | (frame_secret[167] & fast_layout[11]) | (frame_left[167] & fast_layout[12]) | (frame_left[175] & fast_select_5);
-    assign fast_block[352]= (address[224] & fast_select_2) | (address[160] & fast_select_6) | (address[96] & fast_select_7) | (frame_secret[96] & fast_layout[6]) | (frame_prf[96] & fast_layout[7]) | (frame_public[96] & fast_layout[8]) | (frame_key[96] & fast_select_10) | (frame_secret[168] & fast_layout[11]) | (frame_left[168] & fast_layout[12]) | (frame_left[176] & fast_select_5);
-    assign fast_block[353]= (address[225] & fast_select_2) | (address[161] & fast_select_6) | (address[97] & fast_select_7) | (frame_secret[97] & fast_layout[6]) | (frame_prf[97] & fast_layout[7]) | (frame_public[97] & fast_layout[8]) | (frame_key[97] & fast_select_10) | (frame_secret[169] & fast_layout[11]) | (frame_left[169] & fast_layout[12]) | (frame_left[177] & fast_select_5);
-    assign fast_block[354]= (address[226] & fast_select_2) | (address[162] & fast_select_6) | (address[98] & fast_select_7) | (frame_secret[98] & fast_layout[6]) | (frame_prf[98] & fast_layout[7]) | (frame_public[98] & fast_layout[8]) | (frame_key[98] & fast_select_10) | (frame_secret[170] & fast_layout[11]) | (frame_left[170] & fast_layout[12]) | (frame_left[178] & fast_select_5);
-    assign fast_block[355]= (address[227] & fast_select_2) | (address[163] & fast_select_6) | (address[99] & fast_select_7) | (frame_secret[99] & fast_layout[6]) | (frame_prf[99] & fast_layout[7]) | (frame_public[99] & fast_layout[8]) | (frame_key[99] & fast_select_10) | (frame_secret[171] & fast_layout[11]) | (frame_left[171] & fast_layout[12]) | (frame_left[179] & fast_select_5);
-    assign fast_block[356]= (address[228] & fast_select_2) | (address[164] & fast_select_6) | (address[100] & fast_select_7) | (frame_secret[100] & fast_layout[6]) | (frame_prf[100] & fast_layout[7]) | (frame_public[100] & fast_layout[8]) | (frame_key[100] & fast_select_10) | (frame_secret[172] & fast_layout[11]) | (frame_left[172] & fast_layout[12]) | (frame_left[180] & fast_select_5);
-    assign fast_block[357]= (address[229] & fast_select_2) | (address[165] & fast_select_6) | (address[101] & fast_select_7) | (frame_secret[101] & fast_layout[6]) | (frame_prf[101] & fast_layout[7]) | (frame_public[101] & fast_layout[8]) | (frame_key[101] & fast_select_10) | (frame_secret[173] & fast_layout[11]) | (frame_left[173] & fast_layout[12]) | (frame_left[181] & fast_select_5);
-    assign fast_block[358]= (address[230] & fast_select_2) | (address[166] & fast_select_6) | (address[102] & fast_select_7) | (frame_secret[102] & fast_layout[6]) | (frame_prf[102] & fast_layout[7]) | (frame_public[102] & fast_layout[8]) | (frame_key[102] & fast_select_10) | (frame_secret[174] & fast_layout[11]) | (frame_left[174] & fast_layout[12]) | (frame_left[182] & fast_select_5);
-    assign fast_block[359]= (address[231] & fast_select_2) | (address[167] & fast_select_6) | (address[103] & fast_select_7) | (frame_secret[103] & fast_layout[6]) | (frame_prf[103] & fast_layout[7]) | (frame_public[103] & fast_layout[8]) | (frame_key[103] & fast_select_10) | (frame_secret[175] & fast_layout[11]) | (frame_left[175] & fast_layout[12]) | (frame_left[183] & fast_select_5);
-    assign fast_block[360]= (address[232] & fast_select_2) | (address[168] & fast_select_6) | (address[104] & fast_select_7) | (frame_secret[104] & fast_layout[6]) | (frame_prf[104] & fast_layout[7]) | (frame_public[104] & fast_layout[8]) | (frame_key[104] & fast_select_10) | (frame_secret[176] & fast_layout[11]) | (frame_left[176] & fast_layout[12]) | (frame_left[184] & fast_select_5);
-    assign fast_block[361]= (address[233] & fast_select_2) | (address[169] & fast_select_6) | (address[105] & fast_select_7) | (frame_secret[105] & fast_layout[6]) | (frame_prf[105] & fast_layout[7]) | (frame_public[105] & fast_layout[8]) | (frame_key[105] & fast_select_10) | (frame_secret[177] & fast_layout[11]) | (frame_left[177] & fast_layout[12]) | (frame_left[185] & fast_select_5);
-    assign fast_block[362]= (address[234] & fast_select_2) | (address[170] & fast_select_6) | (address[106] & fast_select_7) | (frame_secret[106] & fast_layout[6]) | (frame_prf[106] & fast_layout[7]) | (frame_public[106] & fast_layout[8]) | (frame_key[106] & fast_select_10) | (frame_secret[178] & fast_layout[11]) | (frame_left[178] & fast_layout[12]) | (frame_left[186] & fast_select_5);
-    assign fast_block[363]= (address[235] & fast_select_2) | (address[171] & fast_select_6) | (address[107] & fast_select_7) | (frame_secret[107] & fast_layout[6]) | (frame_prf[107] & fast_layout[7]) | (frame_public[107] & fast_layout[8]) | (frame_key[107] & fast_select_10) | (frame_secret[179] & fast_layout[11]) | (frame_left[179] & fast_layout[12]) | (frame_left[187] & fast_select_5);
-    assign fast_block[364]= (address[236] & fast_select_2) | (address[172] & fast_select_6) | (address[108] & fast_select_7) | (frame_secret[108] & fast_layout[6]) | (frame_prf[108] & fast_layout[7]) | (frame_public[108] & fast_layout[8]) | (frame_key[108] & fast_select_10) | (frame_secret[180] & fast_layout[11]) | (frame_left[180] & fast_layout[12]) | (frame_left[188] & fast_select_5);
-    assign fast_block[365]= (address[237] & fast_select_2) | (address[173] & fast_select_6) | (address[109] & fast_select_7) | (frame_secret[109] & fast_layout[6]) | (frame_prf[109] & fast_layout[7]) | (frame_public[109] & fast_layout[8]) | (frame_key[109] & fast_select_10) | (frame_secret[181] & fast_layout[11]) | (frame_left[181] & fast_layout[12]) | (frame_left[189] & fast_select_5);
-    assign fast_block[366]= (address[238] & fast_select_2) | (address[174] & fast_select_6) | (address[110] & fast_select_7) | (frame_secret[110] & fast_layout[6]) | (frame_prf[110] & fast_layout[7]) | (frame_public[110] & fast_layout[8]) | (frame_key[110] & fast_select_10) | (frame_secret[182] & fast_layout[11]) | (frame_left[182] & fast_layout[12]) | (frame_left[190] & fast_select_5);
-    assign fast_block[367]= (address[239] & fast_select_2) | (address[175] & fast_select_6) | (address[111] & fast_select_7) | (frame_secret[111] & fast_layout[6]) | (frame_prf[111] & fast_layout[7]) | (frame_public[111] & fast_layout[8]) | (frame_key[111] & fast_select_10) | (frame_secret[183] & fast_layout[11]) | (frame_left[183] & fast_layout[12]) | (frame_left[191] & fast_select_5);
-    assign fast_block[368]= (address[240] & fast_select_2) | (address[176] & fast_select_6) | (address[112] & fast_select_7) | (frame_secret[112] & fast_layout[6]) | (frame_prf[112] & fast_layout[7]) | (frame_public[112] & fast_layout[8]) | (frame_key[112] & fast_select_10) | (frame_secret[184] & fast_layout[11]) | (frame_left[184] & fast_layout[12]) | (frame_left[192] & fast_select_5);
-    assign fast_block[369]= (address[241] & fast_select_2) | (address[177] & fast_select_6) | (address[113] & fast_select_7) | (frame_secret[113] & fast_layout[6]) | (frame_prf[113] & fast_layout[7]) | (frame_public[113] & fast_layout[8]) | (frame_key[113] & fast_select_10) | (frame_secret[185] & fast_layout[11]) | (frame_left[185] & fast_layout[12]) | (frame_left[193] & fast_select_5);
-    assign fast_block[370]= (address[242] & fast_select_2) | (address[178] & fast_select_6) | (address[114] & fast_select_7) | (frame_secret[114] & fast_layout[6]) | (frame_prf[114] & fast_layout[7]) | (frame_public[114] & fast_layout[8]) | (frame_key[114] & fast_select_10) | (frame_secret[186] & fast_layout[11]) | (frame_left[186] & fast_layout[12]) | (frame_left[194] & fast_select_5);
-    assign fast_block[371]= (address[243] & fast_select_2) | (address[179] & fast_select_6) | (address[115] & fast_select_7) | (frame_secret[115] & fast_layout[6]) | (frame_prf[115] & fast_layout[7]) | (frame_public[115] & fast_layout[8]) | (frame_key[115] & fast_select_10) | (frame_secret[187] & fast_layout[11]) | (frame_left[187] & fast_layout[12]) | (frame_left[195] & fast_select_5);
-    assign fast_block[372]= (address[244] & fast_select_2) | (address[180] & fast_select_6) | (address[116] & fast_select_7) | (frame_secret[116] & fast_layout[6]) | (frame_prf[116] & fast_layout[7]) | (frame_public[116] & fast_layout[8]) | (frame_key[116] & fast_select_10) | (frame_secret[188] & fast_layout[11]) | (frame_left[188] & fast_layout[12]) | (frame_left[196] & fast_select_5);
-    assign fast_block[373]= (address[245] & fast_select_2) | (address[181] & fast_select_6) | (address[117] & fast_select_7) | (frame_secret[117] & fast_layout[6]) | (frame_prf[117] & fast_layout[7]) | (frame_public[117] & fast_layout[8]) | (frame_key[117] & fast_select_10) | (frame_secret[189] & fast_layout[11]) | (frame_left[189] & fast_layout[12]) | (frame_left[197] & fast_select_5);
-    assign fast_block[374]= (address[246] & fast_select_2) | (address[182] & fast_select_6) | (address[118] & fast_select_7) | (frame_secret[118] & fast_layout[6]) | (frame_prf[118] & fast_layout[7]) | (frame_public[118] & fast_layout[8]) | (frame_key[118] & fast_select_10) | (frame_secret[190] & fast_layout[11]) | (frame_left[190] & fast_layout[12]) | (frame_left[198] & fast_select_5);
-    assign fast_block[375]= (address[247] & fast_select_2) | (address[183] & fast_select_6) | (address[119] & fast_select_7) | (frame_secret[119] & fast_layout[6]) | (frame_prf[119] & fast_layout[7]) | (frame_public[119] & fast_layout[8]) | (frame_key[119] & fast_select_10) | (frame_secret[191] & fast_layout[11]) | (frame_left[191] & fast_layout[12]) | (frame_left[199] & fast_select_5);
-    assign fast_block[376]= (address[248] & fast_select_2) | (address[184] & fast_select_6) | (address[120] & fast_select_7) | (frame_secret[120] & fast_layout[6]) | (frame_prf[120] & fast_layout[7]) | (frame_public[120] & fast_layout[8]) | (frame_key[120] & fast_select_10) | (frame_secret[192] & fast_layout[11]) | (frame_left[192] & fast_layout[12]) | (frame_left[200] & fast_select_5);
-    assign fast_block[377]= (address[249] & fast_select_2) | (address[185] & fast_select_6) | (address[121] & fast_select_7) | (frame_secret[121] & fast_layout[6]) | (frame_prf[121] & fast_layout[7]) | (frame_public[121] & fast_layout[8]) | (frame_key[121] & fast_select_10) | (frame_secret[193] & fast_layout[11]) | (frame_left[193] & fast_layout[12]) | (frame_left[201] & fast_select_5);
-    assign fast_block[378]= (address[250] & fast_select_2) | (address[186] & fast_select_6) | (address[122] & fast_select_7) | (frame_secret[122] & fast_layout[6]) | (frame_prf[122] & fast_layout[7]) | (frame_public[122] & fast_layout[8]) | (frame_key[122] & fast_select_10) | (frame_secret[194] & fast_layout[11]) | (frame_left[194] & fast_layout[12]) | (frame_left[202] & fast_select_5);
-    assign fast_block[379]= (address[251] & fast_select_2) | (address[187] & fast_select_6) | (address[123] & fast_select_7) | (frame_secret[123] & fast_layout[6]) | (frame_prf[123] & fast_layout[7]) | (frame_public[123] & fast_layout[8]) | (frame_key[123] & fast_select_10) | (frame_secret[195] & fast_layout[11]) | (frame_left[195] & fast_layout[12]) | (frame_left[203] & fast_select_5);
-    assign fast_block[380]= (address[252] & fast_select_2) | (address[188] & fast_select_6) | (address[124] & fast_select_7) | (frame_secret[124] & fast_layout[6]) | (frame_prf[124] & fast_layout[7]) | (frame_public[124] & fast_layout[8]) | (frame_key[124] & fast_select_10) | (frame_secret[196] & fast_layout[11]) | (frame_left[196] & fast_layout[12]) | (frame_left[204] & fast_select_5);
-    assign fast_block[381]= (address[253] & fast_select_2) | (address[189] & fast_select_6) | (address[125] & fast_select_7) | (frame_secret[125] & fast_layout[6]) | (frame_prf[125] & fast_layout[7]) | (frame_public[125] & fast_layout[8]) | (frame_key[125] & fast_select_10) | (frame_secret[197] & fast_layout[11]) | (frame_left[197] & fast_layout[12]) | (frame_left[205] & fast_select_5);
-    assign fast_block[382]= (address[254] & fast_select_2) | (address[190] & fast_select_6) | (address[126] & fast_select_7) | (frame_secret[126] & fast_layout[6]) | (frame_prf[126] & fast_layout[7]) | (frame_public[126] & fast_layout[8]) | (frame_key[126] & fast_select_10) | (frame_secret[198] & fast_layout[11]) | (frame_left[198] & fast_layout[12]) | (frame_left[206] & fast_select_5);
-    assign fast_block[383]= (address[255] & fast_select_2) | (address[191] & fast_select_6) | (address[127] & fast_select_7) | (frame_secret[127] & fast_layout[6]) | (frame_prf[127] & fast_layout[7]) | (frame_public[127] & fast_layout[8]) | (frame_key[127] & fast_select_10) | (frame_secret[199] & fast_layout[11]) | (frame_left[199] & fast_layout[12]) | (frame_left[207] & fast_select_5);
-    assign fast_block[384]= (frame_payload[0] & fast_select_2) | (address[192] & fast_select_6) | (address[128] & fast_select_7) | (frame_secret[128] & fast_layout[6]) | (frame_prf[128] & fast_layout[7]) | (frame_public[128] & fast_layout[8]) | (frame_key[128] & fast_select_10) | (frame_secret[200] & fast_layout[11]) | (frame_left[200] & fast_layout[12]) | (frame_left[208] & fast_select_5);
-    assign fast_block[385]= (frame_payload[1] & fast_select_2) | (address[193] & fast_select_6) | (address[129] & fast_select_7) | (frame_secret[129] & fast_layout[6]) | (frame_prf[129] & fast_layout[7]) | (frame_public[129] & fast_layout[8]) | (frame_key[129] & fast_select_10) | (frame_secret[201] & fast_layout[11]) | (frame_left[201] & fast_layout[12]) | (frame_left[209] & fast_select_5);
-    assign fast_block[386]= (frame_payload[2] & fast_select_2) | (address[194] & fast_select_6) | (address[130] & fast_select_7) | (frame_secret[130] & fast_layout[6]) | (frame_prf[130] & fast_layout[7]) | (frame_public[130] & fast_layout[8]) | (frame_key[130] & fast_select_10) | (frame_secret[202] & fast_layout[11]) | (frame_left[202] & fast_layout[12]) | (frame_left[210] & fast_select_5);
-    assign fast_block[387]= (frame_payload[3] & fast_select_2) | (address[195] & fast_select_6) | (address[131] & fast_select_7) | (frame_secret[131] & fast_layout[6]) | (frame_prf[131] & fast_layout[7]) | (frame_public[131] & fast_layout[8]) | (frame_key[131] & fast_select_10) | (frame_secret[203] & fast_layout[11]) | (frame_left[203] & fast_layout[12]) | (frame_left[211] & fast_select_5);
-    assign fast_block[388]= (frame_payload[4] & fast_select_2) | (address[196] & fast_select_6) | (address[132] & fast_select_7) | (frame_secret[132] & fast_layout[6]) | (frame_prf[132] & fast_layout[7]) | (frame_public[132] & fast_layout[8]) | (frame_key[132] & fast_select_10) | (frame_secret[204] & fast_layout[11]) | (frame_left[204] & fast_layout[12]) | (frame_left[212] & fast_select_5);
-    assign fast_block[389]= (frame_payload[5] & fast_select_2) | (address[197] & fast_select_6) | (address[133] & fast_select_7) | (frame_secret[133] & fast_layout[6]) | (frame_prf[133] & fast_layout[7]) | (frame_public[133] & fast_layout[8]) | (frame_key[133] & fast_select_10) | (frame_secret[205] & fast_layout[11]) | (frame_left[205] & fast_layout[12]) | (frame_left[213] & fast_select_5);
-    assign fast_block[390]= (frame_payload[6] & fast_select_2) | (address[198] & fast_select_6) | (address[134] & fast_select_7) | (frame_secret[134] & fast_layout[6]) | (frame_prf[134] & fast_layout[7]) | (frame_public[134] & fast_layout[8]) | (frame_key[134] & fast_select_10) | (frame_secret[206] & fast_layout[11]) | (frame_left[206] & fast_layout[12]) | (frame_left[214] & fast_select_5);
-    assign fast_block[391]= (frame_payload[7] & fast_select_2) | (address[199] & fast_select_6) | (address[135] & fast_select_7) | (frame_secret[135] & fast_layout[6]) | (frame_prf[135] & fast_layout[7]) | (frame_public[135] & fast_layout[8]) | (frame_key[135] & fast_select_10) | (frame_secret[207] & fast_layout[11]) | (frame_left[207] & fast_layout[12]) | (frame_left[215] & fast_select_5);
-    assign fast_block[392]= (frame_payload[8] & fast_select_2) | (address[200] & fast_select_6) | (address[136] & fast_select_7) | (frame_secret[136] & fast_layout[6]) | (frame_prf[136] & fast_layout[7]) | (frame_public[136] & fast_layout[8]) | (frame_key[136] & fast_select_10) | (frame_secret[208] & fast_layout[11]) | (frame_left[208] & fast_layout[12]) | (frame_left[216] & fast_select_5);
-    assign fast_block[393]= (frame_payload[9] & fast_select_2) | (address[201] & fast_select_6) | (address[137] & fast_select_7) | (frame_secret[137] & fast_layout[6]) | (frame_prf[137] & fast_layout[7]) | (frame_public[137] & fast_layout[8]) | (frame_key[137] & fast_select_10) | (frame_secret[209] & fast_layout[11]) | (frame_left[209] & fast_layout[12]) | (frame_left[217] & fast_select_5);
-    assign fast_block[394]= (frame_payload[10] & fast_select_2) | (address[202] & fast_select_6) | (address[138] & fast_select_7) | (frame_secret[138] & fast_layout[6]) | (frame_prf[138] & fast_layout[7]) | (frame_public[138] & fast_layout[8]) | (frame_key[138] & fast_select_10) | (frame_secret[210] & fast_layout[11]) | (frame_left[210] & fast_layout[12]) | (frame_left[218] & fast_select_5);
-    assign fast_block[395]= (frame_payload[11] & fast_select_2) | (address[203] & fast_select_6) | (address[139] & fast_select_7) | (frame_secret[139] & fast_layout[6]) | (frame_prf[139] & fast_layout[7]) | (frame_public[139] & fast_layout[8]) | (frame_key[139] & fast_select_10) | (frame_secret[211] & fast_layout[11]) | (frame_left[211] & fast_layout[12]) | (frame_left[219] & fast_select_5);
-    assign fast_block[396]= (frame_payload[12] & fast_select_2) | (address[204] & fast_select_6) | (address[140] & fast_select_7) | (frame_secret[140] & fast_layout[6]) | (frame_prf[140] & fast_layout[7]) | (frame_public[140] & fast_layout[8]) | (frame_key[140] & fast_select_10) | (frame_secret[212] & fast_layout[11]) | (frame_left[212] & fast_layout[12]) | (frame_left[220] & fast_select_5);
-    assign fast_block[397]= (frame_payload[13] & fast_select_2) | (address[205] & fast_select_6) | (address[141] & fast_select_7) | (frame_secret[141] & fast_layout[6]) | (frame_prf[141] & fast_layout[7]) | (frame_public[141] & fast_layout[8]) | (frame_key[141] & fast_select_10) | (frame_secret[213] & fast_layout[11]) | (frame_left[213] & fast_layout[12]) | (frame_left[221] & fast_select_5);
-    assign fast_block[398]= (frame_payload[14] & fast_select_2) | (address[206] & fast_select_6) | (address[142] & fast_select_7) | (frame_secret[142] & fast_layout[6]) | (frame_prf[142] & fast_layout[7]) | (frame_public[142] & fast_layout[8]) | (frame_key[142] & fast_select_10) | (frame_secret[214] & fast_layout[11]) | (frame_left[214] & fast_layout[12]) | (frame_left[222] & fast_select_5);
-    assign fast_block[399]= (frame_payload[15] & fast_select_2) | (address[207] & fast_select_6) | (address[143] & fast_select_7) | (frame_secret[143] & fast_layout[6]) | (frame_prf[143] & fast_layout[7]) | (frame_public[143] & fast_layout[8]) | (frame_key[143] & fast_select_10) | (frame_secret[215] & fast_layout[11]) | (frame_left[215] & fast_layout[12]) | (frame_left[223] & fast_select_5);
-    assign fast_block[400]= (frame_payload[16] & fast_select_2) | (address[208] & fast_select_6) | (address[144] & fast_select_7) | (frame_secret[144] & fast_layout[6]) | (frame_prf[144] & fast_layout[7]) | (frame_public[144] & fast_layout[8]) | (frame_key[144] & fast_select_10) | (frame_secret[216] & fast_layout[11]) | (frame_left[216] & fast_layout[12]) | (frame_left[224] & fast_select_5);
-    assign fast_block[401]= (frame_payload[17] & fast_select_2) | (address[209] & fast_select_6) | (address[145] & fast_select_7) | (frame_secret[145] & fast_layout[6]) | (frame_prf[145] & fast_layout[7]) | (frame_public[145] & fast_layout[8]) | (frame_key[145] & fast_select_10) | (frame_secret[217] & fast_layout[11]) | (frame_left[217] & fast_layout[12]) | (frame_left[225] & fast_select_5);
-    assign fast_block[402]= (frame_payload[18] & fast_select_2) | (address[210] & fast_select_6) | (address[146] & fast_select_7) | (frame_secret[146] & fast_layout[6]) | (frame_prf[146] & fast_layout[7]) | (frame_public[146] & fast_layout[8]) | (frame_key[146] & fast_select_10) | (frame_secret[218] & fast_layout[11]) | (frame_left[218] & fast_layout[12]) | (frame_left[226] & fast_select_5);
-    assign fast_block[403]= (frame_payload[19] & fast_select_2) | (address[211] & fast_select_6) | (address[147] & fast_select_7) | (frame_secret[147] & fast_layout[6]) | (frame_prf[147] & fast_layout[7]) | (frame_public[147] & fast_layout[8]) | (frame_key[147] & fast_select_10) | (frame_secret[219] & fast_layout[11]) | (frame_left[219] & fast_layout[12]) | (frame_left[227] & fast_select_5);
-    assign fast_block[404]= (frame_payload[20] & fast_select_2) | (address[212] & fast_select_6) | (address[148] & fast_select_7) | (frame_secret[148] & fast_layout[6]) | (frame_prf[148] & fast_layout[7]) | (frame_public[148] & fast_layout[8]) | (frame_key[148] & fast_select_10) | (frame_secret[220] & fast_layout[11]) | (frame_left[220] & fast_layout[12]) | (frame_left[228] & fast_select_5);
-    assign fast_block[405]= (frame_payload[21] & fast_select_2) | (address[213] & fast_select_6) | (address[149] & fast_select_7) | (frame_secret[149] & fast_layout[6]) | (frame_prf[149] & fast_layout[7]) | (frame_public[149] & fast_layout[8]) | (frame_key[149] & fast_select_10) | (frame_secret[221] & fast_layout[11]) | (frame_left[221] & fast_layout[12]) | (frame_left[229] & fast_select_5);
-    assign fast_block[406]= (frame_payload[22] & fast_select_2) | (address[214] & fast_select_6) | (address[150] & fast_select_7) | (frame_secret[150] & fast_layout[6]) | (frame_prf[150] & fast_layout[7]) | (frame_public[150] & fast_layout[8]) | (frame_key[150] & fast_select_10) | (frame_secret[222] & fast_layout[11]) | (frame_left[222] & fast_layout[12]) | (frame_left[230] & fast_select_5);
-    assign fast_block[407]= (frame_payload[23] & fast_select_2) | (address[215] & fast_select_6) | (address[151] & fast_select_7) | (frame_secret[151] & fast_layout[6]) | (frame_prf[151] & fast_layout[7]) | (frame_public[151] & fast_layout[8]) | (frame_key[151] & fast_select_10) | (frame_secret[223] & fast_layout[11]) | (frame_left[223] & fast_layout[12]) | (frame_left[231] & fast_select_5);
-    assign fast_block[408]= (frame_payload[24] & fast_select_2) | (address[216] & fast_select_6) | (address[152] & fast_select_7) | (frame_secret[152] & fast_layout[6]) | (frame_prf[152] & fast_layout[7]) | (frame_public[152] & fast_layout[8]) | (frame_key[152] & fast_select_10) | (frame_secret[224] & fast_layout[11]) | (frame_left[224] & fast_layout[12]) | (frame_left[232] & fast_select_5);
-    assign fast_block[409]= (frame_payload[25] & fast_select_2) | (address[217] & fast_select_6) | (address[153] & fast_select_7) | (frame_secret[153] & fast_layout[6]) | (frame_prf[153] & fast_layout[7]) | (frame_public[153] & fast_layout[8]) | (frame_key[153] & fast_select_10) | (frame_secret[225] & fast_layout[11]) | (frame_left[225] & fast_layout[12]) | (frame_left[233] & fast_select_5);
-    assign fast_block[410]= (frame_payload[26] & fast_select_2) | (address[218] & fast_select_6) | (address[154] & fast_select_7) | (frame_secret[154] & fast_layout[6]) | (frame_prf[154] & fast_layout[7]) | (frame_public[154] & fast_layout[8]) | (frame_key[154] & fast_select_10) | (frame_secret[226] & fast_layout[11]) | (frame_left[226] & fast_layout[12]) | (frame_left[234] & fast_select_5);
-    assign fast_block[411]= (frame_payload[27] & fast_select_2) | (address[219] & fast_select_6) | (address[155] & fast_select_7) | (frame_secret[155] & fast_layout[6]) | (frame_prf[155] & fast_layout[7]) | (frame_public[155] & fast_layout[8]) | (frame_key[155] & fast_select_10) | (frame_secret[227] & fast_layout[11]) | (frame_left[227] & fast_layout[12]) | (frame_left[235] & fast_select_5);
-    assign fast_block[412]= (frame_payload[28] & fast_select_2) | (address[220] & fast_select_6) | (address[156] & fast_select_7) | (frame_secret[156] & fast_layout[6]) | (frame_prf[156] & fast_layout[7]) | (frame_public[156] & fast_layout[8]) | (frame_key[156] & fast_select_10) | (frame_secret[228] & fast_layout[11]) | (frame_left[228] & fast_layout[12]) | (frame_left[236] & fast_select_5);
-    assign fast_block[413]= (frame_payload[29] & fast_select_2) | (address[221] & fast_select_6) | (address[157] & fast_select_7) | (frame_secret[157] & fast_layout[6]) | (frame_prf[157] & fast_layout[7]) | (frame_public[157] & fast_layout[8]) | (frame_key[157] & fast_select_10) | (frame_secret[229] & fast_layout[11]) | (frame_left[229] & fast_layout[12]) | (frame_left[237] & fast_select_5);
-    assign fast_block[414]= (frame_payload[30] & fast_select_2) | (address[222] & fast_select_6) | (address[158] & fast_select_7) | (frame_secret[158] & fast_layout[6]) | (frame_prf[158] & fast_layout[7]) | (frame_public[158] & fast_layout[8]) | (frame_key[158] & fast_select_10) | (frame_secret[230] & fast_layout[11]) | (frame_left[230] & fast_layout[12]) | (frame_left[238] & fast_select_5);
-    assign fast_block[415]= (frame_payload[31] & fast_select_2) | (address[223] & fast_select_6) | (address[159] & fast_select_7) | (frame_secret[159] & fast_layout[6]) | (frame_prf[159] & fast_layout[7]) | (frame_public[159] & fast_layout[8]) | (frame_key[159] & fast_select_10) | (frame_secret[231] & fast_layout[11]) | (frame_left[231] & fast_layout[12]) | (frame_left[239] & fast_select_5);
-    assign fast_block[416]= (frame_payload[32] & fast_select_2) | (address[224] & fast_select_6) | (address[160] & fast_select_7) | (frame_secret[160] & fast_layout[6]) | (frame_prf[160] & fast_layout[7]) | (frame_public[160] & fast_layout[8]) | (frame_key[160] & fast_select_10) | (frame_secret[232] & fast_layout[11]) | (frame_left[232] & fast_layout[12]) | (frame_left[240] & fast_select_5);
-    assign fast_block[417]= (frame_payload[33] & fast_select_2) | (address[225] & fast_select_6) | (address[161] & fast_select_7) | (frame_secret[161] & fast_layout[6]) | (frame_prf[161] & fast_layout[7]) | (frame_public[161] & fast_layout[8]) | (frame_key[161] & fast_select_10) | (frame_secret[233] & fast_layout[11]) | (frame_left[233] & fast_layout[12]) | (frame_left[241] & fast_select_5);
-    assign fast_block[418]= (frame_payload[34] & fast_select_2) | (address[226] & fast_select_6) | (address[162] & fast_select_7) | (frame_secret[162] & fast_layout[6]) | (frame_prf[162] & fast_layout[7]) | (frame_public[162] & fast_layout[8]) | (frame_key[162] & fast_select_10) | (frame_secret[234] & fast_layout[11]) | (frame_left[234] & fast_layout[12]) | (frame_left[242] & fast_select_5);
-    assign fast_block[419]= (frame_payload[35] & fast_select_2) | (address[227] & fast_select_6) | (address[163] & fast_select_7) | (frame_secret[163] & fast_layout[6]) | (frame_prf[163] & fast_layout[7]) | (frame_public[163] & fast_layout[8]) | (frame_key[163] & fast_select_10) | (frame_secret[235] & fast_layout[11]) | (frame_left[235] & fast_layout[12]) | (frame_left[243] & fast_select_5);
-    assign fast_block[420]= (frame_payload[36] & fast_select_2) | (address[228] & fast_select_6) | (address[164] & fast_select_7) | (frame_secret[164] & fast_layout[6]) | (frame_prf[164] & fast_layout[7]) | (frame_public[164] & fast_layout[8]) | (frame_key[164] & fast_select_10) | (frame_secret[236] & fast_layout[11]) | (frame_left[236] & fast_layout[12]) | (frame_left[244] & fast_select_5);
-    assign fast_block[421]= (frame_payload[37] & fast_select_2) | (address[229] & fast_select_6) | (address[165] & fast_select_7) | (frame_secret[165] & fast_layout[6]) | (frame_prf[165] & fast_layout[7]) | (frame_public[165] & fast_layout[8]) | (frame_key[165] & fast_select_10) | (frame_secret[237] & fast_layout[11]) | (frame_left[237] & fast_layout[12]) | (frame_left[245] & fast_select_5);
-    assign fast_block[422]= (frame_payload[38] & fast_select_2) | (address[230] & fast_select_6) | (address[166] & fast_select_7) | (frame_secret[166] & fast_layout[6]) | (frame_prf[166] & fast_layout[7]) | (frame_public[166] & fast_layout[8]) | (frame_key[166] & fast_select_10) | (frame_secret[238] & fast_layout[11]) | (frame_left[238] & fast_layout[12]) | (frame_left[246] & fast_select_5);
-    assign fast_block[423]= (frame_payload[39] & fast_select_2) | (address[231] & fast_select_6) | (address[167] & fast_select_7) | (frame_secret[167] & fast_layout[6]) | (frame_prf[167] & fast_layout[7]) | (frame_public[167] & fast_layout[8]) | (frame_key[167] & fast_select_10) | (frame_secret[239] & fast_layout[11]) | (frame_left[239] & fast_layout[12]) | (frame_left[247] & fast_select_5);
-    assign fast_block[424]= (frame_payload[40] & fast_select_2) | (address[232] & fast_select_6) | (address[168] & fast_select_7) | (frame_secret[168] & fast_layout[6]) | (frame_prf[168] & fast_layout[7]) | (frame_public[168] & fast_layout[8]) | (frame_key[168] & fast_select_10) | (frame_secret[240] & fast_layout[11]) | (frame_left[240] & fast_layout[12]) | (frame_left[248] & fast_select_5);
-    assign fast_block[425]= (frame_payload[41] & fast_select_2) | (address[233] & fast_select_6) | (address[169] & fast_select_7) | (frame_secret[169] & fast_layout[6]) | (frame_prf[169] & fast_layout[7]) | (frame_public[169] & fast_layout[8]) | (frame_key[169] & fast_select_10) | (frame_secret[241] & fast_layout[11]) | (frame_left[241] & fast_layout[12]) | (frame_left[249] & fast_select_5);
-    assign fast_block[426]= (frame_payload[42] & fast_select_2) | (address[234] & fast_select_6) | (address[170] & fast_select_7) | (frame_secret[170] & fast_layout[6]) | (frame_prf[170] & fast_layout[7]) | (frame_public[170] & fast_layout[8]) | (frame_key[170] & fast_select_10) | (frame_secret[242] & fast_layout[11]) | (frame_left[242] & fast_layout[12]) | (frame_left[250] & fast_select_5);
-    assign fast_block[427]= (frame_payload[43] & fast_select_2) | (address[235] & fast_select_6) | (address[171] & fast_select_7) | (frame_secret[171] & fast_layout[6]) | (frame_prf[171] & fast_layout[7]) | (frame_public[171] & fast_layout[8]) | (frame_key[171] & fast_select_10) | (frame_secret[243] & fast_layout[11]) | (frame_left[243] & fast_layout[12]) | (frame_left[251] & fast_select_5);
-    assign fast_block[428]= (frame_payload[44] & fast_select_2) | (address[236] & fast_select_6) | (address[172] & fast_select_7) | (frame_secret[172] & fast_layout[6]) | (frame_prf[172] & fast_layout[7]) | (frame_public[172] & fast_layout[8]) | (frame_key[172] & fast_select_10) | (frame_secret[244] & fast_layout[11]) | (frame_left[244] & fast_layout[12]) | (frame_left[252] & fast_select_5);
-    assign fast_block[429]= (frame_payload[45] & fast_select_2) | (address[237] & fast_select_6) | (address[173] & fast_select_7) | (frame_secret[173] & fast_layout[6]) | (frame_prf[173] & fast_layout[7]) | (frame_public[173] & fast_layout[8]) | (frame_key[173] & fast_select_10) | (frame_secret[245] & fast_layout[11]) | (frame_left[245] & fast_layout[12]) | (frame_left[253] & fast_select_5);
-    assign fast_block[430]= (frame_payload[46] & fast_select_2) | (address[238] & fast_select_6) | (address[174] & fast_select_7) | (frame_secret[174] & fast_layout[6]) | (frame_prf[174] & fast_layout[7]) | (frame_public[174] & fast_layout[8]) | (frame_key[174] & fast_select_10) | (frame_secret[246] & fast_layout[11]) | (frame_left[246] & fast_layout[12]) | (frame_left[254] & fast_select_5);
-    assign fast_block[431]= (frame_payload[47] & fast_select_2) | (address[239] & fast_select_6) | (address[175] & fast_select_7) | (frame_secret[175] & fast_layout[6]) | (frame_prf[175] & fast_layout[7]) | (frame_public[175] & fast_layout[8]) | (frame_key[175] & fast_select_10) | (frame_secret[247] & fast_layout[11]) | (frame_left[247] & fast_layout[12]) | (frame_left[255] & fast_select_5);
-    assign fast_block[432]= (frame_payload[48] & fast_select_2) | (address[240] & fast_select_6) | (address[176] & fast_select_7) | (frame_secret[176] & fast_layout[6]) | (frame_prf[176] & fast_layout[7]) | (frame_public[176] & fast_layout[8]) | (frame_key[176] & fast_select_10) | (frame_secret[248] & fast_layout[11]) | (frame_left[248] & fast_layout[12]) | fast_layout[13] | (frame_right[0] & fast_layout[14]);
-    assign fast_block[433]= (frame_payload[49] & fast_select_2) | (address[241] & fast_select_6) | (address[177] & fast_select_7) | (frame_secret[177] & fast_layout[6]) | (frame_prf[177] & fast_layout[7]) | (frame_public[177] & fast_layout[8]) | (frame_key[177] & fast_select_10) | (frame_secret[249] & fast_layout[11]) | (frame_left[249] & fast_layout[12]) | fast_layout[13] | (frame_right[1] & fast_layout[14]);
-    assign fast_block[434]= (frame_payload[50] & fast_select_2) | (address[242] & fast_select_6) | (address[178] & fast_select_7) | (frame_secret[178] & fast_layout[6]) | (frame_prf[178] & fast_layout[7]) | (frame_public[178] & fast_layout[8]) | (frame_key[178] & fast_select_10) | (frame_secret[250] & fast_layout[11]) | (frame_left[250] & fast_layout[12]) | fast_layout[13] | (frame_right[2] & fast_layout[14]);
-    assign fast_block[435]= (frame_payload[51] & fast_select_2) | (address[243] & fast_select_6) | (address[179] & fast_select_7) | (frame_secret[179] & fast_layout[6]) | (frame_prf[179] & fast_layout[7]) | (frame_public[179] & fast_layout[8]) | (frame_key[179] & fast_select_10) | (frame_secret[251] & fast_layout[11]) | (frame_left[251] & fast_layout[12]) | fast_layout[13] | (frame_right[3] & fast_layout[14]);
-    assign fast_block[436]= (frame_payload[52] & fast_select_2) | (address[244] & fast_select_6) | (address[180] & fast_select_7) | (frame_secret[180] & fast_layout[6]) | (frame_prf[180] & fast_layout[7]) | (frame_public[180] & fast_layout[8]) | (frame_key[180] & fast_select_10) | (frame_secret[252] & fast_layout[11]) | (frame_left[252] & fast_layout[12]) | fast_layout[13] | (frame_right[4] & fast_layout[14]);
-    assign fast_block[437]= (frame_payload[53] & fast_select_2) | (address[245] & fast_select_6) | (address[181] & fast_select_7) | (frame_secret[181] & fast_layout[6]) | (frame_prf[181] & fast_layout[7]) | (frame_public[181] & fast_layout[8]) | (frame_key[181] & fast_select_10) | (frame_secret[253] & fast_layout[11]) | (frame_left[253] & fast_layout[12]) | (frame_right[5] & fast_layout[14]);
-    assign fast_block[438]= (frame_payload[54] & fast_select_2) | (address[246] & fast_select_6) | (address[182] & fast_select_7) | (frame_secret[182] & fast_layout[6]) | (frame_prf[182] & fast_layout[7]) | (frame_public[182] & fast_layout[8]) | (frame_key[182] & fast_select_10) | (frame_secret[254] & fast_layout[11]) | (frame_left[254] & fast_layout[12]) | (frame_right[6] & fast_layout[14]);
-    assign fast_block[439]= (frame_payload[55] & fast_select_2) | (address[247] & fast_select_6) | (address[183] & fast_select_7) | (frame_secret[183] & fast_layout[6]) | (frame_prf[183] & fast_layout[7]) | (frame_public[183] & fast_layout[8]) | (frame_key[183] & fast_select_10) | (frame_secret[255] & fast_layout[11]) | (frame_left[255] & fast_layout[12]) | (frame_right[7] & fast_layout[14]);
-    assign fast_block[440]= (frame_payload[56] & fast_select_2) | (address[248] & fast_select_6) | (address[184] & fast_select_7) | (frame_secret[184] & fast_layout[6]) | (frame_prf[184] & fast_layout[7]) | (frame_public[184] & fast_layout[8]) | (frame_key[184] & fast_select_10) | fast_select_4 | (frame_right[8] & fast_layout[14]);
-    assign fast_block[441]= (frame_payload[57] & fast_select_2) | (address[249] & fast_select_6) | (address[185] & fast_select_7) | (frame_secret[185] & fast_layout[6]) | (frame_prf[185] & fast_layout[7]) | (frame_public[185] & fast_layout[8]) | (frame_key[185] & fast_select_10) | fast_select_4 | (frame_right[9] & fast_layout[14]);
-    assign fast_block[442]= (frame_payload[58] & fast_select_2) | (address[250] & fast_select_6) | (address[186] & fast_select_7) | (frame_secret[186] & fast_layout[6]) | (frame_prf[186] & fast_layout[7]) | (frame_public[186] & fast_layout[8]) | (frame_key[186] & fast_select_10) | fast_select_4 | (frame_right[10] & fast_layout[14]);
-    assign fast_block[443]= (frame_payload[59] & fast_select_2) | (address[251] & fast_select_6) | (address[187] & fast_select_7) | (frame_secret[187] & fast_layout[6]) | (frame_prf[187] & fast_layout[7]) | (frame_public[187] & fast_layout[8]) | (frame_key[187] & fast_select_10) | fast_select_4 | (frame_right[11] & fast_layout[14]);
-    assign fast_block[444]= (frame_payload[60] & fast_select_2) | (address[252] & fast_select_6) | (address[188] & fast_select_7) | (frame_secret[188] & fast_layout[6]) | (frame_prf[188] & fast_layout[7]) | (frame_public[188] & fast_layout[8]) | (frame_key[188] & fast_select_10) | fast_select_4 | (frame_right[12] & fast_layout[14]);
-    assign fast_block[445]= (frame_payload[61] & fast_select_2) | (address[253] & fast_select_6) | (address[189] & fast_select_7) | (frame_secret[189] & fast_layout[6]) | (frame_prf[189] & fast_layout[7]) | (frame_public[189] & fast_layout[8]) | (frame_key[189] & fast_select_10) | (frame_right[13] & fast_layout[14]);
-    assign fast_block[446]= (frame_payload[62] & fast_select_2) | (address[254] & fast_select_6) | (address[190] & fast_select_7) | (frame_secret[190] & fast_layout[6]) | (frame_prf[190] & fast_layout[7]) | (frame_public[190] & fast_layout[8]) | (frame_key[190] & fast_select_10) | (frame_right[14] & fast_layout[14]);
-    assign fast_block[447]= (frame_payload[63] & fast_select_2) | (address[255] & fast_select_6) | (address[191] & fast_select_7) | (frame_secret[191] & fast_layout[6]) | (frame_prf[191] & fast_layout[7]) | (frame_public[191] & fast_layout[8]) | (frame_key[191] & fast_select_10) | (frame_right[15] & fast_layout[14]);
-    assign fast_block[448]= (frame_payload[64] & fast_select_2) | (frame_payload[0] & fast_select_6) | (address[192] & fast_select_7) | (frame_secret[192] & fast_layout[6]) | (frame_prf[192] & fast_layout[7]) | (frame_public[192] & fast_layout[8]) | (frame_key[192] & fast_select_10) | (frame_right[16] & fast_layout[14]);
-    assign fast_block[449]= (frame_payload[65] & fast_select_2) | (frame_payload[1] & fast_select_6) | (address[193] & fast_select_7) | (frame_secret[193] & fast_layout[6]) | (frame_prf[193] & fast_layout[7]) | (frame_public[193] & fast_layout[8]) | (frame_key[193] & fast_select_10) | (frame_right[17] & fast_layout[14]);
-    assign fast_block[450]= (frame_payload[66] & fast_select_2) | (frame_payload[2] & fast_select_6) | (address[194] & fast_select_7) | (frame_secret[194] & fast_layout[6]) | (frame_prf[194] & fast_layout[7]) | (frame_public[194] & fast_layout[8]) | (frame_key[194] & fast_select_10) | (frame_right[18] & fast_layout[14]);
-    assign fast_block[451]= (frame_payload[67] & fast_select_2) | (frame_payload[3] & fast_select_6) | (address[195] & fast_select_7) | (frame_secret[195] & fast_layout[6]) | (frame_prf[195] & fast_layout[7]) | (frame_public[195] & fast_layout[8]) | (frame_key[195] & fast_select_10) | (frame_right[19] & fast_layout[14]);
-    assign fast_block[452]= (frame_payload[68] & fast_select_2) | (frame_payload[4] & fast_select_6) | (address[196] & fast_select_7) | (frame_secret[196] & fast_layout[6]) | (frame_prf[196] & fast_layout[7]) | (frame_public[196] & fast_layout[8]) | (frame_key[196] & fast_select_10) | (frame_right[20] & fast_layout[14]);
-    assign fast_block[453]= (frame_payload[69] & fast_select_2) | (frame_payload[5] & fast_select_6) | (address[197] & fast_select_7) | (frame_secret[197] & fast_layout[6]) | (frame_prf[197] & fast_layout[7]) | (frame_public[197] & fast_layout[8]) | (frame_key[197] & fast_select_10) | (frame_right[21] & fast_layout[14]);
-    assign fast_block[454]= (frame_payload[70] & fast_select_2) | (frame_payload[6] & fast_select_6) | (address[198] & fast_select_7) | (frame_secret[198] & fast_layout[6]) | (frame_prf[198] & fast_layout[7]) | (frame_public[198] & fast_layout[8]) | (frame_key[198] & fast_select_10) | (frame_right[22] & fast_layout[14]);
-    assign fast_block[455]= (frame_payload[71] & fast_select_2) | (frame_payload[7] & fast_select_6) | (address[199] & fast_select_7) | (frame_secret[199] & fast_layout[6]) | (frame_prf[199] & fast_layout[7]) | (frame_public[199] & fast_layout[8]) | (frame_key[199] & fast_select_10) | (frame_right[23] & fast_layout[14]);
-    assign fast_block[456]= (frame_payload[72] & fast_select_2) | (frame_payload[8] & fast_select_6) | (address[200] & fast_select_7) | (frame_secret[200] & fast_layout[6]) | (frame_prf[200] & fast_layout[7]) | (frame_public[200] & fast_layout[8]) | (frame_key[200] & fast_select_10) | (frame_right[24] & fast_layout[14]);
-    assign fast_block[457]= (frame_payload[73] & fast_select_2) | (frame_payload[9] & fast_select_6) | (address[201] & fast_select_7) | (frame_secret[201] & fast_layout[6]) | (frame_prf[201] & fast_layout[7]) | (frame_public[201] & fast_layout[8]) | (frame_key[201] & fast_select_10) | (frame_right[25] & fast_layout[14]);
-    assign fast_block[458]= (frame_payload[74] & fast_select_2) | (frame_payload[10] & fast_select_6) | (address[202] & fast_select_7) | (frame_secret[202] & fast_layout[6]) | (frame_prf[202] & fast_layout[7]) | (frame_public[202] & fast_layout[8]) | (frame_key[202] & fast_select_10) | (frame_right[26] & fast_layout[14]);
-    assign fast_block[459]= (frame_payload[75] & fast_select_2) | (frame_payload[11] & fast_select_6) | (address[203] & fast_select_7) | (frame_secret[203] & fast_layout[6]) | (frame_prf[203] & fast_layout[7]) | (frame_public[203] & fast_layout[8]) | (frame_key[203] & fast_select_10) | (frame_right[27] & fast_layout[14]);
-    assign fast_block[460]= (frame_payload[76] & fast_select_2) | (frame_payload[12] & fast_select_6) | (address[204] & fast_select_7) | (frame_secret[204] & fast_layout[6]) | (frame_prf[204] & fast_layout[7]) | (frame_public[204] & fast_layout[8]) | (frame_key[204] & fast_select_10) | (frame_right[28] & fast_layout[14]);
-    assign fast_block[461]= (frame_payload[77] & fast_select_2) | (frame_payload[13] & fast_select_6) | (address[205] & fast_select_7) | (frame_secret[205] & fast_layout[6]) | (frame_prf[205] & fast_layout[7]) | (frame_public[205] & fast_layout[8]) | (frame_key[205] & fast_select_10) | (frame_right[29] & fast_layout[14]);
-    assign fast_block[462]= (frame_payload[78] & fast_select_2) | (frame_payload[14] & fast_select_6) | (address[206] & fast_select_7) | (frame_secret[206] & fast_layout[6]) | (frame_prf[206] & fast_layout[7]) | (frame_public[206] & fast_layout[8]) | (frame_key[206] & fast_select_10) | (frame_right[30] & fast_layout[14]);
-    assign fast_block[463]= (frame_payload[79] & fast_select_2) | (frame_payload[15] & fast_select_6) | (address[207] & fast_select_7) | (frame_secret[207] & fast_layout[6]) | (frame_prf[207] & fast_layout[7]) | (frame_public[207] & fast_layout[8]) | (frame_key[207] & fast_select_10) | (frame_right[31] & fast_layout[14]);
-    assign fast_block[464]= (frame_payload[80] & fast_select_2) | (frame_payload[16] & fast_select_6) | (address[208] & fast_select_7) | (frame_secret[208] & fast_layout[6]) | (frame_prf[208] & fast_layout[7]) | (frame_public[208] & fast_layout[8]) | (frame_key[208] & fast_select_10) | (frame_right[32] & fast_layout[14]);
-    assign fast_block[465]= (frame_payload[81] & fast_select_2) | (frame_payload[17] & fast_select_6) | (address[209] & fast_select_7) | (frame_secret[209] & fast_layout[6]) | (frame_prf[209] & fast_layout[7]) | (frame_public[209] & fast_layout[8]) | (frame_key[209] & fast_select_10) | (frame_right[33] & fast_layout[14]);
-    assign fast_block[466]= (frame_payload[82] & fast_select_2) | (frame_payload[18] & fast_select_6) | (address[210] & fast_select_7) | (frame_secret[210] & fast_layout[6]) | (frame_prf[210] & fast_layout[7]) | (frame_public[210] & fast_layout[8]) | (frame_key[210] & fast_select_10) | (frame_right[34] & fast_layout[14]);
-    assign fast_block[467]= (frame_payload[83] & fast_select_2) | (frame_payload[19] & fast_select_6) | (address[211] & fast_select_7) | (frame_secret[211] & fast_layout[6]) | (frame_prf[211] & fast_layout[7]) | (frame_public[211] & fast_layout[8]) | (frame_key[211] & fast_select_10) | (frame_right[35] & fast_layout[14]);
-    assign fast_block[468]= (frame_payload[84] & fast_select_2) | (frame_payload[20] & fast_select_6) | (address[212] & fast_select_7) | (frame_secret[212] & fast_layout[6]) | (frame_prf[212] & fast_layout[7]) | (frame_public[212] & fast_layout[8]) | (frame_key[212] & fast_select_10) | (frame_right[36] & fast_layout[14]);
-    assign fast_block[469]= (frame_payload[85] & fast_select_2) | (frame_payload[21] & fast_select_6) | (address[213] & fast_select_7) | (frame_secret[213] & fast_layout[6]) | (frame_prf[213] & fast_layout[7]) | (frame_public[213] & fast_layout[8]) | (frame_key[213] & fast_select_10) | (frame_right[37] & fast_layout[14]);
-    assign fast_block[470]= (frame_payload[86] & fast_select_2) | (frame_payload[22] & fast_select_6) | (address[214] & fast_select_7) | (frame_secret[214] & fast_layout[6]) | (frame_prf[214] & fast_layout[7]) | (frame_public[214] & fast_layout[8]) | (frame_key[214] & fast_select_10) | (frame_right[38] & fast_layout[14]);
-    assign fast_block[471]= (frame_payload[87] & fast_select_2) | (frame_payload[23] & fast_select_6) | (address[215] & fast_select_7) | (frame_secret[215] & fast_layout[6]) | (frame_prf[215] & fast_layout[7]) | (frame_public[215] & fast_layout[8]) | (frame_key[215] & fast_select_10) | (frame_right[39] & fast_layout[14]);
-    assign fast_block[472]= (frame_payload[88] & fast_select_2) | (frame_payload[24] & fast_select_6) | (address[216] & fast_select_7) | (frame_secret[216] & fast_layout[6]) | (frame_prf[216] & fast_layout[7]) | (frame_public[216] & fast_layout[8]) | (frame_key[216] & fast_select_10) | (frame_right[40] & fast_layout[14]);
-    assign fast_block[473]= (frame_payload[89] & fast_select_2) | (frame_payload[25] & fast_select_6) | (address[217] & fast_select_7) | (frame_secret[217] & fast_layout[6]) | (frame_prf[217] & fast_layout[7]) | (frame_public[217] & fast_layout[8]) | (frame_key[217] & fast_select_10) | (frame_right[41] & fast_layout[14]);
-    assign fast_block[474]= (frame_payload[90] & fast_select_2) | (frame_payload[26] & fast_select_6) | (address[218] & fast_select_7) | (frame_secret[218] & fast_layout[6]) | (frame_prf[218] & fast_layout[7]) | (frame_public[218] & fast_layout[8]) | (frame_key[218] & fast_select_10) | (frame_right[42] & fast_layout[14]);
-    assign fast_block[475]= (frame_payload[91] & fast_select_2) | (frame_payload[27] & fast_select_6) | (address[219] & fast_select_7) | (frame_secret[219] & fast_layout[6]) | (frame_prf[219] & fast_layout[7]) | (frame_public[219] & fast_layout[8]) | (frame_key[219] & fast_select_10) | (frame_right[43] & fast_layout[14]);
-    assign fast_block[476]= (frame_payload[92] & fast_select_2) | (frame_payload[28] & fast_select_6) | (address[220] & fast_select_7) | (frame_secret[220] & fast_layout[6]) | (frame_prf[220] & fast_layout[7]) | (frame_public[220] & fast_layout[8]) | (frame_key[220] & fast_select_10) | (frame_right[44] & fast_layout[14]);
-    assign fast_block[477]= (frame_payload[93] & fast_select_2) | (frame_payload[29] & fast_select_6) | (address[221] & fast_select_7) | (frame_secret[221] & fast_layout[6]) | (frame_prf[221] & fast_layout[7]) | (frame_public[221] & fast_layout[8]) | (frame_key[221] & fast_select_10) | (frame_right[45] & fast_layout[14]);
-    assign fast_block[478]= (frame_payload[94] & fast_select_2) | (frame_payload[30] & fast_select_6) | (address[222] & fast_select_7) | (frame_secret[222] & fast_layout[6]) | (frame_prf[222] & fast_layout[7]) | (frame_public[222] & fast_layout[8]) | (frame_key[222] & fast_select_10) | (frame_right[46] & fast_layout[14]);
-    assign fast_block[479]= (frame_payload[95] & fast_select_2) | (frame_payload[31] & fast_select_6) | (address[223] & fast_select_7) | (frame_secret[223] & fast_layout[6]) | (frame_prf[223] & fast_layout[7]) | (frame_public[223] & fast_layout[8]) | (frame_key[223] & fast_select_10) | (frame_right[47] & fast_layout[14]);
-    assign fast_block[480]= (frame_payload[96] & fast_select_2) | (frame_payload[32] & fast_select_6) | (address[224] & fast_select_7) | (frame_secret[224] & fast_layout[6]) | (frame_prf[224] & fast_layout[7]) | (frame_public[224] & fast_layout[8]) | (frame_key[224] & fast_select_10) | (frame_right[48] & fast_layout[14]);
-    assign fast_block[481]= (frame_payload[97] & fast_select_2) | (frame_payload[33] & fast_select_6) | (address[225] & fast_select_7) | (frame_secret[225] & fast_layout[6]) | (frame_prf[225] & fast_layout[7]) | (frame_public[225] & fast_layout[8]) | (frame_key[225] & fast_select_10) | (frame_right[49] & fast_layout[14]);
-    assign fast_block[482]= (frame_payload[98] & fast_select_2) | (frame_payload[34] & fast_select_6) | (address[226] & fast_select_7) | (frame_secret[226] & fast_layout[6]) | (frame_prf[226] & fast_layout[7]) | (frame_public[226] & fast_layout[8]) | (frame_key[226] & fast_select_10) | (frame_right[50] & fast_layout[14]);
-    assign fast_block[483]= (frame_payload[99] & fast_select_2) | (frame_payload[35] & fast_select_6) | (address[227] & fast_select_7) | (frame_secret[227] & fast_layout[6]) | (frame_prf[227] & fast_layout[7]) | (frame_public[227] & fast_layout[8]) | (frame_key[227] & fast_select_10) | (frame_right[51] & fast_layout[14]);
-    assign fast_block[484]= (frame_payload[100] & fast_select_2) | (frame_payload[36] & fast_select_6) | (address[228] & fast_select_7) | (frame_secret[228] & fast_layout[6]) | (frame_prf[228] & fast_layout[7]) | (frame_public[228] & fast_layout[8]) | (frame_key[228] & fast_select_10) | (frame_right[52] & fast_layout[14]);
-    assign fast_block[485]= (frame_payload[101] & fast_select_2) | (frame_payload[37] & fast_select_6) | (address[229] & fast_select_7) | (frame_secret[229] & fast_layout[6]) | (frame_prf[229] & fast_layout[7]) | (frame_public[229] & fast_layout[8]) | (frame_key[229] & fast_select_10) | (frame_right[53] & fast_layout[14]);
-    assign fast_block[486]= (frame_payload[102] & fast_select_2) | (frame_payload[38] & fast_select_6) | (address[230] & fast_select_7) | (frame_secret[230] & fast_layout[6]) | (frame_prf[230] & fast_layout[7]) | (frame_public[230] & fast_layout[8]) | (frame_key[230] & fast_select_10) | (frame_right[54] & fast_layout[14]);
-    assign fast_block[487]= (frame_payload[103] & fast_select_2) | (frame_payload[39] & fast_select_6) | (address[231] & fast_select_7) | (frame_secret[231] & fast_layout[6]) | (frame_prf[231] & fast_layout[7]) | (frame_public[231] & fast_layout[8]) | (frame_key[231] & fast_select_10) | (frame_right[55] & fast_layout[14]);
-    assign fast_block[488]= (frame_payload[104] & fast_select_2) | (frame_payload[40] & fast_select_6) | (address[232] & fast_select_7) | (frame_secret[232] & fast_layout[6]) | (frame_prf[232] & fast_layout[7]) | (frame_public[232] & fast_layout[8]) | (frame_key[232] & fast_select_10) | (frame_right[56] & fast_layout[14]);
-    assign fast_block[489]= (frame_payload[105] & fast_select_2) | (frame_payload[41] & fast_select_6) | (address[233] & fast_select_7) | (frame_secret[233] & fast_layout[6]) | (frame_prf[233] & fast_layout[7]) | (frame_public[233] & fast_layout[8]) | (frame_key[233] & fast_select_10) | (frame_right[57] & fast_layout[14]);
-    assign fast_block[490]= (frame_payload[106] & fast_select_2) | (frame_payload[42] & fast_select_6) | (address[234] & fast_select_7) | (frame_secret[234] & fast_layout[6]) | (frame_prf[234] & fast_layout[7]) | (frame_public[234] & fast_layout[8]) | (frame_key[234] & fast_select_10) | (frame_right[58] & fast_layout[14]);
-    assign fast_block[491]= (frame_payload[107] & fast_select_2) | (frame_payload[43] & fast_select_6) | (address[235] & fast_select_7) | (frame_secret[235] & fast_layout[6]) | (frame_prf[235] & fast_layout[7]) | (frame_public[235] & fast_layout[8]) | (frame_key[235] & fast_select_10) | (frame_right[59] & fast_layout[14]);
-    assign fast_block[492]= (frame_payload[108] & fast_select_2) | (frame_payload[44] & fast_select_6) | (address[236] & fast_select_7) | (frame_secret[236] & fast_layout[6]) | (frame_prf[236] & fast_layout[7]) | (frame_public[236] & fast_layout[8]) | (frame_key[236] & fast_select_10) | (frame_right[60] & fast_layout[14]);
-    assign fast_block[493]= (frame_payload[109] & fast_select_2) | (frame_payload[45] & fast_select_6) | (address[237] & fast_select_7) | (frame_secret[237] & fast_layout[6]) | (frame_prf[237] & fast_layout[7]) | (frame_public[237] & fast_layout[8]) | (frame_key[237] & fast_select_10) | (frame_right[61] & fast_layout[14]);
-    assign fast_block[494]= (frame_payload[110] & fast_select_2) | (frame_payload[46] & fast_select_6) | (address[238] & fast_select_7) | (frame_secret[238] & fast_layout[6]) | (frame_prf[238] & fast_layout[7]) | (frame_public[238] & fast_layout[8]) | (frame_key[238] & fast_select_10) | (frame_right[62] & fast_layout[14]);
-    assign fast_block[495]= (frame_payload[111] & fast_select_2) | (frame_payload[47] & fast_select_6) | (address[239] & fast_select_7) | (frame_secret[239] & fast_layout[6]) | (frame_prf[239] & fast_layout[7]) | (frame_public[239] & fast_layout[8]) | (frame_key[239] & fast_select_10) | (frame_right[63] & fast_layout[14]);
-    assign fast_block[496]= (frame_payload[112] & fast_select_2) | (frame_payload[48] & fast_select_6) | (address[240] & fast_select_7) | (frame_secret[240] & fast_layout[6]) | (frame_prf[240] & fast_layout[7]) | (frame_public[240] & fast_layout[8]) | (frame_key[240] & fast_select_10) | (frame_right[64] & fast_layout[14]);
-    assign fast_block[497]= (frame_payload[113] & fast_select_2) | (frame_payload[49] & fast_select_6) | (address[241] & fast_select_7) | (frame_secret[241] & fast_layout[6]) | (frame_prf[241] & fast_layout[7]) | (frame_public[241] & fast_layout[8]) | (frame_key[241] & fast_select_10) | (frame_right[65] & fast_layout[14]);
-    assign fast_block[498]= (frame_payload[114] & fast_select_2) | (frame_payload[50] & fast_select_6) | (address[242] & fast_select_7) | (frame_secret[242] & fast_layout[6]) | (frame_prf[242] & fast_layout[7]) | (frame_public[242] & fast_layout[8]) | (frame_key[242] & fast_select_10) | (frame_right[66] & fast_layout[14]);
-    assign fast_block[499]= (frame_payload[115] & fast_select_2) | (frame_payload[51] & fast_select_6) | (address[243] & fast_select_7) | (frame_secret[243] & fast_layout[6]) | (frame_prf[243] & fast_layout[7]) | (frame_public[243] & fast_layout[8]) | (frame_key[243] & fast_select_10) | (frame_right[67] & fast_layout[14]);
-    assign fast_block[500]= (frame_payload[116] & fast_select_2) | (frame_payload[52] & fast_select_6) | (address[244] & fast_select_7) | (frame_secret[244] & fast_layout[6]) | (frame_prf[244] & fast_layout[7]) | (frame_public[244] & fast_layout[8]) | (frame_key[244] & fast_select_10) | (frame_right[68] & fast_layout[14]);
-    assign fast_block[501]= (frame_payload[117] & fast_select_2) | (frame_payload[53] & fast_select_6) | (address[245] & fast_select_7) | (frame_secret[245] & fast_layout[6]) | (frame_prf[245] & fast_layout[7]) | (frame_public[245] & fast_layout[8]) | (frame_key[245] & fast_select_10) | (frame_right[69] & fast_layout[14]);
-    assign fast_block[502]= (frame_payload[118] & fast_select_2) | (frame_payload[54] & fast_select_6) | (address[246] & fast_select_7) | (frame_secret[246] & fast_layout[6]) | (frame_prf[246] & fast_layout[7]) | (frame_public[246] & fast_layout[8]) | (frame_key[246] & fast_select_10) | (frame_right[70] & fast_layout[14]);
-    assign fast_block[503]= (frame_payload[119] & fast_select_2) | (frame_payload[55] & fast_select_6) | (address[247] & fast_select_7) | (frame_secret[247] & fast_layout[6]) | (frame_prf[247] & fast_layout[7]) | (frame_public[247] & fast_layout[8]) | (frame_key[247] & fast_select_10) | (frame_right[71] & fast_layout[14]);
-    assign fast_block[504]= (frame_payload[120] & fast_select_2) | (frame_payload[56] & fast_select_6) | (address[248] & fast_select_7) | (frame_secret[248] & fast_layout[6]) | (frame_prf[248] & fast_layout[7]) | (frame_public[248] & fast_layout[8]) | (frame_key[248] & fast_select_10) | (frame_right[72] & fast_layout[14]);
-    assign fast_block[505]= (frame_payload[121] & fast_select_2) | (frame_payload[57] & fast_select_6) | (address[249] & fast_select_7) | (frame_secret[249] & fast_layout[6]) | (frame_prf[249] & fast_layout[7]) | (frame_public[249] & fast_layout[8]) | (frame_key[249] & fast_select_10) | (frame_right[73] & fast_layout[14]);
-    assign fast_block[506]= (frame_payload[122] & fast_select_2) | (frame_payload[58] & fast_select_6) | (address[250] & fast_select_7) | (frame_secret[250] & fast_layout[6]) | (frame_prf[250] & fast_layout[7]) | (frame_public[250] & fast_layout[8]) | (frame_key[250] & fast_select_10) | (frame_right[74] & fast_layout[14]);
-    assign fast_block[507]= (frame_payload[123] & fast_select_2) | (frame_payload[59] & fast_select_6) | (address[251] & fast_select_7) | (frame_secret[251] & fast_layout[6]) | (frame_prf[251] & fast_layout[7]) | (frame_public[251] & fast_layout[8]) | (frame_key[251] & fast_select_10) | (frame_right[75] & fast_layout[14]);
-    assign fast_block[508]= (frame_payload[124] & fast_select_2) | (frame_payload[60] & fast_select_6) | (address[252] & fast_select_7) | (frame_secret[252] & fast_layout[6]) | (frame_prf[252] & fast_layout[7]) | (frame_public[252] & fast_layout[8]) | (frame_key[252] & fast_select_10) | (frame_right[76] & fast_layout[14]);
-    assign fast_block[509]= (frame_payload[125] & fast_select_2) | (frame_payload[61] & fast_select_6) | (address[253] & fast_select_7) | (frame_secret[253] & fast_layout[6]) | (frame_prf[253] & fast_layout[7]) | (frame_public[253] & fast_layout[8]) | (frame_key[253] & fast_select_10) | (frame_right[77] & fast_layout[14]);
-    assign fast_block[510]= (frame_payload[126] & fast_select_2) | (frame_payload[62] & fast_select_6) | (address[254] & fast_select_7) | (frame_secret[254] & fast_layout[6]) | (frame_prf[254] & fast_layout[7]) | (frame_public[254] & fast_layout[8]) | (frame_key[254] & fast_select_10) | (frame_right[78] & fast_layout[14]);
-    assign fast_block[511]= (frame_payload[127] & fast_select_2) | (frame_payload[63] & fast_select_6) | (address[255] & fast_select_7) | (frame_secret[255] & fast_layout[6]) | (frame_prf[255] & fast_layout[7]) | (frame_public[255] & fast_layout[8]) | (frame_key[255] & fast_select_10) | (frame_right[79] & fast_layout[14]);
-    assign fast_block[512]= fast_layout[0] | (frame_right[0] & fast_layout[1]) | (frame_payload[64] & fast_select_6) | (frame_payload[0] & fast_select_7) | (frame_public[0] & fast_layout[6]) | (index_bytes[0] & fast_layout[7]) | (xmss_address[0] & fast_layout[8]) | (frame_left[0] & fast_select_10) | (frame_right[80] & fast_layout[14]);
-    assign fast_block[513]= fast_layout[0] | (frame_right[1] & fast_layout[1]) | (frame_payload[65] & fast_select_6) | (frame_payload[1] & fast_select_7) | (frame_public[1] & fast_layout[6]) | (index_bytes[1] & fast_layout[7]) | (xmss_address[1] & fast_layout[8]) | (frame_left[1] & fast_select_10) | (frame_right[81] & fast_layout[14]);
-    assign fast_block[514]= fast_layout[0] | (frame_right[2] & fast_layout[1]) | (frame_payload[66] & fast_select_6) | (frame_payload[2] & fast_select_7) | (frame_public[2] & fast_layout[6]) | (index_bytes[2] & fast_layout[7]) | (xmss_address[2] & fast_layout[8]) | (frame_left[2] & fast_select_10) | (frame_right[82] & fast_layout[14]);
-    assign fast_block[515]= fast_layout[0] | (frame_right[3] & fast_layout[1]) | (frame_payload[67] & fast_select_6) | (frame_payload[3] & fast_select_7) | (frame_public[3] & fast_layout[6]) | (index_bytes[3] & fast_layout[7]) | (xmss_address[3] & fast_layout[8]) | (frame_left[3] & fast_select_10) | (frame_right[83] & fast_layout[14]);
-    assign fast_block[516]= fast_layout[0] | (frame_right[4] & fast_layout[1]) | (frame_payload[68] & fast_select_6) | (frame_payload[4] & fast_select_7) | (frame_public[4] & fast_layout[6]) | (index_bytes[4] & fast_layout[7]) | (xmss_address[4] & fast_layout[8]) | (frame_left[4] & fast_select_10) | (frame_right[84] & fast_layout[14]);
-    assign fast_block[517]= (frame_right[5] & fast_layout[1]) | (frame_payload[69] & fast_select_6) | (frame_payload[5] & fast_select_7) | (frame_public[5] & fast_layout[6]) | (index_bytes[5] & fast_layout[7]) | (xmss_address[5] & fast_layout[8]) | (frame_left[5] & fast_select_10) | (frame_right[85] & fast_layout[14]);
-    assign fast_block[518]= (frame_right[6] & fast_layout[1]) | (frame_payload[70] & fast_select_6) | (frame_payload[6] & fast_select_7) | (frame_public[6] & fast_layout[6]) | (index_bytes[6] & fast_layout[7]) | (xmss_address[6] & fast_layout[8]) | (frame_left[6] & fast_select_10) | (frame_right[86] & fast_layout[14]);
-    assign fast_block[519]= (frame_right[7] & fast_layout[1]) | (frame_payload[71] & fast_select_6) | (frame_payload[7] & fast_select_7) | (frame_public[7] & fast_layout[6]) | (index_bytes[7] & fast_layout[7]) | (xmss_address[7] & fast_layout[8]) | (frame_left[7] & fast_select_10) | (frame_right[87] & fast_layout[14]);
-    assign fast_block[520]= (frame_right[8] & fast_layout[1]) | (frame_payload[72] & fast_select_6) | (frame_payload[8] & fast_select_7) | (frame_public[8] & fast_layout[6]) | (index_bytes[8] & fast_layout[7]) | (xmss_address[8] & fast_layout[8]) | (frame_left[8] & fast_select_10) | (frame_right[88] & fast_layout[14]);
-    assign fast_block[521]= (frame_right[9] & fast_layout[1]) | (frame_payload[73] & fast_select_6) | (frame_payload[9] & fast_select_7) | (frame_public[9] & fast_layout[6]) | (index_bytes[9] & fast_layout[7]) | (xmss_address[9] & fast_layout[8]) | (frame_left[9] & fast_select_10) | (frame_right[89] & fast_layout[14]);
-    assign fast_block[522]= (frame_right[10] & fast_layout[1]) | (frame_payload[74] & fast_select_6) | (frame_payload[10] & fast_select_7) | (frame_public[10] & fast_layout[6]) | (index_bytes[10] & fast_layout[7]) | (xmss_address[10] & fast_layout[8]) | (frame_left[10] & fast_select_10) | (frame_right[90] & fast_layout[14]);
-    assign fast_block[523]= (frame_right[11] & fast_layout[1]) | (frame_payload[75] & fast_select_6) | (frame_payload[11] & fast_select_7) | (frame_public[11] & fast_layout[6]) | (index_bytes[11] & fast_layout[7]) | (xmss_address[11] & fast_layout[8]) | (frame_left[11] & fast_select_10) | (frame_right[91] & fast_layout[14]);
-    assign fast_block[524]= (frame_right[12] & fast_layout[1]) | (frame_payload[76] & fast_select_6) | (frame_payload[12] & fast_select_7) | (frame_public[12] & fast_layout[6]) | (index_bytes[12] & fast_layout[7]) | (xmss_address[12] & fast_layout[8]) | (frame_left[12] & fast_select_10) | (frame_right[92] & fast_layout[14]);
-    assign fast_block[525]= (frame_right[13] & fast_layout[1]) | (frame_payload[77] & fast_select_6) | (frame_payload[13] & fast_select_7) | (frame_public[13] & fast_layout[6]) | (index_bytes[13] & fast_layout[7]) | (xmss_address[13] & fast_layout[8]) | (frame_left[13] & fast_select_10) | (frame_right[93] & fast_layout[14]);
-    assign fast_block[526]= (frame_right[14] & fast_layout[1]) | (frame_payload[78] & fast_select_6) | (frame_payload[14] & fast_select_7) | (frame_public[14] & fast_layout[6]) | (index_bytes[14] & fast_layout[7]) | (xmss_address[14] & fast_layout[8]) | (frame_left[14] & fast_select_10) | (frame_right[94] & fast_layout[14]);
-    assign fast_block[527]= (frame_right[15] & fast_layout[1]) | (frame_payload[79] & fast_select_6) | (frame_payload[15] & fast_select_7) | (frame_public[15] & fast_layout[6]) | (index_bytes[15] & fast_layout[7]) | (xmss_address[15] & fast_layout[8]) | (frame_left[15] & fast_select_10) | (frame_right[95] & fast_layout[14]);
-    assign fast_block[528]= (frame_right[16] & fast_layout[1]) | (frame_payload[80] & fast_select_6) | (frame_payload[16] & fast_select_7) | (frame_public[16] & fast_layout[6]) | (index_bytes[16] & fast_layout[7]) | (xmss_address[16] & fast_layout[8]) | (frame_left[16] & fast_select_10) | (frame_right[96] & fast_layout[14]);
-    assign fast_block[529]= (frame_right[17] & fast_layout[1]) | (frame_payload[81] & fast_select_6) | (frame_payload[17] & fast_select_7) | (frame_public[17] & fast_layout[6]) | (index_bytes[17] & fast_layout[7]) | (xmss_address[17] & fast_layout[8]) | (frame_left[17] & fast_select_10) | (frame_right[97] & fast_layout[14]);
-    assign fast_block[530]= (frame_right[18] & fast_layout[1]) | (frame_payload[82] & fast_select_6) | (frame_payload[18] & fast_select_7) | (frame_public[18] & fast_layout[6]) | (index_bytes[18] & fast_layout[7]) | (xmss_address[18] & fast_layout[8]) | (frame_left[18] & fast_select_10) | (frame_right[98] & fast_layout[14]);
-    assign fast_block[531]= (frame_right[19] & fast_layout[1]) | (frame_payload[83] & fast_select_6) | (frame_payload[19] & fast_select_7) | (frame_public[19] & fast_layout[6]) | (index_bytes[19] & fast_layout[7]) | (xmss_address[19] & fast_layout[8]) | (frame_left[19] & fast_select_10) | (frame_right[99] & fast_layout[14]);
-    assign fast_block[532]= (frame_right[20] & fast_layout[1]) | (frame_payload[84] & fast_select_6) | (frame_payload[20] & fast_select_7) | (frame_public[20] & fast_layout[6]) | (index_bytes[20] & fast_layout[7]) | (xmss_address[20] & fast_layout[8]) | (frame_left[20] & fast_select_10) | (frame_right[100] & fast_layout[14]);
-    assign fast_block[533]= (frame_right[21] & fast_layout[1]) | (frame_payload[85] & fast_select_6) | (frame_payload[21] & fast_select_7) | (frame_public[21] & fast_layout[6]) | (index_bytes[21] & fast_layout[7]) | (xmss_address[21] & fast_layout[8]) | (frame_left[21] & fast_select_10) | (frame_right[101] & fast_layout[14]);
-    assign fast_block[534]= (frame_right[22] & fast_layout[1]) | (frame_payload[86] & fast_select_6) | (frame_payload[22] & fast_select_7) | (frame_public[22] & fast_layout[6]) | (index_bytes[22] & fast_layout[7]) | (xmss_address[22] & fast_layout[8]) | (frame_left[22] & fast_select_10) | (frame_right[102] & fast_layout[14]);
-    assign fast_block[535]= (frame_right[23] & fast_layout[1]) | (frame_payload[87] & fast_select_6) | (frame_payload[23] & fast_select_7) | (frame_public[23] & fast_layout[6]) | (index_bytes[23] & fast_layout[7]) | (xmss_address[23] & fast_layout[8]) | (frame_left[23] & fast_select_10) | (frame_right[103] & fast_layout[14]);
-    assign fast_block[536]= (frame_right[24] & fast_layout[1]) | (frame_payload[88] & fast_select_6) | (frame_payload[24] & fast_select_7) | (frame_public[24] & fast_layout[6]) | (index_bytes[24] & fast_layout[7]) | (xmss_address[24] & fast_layout[8]) | (frame_left[24] & fast_select_10) | (frame_right[104] & fast_layout[14]);
-    assign fast_block[537]= (frame_right[25] & fast_layout[1]) | (frame_payload[89] & fast_select_6) | (frame_payload[25] & fast_select_7) | (frame_public[25] & fast_layout[6]) | (index_bytes[25] & fast_layout[7]) | (xmss_address[25] & fast_layout[8]) | (frame_left[25] & fast_select_10) | (frame_right[105] & fast_layout[14]);
-    assign fast_block[538]= (frame_right[26] & fast_layout[1]) | (frame_payload[90] & fast_select_6) | (frame_payload[26] & fast_select_7) | (frame_public[26] & fast_layout[6]) | (index_bytes[26] & fast_layout[7]) | (xmss_address[26] & fast_layout[8]) | (frame_left[26] & fast_select_10) | (frame_right[106] & fast_layout[14]);
-    assign fast_block[539]= (frame_right[27] & fast_layout[1]) | (frame_payload[91] & fast_select_6) | (frame_payload[27] & fast_select_7) | (frame_public[27] & fast_layout[6]) | (index_bytes[27] & fast_layout[7]) | (xmss_address[27] & fast_layout[8]) | (frame_left[27] & fast_select_10) | (frame_right[107] & fast_layout[14]);
-    assign fast_block[540]= (frame_right[28] & fast_layout[1]) | (frame_payload[92] & fast_select_6) | (frame_payload[28] & fast_select_7) | (frame_public[28] & fast_layout[6]) | (index_bytes[28] & fast_layout[7]) | (xmss_address[28] & fast_layout[8]) | (frame_left[28] & fast_select_10) | (frame_right[108] & fast_layout[14]);
-    assign fast_block[541]= (frame_right[29] & fast_layout[1]) | (frame_payload[93] & fast_select_6) | (frame_payload[29] & fast_select_7) | (frame_public[29] & fast_layout[6]) | (index_bytes[29] & fast_layout[7]) | (xmss_address[29] & fast_layout[8]) | (frame_left[29] & fast_select_10) | (frame_right[109] & fast_layout[14]);
-    assign fast_block[542]= (frame_right[30] & fast_layout[1]) | (frame_payload[94] & fast_select_6) | (frame_payload[30] & fast_select_7) | (frame_public[30] & fast_layout[6]) | (index_bytes[30] & fast_layout[7]) | (xmss_address[30] & fast_layout[8]) | (frame_left[30] & fast_select_10) | (frame_right[110] & fast_layout[14]);
-    assign fast_block[543]= (frame_right[31] & fast_layout[1]) | (frame_payload[95] & fast_select_6) | (frame_payload[31] & fast_select_7) | (frame_public[31] & fast_layout[6]) | (index_bytes[31] & fast_layout[7]) | (xmss_address[31] & fast_layout[8]) | (frame_left[31] & fast_select_10) | (frame_right[111] & fast_layout[14]);
-    assign fast_block[544]= (frame_right[32] & fast_layout[1]) | (frame_payload[96] & fast_select_6) | (frame_payload[32] & fast_select_7) | (frame_public[32] & fast_layout[6]) | (index_bytes[32] & fast_layout[7]) | (xmss_address[32] & fast_layout[8]) | (frame_left[32] & fast_select_10) | (frame_right[112] & fast_layout[14]);
-    assign fast_block[545]= (frame_right[33] & fast_layout[1]) | (frame_payload[97] & fast_select_6) | (frame_payload[33] & fast_select_7) | (frame_public[33] & fast_layout[6]) | (index_bytes[33] & fast_layout[7]) | (xmss_address[33] & fast_layout[8]) | (frame_left[33] & fast_select_10) | (frame_right[113] & fast_layout[14]);
-    assign fast_block[546]= (frame_right[34] & fast_layout[1]) | (frame_payload[98] & fast_select_6) | (frame_payload[34] & fast_select_7) | (frame_public[34] & fast_layout[6]) | (index_bytes[34] & fast_layout[7]) | (xmss_address[34] & fast_layout[8]) | (frame_left[34] & fast_select_10) | (frame_right[114] & fast_layout[14]);
-    assign fast_block[547]= (frame_right[35] & fast_layout[1]) | (frame_payload[99] & fast_select_6) | (frame_payload[35] & fast_select_7) | (frame_public[35] & fast_layout[6]) | (index_bytes[35] & fast_layout[7]) | (xmss_address[35] & fast_layout[8]) | (frame_left[35] & fast_select_10) | (frame_right[115] & fast_layout[14]);
-    assign fast_block[548]= (frame_right[36] & fast_layout[1]) | (frame_payload[100] & fast_select_6) | (frame_payload[36] & fast_select_7) | (frame_public[36] & fast_layout[6]) | (index_bytes[36] & fast_layout[7]) | (xmss_address[36] & fast_layout[8]) | (frame_left[36] & fast_select_10) | (frame_right[116] & fast_layout[14]);
-    assign fast_block[549]= (frame_right[37] & fast_layout[1]) | (frame_payload[101] & fast_select_6) | (frame_payload[37] & fast_select_7) | (frame_public[37] & fast_layout[6]) | (index_bytes[37] & fast_layout[7]) | (xmss_address[37] & fast_layout[8]) | (frame_left[37] & fast_select_10) | (frame_right[117] & fast_layout[14]);
-    assign fast_block[550]= (frame_right[38] & fast_layout[1]) | (frame_payload[102] & fast_select_6) | (frame_payload[38] & fast_select_7) | (frame_public[38] & fast_layout[6]) | (index_bytes[38] & fast_layout[7]) | (xmss_address[38] & fast_layout[8]) | (frame_left[38] & fast_select_10) | (frame_right[118] & fast_layout[14]);
-    assign fast_block[551]= (frame_right[39] & fast_layout[1]) | (frame_payload[103] & fast_select_6) | (frame_payload[39] & fast_select_7) | (frame_public[39] & fast_layout[6]) | (index_bytes[39] & fast_layout[7]) | (xmss_address[39] & fast_layout[8]) | (frame_left[39] & fast_select_10) | (frame_right[119] & fast_layout[14]);
-    assign fast_block[552]= (frame_right[40] & fast_layout[1]) | (frame_payload[104] & fast_select_6) | (frame_payload[40] & fast_select_7) | (frame_public[40] & fast_layout[6]) | (index_bytes[40] & fast_layout[7]) | (xmss_address[40] & fast_layout[8]) | (frame_left[40] & fast_select_10) | (frame_right[120] & fast_layout[14]);
-    assign fast_block[553]= (frame_right[41] & fast_layout[1]) | (frame_payload[105] & fast_select_6) | (frame_payload[41] & fast_select_7) | (frame_public[41] & fast_layout[6]) | (index_bytes[41] & fast_layout[7]) | (xmss_address[41] & fast_layout[8]) | (frame_left[41] & fast_select_10) | (frame_right[121] & fast_layout[14]);
-    assign fast_block[554]= (frame_right[42] & fast_layout[1]) | (frame_payload[106] & fast_select_6) | (frame_payload[42] & fast_select_7) | (frame_public[42] & fast_layout[6]) | (index_bytes[42] & fast_layout[7]) | (xmss_address[42] & fast_layout[8]) | (frame_left[42] & fast_select_10) | (frame_right[122] & fast_layout[14]);
-    assign fast_block[555]= (frame_right[43] & fast_layout[1]) | (frame_payload[107] & fast_select_6) | (frame_payload[43] & fast_select_7) | (frame_public[43] & fast_layout[6]) | (index_bytes[43] & fast_layout[7]) | (xmss_address[43] & fast_layout[8]) | (frame_left[43] & fast_select_10) | (frame_right[123] & fast_layout[14]);
-    assign fast_block[556]= (frame_right[44] & fast_layout[1]) | (frame_payload[108] & fast_select_6) | (frame_payload[44] & fast_select_7) | (frame_public[44] & fast_layout[6]) | (index_bytes[44] & fast_layout[7]) | (xmss_address[44] & fast_layout[8]) | (frame_left[44] & fast_select_10) | (frame_right[124] & fast_layout[14]);
-    assign fast_block[557]= (frame_right[45] & fast_layout[1]) | (frame_payload[109] & fast_select_6) | (frame_payload[45] & fast_select_7) | (frame_public[45] & fast_layout[6]) | (index_bytes[45] & fast_layout[7]) | (xmss_address[45] & fast_layout[8]) | (frame_left[45] & fast_select_10) | (frame_right[125] & fast_layout[14]);
-    assign fast_block[558]= (frame_right[46] & fast_layout[1]) | (frame_payload[110] & fast_select_6) | (frame_payload[46] & fast_select_7) | (frame_public[46] & fast_layout[6]) | (index_bytes[46] & fast_layout[7]) | (xmss_address[46] & fast_layout[8]) | (frame_left[46] & fast_select_10) | (frame_right[126] & fast_layout[14]);
-    assign fast_block[559]= (frame_right[47] & fast_layout[1]) | (frame_payload[111] & fast_select_6) | (frame_payload[47] & fast_select_7) | (frame_public[47] & fast_layout[6]) | (index_bytes[47] & fast_layout[7]) | (xmss_address[47] & fast_layout[8]) | (frame_left[47] & fast_select_10) | (frame_right[127] & fast_layout[14]);
-    assign fast_block[560]= (frame_right[48] & fast_layout[1]) | (frame_payload[112] & fast_select_6) | (frame_payload[48] & fast_select_7) | (frame_public[48] & fast_layout[6]) | (index_bytes[48] & fast_layout[7]) | (xmss_address[48] & fast_layout[8]) | (frame_left[48] & fast_select_10) | (frame_right[128] & fast_layout[14]);
-    assign fast_block[561]= (frame_right[49] & fast_layout[1]) | (frame_payload[113] & fast_select_6) | (frame_payload[49] & fast_select_7) | (frame_public[49] & fast_layout[6]) | (index_bytes[49] & fast_layout[7]) | (xmss_address[49] & fast_layout[8]) | (frame_left[49] & fast_select_10) | (frame_right[129] & fast_layout[14]);
-    assign fast_block[562]= (frame_right[50] & fast_layout[1]) | (frame_payload[114] & fast_select_6) | (frame_payload[50] & fast_select_7) | (frame_public[50] & fast_layout[6]) | (index_bytes[50] & fast_layout[7]) | (xmss_address[50] & fast_layout[8]) | (frame_left[50] & fast_select_10) | (frame_right[130] & fast_layout[14]);
-    assign fast_block[563]= (frame_right[51] & fast_layout[1]) | (frame_payload[115] & fast_select_6) | (frame_payload[51] & fast_select_7) | (frame_public[51] & fast_layout[6]) | (index_bytes[51] & fast_layout[7]) | (xmss_address[51] & fast_layout[8]) | (frame_left[51] & fast_select_10) | (frame_right[131] & fast_layout[14]);
-    assign fast_block[564]= (frame_right[52] & fast_layout[1]) | (frame_payload[116] & fast_select_6) | (frame_payload[52] & fast_select_7) | (frame_public[52] & fast_layout[6]) | (index_bytes[52] & fast_layout[7]) | (xmss_address[52] & fast_layout[8]) | (frame_left[52] & fast_select_10) | (frame_right[132] & fast_layout[14]);
-    assign fast_block[565]= (frame_right[53] & fast_layout[1]) | (frame_payload[117] & fast_select_6) | (frame_payload[53] & fast_select_7) | (frame_public[53] & fast_layout[6]) | (index_bytes[53] & fast_layout[7]) | (xmss_address[53] & fast_layout[8]) | (frame_left[53] & fast_select_10) | (frame_right[133] & fast_layout[14]);
-    assign fast_block[566]= (frame_right[54] & fast_layout[1]) | (frame_payload[118] & fast_select_6) | (frame_payload[54] & fast_select_7) | (frame_public[54] & fast_layout[6]) | (index_bytes[54] & fast_layout[7]) | (xmss_address[54] & fast_layout[8]) | (frame_left[54] & fast_select_10) | (frame_right[134] & fast_layout[14]);
-    assign fast_block[567]= (frame_right[55] & fast_layout[1]) | (frame_payload[119] & fast_select_6) | (frame_payload[55] & fast_select_7) | (frame_public[55] & fast_layout[6]) | (index_bytes[55] & fast_layout[7]) | (xmss_address[55] & fast_layout[8]) | (frame_left[55] & fast_select_10) | (frame_right[135] & fast_layout[14]);
-    assign fast_block[568]= (frame_right[56] & fast_layout[1]) | (frame_payload[120] & fast_select_6) | (frame_payload[56] & fast_select_7) | (frame_public[56] & fast_layout[6]) | (index_bytes[56] & fast_layout[7]) | (xmss_address[56] & fast_layout[8]) | (frame_left[56] & fast_select_10) | (frame_right[136] & fast_layout[14]);
-    assign fast_block[569]= (frame_right[57] & fast_layout[1]) | (frame_payload[121] & fast_select_6) | (frame_payload[57] & fast_select_7) | (frame_public[57] & fast_layout[6]) | (index_bytes[57] & fast_layout[7]) | (xmss_address[57] & fast_layout[8]) | (frame_left[57] & fast_select_10) | (frame_right[137] & fast_layout[14]);
-    assign fast_block[570]= (frame_right[58] & fast_layout[1]) | (frame_payload[122] & fast_select_6) | (frame_payload[58] & fast_select_7) | (frame_public[58] & fast_layout[6]) | (index_bytes[58] & fast_layout[7]) | (xmss_address[58] & fast_layout[8]) | (frame_left[58] & fast_select_10) | (frame_right[138] & fast_layout[14]);
-    assign fast_block[571]= (frame_right[59] & fast_layout[1]) | (frame_payload[123] & fast_select_6) | (frame_payload[59] & fast_select_7) | (frame_public[59] & fast_layout[6]) | (index_bytes[59] & fast_layout[7]) | (xmss_address[59] & fast_layout[8]) | (frame_left[59] & fast_select_10) | (frame_right[139] & fast_layout[14]);
-    assign fast_block[572]= (frame_right[60] & fast_layout[1]) | (frame_payload[124] & fast_select_6) | (frame_payload[60] & fast_select_7) | (frame_public[60] & fast_layout[6]) | (index_bytes[60] & fast_layout[7]) | (xmss_address[60] & fast_layout[8]) | (frame_left[60] & fast_select_10) | (frame_right[140] & fast_layout[14]);
-    assign fast_block[573]= (frame_right[61] & fast_layout[1]) | (frame_payload[125] & fast_select_6) | (frame_payload[61] & fast_select_7) | (frame_public[61] & fast_layout[6]) | (index_bytes[61] & fast_layout[7]) | (xmss_address[61] & fast_layout[8]) | (frame_left[61] & fast_select_10) | (frame_right[141] & fast_layout[14]);
-    assign fast_block[574]= (frame_right[62] & fast_layout[1]) | (frame_payload[126] & fast_select_6) | (frame_payload[62] & fast_select_7) | (frame_public[62] & fast_layout[6]) | (index_bytes[62] & fast_layout[7]) | (xmss_address[62] & fast_layout[8]) | (frame_left[62] & fast_select_10) | (frame_right[142] & fast_layout[14]);
-    assign fast_block[575]= (frame_right[63] & fast_layout[1]) | (frame_payload[127] & fast_select_6) | (frame_payload[63] & fast_select_7) | (frame_public[63] & fast_layout[6]) | (index_bytes[63] & fast_layout[7]) | (xmss_address[63] & fast_layout[8]) | (frame_left[63] & fast_select_10) | (frame_right[143] & fast_layout[14]);
-    assign fast_block[576]= (frame_right[64] & fast_layout[1]) | (frame_payload[128] & fast_select_6) | (frame_payload[64] & fast_select_7) | (frame_public[64] & fast_layout[6]) | (index_bytes[64] & fast_layout[7]) | (xmss_address[64] & fast_layout[8]) | (frame_left[64] & fast_select_10) | (frame_right[144] & fast_layout[14]);
-    assign fast_block[577]= (frame_right[65] & fast_layout[1]) | (frame_payload[129] & fast_select_6) | (frame_payload[65] & fast_select_7) | (frame_public[65] & fast_layout[6]) | (index_bytes[65] & fast_layout[7]) | (xmss_address[65] & fast_layout[8]) | (frame_left[65] & fast_select_10) | (frame_right[145] & fast_layout[14]);
-    assign fast_block[578]= (frame_right[66] & fast_layout[1]) | (frame_payload[130] & fast_select_6) | (frame_payload[66] & fast_select_7) | (frame_public[66] & fast_layout[6]) | (index_bytes[66] & fast_layout[7]) | (xmss_address[66] & fast_layout[8]) | (frame_left[66] & fast_select_10) | (frame_right[146] & fast_layout[14]);
-    assign fast_block[579]= (frame_right[67] & fast_layout[1]) | (frame_payload[131] & fast_select_6) | (frame_payload[67] & fast_select_7) | (frame_public[67] & fast_layout[6]) | (index_bytes[67] & fast_layout[7]) | (xmss_address[67] & fast_layout[8]) | (frame_left[67] & fast_select_10) | (frame_right[147] & fast_layout[14]);
-    assign fast_block[580]= (frame_right[68] & fast_layout[1]) | (frame_payload[132] & fast_select_6) | (frame_payload[68] & fast_select_7) | (frame_public[68] & fast_layout[6]) | (index_bytes[68] & fast_layout[7]) | (xmss_address[68] & fast_layout[8]) | (frame_left[68] & fast_select_10) | (frame_right[148] & fast_layout[14]);
-    assign fast_block[581]= (frame_right[69] & fast_layout[1]) | (frame_payload[133] & fast_select_6) | (frame_payload[69] & fast_select_7) | (frame_public[69] & fast_layout[6]) | (index_bytes[69] & fast_layout[7]) | (xmss_address[69] & fast_layout[8]) | (frame_left[69] & fast_select_10) | (frame_right[149] & fast_layout[14]);
-    assign fast_block[582]= (frame_right[70] & fast_layout[1]) | (frame_payload[134] & fast_select_6) | (frame_payload[70] & fast_select_7) | (frame_public[70] & fast_layout[6]) | (index_bytes[70] & fast_layout[7]) | (xmss_address[70] & fast_layout[8]) | (frame_left[70] & fast_select_10) | (frame_right[150] & fast_layout[14]);
-    assign fast_block[583]= (frame_right[71] & fast_layout[1]) | (frame_payload[135] & fast_select_6) | (frame_payload[71] & fast_select_7) | (frame_public[71] & fast_layout[6]) | (index_bytes[71] & fast_layout[7]) | (xmss_address[71] & fast_layout[8]) | (frame_left[71] & fast_select_10) | (frame_right[151] & fast_layout[14]);
-    assign fast_block[584]= (frame_right[72] & fast_layout[1]) | (frame_payload[136] & fast_select_6) | (frame_payload[72] & fast_select_7) | (frame_public[72] & fast_layout[6]) | (index_bytes[72] & fast_layout[7]) | (xmss_address[72] & fast_layout[8]) | (frame_left[72] & fast_select_10) | (frame_right[152] & fast_layout[14]);
-    assign fast_block[585]= (frame_right[73] & fast_layout[1]) | (frame_payload[137] & fast_select_6) | (frame_payload[73] & fast_select_7) | (frame_public[73] & fast_layout[6]) | (index_bytes[73] & fast_layout[7]) | (xmss_address[73] & fast_layout[8]) | (frame_left[73] & fast_select_10) | (frame_right[153] & fast_layout[14]);
-    assign fast_block[586]= (frame_right[74] & fast_layout[1]) | (frame_payload[138] & fast_select_6) | (frame_payload[74] & fast_select_7) | (frame_public[74] & fast_layout[6]) | (index_bytes[74] & fast_layout[7]) | (xmss_address[74] & fast_layout[8]) | (frame_left[74] & fast_select_10) | (frame_right[154] & fast_layout[14]);
-    assign fast_block[587]= (frame_right[75] & fast_layout[1]) | (frame_payload[139] & fast_select_6) | (frame_payload[75] & fast_select_7) | (frame_public[75] & fast_layout[6]) | (index_bytes[75] & fast_layout[7]) | (xmss_address[75] & fast_layout[8]) | (frame_left[75] & fast_select_10) | (frame_right[155] & fast_layout[14]);
-    assign fast_block[588]= (frame_right[76] & fast_layout[1]) | (frame_payload[140] & fast_select_6) | (frame_payload[76] & fast_select_7) | (frame_public[76] & fast_layout[6]) | (index_bytes[76] & fast_layout[7]) | (xmss_address[76] & fast_layout[8]) | (frame_left[76] & fast_select_10) | (frame_right[156] & fast_layout[14]);
-    assign fast_block[589]= (frame_right[77] & fast_layout[1]) | (frame_payload[141] & fast_select_6) | (frame_payload[77] & fast_select_7) | (frame_public[77] & fast_layout[6]) | (index_bytes[77] & fast_layout[7]) | (xmss_address[77] & fast_layout[8]) | (frame_left[77] & fast_select_10) | (frame_right[157] & fast_layout[14]);
-    assign fast_block[590]= (frame_right[78] & fast_layout[1]) | (frame_payload[142] & fast_select_6) | (frame_payload[78] & fast_select_7) | (frame_public[78] & fast_layout[6]) | (index_bytes[78] & fast_layout[7]) | (xmss_address[78] & fast_layout[8]) | (frame_left[78] & fast_select_10) | (frame_right[158] & fast_layout[14]);
-    assign fast_block[591]= (frame_right[79] & fast_layout[1]) | (frame_payload[143] & fast_select_6) | (frame_payload[79] & fast_select_7) | (frame_public[79] & fast_layout[6]) | (index_bytes[79] & fast_layout[7]) | (xmss_address[79] & fast_layout[8]) | (frame_left[79] & fast_select_10) | (frame_right[159] & fast_layout[14]);
-    assign fast_block[592]= (frame_right[80] & fast_layout[1]) | (frame_payload[144] & fast_select_6) | (frame_payload[80] & fast_select_7) | (frame_public[80] & fast_layout[6]) | (index_bytes[80] & fast_layout[7]) | (xmss_address[80] & fast_layout[8]) | (frame_left[80] & fast_select_10) | (frame_right[160] & fast_layout[14]);
-    assign fast_block[593]= (frame_right[81] & fast_layout[1]) | (frame_payload[145] & fast_select_6) | (frame_payload[81] & fast_select_7) | (frame_public[81] & fast_layout[6]) | (index_bytes[81] & fast_layout[7]) | (xmss_address[81] & fast_layout[8]) | (frame_left[81] & fast_select_10) | (frame_right[161] & fast_layout[14]);
-    assign fast_block[594]= (frame_right[82] & fast_layout[1]) | (frame_payload[146] & fast_select_6) | (frame_payload[82] & fast_select_7) | (frame_public[82] & fast_layout[6]) | (index_bytes[82] & fast_layout[7]) | (xmss_address[82] & fast_layout[8]) | (frame_left[82] & fast_select_10) | (frame_right[162] & fast_layout[14]);
-    assign fast_block[595]= (frame_right[83] & fast_layout[1]) | (frame_payload[147] & fast_select_6) | (frame_payload[83] & fast_select_7) | (frame_public[83] & fast_layout[6]) | (index_bytes[83] & fast_layout[7]) | (xmss_address[83] & fast_layout[8]) | (frame_left[83] & fast_select_10) | (frame_right[163] & fast_layout[14]);
-    assign fast_block[596]= (frame_right[84] & fast_layout[1]) | (frame_payload[148] & fast_select_6) | (frame_payload[84] & fast_select_7) | (frame_public[84] & fast_layout[6]) | (index_bytes[84] & fast_layout[7]) | (xmss_address[84] & fast_layout[8]) | (frame_left[84] & fast_select_10) | (frame_right[164] & fast_layout[14]);
-    assign fast_block[597]= (frame_right[85] & fast_layout[1]) | (frame_payload[149] & fast_select_6) | (frame_payload[85] & fast_select_7) | (frame_public[85] & fast_layout[6]) | (index_bytes[85] & fast_layout[7]) | (xmss_address[85] & fast_layout[8]) | (frame_left[85] & fast_select_10) | (frame_right[165] & fast_layout[14]);
-    assign fast_block[598]= (frame_right[86] & fast_layout[1]) | (frame_payload[150] & fast_select_6) | (frame_payload[86] & fast_select_7) | (frame_public[86] & fast_layout[6]) | (index_bytes[86] & fast_layout[7]) | (xmss_address[86] & fast_layout[8]) | (frame_left[86] & fast_select_10) | (frame_right[166] & fast_layout[14]);
-    assign fast_block[599]= (frame_right[87] & fast_layout[1]) | (frame_payload[151] & fast_select_6) | (frame_payload[87] & fast_select_7) | (frame_public[87] & fast_layout[6]) | (index_bytes[87] & fast_layout[7]) | (xmss_address[87] & fast_layout[8]) | (frame_left[87] & fast_select_10) | (frame_right[167] & fast_layout[14]);
-    assign fast_block[600]= (frame_right[88] & fast_layout[1]) | (frame_payload[152] & fast_select_6) | (frame_payload[88] & fast_select_7) | (frame_public[88] & fast_layout[6]) | (index_bytes[88] & fast_layout[7]) | (xmss_address[88] & fast_layout[8]) | (frame_left[88] & fast_select_10) | (frame_right[168] & fast_layout[14]);
-    assign fast_block[601]= (frame_right[89] & fast_layout[1]) | (frame_payload[153] & fast_select_6) | (frame_payload[89] & fast_select_7) | (frame_public[89] & fast_layout[6]) | (index_bytes[89] & fast_layout[7]) | (xmss_address[89] & fast_layout[8]) | (frame_left[89] & fast_select_10) | (frame_right[169] & fast_layout[14]);
-    assign fast_block[602]= (frame_right[90] & fast_layout[1]) | (frame_payload[154] & fast_select_6) | (frame_payload[90] & fast_select_7) | (frame_public[90] & fast_layout[6]) | (index_bytes[90] & fast_layout[7]) | (xmss_address[90] & fast_layout[8]) | (frame_left[90] & fast_select_10) | (frame_right[170] & fast_layout[14]);
-    assign fast_block[603]= (frame_right[91] & fast_layout[1]) | (frame_payload[155] & fast_select_6) | (frame_payload[91] & fast_select_7) | (frame_public[91] & fast_layout[6]) | (index_bytes[91] & fast_layout[7]) | (xmss_address[91] & fast_layout[8]) | (frame_left[91] & fast_select_10) | (frame_right[171] & fast_layout[14]);
-    assign fast_block[604]= (frame_right[92] & fast_layout[1]) | (frame_payload[156] & fast_select_6) | (frame_payload[92] & fast_select_7) | (frame_public[92] & fast_layout[6]) | (index_bytes[92] & fast_layout[7]) | (xmss_address[92] & fast_layout[8]) | (frame_left[92] & fast_select_10) | (frame_right[172] & fast_layout[14]);
-    assign fast_block[605]= (frame_right[93] & fast_layout[1]) | (frame_payload[157] & fast_select_6) | (frame_payload[93] & fast_select_7) | (frame_public[93] & fast_layout[6]) | (index_bytes[93] & fast_layout[7]) | (xmss_address[93] & fast_layout[8]) | (frame_left[93] & fast_select_10) | (frame_right[173] & fast_layout[14]);
-    assign fast_block[606]= (frame_right[94] & fast_layout[1]) | (frame_payload[158] & fast_select_6) | (frame_payload[94] & fast_select_7) | (frame_public[94] & fast_layout[6]) | (index_bytes[94] & fast_layout[7]) | (xmss_address[94] & fast_layout[8]) | (frame_left[94] & fast_select_10) | (frame_right[174] & fast_layout[14]);
-    assign fast_block[607]= (frame_right[95] & fast_layout[1]) | (frame_payload[159] & fast_select_6) | (frame_payload[95] & fast_select_7) | (frame_public[95] & fast_layout[6]) | (index_bytes[95] & fast_layout[7]) | (xmss_address[95] & fast_layout[8]) | (frame_left[95] & fast_select_10) | (frame_right[175] & fast_layout[14]);
-    assign fast_block[608]= (frame_right[96] & fast_layout[1]) | (frame_payload[160] & fast_select_6) | (frame_payload[96] & fast_select_7) | (frame_public[96] & fast_layout[6]) | (index_bytes[96] & fast_layout[7]) | (xmss_address[96] & fast_layout[8]) | (frame_left[96] & fast_select_10) | (frame_right[176] & fast_layout[14]);
-    assign fast_block[609]= (frame_right[97] & fast_layout[1]) | (frame_payload[161] & fast_select_6) | (frame_payload[97] & fast_select_7) | (frame_public[97] & fast_layout[6]) | (index_bytes[97] & fast_layout[7]) | (xmss_address[97] & fast_layout[8]) | (frame_left[97] & fast_select_10) | (frame_right[177] & fast_layout[14]);
-    assign fast_block[610]= (frame_right[98] & fast_layout[1]) | (frame_payload[162] & fast_select_6) | (frame_payload[98] & fast_select_7) | (frame_public[98] & fast_layout[6]) | (index_bytes[98] & fast_layout[7]) | (xmss_address[98] & fast_layout[8]) | (frame_left[98] & fast_select_10) | (frame_right[178] & fast_layout[14]);
-    assign fast_block[611]= (frame_right[99] & fast_layout[1]) | (frame_payload[163] & fast_select_6) | (frame_payload[99] & fast_select_7) | (frame_public[99] & fast_layout[6]) | (index_bytes[99] & fast_layout[7]) | (xmss_address[99] & fast_layout[8]) | (frame_left[99] & fast_select_10) | (frame_right[179] & fast_layout[14]);
-    assign fast_block[612]= (frame_right[100] & fast_layout[1]) | (frame_payload[164] & fast_select_6) | (frame_payload[100] & fast_select_7) | (frame_public[100] & fast_layout[6]) | (index_bytes[100] & fast_layout[7]) | (xmss_address[100] & fast_layout[8]) | (frame_left[100] & fast_select_10) | (frame_right[180] & fast_layout[14]);
-    assign fast_block[613]= (frame_right[101] & fast_layout[1]) | (frame_payload[165] & fast_select_6) | (frame_payload[101] & fast_select_7) | (frame_public[101] & fast_layout[6]) | (index_bytes[101] & fast_layout[7]) | (xmss_address[101] & fast_layout[8]) | (frame_left[101] & fast_select_10) | (frame_right[181] & fast_layout[14]);
-    assign fast_block[614]= (frame_right[102] & fast_layout[1]) | (frame_payload[166] & fast_select_6) | (frame_payload[102] & fast_select_7) | (frame_public[102] & fast_layout[6]) | (index_bytes[102] & fast_layout[7]) | (xmss_address[102] & fast_layout[8]) | (frame_left[102] & fast_select_10) | (frame_right[182] & fast_layout[14]);
-    assign fast_block[615]= (frame_right[103] & fast_layout[1]) | (frame_payload[167] & fast_select_6) | (frame_payload[103] & fast_select_7) | (frame_public[103] & fast_layout[6]) | (index_bytes[103] & fast_layout[7]) | (xmss_address[103] & fast_layout[8]) | (frame_left[103] & fast_select_10) | (frame_right[183] & fast_layout[14]);
-    assign fast_block[616]= (frame_right[104] & fast_layout[1]) | (frame_payload[168] & fast_select_6) | (frame_payload[104] & fast_select_7) | (frame_public[104] & fast_layout[6]) | (index_bytes[104] & fast_layout[7]) | (xmss_address[104] & fast_layout[8]) | (frame_left[104] & fast_select_10) | (frame_right[184] & fast_layout[14]);
-    assign fast_block[617]= (frame_right[105] & fast_layout[1]) | (frame_payload[169] & fast_select_6) | (frame_payload[105] & fast_select_7) | (frame_public[105] & fast_layout[6]) | (index_bytes[105] & fast_layout[7]) | (xmss_address[105] & fast_layout[8]) | (frame_left[105] & fast_select_10) | (frame_right[185] & fast_layout[14]);
-    assign fast_block[618]= (frame_right[106] & fast_layout[1]) | (frame_payload[170] & fast_select_6) | (frame_payload[106] & fast_select_7) | (frame_public[106] & fast_layout[6]) | (index_bytes[106] & fast_layout[7]) | (xmss_address[106] & fast_layout[8]) | (frame_left[106] & fast_select_10) | (frame_right[186] & fast_layout[14]);
-    assign fast_block[619]= (frame_right[107] & fast_layout[1]) | (frame_payload[171] & fast_select_6) | (frame_payload[107] & fast_select_7) | (frame_public[107] & fast_layout[6]) | (index_bytes[107] & fast_layout[7]) | (xmss_address[107] & fast_layout[8]) | (frame_left[107] & fast_select_10) | (frame_right[187] & fast_layout[14]);
-    assign fast_block[620]= (frame_right[108] & fast_layout[1]) | (frame_payload[172] & fast_select_6) | (frame_payload[108] & fast_select_7) | (frame_public[108] & fast_layout[6]) | (index_bytes[108] & fast_layout[7]) | (xmss_address[108] & fast_layout[8]) | (frame_left[108] & fast_select_10) | (frame_right[188] & fast_layout[14]);
-    assign fast_block[621]= (frame_right[109] & fast_layout[1]) | (frame_payload[173] & fast_select_6) | (frame_payload[109] & fast_select_7) | (frame_public[109] & fast_layout[6]) | (index_bytes[109] & fast_layout[7]) | (xmss_address[109] & fast_layout[8]) | (frame_left[109] & fast_select_10) | (frame_right[189] & fast_layout[14]);
-    assign fast_block[622]= (frame_right[110] & fast_layout[1]) | (frame_payload[174] & fast_select_6) | (frame_payload[110] & fast_select_7) | (frame_public[110] & fast_layout[6]) | (index_bytes[110] & fast_layout[7]) | (xmss_address[110] & fast_layout[8]) | (frame_left[110] & fast_select_10) | (frame_right[190] & fast_layout[14]);
-    assign fast_block[623]= (frame_right[111] & fast_layout[1]) | (frame_payload[175] & fast_select_6) | (frame_payload[111] & fast_select_7) | (frame_public[111] & fast_layout[6]) | (index_bytes[111] & fast_layout[7]) | (xmss_address[111] & fast_layout[8]) | (frame_left[111] & fast_select_10) | (frame_right[191] & fast_layout[14]);
-    assign fast_block[624]= (frame_right[112] & fast_layout[1]) | (frame_payload[176] & fast_select_6) | (frame_payload[112] & fast_select_7) | (frame_public[112] & fast_layout[6]) | (index_bytes[112] & fast_layout[7]) | (xmss_address[112] & fast_layout[8]) | (frame_left[112] & fast_select_10) | (frame_right[192] & fast_layout[14]);
-    assign fast_block[625]= (frame_right[113] & fast_layout[1]) | (frame_payload[177] & fast_select_6) | (frame_payload[113] & fast_select_7) | (frame_public[113] & fast_layout[6]) | (index_bytes[113] & fast_layout[7]) | (xmss_address[113] & fast_layout[8]) | (frame_left[113] & fast_select_10) | (frame_right[193] & fast_layout[14]);
-    assign fast_block[626]= (frame_right[114] & fast_layout[1]) | (frame_payload[178] & fast_select_6) | (frame_payload[114] & fast_select_7) | (frame_public[114] & fast_layout[6]) | (index_bytes[114] & fast_layout[7]) | (xmss_address[114] & fast_layout[8]) | (frame_left[114] & fast_select_10) | (frame_right[194] & fast_layout[14]);
-    assign fast_block[627]= (frame_right[115] & fast_layout[1]) | (frame_payload[179] & fast_select_6) | (frame_payload[115] & fast_select_7) | (frame_public[115] & fast_layout[6]) | (index_bytes[115] & fast_layout[7]) | (xmss_address[115] & fast_layout[8]) | (frame_left[115] & fast_select_10) | (frame_right[195] & fast_layout[14]);
-    assign fast_block[628]= (frame_right[116] & fast_layout[1]) | (frame_payload[180] & fast_select_6) | (frame_payload[116] & fast_select_7) | (frame_public[116] & fast_layout[6]) | (index_bytes[116] & fast_layout[7]) | (xmss_address[116] & fast_layout[8]) | (frame_left[116] & fast_select_10) | (frame_right[196] & fast_layout[14]);
-    assign fast_block[629]= (frame_right[117] & fast_layout[1]) | (frame_payload[181] & fast_select_6) | (frame_payload[117] & fast_select_7) | (frame_public[117] & fast_layout[6]) | (index_bytes[117] & fast_layout[7]) | (xmss_address[117] & fast_layout[8]) | (frame_left[117] & fast_select_10) | (frame_right[197] & fast_layout[14]);
-    assign fast_block[630]= (frame_right[118] & fast_layout[1]) | (frame_payload[182] & fast_select_6) | (frame_payload[118] & fast_select_7) | (frame_public[118] & fast_layout[6]) | (index_bytes[118] & fast_layout[7]) | (xmss_address[118] & fast_layout[8]) | (frame_left[118] & fast_select_10) | (frame_right[198] & fast_layout[14]);
-    assign fast_block[631]= (frame_right[119] & fast_layout[1]) | (frame_payload[183] & fast_select_6) | (frame_payload[119] & fast_select_7) | (frame_public[119] & fast_layout[6]) | (index_bytes[119] & fast_layout[7]) | (xmss_address[119] & fast_layout[8]) | (frame_left[119] & fast_select_10) | (frame_right[199] & fast_layout[14]);
-    assign fast_block[632]= (frame_right[120] & fast_layout[1]) | (frame_payload[184] & fast_select_6) | (frame_payload[120] & fast_select_7) | (frame_public[120] & fast_layout[6]) | (index_bytes[120] & fast_layout[7]) | (xmss_address[120] & fast_layout[8]) | (frame_left[120] & fast_select_10) | (frame_right[200] & fast_layout[14]);
-    assign fast_block[633]= (frame_right[121] & fast_layout[1]) | (frame_payload[185] & fast_select_6) | (frame_payload[121] & fast_select_7) | (frame_public[121] & fast_layout[6]) | (index_bytes[121] & fast_layout[7]) | (xmss_address[121] & fast_layout[8]) | (frame_left[121] & fast_select_10) | (frame_right[201] & fast_layout[14]);
-    assign fast_block[634]= (frame_right[122] & fast_layout[1]) | (frame_payload[186] & fast_select_6) | (frame_payload[122] & fast_select_7) | (frame_public[122] & fast_layout[6]) | (index_bytes[122] & fast_layout[7]) | (xmss_address[122] & fast_layout[8]) | (frame_left[122] & fast_select_10) | (frame_right[202] & fast_layout[14]);
-    assign fast_block[635]= (frame_right[123] & fast_layout[1]) | (frame_payload[187] & fast_select_6) | (frame_payload[123] & fast_select_7) | (frame_public[123] & fast_layout[6]) | (index_bytes[123] & fast_layout[7]) | (xmss_address[123] & fast_layout[8]) | (frame_left[123] & fast_select_10) | (frame_right[203] & fast_layout[14]);
-    assign fast_block[636]= (frame_right[124] & fast_layout[1]) | (frame_payload[188] & fast_select_6) | (frame_payload[124] & fast_select_7) | (frame_public[124] & fast_layout[6]) | (index_bytes[124] & fast_layout[7]) | (xmss_address[124] & fast_layout[8]) | (frame_left[124] & fast_select_10) | (frame_right[204] & fast_layout[14]);
-    assign fast_block[637]= (frame_right[125] & fast_layout[1]) | (frame_payload[189] & fast_select_6) | (frame_payload[125] & fast_select_7) | (frame_public[125] & fast_layout[6]) | (index_bytes[125] & fast_layout[7]) | (xmss_address[125] & fast_layout[8]) | (frame_left[125] & fast_select_10) | (frame_right[205] & fast_layout[14]);
-    assign fast_block[638]= (frame_right[126] & fast_layout[1]) | (frame_payload[190] & fast_select_6) | (frame_payload[126] & fast_select_7) | (frame_public[126] & fast_layout[6]) | (index_bytes[126] & fast_layout[7]) | (xmss_address[126] & fast_layout[8]) | (frame_left[126] & fast_select_10) | (frame_right[206] & fast_layout[14]);
-    assign fast_block[639]= (frame_right[127] & fast_layout[1]) | (frame_payload[191] & fast_select_6) | (frame_payload[127] & fast_select_7) | (frame_public[127] & fast_layout[6]) | (index_bytes[127] & fast_layout[7]) | (xmss_address[127] & fast_layout[8]) | (frame_left[127] & fast_select_10) | (frame_right[207] & fast_layout[14]);
-    assign fast_block[640]= fast_select_11 | (frame_right[0] & fast_layout[3]) | (frame_payload[128] & fast_select_7) | (frame_public[128] & fast_layout[6]) | (index_bytes[128] & fast_layout[7]) | (xmss_address[128] & fast_layout[8]) | (frame_left[128] & fast_select_10) | (frame_right[208] & fast_layout[14]);
-    assign fast_block[641]= fast_select_11 | (frame_right[1] & fast_layout[3]) | (frame_payload[129] & fast_select_7) | (frame_public[129] & fast_layout[6]) | (index_bytes[129] & fast_layout[7]) | (xmss_address[129] & fast_layout[8]) | (frame_left[129] & fast_select_10) | (frame_right[209] & fast_layout[14]);
-    assign fast_block[642]= fast_select_11 | (frame_right[2] & fast_layout[3]) | (frame_payload[130] & fast_select_7) | (frame_public[130] & fast_layout[6]) | (index_bytes[130] & fast_layout[7]) | (xmss_address[130] & fast_layout[8]) | (frame_left[130] & fast_select_10) | (frame_right[210] & fast_layout[14]);
-    assign fast_block[643]= fast_select_11 | (frame_right[3] & fast_layout[3]) | (frame_payload[131] & fast_select_7) | (frame_public[131] & fast_layout[6]) | (index_bytes[131] & fast_layout[7]) | (xmss_address[131] & fast_layout[8]) | (frame_left[131] & fast_select_10) | (frame_right[211] & fast_layout[14]);
-    assign fast_block[644]= fast_select_11 | (frame_right[4] & fast_layout[3]) | (frame_payload[132] & fast_select_7) | (frame_public[132] & fast_layout[6]) | (index_bytes[132] & fast_layout[7]) | (xmss_address[132] & fast_layout[8]) | (frame_left[132] & fast_select_10) | (frame_right[212] & fast_layout[14]);
-    assign fast_block[645]= (frame_right[5] & fast_layout[3]) | (frame_payload[133] & fast_select_7) | (frame_public[133] & fast_layout[6]) | (index_bytes[133] & fast_layout[7]) | (xmss_address[133] & fast_layout[8]) | (frame_left[133] & fast_select_10) | (frame_right[213] & fast_layout[14]);
-    assign fast_block[646]= (frame_right[6] & fast_layout[3]) | (frame_payload[134] & fast_select_7) | (frame_public[134] & fast_layout[6]) | (index_bytes[134] & fast_layout[7]) | (xmss_address[134] & fast_layout[8]) | (frame_left[134] & fast_select_10) | (frame_right[214] & fast_layout[14]);
-    assign fast_block[647]= (frame_right[7] & fast_layout[3]) | (frame_payload[135] & fast_select_7) | (frame_public[135] & fast_layout[6]) | (index_bytes[135] & fast_layout[7]) | (xmss_address[135] & fast_layout[8]) | (frame_left[135] & fast_select_10) | (frame_right[215] & fast_layout[14]);
-    assign fast_block[648]= (frame_right[8] & fast_layout[3]) | (frame_payload[136] & fast_select_7) | (frame_public[136] & fast_layout[6]) | (index_bytes[136] & fast_layout[7]) | (xmss_address[136] & fast_layout[8]) | (frame_left[136] & fast_select_10) | (frame_right[216] & fast_layout[14]);
-    assign fast_block[649]= (frame_right[9] & fast_layout[3]) | (frame_payload[137] & fast_select_7) | (frame_public[137] & fast_layout[6]) | (index_bytes[137] & fast_layout[7]) | (xmss_address[137] & fast_layout[8]) | (frame_left[137] & fast_select_10) | (frame_right[217] & fast_layout[14]);
-    assign fast_block[650]= (frame_right[10] & fast_layout[3]) | (frame_payload[138] & fast_select_7) | (frame_public[138] & fast_layout[6]) | (index_bytes[138] & fast_layout[7]) | (xmss_address[138] & fast_layout[8]) | (frame_left[138] & fast_select_10) | (frame_right[218] & fast_layout[14]);
-    assign fast_block[651]= (frame_right[11] & fast_layout[3]) | (frame_payload[139] & fast_select_7) | (frame_public[139] & fast_layout[6]) | (index_bytes[139] & fast_layout[7]) | (xmss_address[139] & fast_layout[8]) | (frame_left[139] & fast_select_10) | (frame_right[219] & fast_layout[14]);
-    assign fast_block[652]= (frame_right[12] & fast_layout[3]) | (frame_payload[140] & fast_select_7) | (frame_public[140] & fast_layout[6]) | (index_bytes[140] & fast_layout[7]) | (xmss_address[140] & fast_layout[8]) | (frame_left[140] & fast_select_10) | (frame_right[220] & fast_layout[14]);
-    assign fast_block[653]= (frame_right[13] & fast_layout[3]) | (frame_payload[141] & fast_select_7) | (frame_public[141] & fast_layout[6]) | (index_bytes[141] & fast_layout[7]) | (xmss_address[141] & fast_layout[8]) | (frame_left[141] & fast_select_10) | (frame_right[221] & fast_layout[14]);
-    assign fast_block[654]= (frame_right[14] & fast_layout[3]) | (frame_payload[142] & fast_select_7) | (frame_public[142] & fast_layout[6]) | (index_bytes[142] & fast_layout[7]) | (xmss_address[142] & fast_layout[8]) | (frame_left[142] & fast_select_10) | (frame_right[222] & fast_layout[14]);
-    assign fast_block[655]= (frame_right[15] & fast_layout[3]) | (frame_payload[143] & fast_select_7) | (frame_public[143] & fast_layout[6]) | (index_bytes[143] & fast_layout[7]) | (xmss_address[143] & fast_layout[8]) | (frame_left[143] & fast_select_10) | (frame_right[223] & fast_layout[14]);
-    assign fast_block[656]= (frame_right[16] & fast_layout[3]) | (frame_payload[144] & fast_select_7) | (frame_public[144] & fast_layout[6]) | (index_bytes[144] & fast_layout[7]) | (xmss_address[144] & fast_layout[8]) | (frame_left[144] & fast_select_10) | (frame_right[224] & fast_layout[14]);
-    assign fast_block[657]= (frame_right[17] & fast_layout[3]) | (frame_payload[145] & fast_select_7) | (frame_public[145] & fast_layout[6]) | (index_bytes[145] & fast_layout[7]) | (xmss_address[145] & fast_layout[8]) | (frame_left[145] & fast_select_10) | (frame_right[225] & fast_layout[14]);
-    assign fast_block[658]= (frame_right[18] & fast_layout[3]) | (frame_payload[146] & fast_select_7) | (frame_public[146] & fast_layout[6]) | (index_bytes[146] & fast_layout[7]) | (xmss_address[146] & fast_layout[8]) | (frame_left[146] & fast_select_10) | (frame_right[226] & fast_layout[14]);
-    assign fast_block[659]= (frame_right[19] & fast_layout[3]) | (frame_payload[147] & fast_select_7) | (frame_public[147] & fast_layout[6]) | (index_bytes[147] & fast_layout[7]) | (xmss_address[147] & fast_layout[8]) | (frame_left[147] & fast_select_10) | (frame_right[227] & fast_layout[14]);
-    assign fast_block[660]= (frame_right[20] & fast_layout[3]) | (frame_payload[148] & fast_select_7) | (frame_public[148] & fast_layout[6]) | (index_bytes[148] & fast_layout[7]) | (xmss_address[148] & fast_layout[8]) | (frame_left[148] & fast_select_10) | (frame_right[228] & fast_layout[14]);
-    assign fast_block[661]= (frame_right[21] & fast_layout[3]) | (frame_payload[149] & fast_select_7) | (frame_public[149] & fast_layout[6]) | (index_bytes[149] & fast_layout[7]) | (xmss_address[149] & fast_layout[8]) | (frame_left[149] & fast_select_10) | (frame_right[229] & fast_layout[14]);
-    assign fast_block[662]= (frame_right[22] & fast_layout[3]) | (frame_payload[150] & fast_select_7) | (frame_public[150] & fast_layout[6]) | (index_bytes[150] & fast_layout[7]) | (xmss_address[150] & fast_layout[8]) | (frame_left[150] & fast_select_10) | (frame_right[230] & fast_layout[14]);
-    assign fast_block[663]= (frame_right[23] & fast_layout[3]) | (frame_payload[151] & fast_select_7) | (frame_public[151] & fast_layout[6]) | (index_bytes[151] & fast_layout[7]) | (xmss_address[151] & fast_layout[8]) | (frame_left[151] & fast_select_10) | (frame_right[231] & fast_layout[14]);
-    assign fast_block[664]= (frame_right[24] & fast_layout[3]) | (frame_payload[152] & fast_select_7) | (frame_public[152] & fast_layout[6]) | (index_bytes[152] & fast_layout[7]) | (xmss_address[152] & fast_layout[8]) | (frame_left[152] & fast_select_10) | (frame_right[232] & fast_layout[14]);
-    assign fast_block[665]= (frame_right[25] & fast_layout[3]) | (frame_payload[153] & fast_select_7) | (frame_public[153] & fast_layout[6]) | (index_bytes[153] & fast_layout[7]) | (xmss_address[153] & fast_layout[8]) | (frame_left[153] & fast_select_10) | (frame_right[233] & fast_layout[14]);
-    assign fast_block[666]= (frame_right[26] & fast_layout[3]) | (frame_payload[154] & fast_select_7) | (frame_public[154] & fast_layout[6]) | (index_bytes[154] & fast_layout[7]) | (xmss_address[154] & fast_layout[8]) | (frame_left[154] & fast_select_10) | (frame_right[234] & fast_layout[14]);
-    assign fast_block[667]= (frame_right[27] & fast_layout[3]) | (frame_payload[155] & fast_select_7) | (frame_public[155] & fast_layout[6]) | (index_bytes[155] & fast_layout[7]) | (xmss_address[155] & fast_layout[8]) | (frame_left[155] & fast_select_10) | (frame_right[235] & fast_layout[14]);
-    assign fast_block[668]= (frame_right[28] & fast_layout[3]) | (frame_payload[156] & fast_select_7) | (frame_public[156] & fast_layout[6]) | (index_bytes[156] & fast_layout[7]) | (xmss_address[156] & fast_layout[8]) | (frame_left[156] & fast_select_10) | (frame_right[236] & fast_layout[14]);
-    assign fast_block[669]= (frame_right[29] & fast_layout[3]) | (frame_payload[157] & fast_select_7) | (frame_public[157] & fast_layout[6]) | (index_bytes[157] & fast_layout[7]) | (xmss_address[157] & fast_layout[8]) | (frame_left[157] & fast_select_10) | (frame_right[237] & fast_layout[14]);
-    assign fast_block[670]= (frame_right[30] & fast_layout[3]) | (frame_payload[158] & fast_select_7) | (frame_public[158] & fast_layout[6]) | (index_bytes[158] & fast_layout[7]) | (xmss_address[158] & fast_layout[8]) | (frame_left[158] & fast_select_10) | (frame_right[238] & fast_layout[14]);
-    assign fast_block[671]= (frame_right[31] & fast_layout[3]) | (frame_payload[159] & fast_select_7) | (frame_public[159] & fast_layout[6]) | (index_bytes[159] & fast_layout[7]) | (xmss_address[159] & fast_layout[8]) | (frame_left[159] & fast_select_10) | (frame_right[239] & fast_layout[14]);
-    assign fast_block[672]= (frame_right[32] & fast_layout[3]) | (frame_payload[160] & fast_select_7) | (frame_public[160] & fast_layout[6]) | (index_bytes[160] & fast_layout[7]) | (xmss_address[160] & fast_layout[8]) | (frame_left[160] & fast_select_10) | (frame_right[240] & fast_layout[14]);
-    assign fast_block[673]= (frame_right[33] & fast_layout[3]) | (frame_payload[161] & fast_select_7) | (frame_public[161] & fast_layout[6]) | (index_bytes[161] & fast_layout[7]) | (xmss_address[161] & fast_layout[8]) | (frame_left[161] & fast_select_10) | (frame_right[241] & fast_layout[14]);
-    assign fast_block[674]= (frame_right[34] & fast_layout[3]) | (frame_payload[162] & fast_select_7) | (frame_public[162] & fast_layout[6]) | (index_bytes[162] & fast_layout[7]) | (xmss_address[162] & fast_layout[8]) | (frame_left[162] & fast_select_10) | (frame_right[242] & fast_layout[14]);
-    assign fast_block[675]= (frame_right[35] & fast_layout[3]) | (frame_payload[163] & fast_select_7) | (frame_public[163] & fast_layout[6]) | (index_bytes[163] & fast_layout[7]) | (xmss_address[163] & fast_layout[8]) | (frame_left[163] & fast_select_10) | (frame_right[243] & fast_layout[14]);
-    assign fast_block[676]= (frame_right[36] & fast_layout[3]) | (frame_payload[164] & fast_select_7) | (frame_public[164] & fast_layout[6]) | (index_bytes[164] & fast_layout[7]) | (xmss_address[164] & fast_layout[8]) | (frame_left[164] & fast_select_10) | (frame_right[244] & fast_layout[14]);
-    assign fast_block[677]= (frame_right[37] & fast_layout[3]) | (frame_payload[165] & fast_select_7) | (frame_public[165] & fast_layout[6]) | (index_bytes[165] & fast_layout[7]) | (xmss_address[165] & fast_layout[8]) | (frame_left[165] & fast_select_10) | (frame_right[245] & fast_layout[14]);
-    assign fast_block[678]= (frame_right[38] & fast_layout[3]) | (frame_payload[166] & fast_select_7) | (frame_public[166] & fast_layout[6]) | (index_bytes[166] & fast_layout[7]) | (xmss_address[166] & fast_layout[8]) | (frame_left[166] & fast_select_10) | (frame_right[246] & fast_layout[14]);
-    assign fast_block[679]= (frame_right[39] & fast_layout[3]) | (frame_payload[167] & fast_select_7) | (frame_public[167] & fast_layout[6]) | (index_bytes[167] & fast_layout[7]) | (xmss_address[167] & fast_layout[8]) | (frame_left[167] & fast_select_10) | (frame_right[247] & fast_layout[14]);
-    assign fast_block[680]= (frame_right[40] & fast_layout[3]) | (frame_payload[168] & fast_select_7) | (frame_public[168] & fast_layout[6]) | (index_bytes[168] & fast_layout[7]) | (xmss_address[168] & fast_layout[8]) | (frame_left[168] & fast_select_10) | (frame_right[248] & fast_layout[14]);
-    assign fast_block[681]= (frame_right[41] & fast_layout[3]) | (frame_payload[169] & fast_select_7) | (frame_public[169] & fast_layout[6]) | (index_bytes[169] & fast_layout[7]) | (xmss_address[169] & fast_layout[8]) | (frame_left[169] & fast_select_10) | (frame_right[249] & fast_layout[14]);
-    assign fast_block[682]= (frame_right[42] & fast_layout[3]) | (frame_payload[170] & fast_select_7) | (frame_public[170] & fast_layout[6]) | (index_bytes[170] & fast_layout[7]) | (xmss_address[170] & fast_layout[8]) | (frame_left[170] & fast_select_10) | (frame_right[250] & fast_layout[14]);
-    assign fast_block[683]= (frame_right[43] & fast_layout[3]) | (frame_payload[171] & fast_select_7) | (frame_public[171] & fast_layout[6]) | (index_bytes[171] & fast_layout[7]) | (xmss_address[171] & fast_layout[8]) | (frame_left[171] & fast_select_10) | (frame_right[251] & fast_layout[14]);
-    assign fast_block[684]= (frame_right[44] & fast_layout[3]) | (frame_payload[172] & fast_select_7) | (frame_public[172] & fast_layout[6]) | (index_bytes[172] & fast_layout[7]) | (xmss_address[172] & fast_layout[8]) | (frame_left[172] & fast_select_10) | (frame_right[252] & fast_layout[14]);
-    assign fast_block[685]= (frame_right[45] & fast_layout[3]) | (frame_payload[173] & fast_select_7) | (frame_public[173] & fast_layout[6]) | (index_bytes[173] & fast_layout[7]) | (xmss_address[173] & fast_layout[8]) | (frame_left[173] & fast_select_10) | (frame_right[253] & fast_layout[14]);
-    assign fast_block[686]= (frame_right[46] & fast_layout[3]) | (frame_payload[174] & fast_select_7) | (frame_public[174] & fast_layout[6]) | (index_bytes[174] & fast_layout[7]) | (xmss_address[174] & fast_layout[8]) | (frame_left[174] & fast_select_10) | (frame_right[254] & fast_layout[14]);
-    assign fast_block[687]= (frame_right[47] & fast_layout[3]) | (frame_payload[175] & fast_select_7) | (frame_public[175] & fast_layout[6]) | (index_bytes[175] & fast_layout[7]) | (xmss_address[175] & fast_layout[8]) | (frame_left[175] & fast_select_10) | (frame_right[255] & fast_layout[14]);
-    assign fast_block[688]= (frame_right[48] & fast_layout[3]) | (frame_payload[176] & fast_select_7) | (frame_public[176] & fast_layout[6]) | (index_bytes[176] & fast_layout[7]) | (xmss_address[176] & fast_layout[8]) | (frame_left[176] & fast_select_10) | fast_layout[14];
-    assign fast_block[689]= (frame_right[49] & fast_layout[3]) | (frame_payload[177] & fast_select_7) | (frame_public[177] & fast_layout[6]) | (index_bytes[177] & fast_layout[7]) | (xmss_address[177] & fast_layout[8]) | (frame_left[177] & fast_select_10) | fast_layout[14];
-    assign fast_block[690]= (frame_right[50] & fast_layout[3]) | (frame_payload[178] & fast_select_7) | (frame_public[178] & fast_layout[6]) | (index_bytes[178] & fast_layout[7]) | (xmss_address[178] & fast_layout[8]) | (frame_left[178] & fast_select_10) | fast_layout[14];
-    assign fast_block[691]= (frame_right[51] & fast_layout[3]) | (frame_payload[179] & fast_select_7) | (frame_public[179] & fast_layout[6]) | (index_bytes[179] & fast_layout[7]) | (xmss_address[179] & fast_layout[8]) | (frame_left[179] & fast_select_10) | fast_layout[14];
-    assign fast_block[692]= (frame_right[52] & fast_layout[3]) | (frame_payload[180] & fast_select_7) | (frame_public[180] & fast_layout[6]) | (index_bytes[180] & fast_layout[7]) | (xmss_address[180] & fast_layout[8]) | (frame_left[180] & fast_select_10) | fast_layout[14];
-    assign fast_block[693]= (frame_right[53] & fast_layout[3]) | (frame_payload[181] & fast_select_7) | (frame_public[181] & fast_layout[6]) | (index_bytes[181] & fast_layout[7]) | (xmss_address[181] & fast_layout[8]) | (frame_left[181] & fast_select_10);
-    assign fast_block[694]= (frame_right[54] & fast_layout[3]) | (frame_payload[182] & fast_select_7) | (frame_public[182] & fast_layout[6]) | (index_bytes[182] & fast_layout[7]) | (xmss_address[182] & fast_layout[8]) | (frame_left[182] & fast_select_10);
-    assign fast_block[695]= (frame_right[55] & fast_layout[3]) | (frame_payload[183] & fast_select_7) | (frame_public[183] & fast_layout[6]) | (index_bytes[183] & fast_layout[7]) | (xmss_address[183] & fast_layout[8]) | (frame_left[183] & fast_select_10);
-    assign fast_block[696]= (frame_right[56] & fast_layout[3]) | (frame_payload[184] & fast_select_7) | (frame_public[184] & fast_layout[6]) | (index_bytes[184] & fast_layout[7]) | (xmss_address[184] & fast_layout[8]) | (frame_left[184] & fast_select_10);
-    assign fast_block[697]= (frame_right[57] & fast_layout[3]) | (frame_payload[185] & fast_select_7) | (frame_public[185] & fast_layout[6]) | (index_bytes[185] & fast_layout[7]) | (xmss_address[185] & fast_layout[8]) | (frame_left[185] & fast_select_10);
-    assign fast_block[698]= (frame_right[58] & fast_layout[3]) | (frame_payload[186] & fast_select_7) | (frame_public[186] & fast_layout[6]) | (index_bytes[186] & fast_layout[7]) | (xmss_address[186] & fast_layout[8]) | (frame_left[186] & fast_select_10);
-    assign fast_block[699]= (frame_right[59] & fast_layout[3]) | (frame_payload[187] & fast_select_7) | (frame_public[187] & fast_layout[6]) | (index_bytes[187] & fast_layout[7]) | (xmss_address[187] & fast_layout[8]) | (frame_left[187] & fast_select_10);
-    assign fast_block[700]= (frame_right[60] & fast_layout[3]) | (frame_payload[188] & fast_select_7) | (frame_public[188] & fast_layout[6]) | (index_bytes[188] & fast_layout[7]) | (xmss_address[188] & fast_layout[8]) | (frame_left[188] & fast_select_10);
-    assign fast_block[701]= (frame_right[61] & fast_layout[3]) | (frame_payload[189] & fast_select_7) | (frame_public[189] & fast_layout[6]) | (index_bytes[189] & fast_layout[7]) | (xmss_address[189] & fast_layout[8]) | (frame_left[189] & fast_select_10);
-    assign fast_block[702]= (frame_right[62] & fast_layout[3]) | (frame_payload[190] & fast_select_7) | (frame_public[190] & fast_layout[6]) | (index_bytes[190] & fast_layout[7]) | (xmss_address[190] & fast_layout[8]) | (frame_left[190] & fast_select_10);
-    assign fast_block[703]= (frame_right[63] & fast_layout[3]) | (frame_payload[191] & fast_select_7) | (frame_public[191] & fast_layout[6]) | (index_bytes[191] & fast_layout[7]) | (xmss_address[191] & fast_layout[8]) | (frame_left[191] & fast_select_10);
-    assign fast_block[704]= (frame_right[64] & fast_layout[3]) | (frame_payload[192] & fast_select_7) | (frame_public[192] & fast_layout[6]) | (index_bytes[192] & fast_layout[7]) | (xmss_address[192] & fast_layout[8]) | (frame_left[192] & fast_select_10);
-    assign fast_block[705]= (frame_right[65] & fast_layout[3]) | (frame_payload[193] & fast_select_7) | (frame_public[193] & fast_layout[6]) | (index_bytes[193] & fast_layout[7]) | (xmss_address[193] & fast_layout[8]) | (frame_left[193] & fast_select_10);
-    assign fast_block[706]= (frame_right[66] & fast_layout[3]) | (frame_payload[194] & fast_select_7) | (frame_public[194] & fast_layout[6]) | (index_bytes[194] & fast_layout[7]) | (xmss_address[194] & fast_layout[8]) | (frame_left[194] & fast_select_10);
-    assign fast_block[707]= (frame_right[67] & fast_layout[3]) | (frame_payload[195] & fast_select_7) | (frame_public[195] & fast_layout[6]) | (index_bytes[195] & fast_layout[7]) | (xmss_address[195] & fast_layout[8]) | (frame_left[195] & fast_select_10);
-    assign fast_block[708]= (frame_right[68] & fast_layout[3]) | (frame_payload[196] & fast_select_7) | (frame_public[196] & fast_layout[6]) | (index_bytes[196] & fast_layout[7]) | (xmss_address[196] & fast_layout[8]) | (frame_left[196] & fast_select_10);
-    assign fast_block[709]= (frame_right[69] & fast_layout[3]) | (frame_payload[197] & fast_select_7) | (frame_public[197] & fast_layout[6]) | (index_bytes[197] & fast_layout[7]) | (xmss_address[197] & fast_layout[8]) | (frame_left[197] & fast_select_10);
-    assign fast_block[710]= (frame_right[70] & fast_layout[3]) | (frame_payload[198] & fast_select_7) | (frame_public[198] & fast_layout[6]) | (index_bytes[198] & fast_layout[7]) | (xmss_address[198] & fast_layout[8]) | (frame_left[198] & fast_select_10);
-    assign fast_block[711]= (frame_right[71] & fast_layout[3]) | (frame_payload[199] & fast_select_7) | (frame_public[199] & fast_layout[6]) | (index_bytes[199] & fast_layout[7]) | (xmss_address[199] & fast_layout[8]) | (frame_left[199] & fast_select_10);
-    assign fast_block[712]= (frame_right[72] & fast_layout[3]) | (frame_payload[200] & fast_select_7) | (frame_public[200] & fast_layout[6]) | (index_bytes[200] & fast_layout[7]) | (xmss_address[200] & fast_layout[8]) | (frame_left[200] & fast_select_10);
-    assign fast_block[713]= (frame_right[73] & fast_layout[3]) | (frame_payload[201] & fast_select_7) | (frame_public[201] & fast_layout[6]) | (index_bytes[201] & fast_layout[7]) | (xmss_address[201] & fast_layout[8]) | (frame_left[201] & fast_select_10);
-    assign fast_block[714]= (frame_right[74] & fast_layout[3]) | (frame_payload[202] & fast_select_7) | (frame_public[202] & fast_layout[6]) | (index_bytes[202] & fast_layout[7]) | (xmss_address[202] & fast_layout[8]) | (frame_left[202] & fast_select_10);
-    assign fast_block[715]= (frame_right[75] & fast_layout[3]) | (frame_payload[203] & fast_select_7) | (frame_public[203] & fast_layout[6]) | (index_bytes[203] & fast_layout[7]) | (xmss_address[203] & fast_layout[8]) | (frame_left[203] & fast_select_10);
-    assign fast_block[716]= (frame_right[76] & fast_layout[3]) | (frame_payload[204] & fast_select_7) | (frame_public[204] & fast_layout[6]) | (index_bytes[204] & fast_layout[7]) | (xmss_address[204] & fast_layout[8]) | (frame_left[204] & fast_select_10);
-    assign fast_block[717]= (frame_right[77] & fast_layout[3]) | (frame_payload[205] & fast_select_7) | (frame_public[205] & fast_layout[6]) | (index_bytes[205] & fast_layout[7]) | (xmss_address[205] & fast_layout[8]) | (frame_left[205] & fast_select_10);
-    assign fast_block[718]= (frame_right[78] & fast_layout[3]) | (frame_payload[206] & fast_select_7) | (frame_public[206] & fast_layout[6]) | (index_bytes[206] & fast_layout[7]) | (xmss_address[206] & fast_layout[8]) | (frame_left[206] & fast_select_10);
-    assign fast_block[719]= (frame_right[79] & fast_layout[3]) | (frame_payload[207] & fast_select_7) | (frame_public[207] & fast_layout[6]) | (index_bytes[207] & fast_layout[7]) | (xmss_address[207] & fast_layout[8]) | (frame_left[207] & fast_select_10);
-    assign fast_block[720]= (frame_right[80] & fast_layout[3]) | (frame_payload[208] & fast_select_7) | (frame_public[208] & fast_layout[6]) | (index_bytes[208] & fast_layout[7]) | (xmss_address[208] & fast_layout[8]) | (frame_left[208] & fast_select_10);
-    assign fast_block[721]= (frame_right[81] & fast_layout[3]) | (frame_payload[209] & fast_select_7) | (frame_public[209] & fast_layout[6]) | (index_bytes[209] & fast_layout[7]) | (xmss_address[209] & fast_layout[8]) | (frame_left[209] & fast_select_10);
-    assign fast_block[722]= (frame_right[82] & fast_layout[3]) | (frame_payload[210] & fast_select_7) | (frame_public[210] & fast_layout[6]) | (index_bytes[210] & fast_layout[7]) | (xmss_address[210] & fast_layout[8]) | (frame_left[210] & fast_select_10);
-    assign fast_block[723]= (frame_right[83] & fast_layout[3]) | (frame_payload[211] & fast_select_7) | (frame_public[211] & fast_layout[6]) | (index_bytes[211] & fast_layout[7]) | (xmss_address[211] & fast_layout[8]) | (frame_left[211] & fast_select_10);
-    assign fast_block[724]= (frame_right[84] & fast_layout[3]) | (frame_payload[212] & fast_select_7) | (frame_public[212] & fast_layout[6]) | (index_bytes[212] & fast_layout[7]) | (xmss_address[212] & fast_layout[8]) | (frame_left[212] & fast_select_10);
-    assign fast_block[725]= (frame_right[85] & fast_layout[3]) | (frame_payload[213] & fast_select_7) | (frame_public[213] & fast_layout[6]) | (index_bytes[213] & fast_layout[7]) | (xmss_address[213] & fast_layout[8]) | (frame_left[213] & fast_select_10);
-    assign fast_block[726]= (frame_right[86] & fast_layout[3]) | (frame_payload[214] & fast_select_7) | (frame_public[214] & fast_layout[6]) | (index_bytes[214] & fast_layout[7]) | (xmss_address[214] & fast_layout[8]) | (frame_left[214] & fast_select_10);
-    assign fast_block[727]= (frame_right[87] & fast_layout[3]) | (frame_payload[215] & fast_select_7) | (frame_public[215] & fast_layout[6]) | (index_bytes[215] & fast_layout[7]) | (xmss_address[215] & fast_layout[8]) | (frame_left[215] & fast_select_10);
-    assign fast_block[728]= (frame_right[88] & fast_layout[3]) | (frame_payload[216] & fast_select_7) | (frame_public[216] & fast_layout[6]) | (index_bytes[216] & fast_layout[7]) | (xmss_address[216] & fast_layout[8]) | (frame_left[216] & fast_select_10);
-    assign fast_block[729]= (frame_right[89] & fast_layout[3]) | (frame_payload[217] & fast_select_7) | (frame_public[217] & fast_layout[6]) | (index_bytes[217] & fast_layout[7]) | (xmss_address[217] & fast_layout[8]) | (frame_left[217] & fast_select_10);
-    assign fast_block[730]= (frame_right[90] & fast_layout[3]) | (frame_payload[218] & fast_select_7) | (frame_public[218] & fast_layout[6]) | (index_bytes[218] & fast_layout[7]) | (xmss_address[218] & fast_layout[8]) | (frame_left[218] & fast_select_10);
-    assign fast_block[731]= (frame_right[91] & fast_layout[3]) | (frame_payload[219] & fast_select_7) | (frame_public[219] & fast_layout[6]) | (index_bytes[219] & fast_layout[7]) | (xmss_address[219] & fast_layout[8]) | (frame_left[219] & fast_select_10);
-    assign fast_block[732]= (frame_right[92] & fast_layout[3]) | (frame_payload[220] & fast_select_7) | (frame_public[220] & fast_layout[6]) | (index_bytes[220] & fast_layout[7]) | (xmss_address[220] & fast_layout[8]) | (frame_left[220] & fast_select_10);
-    assign fast_block[733]= (frame_right[93] & fast_layout[3]) | (frame_payload[221] & fast_select_7) | (frame_public[221] & fast_layout[6]) | (index_bytes[221] & fast_layout[7]) | (xmss_address[221] & fast_layout[8]) | (frame_left[221] & fast_select_10);
-    assign fast_block[734]= (frame_right[94] & fast_layout[3]) | (frame_payload[222] & fast_select_7) | (frame_public[222] & fast_layout[6]) | (index_bytes[222] & fast_layout[7]) | (xmss_address[222] & fast_layout[8]) | (frame_left[222] & fast_select_10);
-    assign fast_block[735]= (frame_right[95] & fast_layout[3]) | (frame_payload[223] & fast_select_7) | (frame_public[223] & fast_layout[6]) | (index_bytes[223] & fast_layout[7]) | (xmss_address[223] & fast_layout[8]) | (frame_left[223] & fast_select_10);
-    assign fast_block[736]= (frame_right[96] & fast_layout[3]) | (frame_payload[224] & fast_select_7) | (frame_public[224] & fast_layout[6]) | (index_bytes[224] & fast_layout[7]) | (xmss_address[224] & fast_layout[8]) | (frame_left[224] & fast_select_10);
-    assign fast_block[737]= (frame_right[97] & fast_layout[3]) | (frame_payload[225] & fast_select_7) | (frame_public[225] & fast_layout[6]) | (index_bytes[225] & fast_layout[7]) | (xmss_address[225] & fast_layout[8]) | (frame_left[225] & fast_select_10);
-    assign fast_block[738]= (frame_right[98] & fast_layout[3]) | (frame_payload[226] & fast_select_7) | (frame_public[226] & fast_layout[6]) | (index_bytes[226] & fast_layout[7]) | (xmss_address[226] & fast_layout[8]) | (frame_left[226] & fast_select_10);
-    assign fast_block[739]= (frame_right[99] & fast_layout[3]) | (frame_payload[227] & fast_select_7) | (frame_public[227] & fast_layout[6]) | (index_bytes[227] & fast_layout[7]) | (xmss_address[227] & fast_layout[8]) | (frame_left[227] & fast_select_10);
-    assign fast_block[740]= (frame_right[100] & fast_layout[3]) | (frame_payload[228] & fast_select_7) | (frame_public[228] & fast_layout[6]) | (index_bytes[228] & fast_layout[7]) | (xmss_address[228] & fast_layout[8]) | (frame_left[228] & fast_select_10);
-    assign fast_block[741]= (frame_right[101] & fast_layout[3]) | (frame_payload[229] & fast_select_7) | (frame_public[229] & fast_layout[6]) | (index_bytes[229] & fast_layout[7]) | (xmss_address[229] & fast_layout[8]) | (frame_left[229] & fast_select_10);
-    assign fast_block[742]= (frame_right[102] & fast_layout[3]) | (frame_payload[230] & fast_select_7) | (frame_public[230] & fast_layout[6]) | (index_bytes[230] & fast_layout[7]) | (xmss_address[230] & fast_layout[8]) | (frame_left[230] & fast_select_10);
-    assign fast_block[743]= (frame_right[103] & fast_layout[3]) | (frame_payload[231] & fast_select_7) | (frame_public[231] & fast_layout[6]) | (index_bytes[231] & fast_layout[7]) | (xmss_address[231] & fast_layout[8]) | (frame_left[231] & fast_select_10);
-    assign fast_block[744]= (frame_right[104] & fast_layout[3]) | (frame_payload[232] & fast_select_7) | (frame_public[232] & fast_layout[6]) | (index_bytes[232] & fast_layout[7]) | (xmss_address[232] & fast_layout[8]) | (frame_left[232] & fast_select_10);
-    assign fast_block[745]= (frame_right[105] & fast_layout[3]) | (frame_payload[233] & fast_select_7) | (frame_public[233] & fast_layout[6]) | (index_bytes[233] & fast_layout[7]) | (xmss_address[233] & fast_layout[8]) | (frame_left[233] & fast_select_10);
-    assign fast_block[746]= (frame_right[106] & fast_layout[3]) | (frame_payload[234] & fast_select_7) | (frame_public[234] & fast_layout[6]) | (index_bytes[234] & fast_layout[7]) | (xmss_address[234] & fast_layout[8]) | (frame_left[234] & fast_select_10);
-    assign fast_block[747]= (frame_right[107] & fast_layout[3]) | (frame_payload[235] & fast_select_7) | (frame_public[235] & fast_layout[6]) | (index_bytes[235] & fast_layout[7]) | (xmss_address[235] & fast_layout[8]) | (frame_left[235] & fast_select_10);
-    assign fast_block[748]= (frame_right[108] & fast_layout[3]) | (frame_payload[236] & fast_select_7) | (frame_public[236] & fast_layout[6]) | (index_bytes[236] & fast_layout[7]) | (xmss_address[236] & fast_layout[8]) | (frame_left[236] & fast_select_10);
-    assign fast_block[749]= (frame_right[109] & fast_layout[3]) | (frame_payload[237] & fast_select_7) | (frame_public[237] & fast_layout[6]) | (index_bytes[237] & fast_layout[7]) | (xmss_address[237] & fast_layout[8]) | (frame_left[237] & fast_select_10);
-    assign fast_block[750]= (frame_right[110] & fast_layout[3]) | (frame_payload[238] & fast_select_7) | (frame_public[238] & fast_layout[6]) | (index_bytes[238] & fast_layout[7]) | (xmss_address[238] & fast_layout[8]) | (frame_left[238] & fast_select_10);
-    assign fast_block[751]= (frame_right[111] & fast_layout[3]) | (frame_payload[239] & fast_select_7) | (frame_public[239] & fast_layout[6]) | (index_bytes[239] & fast_layout[7]) | (xmss_address[239] & fast_layout[8]) | (frame_left[239] & fast_select_10);
-    assign fast_block[752]= (frame_right[112] & fast_layout[3]) | (frame_payload[240] & fast_select_7) | (frame_public[240] & fast_layout[6]) | (index_bytes[240] & fast_layout[7]) | (xmss_address[240] & fast_layout[8]) | (frame_left[240] & fast_select_10);
-    assign fast_block[753]= (frame_right[113] & fast_layout[3]) | (frame_payload[241] & fast_select_7) | (frame_public[241] & fast_layout[6]) | (index_bytes[241] & fast_layout[7]) | (xmss_address[241] & fast_layout[8]) | (frame_left[241] & fast_select_10);
-    assign fast_block[754]= (frame_right[114] & fast_layout[3]) | (frame_payload[242] & fast_select_7) | (frame_public[242] & fast_layout[6]) | (index_bytes[242] & fast_layout[7]) | (xmss_address[242] & fast_layout[8]) | (frame_left[242] & fast_select_10);
-    assign fast_block[755]= (frame_right[115] & fast_layout[3]) | (frame_payload[243] & fast_select_7) | (frame_public[243] & fast_layout[6]) | (index_bytes[243] & fast_layout[7]) | (xmss_address[243] & fast_layout[8]) | (frame_left[243] & fast_select_10);
-    assign fast_block[756]= (frame_right[116] & fast_layout[3]) | (frame_payload[244] & fast_select_7) | (frame_public[244] & fast_layout[6]) | (index_bytes[244] & fast_layout[7]) | (xmss_address[244] & fast_layout[8]) | (frame_left[244] & fast_select_10);
-    assign fast_block[757]= (frame_right[117] & fast_layout[3]) | (frame_payload[245] & fast_select_7) | (frame_public[245] & fast_layout[6]) | (index_bytes[245] & fast_layout[7]) | (xmss_address[245] & fast_layout[8]) | (frame_left[245] & fast_select_10);
-    assign fast_block[758]= (frame_right[118] & fast_layout[3]) | (frame_payload[246] & fast_select_7) | (frame_public[246] & fast_layout[6]) | (index_bytes[246] & fast_layout[7]) | (xmss_address[246] & fast_layout[8]) | (frame_left[246] & fast_select_10);
-    assign fast_block[759]= (frame_right[119] & fast_layout[3]) | (frame_payload[247] & fast_select_7) | (frame_public[247] & fast_layout[6]) | (index_bytes[247] & fast_layout[7]) | (xmss_address[247] & fast_layout[8]) | (frame_left[247] & fast_select_10);
-    assign fast_block[760]= (frame_right[120] & fast_layout[3]) | (frame_payload[248] & fast_select_7) | (frame_public[248] & fast_layout[6]) | (index_bytes[248] & fast_layout[7]) | (xmss_address[248] & fast_layout[8]) | (frame_left[248] & fast_select_10);
-    assign fast_block[761]= (frame_right[121] & fast_layout[3]) | (frame_payload[249] & fast_select_7) | (frame_public[249] & fast_layout[6]) | (index_bytes[249] & fast_layout[7]) | (xmss_address[249] & fast_layout[8]) | (frame_left[249] & fast_select_10);
-    assign fast_block[762]= (frame_right[122] & fast_layout[3]) | (frame_payload[250] & fast_select_7) | (frame_public[250] & fast_layout[6]) | (index_bytes[250] & fast_layout[7]) | (xmss_address[250] & fast_layout[8]) | (frame_left[250] & fast_select_10);
-    assign fast_block[763]= (frame_right[123] & fast_layout[3]) | (frame_payload[251] & fast_select_7) | (frame_public[251] & fast_layout[6]) | (index_bytes[251] & fast_layout[7]) | (xmss_address[251] & fast_layout[8]) | (frame_left[251] & fast_select_10);
-    assign fast_block[764]= (frame_right[124] & fast_layout[3]) | (frame_payload[252] & fast_select_7) | (frame_public[252] & fast_layout[6]) | (index_bytes[252] & fast_layout[7]) | (xmss_address[252] & fast_layout[8]) | (frame_left[252] & fast_select_10);
-    assign fast_block[765]= (frame_right[125] & fast_layout[3]) | (frame_payload[253] & fast_select_7) | (frame_public[253] & fast_layout[6]) | (index_bytes[253] & fast_layout[7]) | (xmss_address[253] & fast_layout[8]) | (frame_left[253] & fast_select_10);
-    assign fast_block[766]= (frame_right[126] & fast_layout[3]) | (frame_payload[254] & fast_select_7) | (frame_public[254] & fast_layout[6]) | (index_bytes[254] & fast_layout[7]) | (xmss_address[254] & fast_layout[8]) | (frame_left[254] & fast_select_10);
-    assign fast_block[767]= (frame_right[127] & fast_layout[3]) | (frame_payload[255] & fast_select_7) | (frame_public[255] & fast_layout[6]) | (index_bytes[255] & fast_layout[7]) | (xmss_address[255] & fast_layout[8]) | (frame_left[255] & fast_select_10);
-    assign fast_block[768]= (frame_right[128] & fast_layout[3]) | fast_select_12 | (frame_right[0] & fast_select_13) | (xmss_address[0] & fast_layout[6]);
-    assign fast_block[769]= (frame_right[129] & fast_layout[3]) | fast_select_12 | (frame_right[1] & fast_select_13) | (xmss_address[1] & fast_layout[6]);
-    assign fast_block[770]= (frame_right[130] & fast_layout[3]) | fast_select_12 | (frame_right[2] & fast_select_13) | (xmss_address[2] & fast_layout[6]);
-    assign fast_block[771]= (frame_right[131] & fast_layout[3]) | fast_select_12 | (frame_right[3] & fast_select_13) | (xmss_address[3] & fast_layout[6]);
-    assign fast_block[772]= (frame_right[132] & fast_layout[3]) | fast_select_12 | (frame_right[4] & fast_select_13) | (xmss_address[4] & fast_layout[6]);
-    assign fast_block[773]= (frame_right[133] & fast_layout[3]) | (frame_right[5] & fast_select_13) | (xmss_address[5] & fast_layout[6]);
-    assign fast_block[774]= (frame_right[134] & fast_layout[3]) | (frame_right[6] & fast_select_13) | (xmss_address[6] & fast_layout[6]);
-    assign fast_block[775]= (frame_right[135] & fast_layout[3]) | (frame_right[7] & fast_select_13) | (xmss_address[7] & fast_layout[6]);
-    assign fast_block[776]= (frame_right[136] & fast_layout[3]) | (frame_right[8] & fast_select_13) | (xmss_address[8] & fast_layout[6]);
-    assign fast_block[777]= (frame_right[137] & fast_layout[3]) | (frame_right[9] & fast_select_13) | (xmss_address[9] & fast_layout[6]);
-    assign fast_block[778]= (frame_right[138] & fast_layout[3]) | (frame_right[10] & fast_select_13) | (xmss_address[10] & fast_layout[6]);
-    assign fast_block[779]= (frame_right[139] & fast_layout[3]) | (frame_right[11] & fast_select_13) | (xmss_address[11] & fast_layout[6]);
-    assign fast_block[780]= (frame_right[140] & fast_layout[3]) | (frame_right[12] & fast_select_13) | (xmss_address[12] & fast_layout[6]);
-    assign fast_block[781]= (frame_right[141] & fast_layout[3]) | (frame_right[13] & fast_select_13) | (xmss_address[13] & fast_layout[6]);
-    assign fast_block[782]= (frame_right[142] & fast_layout[3]) | (frame_right[14] & fast_select_13) | (xmss_address[14] & fast_layout[6]);
-    assign fast_block[783]= (frame_right[143] & fast_layout[3]) | (frame_right[15] & fast_select_13) | (xmss_address[15] & fast_layout[6]);
-    assign fast_block[784]= (frame_right[144] & fast_layout[3]) | (frame_right[16] & fast_select_13) | (xmss_address[16] & fast_layout[6]);
-    assign fast_block[785]= (frame_right[145] & fast_layout[3]) | (frame_right[17] & fast_select_13) | (xmss_address[17] & fast_layout[6]);
-    assign fast_block[786]= (frame_right[146] & fast_layout[3]) | (frame_right[18] & fast_select_13) | (xmss_address[18] & fast_layout[6]);
-    assign fast_block[787]= (frame_right[147] & fast_layout[3]) | (frame_right[19] & fast_select_13) | (xmss_address[19] & fast_layout[6]);
-    assign fast_block[788]= (frame_right[148] & fast_layout[3]) | (frame_right[20] & fast_select_13) | (xmss_address[20] & fast_layout[6]);
-    assign fast_block[789]= (frame_right[149] & fast_layout[3]) | (frame_right[21] & fast_select_13) | (xmss_address[21] & fast_layout[6]);
-    assign fast_block[790]= (frame_right[150] & fast_layout[3]) | (frame_right[22] & fast_select_13) | (xmss_address[22] & fast_layout[6]);
-    assign fast_block[791]= (frame_right[151] & fast_layout[3]) | (frame_right[23] & fast_select_13) | (xmss_address[23] & fast_layout[6]);
-    assign fast_block[792]= (frame_right[152] & fast_layout[3]) | (frame_right[24] & fast_select_13) | (xmss_address[24] & fast_layout[6]);
-    assign fast_block[793]= (frame_right[153] & fast_layout[3]) | (frame_right[25] & fast_select_13) | (xmss_address[25] & fast_layout[6]);
-    assign fast_block[794]= (frame_right[154] & fast_layout[3]) | (frame_right[26] & fast_select_13) | (xmss_address[26] & fast_layout[6]);
-    assign fast_block[795]= (frame_right[155] & fast_layout[3]) | (frame_right[27] & fast_select_13) | (xmss_address[27] & fast_layout[6]);
-    assign fast_block[796]= (frame_right[156] & fast_layout[3]) | (frame_right[28] & fast_select_13) | (xmss_address[28] & fast_layout[6]);
-    assign fast_block[797]= (frame_right[157] & fast_layout[3]) | (frame_right[29] & fast_select_13) | (xmss_address[29] & fast_layout[6]);
-    assign fast_block[798]= (frame_right[158] & fast_layout[3]) | (frame_right[30] & fast_select_13) | (xmss_address[30] & fast_layout[6]);
-    assign fast_block[799]= (frame_right[159] & fast_layout[3]) | (frame_right[31] & fast_select_13) | (xmss_address[31] & fast_layout[6]);
-    assign fast_block[800]= (frame_right[160] & fast_layout[3]) | (frame_right[32] & fast_select_13) | (xmss_address[32] & fast_layout[6]);
-    assign fast_block[801]= (frame_right[161] & fast_layout[3]) | (frame_right[33] & fast_select_13) | (xmss_address[33] & fast_layout[6]);
-    assign fast_block[802]= (frame_right[162] & fast_layout[3]) | (frame_right[34] & fast_select_13) | (xmss_address[34] & fast_layout[6]);
-    assign fast_block[803]= (frame_right[163] & fast_layout[3]) | (frame_right[35] & fast_select_13) | (xmss_address[35] & fast_layout[6]);
-    assign fast_block[804]= (frame_right[164] & fast_layout[3]) | (frame_right[36] & fast_select_13) | (xmss_address[36] & fast_layout[6]);
-    assign fast_block[805]= (frame_right[165] & fast_layout[3]) | (frame_right[37] & fast_select_13) | (xmss_address[37] & fast_layout[6]);
-    assign fast_block[806]= (frame_right[166] & fast_layout[3]) | (frame_right[38] & fast_select_13) | (xmss_address[38] & fast_layout[6]);
-    assign fast_block[807]= (frame_right[167] & fast_layout[3]) | (frame_right[39] & fast_select_13) | (xmss_address[39] & fast_layout[6]);
-    assign fast_block[808]= (frame_right[168] & fast_layout[3]) | (frame_right[40] & fast_select_13) | (xmss_address[40] & fast_layout[6]);
-    assign fast_block[809]= (frame_right[169] & fast_layout[3]) | (frame_right[41] & fast_select_13) | (xmss_address[41] & fast_layout[6]);
-    assign fast_block[810]= (frame_right[170] & fast_layout[3]) | (frame_right[42] & fast_select_13) | (xmss_address[42] & fast_layout[6]);
-    assign fast_block[811]= (frame_right[171] & fast_layout[3]) | (frame_right[43] & fast_select_13) | (xmss_address[43] & fast_layout[6]);
-    assign fast_block[812]= (frame_right[172] & fast_layout[3]) | (frame_right[44] & fast_select_13) | (xmss_address[44] & fast_layout[6]);
-    assign fast_block[813]= (frame_right[173] & fast_layout[3]) | (frame_right[45] & fast_select_13) | (xmss_address[45] & fast_layout[6]);
-    assign fast_block[814]= (frame_right[174] & fast_layout[3]) | (frame_right[46] & fast_select_13) | (xmss_address[46] & fast_layout[6]);
-    assign fast_block[815]= (frame_right[175] & fast_layout[3]) | (frame_right[47] & fast_select_13) | (xmss_address[47] & fast_layout[6]);
-    assign fast_block[816]= (frame_right[176] & fast_layout[3]) | (frame_right[48] & fast_select_13) | (xmss_address[48] & fast_layout[6]);
-    assign fast_block[817]= (frame_right[177] & fast_layout[3]) | (frame_right[49] & fast_select_13) | (xmss_address[49] & fast_layout[6]);
-    assign fast_block[818]= (frame_right[178] & fast_layout[3]) | (frame_right[50] & fast_select_13) | (xmss_address[50] & fast_layout[6]);
-    assign fast_block[819]= (frame_right[179] & fast_layout[3]) | (frame_right[51] & fast_select_13) | (xmss_address[51] & fast_layout[6]);
-    assign fast_block[820]= (frame_right[180] & fast_layout[3]) | (frame_right[52] & fast_select_13) | (xmss_address[52] & fast_layout[6]);
-    assign fast_block[821]= (frame_right[181] & fast_layout[3]) | (frame_right[53] & fast_select_13) | (xmss_address[53] & fast_layout[6]);
-    assign fast_block[822]= (frame_right[182] & fast_layout[3]) | (frame_right[54] & fast_select_13) | (xmss_address[54] & fast_layout[6]);
-    assign fast_block[823]= (frame_right[183] & fast_layout[3]) | (frame_right[55] & fast_select_13) | (xmss_address[55] & fast_layout[6]);
-    assign fast_block[824]= (frame_right[184] & fast_layout[3]) | (frame_right[56] & fast_select_13) | (xmss_address[56] & fast_layout[6]);
-    assign fast_block[825]= (frame_right[185] & fast_layout[3]) | (frame_right[57] & fast_select_13) | (xmss_address[57] & fast_layout[6]);
-    assign fast_block[826]= (frame_right[186] & fast_layout[3]) | (frame_right[58] & fast_select_13) | (xmss_address[58] & fast_layout[6]);
-    assign fast_block[827]= (frame_right[187] & fast_layout[3]) | (frame_right[59] & fast_select_13) | (xmss_address[59] & fast_layout[6]);
-    assign fast_block[828]= (frame_right[188] & fast_layout[3]) | (frame_right[60] & fast_select_13) | (xmss_address[60] & fast_layout[6]);
-    assign fast_block[829]= (frame_right[189] & fast_layout[3]) | (frame_right[61] & fast_select_13) | (xmss_address[61] & fast_layout[6]);
-    assign fast_block[830]= (frame_right[190] & fast_layout[3]) | (frame_right[62] & fast_select_13) | (xmss_address[62] & fast_layout[6]);
-    assign fast_block[831]= (frame_right[191] & fast_layout[3]) | (frame_right[63] & fast_select_13) | (xmss_address[63] & fast_layout[6]);
-    assign fast_block[832]= fast_layout[3] | (frame_right[64] & fast_select_13) | (xmss_address[64] & fast_layout[6]);
-    assign fast_block[833]= fast_layout[3] | (frame_right[65] & fast_select_13) | (xmss_address[65] & fast_layout[6]);
-    assign fast_block[834]= fast_layout[3] | (frame_right[66] & fast_select_13) | (xmss_address[66] & fast_layout[6]);
-    assign fast_block[835]= fast_layout[3] | (frame_right[67] & fast_select_13) | (xmss_address[67] & fast_layout[6]);
-    assign fast_block[836]= fast_layout[3] | (frame_right[68] & fast_select_13) | (xmss_address[68] & fast_layout[6]);
-    assign fast_block[837]= (frame_right[69] & fast_select_13) | (xmss_address[69] & fast_layout[6]);
-    assign fast_block[838]= (frame_right[70] & fast_select_13) | (xmss_address[70] & fast_layout[6]);
-    assign fast_block[839]= (frame_right[71] & fast_select_13) | (xmss_address[71] & fast_layout[6]);
-    assign fast_block[840]= (frame_right[72] & fast_select_13) | (xmss_address[72] & fast_layout[6]);
-    assign fast_block[841]= (frame_right[73] & fast_select_13) | (xmss_address[73] & fast_layout[6]);
-    assign fast_block[842]= (frame_right[74] & fast_select_13) | (xmss_address[74] & fast_layout[6]);
-    assign fast_block[843]= (frame_right[75] & fast_select_13) | (xmss_address[75] & fast_layout[6]);
-    assign fast_block[844]= (frame_right[76] & fast_select_13) | (xmss_address[76] & fast_layout[6]);
-    assign fast_block[845]= (frame_right[77] & fast_select_13) | (xmss_address[77] & fast_layout[6]);
-    assign fast_block[846]= (frame_right[78] & fast_select_13) | (xmss_address[78] & fast_layout[6]);
-    assign fast_block[847]= (frame_right[79] & fast_select_13) | (xmss_address[79] & fast_layout[6]);
-    assign fast_block[848]= (frame_right[80] & fast_select_13) | (xmss_address[80] & fast_layout[6]);
-    assign fast_block[849]= (frame_right[81] & fast_select_13) | (xmss_address[81] & fast_layout[6]);
-    assign fast_block[850]= (frame_right[82] & fast_select_13) | (xmss_address[82] & fast_layout[6]);
-    assign fast_block[851]= (frame_right[83] & fast_select_13) | (xmss_address[83] & fast_layout[6]);
-    assign fast_block[852]= (frame_right[84] & fast_select_13) | (xmss_address[84] & fast_layout[6]);
-    assign fast_block[853]= (frame_right[85] & fast_select_13) | (xmss_address[85] & fast_layout[6]);
-    assign fast_block[854]= (frame_right[86] & fast_select_13) | (xmss_address[86] & fast_layout[6]);
-    assign fast_block[855]= (frame_right[87] & fast_select_13) | (xmss_address[87] & fast_layout[6]);
-    assign fast_block[856]= (frame_right[88] & fast_select_13) | (xmss_address[88] & fast_layout[6]);
-    assign fast_block[857]= (frame_right[89] & fast_select_13) | (xmss_address[89] & fast_layout[6]);
-    assign fast_block[858]= (frame_right[90] & fast_select_13) | (xmss_address[90] & fast_layout[6]);
-    assign fast_block[859]= (frame_right[91] & fast_select_13) | (xmss_address[91] & fast_layout[6]);
-    assign fast_block[860]= (frame_right[92] & fast_select_13) | (xmss_address[92] & fast_layout[6]);
-    assign fast_block[861]= (frame_right[93] & fast_select_13) | (xmss_address[93] & fast_layout[6]);
-    assign fast_block[862]= (frame_right[94] & fast_select_13) | (xmss_address[94] & fast_layout[6]);
-    assign fast_block[863]= (frame_right[95] & fast_select_13) | (xmss_address[95] & fast_layout[6]);
-    assign fast_block[864]= (frame_right[96] & fast_select_13) | (xmss_address[96] & fast_layout[6]);
-    assign fast_block[865]= (frame_right[97] & fast_select_13) | (xmss_address[97] & fast_layout[6]);
-    assign fast_block[866]= (frame_right[98] & fast_select_13) | (xmss_address[98] & fast_layout[6]);
-    assign fast_block[867]= (frame_right[99] & fast_select_13) | (xmss_address[99] & fast_layout[6]);
-    assign fast_block[868]= (frame_right[100] & fast_select_13) | (xmss_address[100] & fast_layout[6]);
-    assign fast_block[869]= (frame_right[101] & fast_select_13) | (xmss_address[101] & fast_layout[6]);
-    assign fast_block[870]= (frame_right[102] & fast_select_13) | (xmss_address[102] & fast_layout[6]);
-    assign fast_block[871]= (frame_right[103] & fast_select_13) | (xmss_address[103] & fast_layout[6]);
-    assign fast_block[872]= (frame_right[104] & fast_select_13) | (xmss_address[104] & fast_layout[6]);
-    assign fast_block[873]= (frame_right[105] & fast_select_13) | (xmss_address[105] & fast_layout[6]);
-    assign fast_block[874]= (frame_right[106] & fast_select_13) | (xmss_address[106] & fast_layout[6]);
-    assign fast_block[875]= (frame_right[107] & fast_select_13) | (xmss_address[107] & fast_layout[6]);
-    assign fast_block[876]= (frame_right[108] & fast_select_13) | (xmss_address[108] & fast_layout[6]);
-    assign fast_block[877]= (frame_right[109] & fast_select_13) | (xmss_address[109] & fast_layout[6]);
-    assign fast_block[878]= (frame_right[110] & fast_select_13) | (xmss_address[110] & fast_layout[6]);
-    assign fast_block[879]= (frame_right[111] & fast_select_13) | (xmss_address[111] & fast_layout[6]);
-    assign fast_block[880]= (frame_right[112] & fast_select_13) | (xmss_address[112] & fast_layout[6]);
-    assign fast_block[881]= (frame_right[113] & fast_select_13) | (xmss_address[113] & fast_layout[6]);
-    assign fast_block[882]= (frame_right[114] & fast_select_13) | (xmss_address[114] & fast_layout[6]);
-    assign fast_block[883]= (frame_right[115] & fast_select_13) | (xmss_address[115] & fast_layout[6]);
-    assign fast_block[884]= (frame_right[116] & fast_select_13) | (xmss_address[116] & fast_layout[6]);
-    assign fast_block[885]= (frame_right[117] & fast_select_13) | (xmss_address[117] & fast_layout[6]);
-    assign fast_block[886]= (frame_right[118] & fast_select_13) | (xmss_address[118] & fast_layout[6]);
-    assign fast_block[887]= (frame_right[119] & fast_select_13) | (xmss_address[119] & fast_layout[6]);
-    assign fast_block[888]= (frame_right[120] & fast_select_13) | (xmss_address[120] & fast_layout[6]);
-    assign fast_block[889]= (frame_right[121] & fast_select_13) | (xmss_address[121] & fast_layout[6]);
-    assign fast_block[890]= (frame_right[122] & fast_select_13) | (xmss_address[122] & fast_layout[6]);
-    assign fast_block[891]= (frame_right[123] & fast_select_13) | (xmss_address[123] & fast_layout[6]);
-    assign fast_block[892]= (frame_right[124] & fast_select_13) | (xmss_address[124] & fast_layout[6]);
-    assign fast_block[893]= (frame_right[125] & fast_select_13) | (xmss_address[125] & fast_layout[6]);
-    assign fast_block[894]= (frame_right[126] & fast_select_13) | (xmss_address[126] & fast_layout[6]);
-    assign fast_block[895]= (frame_right[127] & fast_select_13) | (xmss_address[127] & fast_layout[6]);
-    assign fast_block[896]= (frame_right[128] & fast_select_13) | (xmss_address[128] & fast_layout[6]);
-    assign fast_block[897]= (frame_right[129] & fast_select_13) | (xmss_address[129] & fast_layout[6]);
-    assign fast_block[898]= (frame_right[130] & fast_select_13) | (xmss_address[130] & fast_layout[6]);
-    assign fast_block[899]= (frame_right[131] & fast_select_13) | (xmss_address[131] & fast_layout[6]);
-    assign fast_block[900]= (frame_right[132] & fast_select_13) | (xmss_address[132] & fast_layout[6]);
-    assign fast_block[901]= (frame_right[133] & fast_select_13) | (xmss_address[133] & fast_layout[6]);
-    assign fast_block[902]= (frame_right[134] & fast_select_13) | (xmss_address[134] & fast_layout[6]);
-    assign fast_block[903]= (frame_right[135] & fast_select_13) | (xmss_address[135] & fast_layout[6]);
-    assign fast_block[904]= (frame_right[136] & fast_select_13) | (xmss_address[136] & fast_layout[6]);
-    assign fast_block[905]= (frame_right[137] & fast_select_13) | (xmss_address[137] & fast_layout[6]);
-    assign fast_block[906]= (frame_right[138] & fast_select_13) | (xmss_address[138] & fast_layout[6]);
-    assign fast_block[907]= (frame_right[139] & fast_select_13) | (xmss_address[139] & fast_layout[6]);
-    assign fast_block[908]= (frame_right[140] & fast_select_13) | (xmss_address[140] & fast_layout[6]);
-    assign fast_block[909]= (frame_right[141] & fast_select_13) | (xmss_address[141] & fast_layout[6]);
-    assign fast_block[910]= (frame_right[142] & fast_select_13) | (xmss_address[142] & fast_layout[6]);
-    assign fast_block[911]= (frame_right[143] & fast_select_13) | (xmss_address[143] & fast_layout[6]);
-    assign fast_block[912]= (frame_right[144] & fast_select_13) | (xmss_address[144] & fast_layout[6]);
-    assign fast_block[913]= (frame_right[145] & fast_select_13) | (xmss_address[145] & fast_layout[6]);
-    assign fast_block[914]= (frame_right[146] & fast_select_13) | (xmss_address[146] & fast_layout[6]);
-    assign fast_block[915]= (frame_right[147] & fast_select_13) | (xmss_address[147] & fast_layout[6]);
-    assign fast_block[916]= (frame_right[148] & fast_select_13) | (xmss_address[148] & fast_layout[6]);
-    assign fast_block[917]= (frame_right[149] & fast_select_13) | (xmss_address[149] & fast_layout[6]);
-    assign fast_block[918]= (frame_right[150] & fast_select_13) | (xmss_address[150] & fast_layout[6]);
-    assign fast_block[919]= (frame_right[151] & fast_select_13) | (xmss_address[151] & fast_layout[6]);
-    assign fast_block[920]= (frame_right[152] & fast_select_13) | (xmss_address[152] & fast_layout[6]);
-    assign fast_block[921]= (frame_right[153] & fast_select_13) | (xmss_address[153] & fast_layout[6]);
-    assign fast_block[922]= (frame_right[154] & fast_select_13) | (xmss_address[154] & fast_layout[6]);
-    assign fast_block[923]= (frame_right[155] & fast_select_13) | (xmss_address[155] & fast_layout[6]);
-    assign fast_block[924]= (frame_right[156] & fast_select_13) | (xmss_address[156] & fast_layout[6]);
-    assign fast_block[925]= (frame_right[157] & fast_select_13) | (xmss_address[157] & fast_layout[6]);
-    assign fast_block[926]= (frame_right[158] & fast_select_13) | (xmss_address[158] & fast_layout[6]);
-    assign fast_block[927]= (frame_right[159] & fast_select_13) | (xmss_address[159] & fast_layout[6]);
-    assign fast_block[928]= (frame_right[160] & fast_select_13) | (xmss_address[160] & fast_layout[6]);
-    assign fast_block[929]= (frame_right[161] & fast_select_13) | (xmss_address[161] & fast_layout[6]);
-    assign fast_block[930]= (frame_right[162] & fast_select_13) | (xmss_address[162] & fast_layout[6]);
-    assign fast_block[931]= (frame_right[163] & fast_select_13) | (xmss_address[163] & fast_layout[6]);
-    assign fast_block[932]= (frame_right[164] & fast_select_13) | (xmss_address[164] & fast_layout[6]);
-    assign fast_block[933]= (frame_right[165] & fast_select_13) | (xmss_address[165] & fast_layout[6]);
-    assign fast_block[934]= (frame_right[166] & fast_select_13) | (xmss_address[166] & fast_layout[6]);
-    assign fast_block[935]= (frame_right[167] & fast_select_13) | (xmss_address[167] & fast_layout[6]);
-    assign fast_block[936]= (frame_right[168] & fast_select_13) | (xmss_address[168] & fast_layout[6]);
-    assign fast_block[937]= (frame_right[169] & fast_select_13) | (xmss_address[169] & fast_layout[6]);
-    assign fast_block[938]= (frame_right[170] & fast_select_13) | (xmss_address[170] & fast_layout[6]);
-    assign fast_block[939]= (frame_right[171] & fast_select_13) | (xmss_address[171] & fast_layout[6]);
-    assign fast_block[940]= (frame_right[172] & fast_select_13) | (xmss_address[172] & fast_layout[6]);
-    assign fast_block[941]= (frame_right[173] & fast_select_13) | (xmss_address[173] & fast_layout[6]);
-    assign fast_block[942]= (frame_right[174] & fast_select_13) | (xmss_address[174] & fast_layout[6]);
-    assign fast_block[943]= (frame_right[175] & fast_select_13) | (xmss_address[175] & fast_layout[6]);
-    assign fast_block[944]= (frame_right[176] & fast_select_13) | (xmss_address[176] & fast_layout[6]);
-    assign fast_block[945]= (frame_right[177] & fast_select_13) | (xmss_address[177] & fast_layout[6]);
-    assign fast_block[946]= (frame_right[178] & fast_select_13) | (xmss_address[178] & fast_layout[6]);
-    assign fast_block[947]= (frame_right[179] & fast_select_13) | (xmss_address[179] & fast_layout[6]);
-    assign fast_block[948]= (frame_right[180] & fast_select_13) | (xmss_address[180] & fast_layout[6]);
-    assign fast_block[949]= (frame_right[181] & fast_select_13) | (xmss_address[181] & fast_layout[6]);
-    assign fast_block[950]= (frame_right[182] & fast_select_13) | (xmss_address[182] & fast_layout[6]);
-    assign fast_block[951]= (frame_right[183] & fast_select_13) | (xmss_address[183] & fast_layout[6]);
-    assign fast_block[952]= (frame_right[184] & fast_select_13) | (xmss_address[184] & fast_layout[6]);
-    assign fast_block[953]= (frame_right[185] & fast_select_13) | (xmss_address[185] & fast_layout[6]);
-    assign fast_block[954]= (frame_right[186] & fast_select_13) | (xmss_address[186] & fast_layout[6]);
-    assign fast_block[955]= (frame_right[187] & fast_select_13) | (xmss_address[187] & fast_layout[6]);
-    assign fast_block[956]= (frame_right[188] & fast_select_13) | (xmss_address[188] & fast_layout[6]);
-    assign fast_block[957]= (frame_right[189] & fast_select_13) | (xmss_address[189] & fast_layout[6]);
-    assign fast_block[958]= (frame_right[190] & fast_select_13) | (xmss_address[190] & fast_layout[6]);
-    assign fast_block[959]= (frame_right[191] & fast_select_13) | (xmss_address[191] & fast_layout[6]);
-    assign fast_block[960]= (frame_right[192] & fast_select_13) | (xmss_address[192] & fast_layout[6]);
-    assign fast_block[961]= (frame_right[193] & fast_select_13) | (xmss_address[193] & fast_layout[6]);
-    assign fast_block[962]= (frame_right[194] & fast_select_13) | (xmss_address[194] & fast_layout[6]);
-    assign fast_block[963]= (frame_right[195] & fast_select_13) | (xmss_address[195] & fast_layout[6]);
-    assign fast_block[964]= (frame_right[196] & fast_select_13) | (xmss_address[196] & fast_layout[6]);
-    assign fast_block[965]= (frame_right[197] & fast_select_13) | (xmss_address[197] & fast_layout[6]);
-    assign fast_block[966]= (frame_right[198] & fast_select_13) | (xmss_address[198] & fast_layout[6]);
-    assign fast_block[967]= (frame_right[199] & fast_select_13) | (xmss_address[199] & fast_layout[6]);
-    assign fast_block[968]= (frame_right[200] & fast_select_13) | (xmss_address[200] & fast_layout[6]);
-    assign fast_block[969]= (frame_right[201] & fast_select_13) | (xmss_address[201] & fast_layout[6]);
-    assign fast_block[970]= (frame_right[202] & fast_select_13) | (xmss_address[202] & fast_layout[6]);
-    assign fast_block[971]= (frame_right[203] & fast_select_13) | (xmss_address[203] & fast_layout[6]);
-    assign fast_block[972]= (frame_right[204] & fast_select_13) | (xmss_address[204] & fast_layout[6]);
-    assign fast_block[973]= (frame_right[205] & fast_select_13) | (xmss_address[205] & fast_layout[6]);
-    assign fast_block[974]= (frame_right[206] & fast_select_13) | (xmss_address[206] & fast_layout[6]);
-    assign fast_block[975]= (frame_right[207] & fast_select_13) | (xmss_address[207] & fast_layout[6]);
-    assign fast_block[976]= (frame_right[208] & fast_select_13) | (xmss_address[208] & fast_layout[6]);
-    assign fast_block[977]= (frame_right[209] & fast_select_13) | (xmss_address[209] & fast_layout[6]);
-    assign fast_block[978]= (frame_right[210] & fast_select_13) | (xmss_address[210] & fast_layout[6]);
-    assign fast_block[979]= (frame_right[211] & fast_select_13) | (xmss_address[211] & fast_layout[6]);
-    assign fast_block[980]= (frame_right[212] & fast_select_13) | (xmss_address[212] & fast_layout[6]);
-    assign fast_block[981]= (frame_right[213] & fast_select_13) | (xmss_address[213] & fast_layout[6]);
-    assign fast_block[982]= (frame_right[214] & fast_select_13) | (xmss_address[214] & fast_layout[6]);
-    assign fast_block[983]= (frame_right[215] & fast_select_13) | (xmss_address[215] & fast_layout[6]);
-    assign fast_block[984]= (frame_right[216] & fast_select_13) | (xmss_address[216] & fast_layout[6]);
-    assign fast_block[985]= (frame_right[217] & fast_select_13) | (xmss_address[217] & fast_layout[6]);
-    assign fast_block[986]= (frame_right[218] & fast_select_13) | (xmss_address[218] & fast_layout[6]);
-    assign fast_block[987]= (frame_right[219] & fast_select_13) | (xmss_address[219] & fast_layout[6]);
-    assign fast_block[988]= (frame_right[220] & fast_select_13) | (xmss_address[220] & fast_layout[6]);
-    assign fast_block[989]= (frame_right[221] & fast_select_13) | (xmss_address[221] & fast_layout[6]);
-    assign fast_block[990]= (frame_right[222] & fast_select_13) | (xmss_address[222] & fast_layout[6]);
-    assign fast_block[991]= (frame_right[223] & fast_select_13) | (xmss_address[223] & fast_layout[6]);
-    assign fast_block[992]= (frame_right[224] & fast_select_13) | (xmss_address[224] & fast_layout[6]);
-    assign fast_block[993]= (frame_right[225] & fast_select_13) | (xmss_address[225] & fast_layout[6]);
-    assign fast_block[994]= (frame_right[226] & fast_select_13) | (xmss_address[226] & fast_layout[6]);
-    assign fast_block[995]= (frame_right[227] & fast_select_13) | (xmss_address[227] & fast_layout[6]);
-    assign fast_block[996]= (frame_right[228] & fast_select_13) | (xmss_address[228] & fast_layout[6]);
-    assign fast_block[997]= (frame_right[229] & fast_select_13) | (xmss_address[229] & fast_layout[6]);
-    assign fast_block[998]= (frame_right[230] & fast_select_13) | (xmss_address[230] & fast_layout[6]);
-    assign fast_block[999]= (frame_right[231] & fast_select_13) | (xmss_address[231] & fast_layout[6]);
-    assign fast_block[1000]= (frame_right[232] & fast_select_13) | (xmss_address[232] & fast_layout[6]);
-    assign fast_block[1001]= (frame_right[233] & fast_select_13) | (xmss_address[233] & fast_layout[6]);
-    assign fast_block[1002]= (frame_right[234] & fast_select_13) | (xmss_address[234] & fast_layout[6]);
-    assign fast_block[1003]= (frame_right[235] & fast_select_13) | (xmss_address[235] & fast_layout[6]);
-    assign fast_block[1004]= (frame_right[236] & fast_select_13) | (xmss_address[236] & fast_layout[6]);
-    assign fast_block[1005]= (frame_right[237] & fast_select_13) | (xmss_address[237] & fast_layout[6]);
-    assign fast_block[1006]= (frame_right[238] & fast_select_13) | (xmss_address[238] & fast_layout[6]);
-    assign fast_block[1007]= (frame_right[239] & fast_select_13) | (xmss_address[239] & fast_layout[6]);
-    assign fast_block[1008]= (frame_right[240] & fast_select_13) | (xmss_address[240] & fast_layout[6]);
-    assign fast_block[1009]= (frame_right[241] & fast_select_13) | (xmss_address[241] & fast_layout[6]);
-    assign fast_block[1010]= (frame_right[242] & fast_select_13) | (xmss_address[242] & fast_layout[6]);
-    assign fast_block[1011]= (frame_right[243] & fast_select_13) | (xmss_address[243] & fast_layout[6]);
-    assign fast_block[1012]= (frame_right[244] & fast_select_13) | (xmss_address[244] & fast_layout[6]);
-    assign fast_block[1013]= (frame_right[245] & fast_select_13) | (xmss_address[245] & fast_layout[6]);
-    assign fast_block[1014]= (frame_right[246] & fast_select_13) | (xmss_address[246] & fast_layout[6]);
-    assign fast_block[1015]= (frame_right[247] & fast_select_13) | (xmss_address[247] & fast_layout[6]);
-    assign fast_block[1016]= (frame_right[248] & fast_select_13) | (xmss_address[248] & fast_layout[6]);
-    assign fast_block[1017]= (frame_right[249] & fast_select_13) | (xmss_address[249] & fast_layout[6]);
-    assign fast_block[1018]= (frame_right[250] & fast_select_13) | (xmss_address[250] & fast_layout[6]);
-    assign fast_block[1019]= (frame_right[251] & fast_select_13) | (xmss_address[251] & fast_layout[6]);
-    assign fast_block[1020]= (frame_right[252] & fast_select_13) | (xmss_address[252] & fast_layout[6]);
-    assign fast_block[1021]= (frame_right[253] & fast_select_13) | (xmss_address[253] & fast_layout[6]);
-    assign fast_block[1022]= (frame_right[254] & fast_select_13) | (xmss_address[254] & fast_layout[6]);
-    assign fast_block[1023]= (frame_right[255] & fast_select_13) | (xmss_address[255] & fast_layout[6]);
-    assign fast_block[1024]= fast_select_14;
-    assign fast_block[1025]= fast_select_14;
-    assign fast_block[1026]= fast_select_14;
-    assign fast_block[1027]= fast_select_14;
-    assign fast_block[1028]= fast_select_14;
-    assign fast_block[1029]= 1'b0;
-    assign fast_block[1030]= 1'b0;
-    assign fast_block[1031]= 1'b0;
-    assign fast_block[1032]= 1'b0;
-    assign fast_block[1033]= 1'b0;
-    assign fast_block[1034]= 1'b0;
-    assign fast_block[1035]= 1'b0;
-    assign fast_block[1036]= 1'b0;
-    assign fast_block[1037]= 1'b0;
-    assign fast_block[1038]= 1'b0;
-    assign fast_block[1039]= 1'b0;
-    assign fast_block[1040]= 1'b0;
-    assign fast_block[1041]= 1'b0;
-    assign fast_block[1042]= 1'b0;
-    assign fast_block[1043]= 1'b0;
-    assign fast_block[1044]= 1'b0;
-    assign fast_block[1045]= 1'b0;
-    assign fast_block[1046]= 1'b0;
-    assign fast_block[1047]= 1'b0;
-    assign fast_block[1048]= 1'b0;
-    assign fast_block[1049]= 1'b0;
-    assign fast_block[1050]= 1'b0;
-    assign fast_block[1051]= 1'b0;
-    assign fast_block[1052]= 1'b0;
-    assign fast_block[1053]= 1'b0;
-    assign fast_block[1054]= 1'b0;
-    assign fast_block[1055]= 1'b0;
-    assign fast_block[1056]= 1'b0;
-    assign fast_block[1057]= 1'b0;
-    assign fast_block[1058]= 1'b0;
-    assign fast_block[1059]= 1'b0;
-    assign fast_block[1060]= 1'b0;
-    assign fast_block[1061]= 1'b0;
-    assign fast_block[1062]= 1'b0;
-    assign fast_block[1063]= 1'b0;
-    assign fast_block[1064]= 1'b0;
-    assign fast_block[1065]= 1'b0;
-    assign fast_block[1066]= 1'b0;
-    assign fast_block[1067]= 1'b0;
-    assign fast_block[1068]= 1'b0;
-    assign fast_block[1069]= 1'b0;
-    assign fast_block[1070]= 1'b0;
-    assign fast_block[1071]= 1'b0;
-    assign fast_block[1072]= 1'b0;
-    assign fast_block[1073]= 1'b0;
-    assign fast_block[1074]= 1'b0;
-    assign fast_block[1075]= 1'b0;
-    assign fast_block[1076]= 1'b0;
-    assign fast_block[1077]= 1'b0;
-    assign fast_block[1078]= 1'b0;
-    assign fast_block[1079]= 1'b0;
-    assign fast_block[1080]= 1'b0;
-    assign fast_block[1081]= 1'b0;
-    assign fast_block[1082]= 1'b0;
-    assign fast_block[1083]= 1'b0;
-    assign fast_block[1084]= 1'b0;
-    assign fast_block[1085]= 1'b0;
-    assign fast_block[1086]= 1'b0;
-    assign fast_block[1087]=1'b1;
-    logic [63:0] stream_data;
-    integer i;
-    wire at_end_word=position[12:3]==input_length[12:3];
-    wire past_end_word=position[12:3]>input_length[12:3];
-    always @* begin
-        stream_data=source_word(position[12:3]);
-        if((shape==MESSAGE_PRF || shape==MESSAGE_DIGEST || shape==XMSS_MESSAGE)
-            && position[12:3]>=message_prefix_words && 32'(message_word_index)<MESSAGE_WORDS)
-            stream_data=message_word_data;
-        if(shape==ADDRESS_LIST && position>=13'(prefix_bytes))
-            stream_data=node_word(256'(list_data0),{8'd0,list_remainder[4:3]});
-        if(shape==LMS_MESSAGE || shape==LMS_PUBLIC) begin
-            stream_data=0;
-            case(position)
-                0:stream_data=request_identifier[63:0];
-                8:stream_data=request_identifier[127:64];
-                16:begin
-                    stream_data[31:0]=be32(lms_q);
-                    stream_data[47:32]=shape==LMS_MESSAGE ? 16'h8181 : 16'h8080;
-                    stream_data[63:48]=shape==LMS_MESSAGE ? randomizer[15:0] : list_data0[15:0];
-                end
-                default:begin
-                    if(shape==LMS_MESSAGE) begin
-                        case(position)
-                            24:stream_data=64'(256'(randomizer)>>16);
-                            32:stream_data=64'(256'(randomizer)>>80);
-                            40:stream_data=64'(256'(randomizer)>>144);
-                            48:stream_data={message_word_data[15:0],randomizer[255:208]};
-                            default:stream_data={message_word_data[15:0],alignment_carry[63:16]};
-                        endcase
-                    end else begin
-                        case(position[4:3])
-                            0:stream_data=list_data0[143:80];
-                            1:stream_data=list_data0[207:144];
-                            2:stream_data={list_data0[15:0],alignment_carry[63:16]};
-                            default:stream_data=list_data0[79:16];
-                        endcase
-                    end
-                end
+    function automatic [63:0] node_word_indexed(input [255:0] data, input [1:0] index);
+        begin
+            case (index)
+                0: node_word_indexed = data[63:0];
+                1: node_word_indexed = data[127:64];
+                2: node_word_indexed = data[191:128];
+                default: node_word_indexed = data[255:192];
             endcase
         end
-        for(i=0;i<8;i=i+1) begin
-            if(past_end_word || (at_end_word && 3'(i)>=input_length[2:0]))
-                stream_data[i*8 +:8]=0;
-            if(at_end_word && 3'(i)==input_length[2:0]) stream_data[i*8 +:8]=8'h1f;
-            if(stream_last && beat==16 && i==7) stream_data[i*8+7]=1;
+    endfunction
+    function automatic [63:0] message_word(input [5:0] index);
+        begin
+            message_word = index < 11 ? padded_message[index*64+:64] : 64'd0;
         end
-    end
-    shake_context #(.UNROLL(UNROLL),.DIGEST_BYTES(DIGEST_BYTES)) sponge (
-        .clk,.rst,.context_valid(request_valid && request_ready && !reject_request),.context_ready(hash_ready),
-        .fast_block_valid(request_valid && request_ready && !reject_request && fixed_block),.fast_block_ready(fast_ready),
-        .fast_block_data(fast_block),.block_valid(stream_emit),.block_ready,
-        .block_data(stream_block_data),.block_last(STREAM_ENABLE && stream_last),
-        .response_valid(digest_valid),.response_digest(response_value)
-    );
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            state<=IDLE;
-            error<=0;
-            hash_count<=0;
-            permutation_count<=0;
-            input_length<=0;
-            node_words<=0;
-            position<=0;
-            beat<=0;
-            list_cursor<=0;
-            list_remainder<=0;
-            alignment_carry<=0;
-        end else begin
-            // Accepting a new caller request has priority over draining the
-            // old response. Its digest is observed before this edge updates
-            // the sponge, so local feedback needs no extra result register.
-            if(request_valid && request_ready) begin
-                error<=reject_request;
-                position<=0;
-                beat<=0;
-                list_cursor<=0;
-                list_remainder<=0;
-                alignment_carry<=0;
-                node_words<=node_bytes[5:3];
-                case(shape)
-                    ADDRESS_LIST:input_length<=list_length;
-                    MESSAGE_PRF,MESSAGE_DIGEST:input_length<=13'(message_prefix)+13'(message_length);
-                    XMSS_MESSAGE:input_length<=13'd128+13'(message_length);
-                    LMS_MESSAGE:input_length<=13'd54+13'(message_length);
-                    LMS_PUBLIC:input_length<=13'd2166;
-                    default:input_length<=0;
+    endfunction
+    function automatic [12:0] decode_length(input [63:0] desc);
+        reg [12:0] nodes;
+        begin
+            nodes = node_bytes == 16 ? {1'b0, desc[47:40], 4'b0} :
+                node_bytes == 24 ? ({1'b0, desc[47:40], 4'b0} + {2'b0, desc[47:40], 3'b0}) :
+                {desc[47:40], 5'b0};
+            if (!STREAM_ENABLE || !RECIPE_MASK[desc[59:56]]) decode_length = 0;
+            else
+                case (desc[59:56])
+                    ADDRESS_SEED: decode_length = PIPELINE == 1 ? node_bytes + 32 + node_bytes : 13'd0;
+                    ADDRESS_VALUE: decode_length = PIPELINE == 1 ? node_bytes + 32 + nodes : 13'd0;
+                    ADDRESS_LIST: decode_length = node_bytes + 32 + nodes;
+                    MESSAGE_PRF: decode_length = 2 * node_bytes + message_length;
+                    MESSAGE_DIGEST: decode_length = 3 * node_bytes + message_length;
+                    INDEX_PRF: decode_length = PIPELINE == 1 ? 96 : 13'd0;
+                    ROOT_MESSAGE: decode_length = 128 + message_length;
+                    MASKED_SEED: decode_length = PIPELINE == 1 ? 128 : 13'd0;
+                    MASKED_VALUE: decode_length = PIPELINE == 1 ? 13'd64 + {desc[47:40], 5'd0} : 13'd0;
+                    PREFIX_SEED, PREFIX_VALUE: decode_length = PIPELINE == 1 ? 55 : 13'd0;
+                    PREFIX_MESSAGE: decode_length = 54 + message_length;
+                    PREFIX_LIST: decode_length = 13'd22 + {desc[47:40], 5'd0};
+                    PREFIX_LEAF: decode_length = PIPELINE == 1 ? 54 : 13'd0;
+                    PREFIX_PARENT: decode_length = PIPELINE == 1 ? 86 : 13'd0;
+                    default: decode_length = 0;
                 endcase
-                if(PROFILE_ENABLE && !reject_request) begin
-                    hash_count<=hash_count+1'b1;
-                    if(fixed_block) permutation_count<=permutation_count+1'b1;
-                end
-                state<=reject_request ? RESPONSE : fixed_block ? WAIT_HASH : STREAM;
-            end else case(state)
-                STREAM: if(STREAM_ENABLE && stream_accept) begin
-                    if(shape==LMS_MESSAGE) alignment_carry<=message_word_data;
-                    else if(shape==LMS_PUBLIC) alignment_carry<=list_data0[255:192];
-                    position<=position+13'd8;
-                    if(position<13'(prefix_bytes)) begin
-                        if(position+13'd8>=13'(prefix_bytes))
-                            list_remainder<=5'(position+13'd8-13'(prefix_bytes));
-                    end else if(next_remainder>=stream_node_bytes) begin
-                        list_remainder<=5'(next_remainder-stream_node_bytes);
-                        list_cursor<=list_cursor+1'b1;
-                    end else list_remainder<=next_remainder[4:0];
-                    if(beat==16) begin
-                        beat<=0;
-                        if(PROFILE_ENABLE) permutation_count<=permutation_count+1'b1;
-                        if(stream_last) state<=WAIT_HASH;
-                    end else beat<=beat+1'b1;
-                end
-                WAIT_HASH:if(digest_valid) state<=response_ready ? IDLE : RESPONSE;
-                RESPONSE:if(response_ready) state<=IDLE;
-                default:state<=IDLE;
-            endcase
         end
-    end
-endmodule
-`default_nettype wire
-
-`timescale 1ns/1ps
-`default_nettype none
-
-// One SHAKE256 context per request. A context can absorb multiple rate blocks,
-// but completion never starts another hash. The retained state is also the
-// result register, so the caller can route a result back into a later request.
-module shake_context #(
-    parameter integer UNROLL = 1,
-    parameter integer DIGEST_BYTES = 49
-) (
-    input wire clk, rst,
-    input wire context_valid,
-    output wire context_ready,
-    input wire fast_block_valid,
-    output wire fast_block_ready,
-    input wire [1087:0] fast_block_data,
-    input wire block_valid,
-    output wire block_ready,
-    input wire [63:0] block_data,
-    input wire block_last,
-    output logic response_valid,
-    output wire [DIGEST_BYTES*8-1:0] response_digest
-);
-    localparam [1:0] IDLE=0, WAIT_BLOCK=1, RUN=2;
-    logic [1:0] state;
-    logic first_block, running_last;
-    logic [4:0] append_index;
-    logic [4:0] round_index;
-    logic [1599:0] sponge_state;
-    wire [1599:0] round_state [0:UNROLL];
-    wire [1599:0] advanced_state=round_state[UNROLL];
-
-    // Completion and the next explicit request may share the final-round edge.
-    // The response observes the old advanced state; the accepting FF edge then
-    // replaces it with the next request's fixed frame. No request is invented.
-    wire final_round=state==RUN && 32'(round_index)+UNROLL>=24 && running_last;
-    assign context_ready=state==IDLE || final_round;
-    assign block_ready=state==WAIT_BLOCK;
-    assign fast_block_ready=(context_ready && context_valid)
-        || (state==WAIT_BLOCK && first_block && append_index==0);
-    assign response_valid=!rst && final_round;
-    assign response_digest=state==RUN ? advanced_state[DIGEST_BYTES*8-1:0]
-        : sponge_state[DIGEST_BYTES*8-1:0];
-    assign round_state[0]=sponge_state;
-    genvar round_step;
-    generate for(round_step=0;round_step<UNROLL;round_step=round_step+1) begin: rounds
-        localparam [4:0] ROUND_OFFSET=round_step;
-        (* keep_hierarchy="yes" *) keccak round_logic (
-            .state_in(round_state[round_step]),
-            .round_index(round_index+ROUND_OFFSET),
-            .state_out(round_state[round_step+1])
-        );
-    end endgenerate
-
-    wire take_fast=fast_block_valid && fast_block_ready;
-    wire take_stream=block_valid && block_ready && !take_fast;
-    wire clear_stream=take_stream && first_block && append_index==0;
-    genvar word_index;
-    generate for(word_index=0;word_index<25;word_index=word_index+1) begin: words
-        wire select_stream=word_index<17 && take_stream && append_index==5'(word_index);
-        wire [63:0] fast_word;
-        if(word_index<17) assign fast_word=fast_block_data[word_index*64 +:64];
-        else assign fast_word=64'd0;
-        // Absorb directly into one selected word; the lane supplies one
-        // 64-bit word per accepting edge, for seventeen edges per rate block.
-        wire [63:0] input_word=block_data;
-        // Only word zero is selected on the first streaming beat. Every
-        // later rate word has already been cleared at that edge.
-        wire [63:0] absorb_word=input_word
-            ^ (sponge_state[word_index*64 +:64]
-                & {64{word_index>=2 || !clear_stream}});
-        if(word_index>=17) begin: capacity
-            // Both input forms clear the capacity; use the FF clear input
-            // rather than carrying a zero alternative through its data mux.
-            always_ff @(posedge clk)
-                if(!rst) begin
-                    if(take_fast || clear_stream)
-                        sponge_state[word_index*64 +:64]<=64'd0;
-                    else if(state==RUN)
-                        sponge_state[word_index*64 +:64]<=advanced_state[word_index*64 +:64];
-                end
-        end else begin: rate
-            wire [63:0] next_word=take_fast ? fast_word
-                : select_stream ? absorb_word : advanced_state[word_index*64 +:64];
-            always_ff @(posedge clk)
-                if(!rst) begin
-                    if(clear_stream && !select_stream)
-                        sponge_state[word_index*64 +:64]<=64'd0;
-                    else if(state==RUN || take_fast || select_stream)
-                        sponge_state[word_index*64 +:64]<=next_word;
-                end
-        end
-    end endgenerate
-
-    initial begin
-        if(UNROLL<1 || UNROLL>24 || 24%UNROLL!=0)
-            $error("single SHAKE context UNROLL must divide 24");
-        if(DIGEST_BYTES<1 || DIGEST_BYTES>136)
-            $error("single SHAKE context digest must fit one rate block");
-    end
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            state<=IDLE;
-            first_block<=1;
-            running_last<=0;
-            append_index<=0;
-            round_index<=0;
-        end else if(context_valid && context_ready) begin
-            first_block<=1;
-            append_index<=0;
-            if(take_fast) begin
-                running_last<=1;
-                round_index<=0;
-                state<=RUN;
-            end else state<=WAIT_BLOCK;
-        end else begin
-            case(state)
-                IDLE: if(context_valid) begin
-                    first_block<=1;
-                    append_index<=0;
-                    if(take_fast) begin
-                        running_last<=1;
-                        round_index<=0;
-                        state<=RUN;
-                    end else state<=WAIT_BLOCK;
-                end
-                WAIT_BLOCK: if(take_fast) begin
-                    running_last<=1;
-                    round_index<=0;
-                    state<=RUN;
-                end else if(take_stream) begin
-                    if(append_index==16) begin
-                        append_index<=0;
-                        running_last<=block_last;
-                        round_index<=0;
-                        state<=RUN;
-                    end else append_index<=append_index+1'b1;
-                end
-                RUN: if(32'(round_index)+UNROLL>=24) begin
-                    if(running_last) begin
-                        state<=IDLE;
+    endfunction
+    function automatic [12:0] decode_source(input [5:0] index, input bit lms_only,
+        input [15:0] shapes, input [2:0] node_words);
+        reg [2:0] source;
+        reg [5:0] selected_index;
+        reg [3:0] literal;
+        begin
+            source = 0;
+            selected_index = index;
+            literal = 0;
+            (* parallel_case *) case (1'b1)
+                shapes[MESSAGE_PRF]:
+                if (!lms_only && RECIPE_MASK[MESSAGE_PRF]) begin
+                    if (index < node_words) source = 1;
+                    else if (index < 2 * node_words) begin
+                        source = 2;
+                        selected_index = index - node_words;
                     end else begin
-                        first_block<=0;
-                        state<=WAIT_BLOCK;
+                        source = 5;
+                        selected_index = index - 2 * node_words;
                     end
-                end else round_index<=round_index+5'(UNROLL);
-                default:state<=IDLE;
+                end
+                shapes[MESSAGE_DIGEST]:
+                if (!lms_only && RECIPE_MASK[MESSAGE_DIGEST]) begin
+                    if (index < node_words) source = 2;
+                    else if (index < 2 * node_words) begin
+                        source = 3;
+                        selected_index = index - node_words;
+                    end else if (index < 3 * node_words) begin
+                        source = 4;
+                        selected_index = index - 2 * node_words;
+                    end else begin
+                        source = 5;
+                        selected_index = index - 3 * node_words;
+                    end
+                end
+                shapes[ROOT_MESSAGE]:
+                if (!lms_only && RECIPE_MASK[ROOT_MESSAGE]) begin
+                    if (index == 3) literal = 4'd1;
+                    else if (index < 4) literal = 0;
+                    else if (index < 8) begin
+                        source = 2;
+                        selected_index = index - 4;
+                    end else if (index < 12) begin
+                        source = 4;
+                        selected_index = index - 8;
+                    end else if (index == 15) literal = 4'd2;
+                    else if (index >= 16) begin
+                        source = 5;
+                        selected_index = index - 16;
+                    end
+                end
+                shapes[PREFIX_MESSAGE]:
+                if (RECIPE_MASK[PREFIX_MESSAGE]) begin
+                    // Unaligned 22-byte prefix: assemble three aligned words,
+                    // then retain the fixed window starting two bytes later.
+                    if (index >= 3 && index < 7) begin
+                        source = 2;
+                        selected_index = index - 3;
+                    end else if (index >= 7) begin
+                        source = 5;
+                        selected_index = index - 7;
+                    end
+                end
+                shapes[ADDRESS_LIST]:
+                if (!lms_only && RECIPE_MASK[ADDRESS_LIST]) begin
+                    if (index < node_words) source = 3;
+                    else if (index < node_words + 4) begin
+                        source = 6;
+                        selected_index = index - node_words;
+                    end else begin
+                        source = 7;
+                        selected_index = index - node_words - 4;
+                    end
+                end
+                shapes[PREFIX_LIST]:
+                if (!lms_only && RECIPE_MASK[PREFIX_LIST]) begin
+                    case (index)
+                        0: literal = 4'd3;
+                        1: literal = 4'd4;
+                        2: literal = 4'd5;
+                        3: literal = 4'd6;
+                        default: literal = 0;
+                    endcase
+                end
+                default: begin
+                end
+            endcase
+            decode_source = {literal, source, selected_index};
+        end
+    endfunction
+    function automatic [63:0] source_literal(input [3:0] code, input [31:0] leaf,
+        input [127:0] id, input [N*8-1:0] first_node);
+        begin
+            case (code)
+                1: source_literal = 64'h0200000000000000;
+                2: source_literal = {be32(leaf), 32'd0};
+                3: source_literal = id[63:0];
+                4: source_literal = id[127:64];
+                5: source_literal = {first_node[15:0], 16'h8080, be32(leaf)};
+                6: source_literal = first_node[79:16];
+                default: source_literal = 0;
             endcase
         end
-    end
+    endfunction
+    function automatic [511:0] list_nodes(input [5:0] bytes_per_node,
+        input [N*8-1:0] first_node, second_node);
+        begin
+            case (bytes_per_node)
+                16: list_nodes = {256'd0, second_node[127:0], first_node[127:0]};
+                24: list_nodes = {128'd0, second_node[191:0], first_node[191:0]};
+                default: list_nodes = {second_node, first_node};
+            endcase
+        end
+    endfunction
+    function automatic [143:0] list_words(input [511:0] nodes, input [1:0] index);
+        begin
+            case (index)
+                0: list_words = nodes[143:0];
+                1: list_words = nodes[207:64];
+                2: list_words = nodes[271:128];
+                default: list_words = nodes[335:192];
+            endcase
+        end
+    endfunction
+    function automatic [255:0] make_address(input [4:0] layer, input [63:0] tree,
+        input [31:0] leaf, input [7:0] domain, input [31:0] a, b);
+        make_address = {be32(b), be32(a), be32(leaf), be32({24'd0, domain}),
+            be32(tree[31:0]), be32(tree[63:32]), 32'd0, be32({27'd0, layer})};
+    endfunction
+
+    generate
+        if (PIPELINE == 1) begin : scalar_execution
+            localparam bit MASKED_ENABLE = RECIPE_MASK[MASKED_VALUE];
+            typedef enum logic [2:0] {
+                IDLE,
+                START,
+                STREAM,
+                WAIT_HASH,
+                RESPONSE
+            } state_t;
+            state_t state;
+            wire chain_feedback_valid;
+            wire [3:0] chain_feedback_counter;
+            logic seed_phase;
+            logic [4:0] iteration;
+            logic [1:0] compound;
+            // XMSS retains its value across key/mask hashes. SLH
+            // chains instead reuse the sponge's retained digest at the next START.
+            logic [N*8-1:0] chain_value, temporary_key;
+            wire [N*8-1:0] current_value = MASKED_ENABLE ? chain_value :
+                seed_phase ? request_left : digest[N*8-1:0];
+            logic [4:0] rate_block;
+            logic [3:0] beat;
+            logic stream_half;
+            wire [63:0]
+                recipe = request_chain && !seed_phase ? request_step_recipe : request_recipe;
+            logic [15:0] seed_shapes, step_shapes;
+            logic [12:0] seed_length, step_length;
+            logic [2:0] stream_node_words;
+            wire [15:0] shapes = request_chain && !seed_phase ? step_shapes : seed_shapes;
+            // Decode lengths once in the existing request stage. In particular the
+            // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
+            // byte comparator during STREAM. Request fields remain stable until the
+            // response, but their registered decode cuts that wide data-path cone.
+            always_ff @(posedge clk) begin
+                if (!rst && state == IDLE && request_valid) begin
+                    seed_shapes <= (16'b1 << request_recipe[59:56]) & RECIPE_MASK;
+                    step_shapes <= (16'b1 << request_step_recipe[59:56]) & RECIPE_MASK;
+                    seed_length <= decode_length(request_recipe);
+                    step_length <= decode_length(request_step_recipe);
+                    stream_node_words <= node_bytes[5:3];
+                end
+            end
+            wire [7:0] domain = recipe[55:48];
+            wire [7:0] arity = recipe[47:40];
+            wire compact_chain = RECIPE_MASK[ADDRESS_SEED] && request_chain &&
+                request_recipe[59:56] == ADDRESS_SEED;
+            wire [31:0] a = request_a;
+            wire [31:0] b = chain_feedback_valid ?
+                (request_step_recipe[55:48] == 3 ? request_b : {28'd0, chain_feedback_counter}) :
+                request_chain && !seed_phase ?
+                (request_step_recipe[55:48] == 3 && request_step_recipe[59:56] == ADDRESS_VALUE ?
+                 request_b : {27'd0, iteration}) : request_b;
+            wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
+            wire [7:0] address_domain = chain_feedback_valid ? request_step_recipe[55:48] : domain;
+            wire [31:0] leaf = {12'd0, request_leaf};
+            wire [12:0] input_length = MASKED_ENABLE && shapes[MASKED_VALUE] && compound <
+                arity + 1 ? 13'd96 : request_chain && !seed_phase ? step_length : seed_length;
+            wire [5:0] stream_node_bytes = {stream_node_words, 3'b0};
+            logic [1087:0] fast_block;
+            logic [127:0] stream_data;
+            logic [255:0] address, masked_address;
+            wire fixed_block = ((RECIPE_MASK & 16'h3858) == 0 || shapes[ADDRESS_SEED] ||
+                                shapes[ADDRESS_VALUE] || shapes[INDEX_PRF] || shapes[MASKED_SEED] ||
+                                shapes[MASKED_VALUE] || shapes[PREFIX_SEED] || shapes[
+                                PREFIX_VALUE] || shapes[PREFIX_LEAF] || shapes[PREFIX_PARENT]);
+            wire [12:0] rate_offset = ({8'd0, rate_block} << 7) + ({8'd0, rate_block} << 3);
+            wire stream_last = rate_offset + 13'd136 > input_length;
+            wire hash_ready, block_ready, fast_ready, finish_valid;
+            wire [DIGEST_BYTES*8-1:0] digest, finish_digest;
+            wire [N*8-1:0] compact_capture;
+            logic hash_error;
+            wire completed = finish_valid;
+            wire [DIGEST_BYTES*8-1:0] completed_value = finish_digest;
+            assign response_value = fixed_block ?
+                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, digest[N*8-1:0]} : digest;
+            assign response_capture = compact_capture;
+            // Capture both chain modes in the sponge's existing register bank, on
+            // the same final-round edge used by the former lane-local copy.
+            wire capture_single = request_capture &&
+                !(MASKED_ENABLE && shapes[MASKED_VALUE] && compound < arity + 1) &&
+                (seed_phase ? request_capture_after == 0 : request_capture_after == iteration + 1);
+            wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes + 32 : 22;
+            logic staged_valid, staged_last;
+            logic [127:0] staged_data;
+            wire stream_accept = !staged_valid || block_ready;
+            // A scalar producer emits eight bytes per cycle into the existing
+            // sixteen-byte absorb staging register.
+            // Keeping a cursor avoids a rate_block*136 + beat*16 adder chain
+            // ahead of the source selector and each padding-byte comparator.
+            logic [12:0] position;
+            logic [INDEX_BITS-1:0] list_cursor;
+            logic [5:0] list_remainder;
+            wire [4:0] stream_advance = 5'd8;
+            wire [6:0] next_remainder = {1'b0, list_remainder} + stream_advance;
+            assign list_index0 = list_cursor;
+            assign list_next_index0 = state == IDLE && request_valid ? INDEX_BITS'(0) :
+                state == STREAM && stream_accept && position >= prefix_bytes &&
+                next_remainder >= stream_node_bytes ? list_cursor + 1'b1 : list_cursor;
+            assign list_index1 = list_index0 + 1'b1;
+            assign request_ready = state == IDLE;
+            assign response_valid = state == RESPONSE;
+
+            // All sponge beats start on an eight-byte boundary. Select two words
+            // directly instead of shifting a maximum-size concatenated message frame.
+            wire [2:0] node_words = stream_node_words;
+            // Select a source and a small word address BEFORE the wide data mux.
+            // All recipes share the same message/seed selectors instead of each
+            // recipe instantiating its own variable 64-bit extraction network.
+            // Prepare the next eight-byte beat's small selectors while emitting
+            // the current beat. START provides the first selectors; backpressure
+            // holds both selectors and position without another data stage.
+            logic [12:0] source_control[0:1];
+            wire [12:0] following_position = position + 13'(stream_advance);
+            for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                always_ff @(posedge clk)
+                    if (!rst) begin
+                        if (state == START && hash_ready)
+                            source_control[word_slot] <= decode_source(
+                                6'(word_slot), word_slot != 0, shapes, node_words
+                            );
+                        else if (state == STREAM && stream_accept)
+                            source_control[word_slot] <= decode_source(
+                                following_position[8:3] + 6'(word_slot), word_slot != 0, shapes, node_words
+                            );
+                    end
+            end
+            function automatic [63:0] source_word(input [12:0] control);
+                reg [5:0] selected_index;
+                reg [63:0] literal;
+                begin
+                    selected_index = control[5:0];
+                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+                    // Source-range decoding bounds live node reads to four words;
+                    // ADDRESS_LIST body beats use list_window instead.
+                    case (control[8:6])
+                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
+                        4: source_word = node_word_indexed(root, selected_index[1:0]);
+                        5: source_word = message_word(selected_index);
+                        6: source_word = node_word_indexed(address, selected_index[1:0]);
+                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
+                        default: source_word = literal;
+                    endcase
+                end
+            endfunction
+            logic [511:0] list_pair;
+            always @* begin
+                list_pair = list_nodes(stream_node_bytes, list_data0, list_data1);
+            end
+            // Legal list offsets are whole 64-bit words (SLH), or two bytes
+            // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
+            logic [143:0] list_word_window;
+            always @* begin
+                list_word_window = list_words(list_pair, list_remainder[4:3]);
+            end
+            // SLH nodes and prefixes are eight-byte aligned. A beat never crosses
+            // a node boundary; do not retain the legacy two-node byte window.
+            wire [127:0] list_window = RECIPE_MASK[PREFIX_LIST] ?
+                (list_remainder[1] ? {64'd0, list_word_window[79:16]} :
+                 {64'd0, list_word_window[63:0]}) : {64'd0, node_word(
+                list_data0, {4'd0, list_remainder[4:3]}
+            )};
+            logic [127:0] stream_payload;
+            logic [127:0] source_window;
+            always_comb begin
+                source_window = {
+                    source_word(source_control[1]),
+                    source_word(source_control[0])
+                };
+                stream_payload = {64'd0, source_window[63:0]};
+                if (shapes[PREFIX_MESSAGE]) begin
+                    stream_payload = {64'd0, source_window[79:16]};
+                    if (position == 0) stream_payload = {64'd0, identifier[63:0]};
+                    else if (position == 8) stream_payload[63:0] = identifier[127:64];
+                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+                end else
+                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+                    stream_payload = list_window;
+            end
+
+            integer i;
+            always @* begin
+                address = make_address(request_layer, request_tree, leaf, address_domain, a, b);
+                masked_address = {
+                    be32(compound), be32(b), be32(a), be32(leaf), be32(domain), 96'd0
+                };
+            end
+            // Select shared frame fields before alignment. This avoids replicating
+            // every seed/value/key/mask selector for all three node lengths.
+            logic [255:0] frame0, frame1, frame2, frame3;
+            logic [183:0] frame_prefix;
+            logic [7:0] frame_domain;
+            logic frame_two;
+            logic [2:0] frame_layout;
+            always @* begin
+                frame0 = 0;
+                frame1 = 0;
+                frame2 = 0;
+                frame3 = 0;
+                frame_prefix = 0;
+                frame_domain = 0;
+                frame_two = 0;
+                frame_layout = 7;
+                (* parallel_case *) case (1'b1)
+                    shapes[ADDRESS_SEED], shapes[ADDRESS_VALUE]:
+                    if (RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
+                        frame_layout = 0;
+                        frame0 = public_seed;
+                        frame1 = address;
+                        frame2 = chain_feedback_valid ? finish_digest[N*8-1:0] :
+                            shapes[ADDRESS_SEED] ? secret_seed : left_value;
+                        frame_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
+                        frame3 = frame_two ? request_right : 256'd0;
+                    end
+                    shapes[INDEX_PRF]:
+                    if (RECIPE_MASK[INDEX_PRF]) begin
+                        frame_layout = 1;
+                        frame_domain = 3;
+                        frame1 = secret_prf;
+                        frame2 = {be32(leaf), 224'd0};
+                    end
+                    shapes[MASKED_SEED]:
+                    if (RECIPE_MASK[MASKED_SEED]) begin
+                        frame_layout = 2;
+                        frame_domain = 4;
+                        frame1 = secret_seed;
+                        frame2 = public_seed;
+                        frame3 = masked_address;
+                    end
+                    shapes[MASKED_VALUE]:
+                    if (MASKED_ENABLE) begin
+                        if (compound < arity + 1) begin
+                            frame_layout = 1;
+                            frame_domain = 3;
+                            frame1 = public_seed;
+                            frame2 = masked_address;
+                        end else begin
+                            frame_layout = 3;
+                            frame_domain = arity - 1'b1;
+                            frame1 = temporary_key;
+                            // MASK0 already masked the retained left value in place.
+                            frame2 = chain_value;
+                            frame_two = arity == 2;
+                            // MASK1 is the retained sponge digest until this FINAL launch.
+                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
+                        end
+                    end
+                    shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
+                    if (RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
+                        frame_layout = 4;
+                        frame_prefix = {
+                            shapes[PREFIX_SEED] ? 8'hff : b[7:0],
+                            8'(request_a),
+                            8'd0,
+                            be32(leaf),
+                            identifier
+                        };
+                        frame1 = shapes[PREFIX_SEED] ? secret_seed : left_value;
+                    end
+                    shapes[PREFIX_LEAF], shapes[PREFIX_PARENT]:
+                    if (RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
+                        frame_layout = 5;
+                        frame_prefix = {
+                            8'd0,
+                            shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,
+                            be32(request_b),
+                            identifier
+                        };
+                        frame1 = left_value;
+                        frame_two = shapes[PREFIX_PARENT];
+                        frame2 = frame_two ? request_right : 256'd0;
+                    end
+                    default: begin
+                    end
+                endcase
+            end
+            always @* begin
+                fast_block = 0;
+                case (node_bytes)
+                    16: begin
+                        fast_block[0+:128] = public_seed[127:0];
+                        fast_block[128+:256] = address;
+                        fast_block[384+:128] = chain_feedback_valid ? finish_digest[127:0] :
+                            shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+                        if (shapes[ADDRESS_VALUE] && arity == 2) begin
+                            fast_block[512+:128] = request_right[127:0];
+                            fast_block[640+:8]   = 8'h1f;
+                        end else fast_block[512+:8] = 8'h1f;
+                    end
+                    24: begin
+                        fast_block[0+:192] = public_seed[191:0];
+                        fast_block[192+:256] = address;
+                        fast_block[448+:192] = chain_feedback_valid ? finish_digest[191:0] :
+                            shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+                        if (shapes[ADDRESS_VALUE] && arity == 2) begin
+                            fast_block[640+:192] = request_right[191:0];
+                            fast_block[832+:8]   = 8'h1f;
+                        end else fast_block[640+:8] = 8'h1f;
+                    end
+                    32:
+                    case (frame_layout)
+                        0: begin
+                            fast_block[0+:256]   = frame0[255:0];
+                            fast_block[256+:256] = frame1;
+                            fast_block[512+:256] = frame2[255:0];
+                            fast_block[768+:256] = frame3[255:0];
+                            if (frame_two) fast_block[1024+:8] = 8'h1f;
+                            else fast_block[768+:8] = 8'h1f;
+                        end
+                        1: begin
+                            fast_block[248+:8]   = frame_domain;
+                            fast_block[256+:256] = frame1[255:0];
+                            fast_block[512+:256] = frame2;
+                            fast_block[768+:8]   = 8'h1f;
+                        end
+                        2: begin
+                            fast_block[248+:8]   = frame_domain;
+                            fast_block[256+:256] = frame1[255:0];
+                            fast_block[512+:256] = frame2[255:0];
+                            fast_block[768+:256] = frame3;
+                            fast_block[1024+:8]  = 8'h1f;
+                        end
+                        3: begin
+                            fast_block[248+:8]   = frame_domain;
+                            fast_block[256+:256] = frame1[255:0];
+                            fast_block[512+:256] = frame2[255:0];
+                            fast_block[768+:256] = frame3[255:0];
+                            if (frame_two) fast_block[1024+:8] = 8'h1f;
+                            else fast_block[768+:8] = 8'h1f;
+                        end
+                        4: begin
+                            fast_block[183:0] = frame_prefix;
+                            fast_block[184+:256] = frame1[255:0];
+                            fast_block[440+:8] = 8'h1f;
+                        end
+                        5: begin
+                            fast_block[175:0] = frame_prefix[175:0];
+                            fast_block[176+:256] = frame1[255:0];
+                            fast_block[432+:256] = frame2[255:0];
+                            if (frame_two) fast_block[688+:8] = 8'h1f;
+                            else fast_block[432+:8] = 8'h1f;
+                        end
+                        default: begin
+                        end
+                    endcase
+                    default: begin
+                    end
+                endcase
+                fast_block[1087] = 1'b1;
+            end
+            // Share one remaining-length subtraction across the eight output
+            // bytes instead of adding position to each byte's comparison index.
+            wire [12:0] remaining_bytes = input_length - position;
+            wire padding_reached = position > input_length;
+            wire partial_beat = remaining_bytes < 8;
+            always_comb begin
+                stream_data = {64'd0, stream_payload[63:0]};
+                for (i = 0; i < 8; i = i + 1) begin
+                    if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
+                        stream_data[i*8+:8] = 0;
+                    if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
+                        stream_data[i*8+:8] = 8'h1f;
+                    if (beat == 8 && stream_last && i == 7)
+                        stream_data[i*8+7] = 1'b1;
+                end
+            end
+
+            assign batch_request_ready = 1'b0;
+            assign batch_response_valid = 1'b0;
+            assign batch_response_tag = '0;
+            assign batch_response_digest = '0;
+            assign batch_response_capture = '0;
+            assign batch_read_digest = '0;
+            assign batch_read_capture = '0;
+`ifndef SYNTHESIS
+            assign batch_hashes = 64'd0;
+            assign batch_permutations = 64'd0;
+`endif
+
+            // One iterative Keccak state serves fixed blocks, chains and streams.
+            logic [1:0] hash_state;
+            logic saved_chain_enable, saved_chain_prefix;
+            logic saved_chain_prefix_preserve_counter, saved_capture_enable;
+            logic [4:0] saved_chain_count, saved_capture_after;
+            logic first_block, running_last;
+            logic [3:0] append_index;
+            logic [1599:0] sponge_state;
+            logic [4:0] chains_remaining, chain_iteration, round_index;
+            logic [3:0] chain_counter;
+            logic [N*8-1:0] captured_value;
+            wire [3:0] counter_next = chain_counter + 1'b1;
+            wire [3:0] transition_counter = saved_chain_prefix && chain_iteration == 1 ?
+                chain_counter : counter_next;
+            wire [1599:0] rounds[0:UNROLL];
+            assign rounds[0] = sponge_state;
+            for (genvar r = 0; r < UNROLL; r = r + 1) begin : unrolled
+                // verilog_format: off
+                (* keep_hierarchy="yes" *) keccak round_logic(.state_in(rounds[r]),
+                    .round_index(round_index+5'(r)),.state_out(rounds[r+1]));
+                // verilog_format: on
+            end
+            wire [1599:0] advanced_state = rounds[UNROLL];
+            wire round_complete = round_index + UNROLL >= 24;
+            wire round_update = hash_state == HASH_RUN;
+            wire permutation_complete = round_update && round_complete;
+            assign hash_ready = hash_state == HASH_IDLE;
+            assign block_ready = hash_state == HASH_WAIT_BLOCK;
+            assign fast_ready = (hash_state == HASH_IDLE && state == START) ||
+                (hash_state == HASH_WAIT_BLOCK && first_block && append_index == 0);
+            assign digest = sponge_state[DIGEST_BYTES*8-1:0];
+            assign finish_valid = permutation_complete &&
+                (!saved_chain_enable || chains_remaining <= 1) && running_last;
+            assign finish_digest = advanced_state[DIGEST_BYTES*8-1:0];
+            assign compact_capture = captured_value;
+
+`ifndef SYNTHESIS
+            initial begin
+                if (UNROLL < 1 || UNROLL > 24 || 24 % UNROLL != 0)
+                    $error("recipe scalar execution requires U dividing 24");
+            end
+`endif
+            wire take_fast = state == START && fixed_block && fast_ready;
+            wire take_stream = hash_state == HASH_WAIT_BLOCK && !take_fast && staged_valid;
+            wire clear_stream = take_stream && first_block && append_index == 0;
+            wire take_feedback = permutation_complete && saved_chain_enable && chains_remaining > 1;
+            assign chain_feedback_valid   = take_feedback;
+            assign chain_feedback_counter = transition_counter;
+            logic [127:0] previous_rate;
+            always_comb begin
+                case (append_index)
+                    0: previous_rate = sponge_state[0+:128];
+                    1: previous_rate = sponge_state[128+:128];
+                    2: previous_rate = sponge_state[256+:128];
+                    3: previous_rate = sponge_state[384+:128];
+                    4: previous_rate = sponge_state[512+:128];
+                    5: previous_rate = sponge_state[640+:128];
+                    6: previous_rate = sponge_state[768+:128];
+                    7: previous_rate = sponge_state[896+:128];
+                    default: previous_rate = {64'd0, sponge_state[1024+:64]};
+                endcase
+            end
+            wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
+            for (genvar w = 0; w < 25; w = w + 1) begin : state_words
+                wire select_stream = w < 17 && take_stream && append_index == w / 2;
+                wire [63:0] fast_word;
+                if (w < 17) assign fast_word = fast_block[w*64+:64];
+                else assign fast_word = 64'd0;
+                wire [63:0]
+                    absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
+                // These sources are disjoint in the hash FSM. Initialization
+                // clears unselected words by enabling a write with no source.
+                wire [63:0] next_word =
+                    (fast_word & {64{take_fast || take_feedback}}) |
+                    (absorb_word & {64{select_stream}}) |
+                    (advanced_state[w*64+:64] & {64{round_update && !take_feedback}});
+                always_ff @(posedge clk)
+                    if (!rst && (round_update || take_fast || select_stream || clear_stream))
+                        sponge_state[w*64+:64] <= next_word;
+            end
+
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    hash_state <= HASH_IDLE;
+                    saved_chain_enable <= 1'b0;
+                    saved_chain_prefix <= 1'b0;
+                    saved_chain_prefix_preserve_counter <= 1'b0;
+                    saved_chain_count <= '0;
+                    saved_capture_enable <= 1'b0;
+                    saved_capture_after <= '0;
+                    first_block <= 1'b1;
+                    running_last <= 1'b0;
+                    append_index <= 0;
+                    chains_remaining <= '0;
+                    chain_counter <= '0;
+                    chain_iteration <= '0;
+                    round_index <= '0;
+                    hash_error <= 1'b0;
+                end else begin
+                    hash_error <= 1'b0;
+                    case (hash_state)
+                        HASH_IDLE:
+                        if ((state == START)) begin
+                            saved_chain_enable <= compact_chain;
+                            saved_chain_prefix <= compact_chain;
+                            saved_chain_prefix_preserve_counter <=
+                                (request_step_recipe[55:48] == 3);
+                            saved_chain_count <= (request_steps + 5'd1);
+                            saved_capture_enable <=
+                                (compact_chain ? request_capture : capture_single);
+                            saved_capture_after <=
+                                (compact_chain ? request_capture_after + 5'd1 : 5'd1);
+                            first_block <= 1'b1;
+                            append_index <= 0;
+                            if ((state == START && fixed_block)) begin
+                                running_last <= 1'b1;
+                                chains_remaining <= compact_chain ? (request_steps + 5'd1) : 5'd1;
+                                chain_counter <= 0;
+                                chain_iteration <= 1;
+                                round_index <= 0;
+                                hash_state <= HASH_RUN;
+                            end else hash_state <= HASH_WAIT_BLOCK;
+                        end
+                        HASH_WAIT_BLOCK:
+                        if ((state == START && fixed_block) && fast_ready) begin
+                            // Generic pre-padded one-rate-block path.  The recipe
+                            // executor builds fixed-format blocks while this lane is
+                            // idle, avoiding nine serial append cycles per context.
+                            running_last <= 1'b1;
+                            chains_remaining <= saved_chain_enable ? saved_chain_count : 5'd1;
+                            chain_counter <= 0;
+                            chain_iteration <= 1;
+                            round_index <= 0;
+                            hash_state <= HASH_RUN;
+                        end else if (staged_valid) begin
+                            if (append_index == 8) begin
+                                running_last <= staged_last;
+                                append_index <= 0;
+                                if (saved_chain_enable && !staged_last) begin
+                                    hash_error <= 1'b1;
+                                    hash_state <= HASH_IDLE;
+                                end else begin
+                                    chains_remaining <= saved_chain_enable ? saved_chain_count :
+                                        5'd1;
+                                    chain_counter <= 0;
+                                    chain_iteration <= 1;
+                                    round_index <= 0;
+                                    hash_state <= HASH_RUN;
+                                end
+                            end else begin
+                                append_index <= append_index + 1'b1;
+                            end
+                        end
+                        HASH_RUN: begin
+                            if (round_complete) begin
+                                if (saved_capture_enable && saved_capture_after == chain_iteration)
+                                    captured_value <= advanced_state[N*8-1:0];
+                                if (saved_chain_enable && chains_remaining > 1) begin
+                                    chains_remaining <= chains_remaining - 1'b1;
+                                    if (!saved_chain_prefix_preserve_counter &&
+                                        !(saved_chain_prefix && chain_iteration == 1))
+                                        chain_counter <= chain_counter + 1'b1;
+                                    chain_iteration <= chain_iteration + 1'b1;
+                                    round_index <= 0;
+                                end else begin
+                                    if (running_last) begin
+                                        hash_state <= HASH_IDLE;
+                                    end else begin
+                                        first_block <= 1'b0;
+                                        hash_state  <= HASH_WAIT_BLOCK;
+                                    end
+                                end
+                            end else begin
+                                round_index <= round_index + UNROLL;
+                            end
+                        end
+                        default: hash_state <= HASH_IDLE;
+                    endcase
+                end
+            end
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    staged_valid <= 0;
+                    staged_last <= 0;
+                    staged_data <= 0;
+                    position <= 0;
+                    list_cursor <= 0;
+                    list_remainder <= 0;
+                    state <= IDLE;
+                    error <= 0;
+                    seed_phase <= 1;
+                    iteration <= 0;
+                    compound <= 0;
+                    rate_block <= 0;
+                    beat <= 0;
+                    stream_half <= 0;
+                end else begin
+                    if (STREAM_ENABLE && staged_valid && block_ready) staged_valid <= 0;
+                    if (hash_error) begin
+                        error <= 1;
+                        state <= RESPONSE;
+                    end else
+                        case (state)
+                            IDLE:
+                            if (request_valid) begin
+                                staged_valid <= 0;
+                                position <= 0;
+                                list_cursor <= 0;
+                                list_remainder <= 0;
+                                error <= 0;
+                                seed_phase <= 1;
+                                iteration <= 0;
+                                compound <= 0;
+                                chain_value <= request_left;
+                                rate_block <= 0;
+                                beat <= 0;
+                                stream_half <= 0;
+                                state <= START;
+                            end
+                            START:
+                            if (hash_ready) begin
+                                state <= fixed_block ? WAIT_HASH : STREAM;
+                            end
+                            STREAM:
+                            if (STREAM_ENABLE && stream_accept) begin
+                                position <= position + 13'(stream_advance);
+                                if (stream_half) staged_data[127:64] <= stream_data[63:0];
+                                else staged_data[63:0] <= stream_data[63:0];
+                                staged_valid <= stream_half || beat == 8;
+                                staged_last  <= stream_last;
+                                if (beat == 8) staged_data[127:64] <= 0;
+                                stream_half <= beat == 8 ? 1'b0 : !stream_half;
+                                begin
+                                    if (position < prefix_bytes) begin
+                                        if (position + stream_advance >= prefix_bytes)
+                                            list_remainder <= position + stream_advance -
+                                                prefix_bytes;
+                                    end else if (next_remainder >= stream_node_bytes) begin
+                                        list_remainder <= next_remainder - stream_node_bytes;
+                                        list_cursor <= list_cursor + 1'b1;
+                                    end else list_remainder <= next_remainder;
+                                end
+                                if (beat == 8) begin
+                                    beat <= 0;
+                                    if (stream_last) state <= WAIT_HASH;
+                                    else rate_block <= rate_block + 1'b1;
+                                end else if (stream_half) beat <= beat + 1'b1;
+                            end
+                            WAIT_HASH:
+                            if (completed) begin
+                                if (compact_chain) begin
+                                    state <= RESPONSE;
+                                end else if (MASKED_ENABLE && shapes[MASKED_VALUE] &&
+                                             compound < arity + 1) begin
+                                    case (compound)
+                                        0: temporary_key <= completed_value[N*8-1:0];
+                                        // The unmasked value dies at MASK0 completion.
+                                        1: chain_value <= left_value ^ completed_value[N*8-1:0];
+                                        // MASK1 stays in sponge_state until FINAL reads it.
+                                        default: begin end
+                                    endcase
+                                    compound <= compound + 1'b1;
+                                    state <= START;
+                                end else begin
+                                    compound <= 0;
+                                    chain_value <= completed_value[N*8-1:0];
+                                    if (request_chain && (seed_phase ? request_steps != 0 :
+                                                          iteration + 1 < request_steps)) begin
+                                        seed_phase <= 0;
+                                        if (!seed_phase) iteration <= iteration + 1'b1;
+                                        state <= START;
+                                    end else begin
+                                        state <= RESPONSE;
+                                    end
+                                end
+                            end
+                            RESPONSE: if (response_ready) state <= IDLE;
+                            default:  state <= IDLE;
+                        endcase
+                end
+            end
+
+`ifndef SYNTHESIS
+            // Statistics are observers; no diagnostic state drives the execution FSM.
+            always_ff @(posedge clk) begin : debug_statistics
+                if (rst) begin
+                    hash_count <= 64'd0;
+                    permutation_count <= 64'd0;
+                end else begin
+                    if (state == START && hash_ready) begin
+                        hash_count <= hash_count +
+                            (compact_chain ? 64'(request_steps) + 64'd1 : 64'd1);
+                        if (fixed_block)
+                            permutation_count <= permutation_count +
+                                (compact_chain ? 64'(request_steps) + 64'd1 : 64'd1);
+                    end
+                    if (state == STREAM && STREAM_ENABLE && stream_accept && beat == 8)
+                        permutation_count <= permutation_count + 64'd1;
+                end
+            end
+`endif
+        end else begin : scheduled_execution
+            typedef enum logic [2:0] {
+                IDLE,
+                START,
+                STREAM,
+                WAIT_HASH,
+                RESPONSE,
+                FIXED_WAIT
+            } state_t;
+            // Mode ownership and stream lookahead both feed caller handshakes.
+            // Keep their phase bits directly registered rather than decoding a
+            // compact state before the scheduler and next RAM address logic.
+            (* fsm_encoding="one_hot" *) state_t state;
+            logic [3:0] beat;
+            wire [63:0] recipe = request_recipe;
+            logic [15:0] seed_shapes;
+            logic [12:0] seed_length;
+            logic [2:0] stream_node_words;
+            wire [15:0] shapes = seed_shapes;
+            // Decode lengths once in the existing request stage. In particular the
+            // ADDRESS_LIST arity/24-byte-node addition must not feed every padding
+            // byte comparator during STREAM. Request fields remain stable until the
+            // response, but their registered decode cuts that wide data-path cone.
+            always_ff @(posedge clk) begin
+                if (!rst && state == IDLE && request_valid) begin
+                    seed_shapes <= (16'b1 << request_recipe[59:56]) & RECIPE_MASK;
+                    seed_length <= decode_length(request_recipe);
+                    stream_node_words <= node_bytes[5:3];
+                end
+            end
+            wire [7:0] domain = recipe[55:48];
+            wire [31:0] a = request_a, b = request_b;
+            wire [31:0] leaf = {12'd0, request_leaf};
+            wire [12:0] input_length = seed_length;
+            wire [5:0] stream_node_bytes = {stream_node_words, 3'b0};
+            logic [127:0] stream_data;
+            wire [255:0] address = make_address(request_layer, request_tree, leaf, domain, a, b);
+            wire hash_ready, block_ready, finish_valid;
+            wire [DIGEST_BYTES*8-1:0] digest;
+            wire completed = finish_valid;
+            assign response_value = bridge_response ?
+                {{(DIGEST_BYTES * 8 - N * 8) {1'b0}}, published_digest[N*8-1:0]} : digest;
+            assign response_capture = bridge_response ? published_capture[N*8-1:0] :
+                engine_capture[N*8-1:0];
+            wire [7:0] prefix_bytes = shapes[ADDRESS_LIST] ? stream_node_bytes + 32 : 22;
+            logic staged_valid, staged_last;
+            logic [127:0] staged_data;
+            logic fetched_valid;
+            logic [127:0] fetched_source, fetched_list;
+            logic fetched_use_list, fetched_prefix_head, fetched_prefix_tail;
+            logic fetched_padding, fetched_partial, fetched_rate_tail, fetched_last;
+            logic [3:0] fetched_remaining;
+            wire output_accept = !staged_valid || block_ready;
+            wire stream_accept = !fetched_valid || output_accept;
+            // Emit sixteen bytes per cycle, then eight bytes at the end of the rate.
+            // One cursor supplies source selection, padding and the final-block test.
+            logic [12:0] position;
+            logic [INDEX_BITS-1:0] list_cursor;
+            logic [5:0] list_remainder;
+            wire [4:0] stream_advance = beat != 8 ? 5'd16 : 5'd8;
+            wire [6:0] next_remainder = {1'b0, list_remainder} + stream_advance;
+            assign list_index0 = list_cursor;
+            assign list_next_index0 = state == IDLE && request_valid ? INDEX_BITS'(0) :
+                state == STREAM && stream_accept && position >= prefix_bytes &&
+                next_remainder >= stream_node_bytes ? list_cursor + 1'b1 : list_cursor;
+            assign list_index1 = list_index0 + 1'b1;
+            assign
+                request_ready = state == IDLE && (!scalar_fixed ||
+                    (!batch_mode && request_valid && scalar_capacity));
+            assign response_valid = state == RESPONSE || (state == FIXED_WAIT && engine_valid);
+
+            // All sponge beats start on an eight-byte boundary. Select two words
+            // directly instead of shifting a maximum-size concatenated message frame.
+            wire [2:0] node_words = stream_node_words;
+            // Source-range decoding already bounds live node reads to four words.
+            // ADDRESS_LIST uses this selector only across its prefix; later beats
+            // come from list_window. Do not repeat a six-bit bounds check per node.
+            // Select a source and a small word address BEFORE the wide data mux.
+            // All recipes share the same message/seed selectors instead of each
+            // recipe instantiating its own variable 64-bit extraction network.
+            // Compute the next beat's small selectors while producing the current
+            // beat. START supplies the first selector; backpressure holds both the
+            // selector and its position. No node data register or extra cycle is added.
+            logic [12:0] source_control[0:2];
+            wire [12:0] following_position = position + 13'(stream_advance);
+            for (genvar word_slot = 0; word_slot < 3; word_slot++) begin : source_selectors
+                always_ff @(posedge clk)
+                    if (!rst) begin
+                        if (state == START && hash_ready)
+                            source_control[word_slot] <= decode_source(
+                                6'(word_slot), word_slot == 2, shapes, node_words
+                            );
+                        else if (state == STREAM && stream_accept)
+                            source_control[word_slot] <= decode_source(
+                                following_position[8:3] + 6'(word_slot), word_slot == 2, shapes, node_words
+                            );
+                    end
+            end
+            function automatic [63:0] source_word(input [12:0] control);
+                reg [63:0] literal;
+                reg [5:0] selected_index;
+                begin
+                    selected_index = control[5:0];
+                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+                    case (control[8:6])
+                        1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                        2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+                        3: source_word = node_word_indexed(public_seed, selected_index[1:0]);
+                        4: source_word = node_word_indexed(root, selected_index[1:0]);
+                        5: source_word = message_word(selected_index);
+                        6: source_word = node_word_indexed(address, selected_index[1:0]);
+                        // A scheduled ADDRESS_LIST can cross its prefix only for
+                        // 24-byte nodes: the last prefix beat needs the first list
+                        // word. Later list words use list_window, so no indexed
+                        // endpoint-word mux is live on this source path.
+                        7: source_word = list_data0[63:0];
+                        default: source_word = literal;
+                    endcase
+                end
+            endfunction
+            logic [511:0] list_pair;
+            always @* begin
+                list_pair = list_nodes(stream_node_bytes, list_data0, list_data1);
+            end
+            // Legal list offsets are whole 64-bit words (SLH), or two bytes
+            // beyond a word (LMS's 22-byte prefix). No general byte barrel shifter.
+            logic [143:0] list_word_window;
+            always @* begin
+                list_word_window = list_words(list_pair, list_remainder[4:3]);
+            end
+            // A fixed two-node window supports both aligned SLH and the LMS prefix.
+            wire [127:0] list_window = (RECIPE_MASK[PREFIX_LIST] && list_remainder[1]) ?
+                list_word_window[143:16] : list_word_window[127:0];
+            wire [191:0] source_window = {
+                source_word(source_control[2]),
+                source_word(source_control[1]),
+                source_word(source_control[0])
+            };
+            // The RAM-to-window stage retains only the selected portions of
+            // adjacent nodes. Cursor/source controls advance on its own handshake;
+            // padding and the source/list merge run in the following stage.
+            wire [12:0] remaining_bytes = input_length - position;
+            wire padding_reached = position > input_length;
+            wire partial_beat = remaining_bytes < 16;
+            wire stream_last = padding_reached || remaining_bytes < 8;
+`ifndef SYNTHESIS
+            always @(posedge clk) begin : debug_prefix_list_word
+                if (!rst && state == STREAM && stream_accept && shapes[ADDRESS_LIST] &&
+                    position < prefix_bytes) begin
+                    // Check only words contributing input bytes to the prefix
+                    // beat. Full list beats use fetched_list, and the last rate
+                    // beat has no second word.
+                    for (integer i = 0; i < 2; i++) begin
+                        if ((i == 0 || beat != 8) && position + 13'(8 * i) < input_length &&
+                            source_control[i][8:6] == 3'd7 && source_control[i][5:0] != 0)
+                            $fatal(1, "prefix beat requested a list word beyond the first");
+                    end
+                end
+            end
+`endif
+            always_ff @(posedge clk) begin
+                if (rst) fetched_valid <= 0;
+                else if (stream_accept) begin
+                    fetched_valid <= STREAM_ENABLE && state == STREAM;
+                    if (STREAM_ENABLE && state == STREAM) begin
+                        fetched_source <= shapes[PREFIX_MESSAGE] ?
+                            source_window[143:16] : source_window[127:0];
+                        fetched_list <= list_window;
+                        fetched_use_list <= (shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
+                            position >= prefix_bytes;
+                        fetched_prefix_head <= shapes[PREFIX_MESSAGE] && position == 0;
+                        fetched_prefix_tail <= shapes[PREFIX_MESSAGE] && position == 16;
+                        fetched_padding <= padding_reached;
+                        fetched_partial <= partial_beat;
+                        fetched_remaining <= remaining_bytes[3:0];
+                        fetched_rate_tail <= beat == 8;
+                        fetched_last <= stream_last;
+                    end
+                end
+            end
+            always_comb begin
+                stream_data = fetched_use_list ? fetched_list : fetched_source;
+                if (fetched_prefix_head) stream_data = identifier;
+                else if (fetched_prefix_tail) stream_data[47:0] = {16'h8181, be32(leaf)};
+                for (integer i = 0; i < 16; i++) begin
+                    if (fetched_padding || (fetched_partial && fetched_remaining <= 4'(i)))
+                        stream_data[i*8+:8] = 0;
+                    if (!fetched_padding && fetched_partial && fetched_remaining == 4'(i))
+                        stream_data[i*8+:8] = 8'h1f;
+                    if (fetched_rate_tail) begin
+                        if (i >= 8) stream_data[i*8+:8] = 0;
+                        else if (i == 7 && fetched_last) stream_data[i*8+7] = 1'b1;
+                    end
+                end
+            end
+
+            wire batch_perm_valid, batch_perm_ready, batch_perm_done;
+            wire [1599:0] batch_perm_state, batch_perm_digest;
+            wire [TAG_BITS-1:0] batch_perm_tag, batch_perm_result_tag;
+            // The scalar fixed response occupies FIXED_WAIT until it is consumed.
+            wire bridge_response = state == FIXED_WAIT;
+            // A fixed request can enter the context engine on the outer handshake.
+            // The response remains in its context until the caller consumes it.
+            wire scalar_bridge = bridge_response ||
+                (!batch_mode && state == IDLE && request_valid && scalar_fixed);
+            // The intake register owns a newly accepted scalar request before
+            // it is dispatched from FIXED_WAIT. Keep incoming recipe decoding
+            // out of the datapath-mode and downstream-capacity feedback cone.
+            wire engine_mode = batch_mode || bridge_response;
+            wire engine_valid, scalar_capacity, batch_capacity;
+            wire [255:0] engine_digest, engine_capture;
+            wire [255:0] published_digest, published_capture;
+            wire [3:0] scalar_shape = request_recipe[59:56];
+            wire scalar_fixed = RECIPE_MASK[scalar_shape] &&
+                (scalar_shape == 1 || scalar_shape == 2 || scalar_shape == 5 || scalar_shape == 7 ||
+                 scalar_shape == 8 || scalar_shape == 9 || scalar_shape == 10 ||
+                 scalar_shape == 14 || scalar_shape == 15);
+            wire scalar_no_seed = !(request_chain && (scalar_shape == 1 || scalar_shape == 7 ||
+                                                      scalar_shape == 9)) && scalar_shape != 7;
+            wire [1:0] scalar_family = (scalar_shape == 1 || scalar_shape == 2) ?
+                2'd0 : (scalar_shape == 9 || scalar_shape == 10 || scalar_shape == 14 ||
+                        scalar_shape == 15) ? 2'd2 : 2'd1;
+            assign batch_request_ready = batch_mode && !bridge_response && batch_capacity;
+            // Only an accepted scalar request owns the response port. Decoding
+            // an incoming request here would put recipe selection back into
+            // the rolling scheduler's retire/free-slot/ready feedback path.
+            assign batch_response_valid = engine_valid && !bridge_response;
+            assign batch_read_digest = engine_digest;
+            assign batch_read_capture = engine_capture;
+            begin : fixed_context
+                // Scalar tag 0 and batch tags share these contexts and the
+                // existing Keccak datapath. Aliases preserve the former port widths.
+                wire [TAG_BITS-1:0]
+                    incoming_tag = scalar_bridge ? TAG_BITS'(0) : batch_request_tag;
+                wire [4:0] incoming_steps = scalar_bridge ?
+                    (request_chain ? request_steps : 5'd0) : batch_steps;
+                wire [4:0] incoming_capture_after = scalar_bridge ?
+                    (request_chain ? request_capture_after : scalar_no_seed ? 5'd1 : 5'd0) :
+                    batch_capture_after;
+                wire incoming_capture = scalar_bridge ? request_capture : batch_capture_enable;
+                wire [1:0] incoming_family = scalar_bridge ? scalar_family : batch_family;
+                wire incoming_no_seed = scalar_bridge ? scalar_no_seed : batch_no_seed;
+                wire [3:0] incoming_start = scalar_bridge ? 4'd0 : batch_start;
+                wire [255:0] incoming_initial_value = scalar_bridge ?
+                    (scalar_shape == 5 ? 256'(secret_prf) : 256'(request_left)) :
+                    batch_initial_value;
+                wire [3:0] incoming_fixed_shape = scalar_bridge ?
+                    (request_chain ? 4'd0 : scalar_shape) : batch_fixed_shape;
+                wire incoming_pair = scalar_bridge ? request_recipe[47:40] == 2 : batch_pair;
+                wire [255:0] incoming_right = scalar_bridge ? 256'(request_right) : batch_right;
+                wire [255:0] ctx_secret_seed = 256'(secret_seed);
+                wire [255:0] ctx_public_seed = 256'(public_seed);
+                wire [19:0] incoming_leaf = scalar_bridge ? request_leaf : batch_leaf;
+                wire [7:0] incoming_a = scalar_bridge ? 8'(request_a) : batch_a;
+                wire [31:0] incoming_b = scalar_bridge ? request_b : batch_b;
+                wire [7:0]
+                    incoming_seed_domain = scalar_bridge ? request_recipe[55:48] : batch_seed_domain;
+                wire [7:0] incoming_step_domain = scalar_bridge ?
+                    (request_chain ? request_step_recipe[55:48] : request_recipe[55:48]) :
+                    batch_step_domain;
+                // One request register separates caller controls/endpoint RAM from
+                // fixed formatting plus the first Keccak round. Feedback bypasses it.
+                logic pending_valid;
+                logic [TAG_BITS-1:0] ctx_request_tag;
+                logic [4:0] ctx_request_steps, ctx_request_capture_after;
+                logic ctx_request_capture, ctx_request_no_seed, ctx_request_pair;
+                logic [1:0] ctx_request_family;
+                logic [3:0] ctx_request_start, ctx_request_fixed_shape;
+                logic [6:0] ctx_first_phase;
+                logic [2:0] ctx_first_format;
+                logic [255:0] ctx_request_initial_value, ctx_request_right;
+                logic [19:0] ctx_request_leaf;
+                logic [7:0] ctx_request_a, ctx_seed_domain, ctx_step_domain;
+                logic [31:0] ctx_request_b;
+                logic [4:0] ctx_request_layer;
+                logic [63:0] ctx_request_tree;
+                wire ctx_request_valid = pending_valid;
+                wire ctx_request_ready;
+                // Scalar result data are consumed only in FIXED_WAIT. An
+                // incoming scalar recipe must not select the asynchronous RAM
+                // read address used by a concurrently visible batch response.
+                wire [TAG_BITS-1:0] ctx_read_tag = bridge_response ? TAG_BITS'(0) : batch_read_tag;
+                wire [255:0] ctx_read_digest;
+                wire [255:0] ctx_read_capture;
+                wire ctx_response_valid;
+                wire ctx_response_ready = bridge_response ? response_ready : batch_response_ready;
+                logic [TAG_BITS-1:0] ctx_response_tag;
+                wire ctx_perm_valid;
+                wire ctx_perm_ready = batch_perm_ready;
+                wire [1599:0] ctx_perm_state;
+                wire [TAG_BITS-1:0] ctx_perm_tag;
+                wire ctx_perm_done = batch_perm_done;
+                wire [1599:0] ctx_perm_digest = batch_perm_digest;
+                wire [TAG_BITS-1:0] ctx_perm_result_tag = batch_perm_result_tag;
+`ifndef SYNTHESIS
+                logic [63:0] ctx_hash_count, ctx_permutation_count;
+                assign batch_hashes = ctx_hash_count;
+                assign batch_permutations = ctx_permutation_count;
+`endif
+                assign engine_valid = ctx_response_valid;
+                assign engine_digest = ctx_read_digest;
+                assign engine_capture = ctx_read_capture;
+                assign batch_response_tag = ctx_response_tag;
+                assign batch_perm_valid = ctx_perm_valid;
+                assign batch_perm_state = ctx_perm_state;
+                assign batch_perm_tag = ctx_perm_tag;
+                assign batch_response_digest = published_digest;
+                assign batch_response_capture = published_capture;
+
+                wire [255:0] seed_address = make_address(ctx_request_layer, ctx_request_tree,
+                    {12'd0, ctx_request_leaf}, ctx_seed_domain, {24'd0, ctx_request_a}, ctx_request_b);
+                wire [255:0] step_address = make_address(ctx_request_layer, ctx_request_tree,
+                    {12'd0, ctx_request_leaf}, ctx_step_domain, {24'd0, ctx_request_a}, ctx_request_b);
+                wire [255:0] address[0:PIPELINE-1];
+                logic [4:0]
+                    steps[0:PIPELINE-1], iteration[0:PIPELINE-1], capture_after[0:PIPELINE-1];
+                logic [PIPELINE-1:0] busy, complete, capture_enable;
+                // The address domain and fixed shape are shared until every slot drains,
+                // so their address-counter policy is shared by the same batch.
+                logic preserve_counter;
+                (* ram_style="distributed" *) logic [255:0] digest[0:PIPELINE-1];
+                (* ram_style="distributed" *) logic [255:0] captured[0:PIPELINE-1];
+                // One-hot phase bits feed the returned tag's formatting controls directly.
+                // They avoid decoding an encoded RAM output and then decoding next_phase.
+                localparam [6:0] SEED = 7'b0000001, STEP = 7'b0000010, KEY = 7'b0000100,
+                    MASK = 7'b0001000, FINAL = 7'b0010000, MASK1 = 7'b0100000, SINGLE = 7'b1000000;
+                function automatic [6:0] starting_phase(input [3:0] shape,
+                    input bit no_seed, input [1:0] kind);
+                    starting_phase = shape == 8 ? KEY : shape == 7 ? SEED :
+                        shape != 0 ? SINGLE : !no_seed ? SEED : kind == 1 ? KEY : STEP;
+                endfunction
+                function automatic [6:0] advance_phase(input [6:0] current_phase,
+                    input bit pair_nodes, input [1:0] kind);
+                    advance_phase = current_phase[2] ? MASK : current_phase[3] ?
+                        (pair_nodes ? MASK1 : FINAL) : current_phase[5] ? FINAL :
+                        kind == 1 ? KEY : STEP;
+                endfunction
+                function automatic [2:0] format_controls(input [6:0] selected_phase,
+                    input [3:0] shape, input bit pair_nodes, input [1:0] kind);
+                    reg seed, prf, two;
+                    begin
+                        seed = selected_phase[0] || shape == 7;
+                        prf = selected_phase[2] || selected_phase[3] || selected_phase[5];
+                        two = kind == 1 ? seed || (pair_nodes && !prf) :
+                            kind == 2 && shape != 14 && shape != 15 ? 1'b0 : pair_nodes;
+                        format_controls = {two, prf, seed};
+                    end
+                endfunction
+                wire [6:0] incoming_phase = starting_phase(incoming_fixed_shape,
+                    incoming_no_seed, incoming_family);
+                wire [1:0] family[0:PIPELINE-1];
+                wire [3:0] fixed_shape[0:PIPELINE-1];
+                wire [PIPELINE-1:0] paired;
+                logic [3:0] shared_shape;
+                logic shared_pair;
+                logic [6:0] phase[0:PIPELINE-1];
+                (* ram_style="distributed" *) logic [255:0] key_value[0:PIPELINE-1];
+                logic [PIPELINE-1:0] captured_valid, initial_pending, capture_initial;
+                assign ctx_read_digest = initial_pending[ctx_read_tag] ? key_value[ctx_read_tag] :
+                    digest[ctx_read_tag];
+                assign ctx_read_capture = captured_valid[ctx_read_tag] ?
+                    (capture_initial[ctx_read_tag] ? key_value[ctx_read_tag] :
+                     captured[ctx_read_tag]) : 256'd0;
+                wire [TAG_BITS-1:0] t = ctx_perm_result_tag;
+                // Read context operands while the last Keccak round is running.
+                // A slot has one permutation in flight; its operands stay live
+                // from dispatch until this return. Only the new digest depends
+                // on the final round, so context RAM need not follow its tag.
+                // Position the context read address near its operand banks.
+                // Its last-traversal enable differs from the generic round tag,
+                // so synthesis keeps this register independent of that tag.
+                logic [TAG_BITS-1:0] prefetch_tag;
+                if (PIPELINE > 2) begin : local_read_address
+                    always_ff @(posedge clk)
+                        if (stage_valid[PIPELINE-3] && stage_fixed[PIPELINE-3] &&
+                            stage_base[PIPELINE-3] + ROUNDS >= 24)
+                            prefetch_tag <= stage_tag[PIPELINE-3];
+                end else begin : input_read_address
+                    wire source_valid = recycle || launch_valid;
+                    wire source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
+                    wire [4:0] source_base = recycle ?
+                        stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                    always_ff @(posedge clk)
+                        if (source_valid && source_fixed && source_base + ROUNDS >= 24)
+                            prefetch_tag <= recycle ? stage_tag[PIPELINE-1] : launch_tag;
+                end
+                wire prefetch_context = stage_valid[PIPELINE-2] &&
+                    stage_fixed[PIPELINE-2] && stage_base[PIPELINE-2] + ROUNDS >= 24;
+                logic [255:0] return_key, return_digest, return_captured, return_address;
+                logic [PIPELINE-1:0] node_phase, more_steps, feedback_required;
+                logic [6:0] return_phase, return_next_phase;
+                logic [2:0] return_format;
+                logic [4:0] return_next_step;
+                logic return_node_phase, return_feedback_required, return_next_more_steps;
+                logic return_capture, return_initial_pending, return_capture_initial;
+                // Context control is stable from dispatch through the final round.
+                // Read it beside the operands, before the returned tag can fan out
+                // through phase decode, counter arithmetic and the block formatter.
+                // One prepared format replaces the per-slot feedback format bank.
+                always_ff @(posedge clk)
+                    if (prefetch_context) begin
+                        return_key <= key_value[prefetch_tag];
+                        return_digest <= digest[prefetch_tag];
+                        return_captured <= captured[prefetch_tag];
+                        return_address <= address[prefetch_tag];
+                        return_phase <= phase[prefetch_tag];
+                        return_next_phase <= advance_phase(phase[prefetch_tag],
+                            paired[prefetch_tag], family[prefetch_tag]);
+                        return_format <= format_controls(advance_phase(phase[prefetch_tag],
+                            paired[prefetch_tag], family[prefetch_tag]),
+                            fixed_shape[prefetch_tag], paired[prefetch_tag], family[prefetch_tag]);
+                        return_node_phase <= node_phase[prefetch_tag];
+                        return_feedback_required <= feedback_required[prefetch_tag];
+                        return_next_step <= node_phase[prefetch_tag] ? iteration[prefetch_tag] :
+                            iteration[prefetch_tag] - 1'b1;
+                        return_next_more_steps <= node_phase[prefetch_tag] ?
+                            iteration[prefetch_tag] + 1'b1 < steps[prefetch_tag] :
+                            more_steps[prefetch_tag];
+                        return_capture <= capture_enable[prefetch_tag] &&
+                            iteration[prefetch_tag] == capture_after[prefetch_tag];
+                        return_initial_pending <= initial_pending[prefetch_tag];
+                        return_capture_initial <= capture_initial[prefetch_tag];
+                    end
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_operand_prefetch
+                    if (!rst && prefetch_context && prefetch_tag !== stage_tag[PIPELINE-2])
+                        $fatal(1, "local context read address lost its round tag");
+                    if (!rst && ctx_perm_done) begin
+                        if (return_address !== address[t])
+                            $fatal(1, "prefetched address changed before return");
+                        if (return_key !== key_value[t] || return_digest !== digest[t] ||
+                            return_captured !== captured[t])
+                            $fatal(1, "prefetched context operand changed before return");
+                        if (return_phase !== phase[t] || return_node_phase !== node_phase[t] ||
+                            return_feedback_required !== feedback_required[t] ||
+                            return_next_phase !== advance_phase(phase[t], paired[t], family[t]) ||
+                            return_next_step !== (node_phase[t] ? iteration[t] : iteration[t] - 1'b1) ||
+                            return_next_more_steps !== (node_phase[t] ?
+                                iteration[t] + 1'b1 < steps[t] : more_steps[t]) ||
+                            return_capture !== (capture_enable[t] && iteration[t] == capture_after[t]) ||
+                            return_initial_pending !== initial_pending[t] ||
+                            return_capture_initial !== capture_initial[t])
+                            $fatal(1, "prefetched context control changed before return");
+                    end
+                end
+`endif
+                wire node_done = return_node_phase;
+                wire again = ctx_perm_done && return_feedback_required;
+                wire capture_now = ctx_perm_done && node_done && return_capture;
+                wire [6:0] next_phase = return_next_phase;
+                wire next_node_phase = next_phase[0] || next_phase[1] || next_phase[4] ||
+                    next_phase[6];
+                wire next_more_steps = return_next_more_steps;
+                wire [4:0] next_step = return_next_step;
+                logic [255:0] next_address;
+                always_comb begin
+                    next_address = return_address;
+                    if (!preserve_counter) next_address[224+:32] = be32({27'd0, next_step});
+                end
+                // Intake has already reserved an in-range idle tag. The pending
+                // tag remains idle until this launch, so do not repeat its lookup
+                // on the downstream-ready path that also permits queue refill.
+                assign ctx_request_ready = !rst && !again && ctx_perm_ready;
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_pending_reservation
+                    if (!rst && pending_valid) begin
+                        if (ctx_request_tag >= PIPELINE)
+                            $fatal(1, "pending request tag out of range");
+                        else if (busy[ctx_request_tag] !== 1'b0)
+                            $fatal(1, "pending request tag was not reserved idle");
+                    end
+                end
+`endif
+                wire accept = ctx_request_valid && ctx_request_ready;
+                // Reserve the pending tag before its context becomes busy. A retired
+                // context may be refilled on the same edge, but a queued tag may not.
+                // Determine capacity independently of the request's recipe/mode.
+                // Scalar intake occurs only in IDLE, where no scalar response can
+                // retire. Batch intake uses its own response handshake for refill.
+                // Mode selection is applied once, at the public ready outputs.
+                wire queue_open = !rst && (!pending_valid || (!again && ctx_perm_ready));
+                wire batch_retire = ctx_response_valid && batch_response_ready;
+                wire scalar_slot_available =
+                    !busy[0] &&
+                    (!pending_valid || ctx_request_tag != TAG_BITS'(0));
+                wire batch_slot_available = batch_request_tag < PIPELINE &&
+                    (!busy[batch_request_tag] || (batch_retire && ctx_response_tag == batch_request_tag)) &&
+                    (!pending_valid || ctx_request_tag != batch_request_tag);
+                assign scalar_capacity = queue_open && scalar_slot_available;
+                assign batch_capacity = queue_open && batch_slot_available;
+                wire receive = (state == IDLE && request_valid && scalar_fixed &&
+                    !batch_mode && scalar_capacity) || (batch_request_valid && batch_request_ready);
+`ifndef SYNTHESIS
+                // Preserve even ready-without-valid behavior while changing the
+                // combinational factoring. These observers are absent in hardware.
+                wire old_retire = ctx_response_valid && ctx_response_ready;
+                wire old_scalar_slot = (!busy[0] || (old_retire && ctx_response_tag == 0)) &&
+                    (!pending_valid || ctx_request_tag != 0);
+                wire old_batch_slot = batch_request_tag < PIPELINE &&
+                    (!busy[batch_request_tag] || (old_retire && ctx_response_tag == batch_request_tag)) &&
+                    (!pending_valid || ctx_request_tag != batch_request_tag);
+                wire old_ready = !rst && (batch_mode || scalar_bridge) && (!pending_valid || accept) &&
+                    (scalar_bridge ? old_scalar_slot : old_batch_slot);
+                wire old_valid = scalar_bridge ? state == IDLE && request_valid : batch_request_valid;
+                always @(posedge clk) begin : debug_intake_equivalence
+                    if (!rst) begin
+                        if (state == IDLE && request_valid && request_ready &&
+                            scalar_fixed && !batch_mode &&
+                            (pending_valid || |busy || ctx_response_valid))
+                            $fatal(1, "scalar intake before batch contexts drained");
+                        if (batch_response_valid !== (engine_valid && !scalar_bridge))
+                            $fatal(1, "accepted response ownership changed batch valid");
+                        if ((ctx_response_valid && ctx_response_ready) !==
+                            (ctx_response_valid && (scalar_bridge ?
+                                state == FIXED_WAIT && response_ready : batch_response_ready)))
+                            $fatal(1, "accepted response ownership changed retirement");
+                        if (request_ready !== (state == IDLE &&
+                            (!scalar_fixed || (!batch_mode && old_ready))))
+                            $fatal(1, "scalar intake ready changed");
+                        if (batch_request_ready !== (old_ready && !scalar_bridge))
+                            $fatal(1, "batch intake ready changed");
+                        if (receive !== (old_valid && old_ready))
+                            $fatal(1, "context intake handshake changed");
+                    end
+                end
+`endif
+                always_ff @(posedge clk) begin
+                    if (rst) pending_valid <= 0;
+                    else begin
+                        if (accept) pending_valid <= 0;
+                        if (receive) pending_valid <= 1;
+                    end
+                end
+                // The valid bit owns the payload. A vacant or dispatching intake
+                // may sample invalid inputs; a blocked valid request must hold.
+                // Keep tag validation and receive out of the wide register enable.
+                always_ff @(posedge clk)
+                    if (queue_open) begin
+                        ctx_request_tag <= incoming_tag;
+                        ctx_request_steps <= incoming_steps;
+                        ctx_request_capture_after <= incoming_capture_after;
+                        ctx_request_capture <= incoming_capture;
+                        ctx_request_family <= incoming_family;
+                        ctx_request_no_seed <= incoming_no_seed;
+                        ctx_request_start <= incoming_start;
+                        ctx_request_initial_value <= incoming_initial_value;
+                        ctx_request_fixed_shape <= incoming_fixed_shape;
+                        ctx_request_pair <= incoming_pair;
+                        ctx_first_phase <= incoming_phase;
+                        ctx_first_format <= format_controls(incoming_phase,
+                        incoming_fixed_shape, incoming_pair, incoming_family);
+                        ctx_request_right <= incoming_right;
+                        ctx_request_leaf <= incoming_leaf;
+                        ctx_request_a <= incoming_a;
+                        ctx_request_b <= incoming_b;
+                        ctx_seed_domain <= incoming_seed_domain;
+                        ctx_step_domain <= incoming_step_domain;
+                        ctx_request_layer <= request_layer;
+                        ctx_request_tree <= request_tree;
+                    end
+`ifndef SYNTHESIS
+                localparam integer INTAKE_BITS = TAG_BITS + 690;
+                wire [INTAKE_BITS-1:0] intake_payload = {
+                    ctx_request_tag, ctx_request_steps, ctx_request_capture_after,
+                    ctx_request_capture, ctx_request_family, ctx_request_no_seed,
+                    ctx_request_start, ctx_request_initial_value, ctx_request_fixed_shape,
+                    ctx_request_pair, ctx_first_phase, ctx_first_format, ctx_request_right,
+                    ctx_request_leaf, ctx_request_a, ctx_request_b, ctx_seed_domain,
+                    ctx_step_domain, ctx_request_layer, ctx_request_tree
+                };
+                wire [INTAKE_BITS-1:0] incoming_payload = {
+                    incoming_tag, incoming_steps, incoming_capture_after,
+                    incoming_capture, incoming_family, incoming_no_seed,
+                    incoming_start, incoming_initial_value, incoming_fixed_shape,
+                    incoming_pair, incoming_phase, format_controls(incoming_phase,
+                        incoming_fixed_shape, incoming_pair, incoming_family), incoming_right,
+                    incoming_leaf, incoming_a, incoming_b, incoming_seed_domain,
+                    incoming_step_domain, request_layer, request_tree
+                };
+                logic [INTAKE_BITS-1:0] reference_intake_payload;
+                always @(posedge clk) begin : debug_intake_payload
+                    if (!rst && receive) reference_intake_payload <= incoming_payload;
+                    if (!rst && pending_valid && intake_payload !== reference_intake_payload)
+                        $fatal(1, "valid intake payload differs from original receive snapshot");
+                end
+`endif
+                wire [3:0] requested_shape = ctx_request_fixed_shape;
+                wire requested_pair = ctx_request_pair;
+                wire zero_request = ctx_request_no_seed && ctx_request_steps == 0 &&
+                    requested_shape == 0;
+                assign ctx_perm_valid = again || (accept && !zero_request);
+                // Valid/reset gating belongs to the handshake. Formatting is
+                // unobserved while reset holds launch_ready low; keep the global
+                // reset net off the wide feedback data selector.
+                wire format_feedback = stage_valid[PIPELINE-1] &&
+                    stage_fixed[PIPELINE-1] && !recycle && return_feedback_required;
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_format_feedback
+                    if (!rst && format_feedback !== again)
+                        $fatal(1, "format feedback differs from accepted completion");
+                end
+`endif
+                // Select operands before the common width and padding formatter.
+                wire [255:0] block_address = format_feedback ? next_address :
+                    ctx_request_no_seed ? step_address : seed_address;
+                wire [1:0] block_family = format_feedback ? family[t] : ctx_request_family;
+                wire [6:0] first_phase = ctx_first_phase;
+                wire first_node_phase = first_phase[0] || first_phase[1] || first_phase[6];
+                wire first_more_steps = ctx_request_no_seed ? ctx_request_steps > 1 :
+                    ctx_request_steps != 0;
+                wire [6:0] block_phase = format_feedback ? next_phase : first_phase;
+                wire [2:0] block_format = format_feedback ? return_format : ctx_first_format;
+                wire [3:0] block_step = format_feedback ? next_step[3:0] : ctx_request_start;
+                wire [3:0] block_shape = format_feedback ? fixed_shape[t] : requested_shape;
+                wire block_pair = format_feedback ? paired[t] : requested_pair;
+                wire [255:0] block_value = format_feedback ?
+                    (return_phase[5] ? return_digest :
+                     return_phase[3] ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0]) :
+                    requested_shape == 1 || requested_shape == 9 ? ctx_secret_seed :
+                    ctx_request_no_seed ? ctx_request_initial_value : ctx_secret_seed;
+                wire [255:0]
+                    block_right = format_feedback ? return_captured ^ ctx_perm_digest[255:0] : ctx_request_right;
+                wire [1599:0] unified_state;
+                begin : formatter
+                    // Keep each byte placement independent of the family mux.
+                    // Only the final, mutually exclusive layout enables merge nodes.
+                    wire seed = block_format[0];
+                    wire prf = block_format[1];
+                    wire xmss = block_family == 1;
+                    wire lms = block_family == 2;
+                    wire lms_node = lms && (block_shape == 14 || block_shape == 15);
+                    wire lms_chain = lms && !lms_node;
+                    wire node16 = node_bytes == 16;
+                    wire node24 = node_bytes == 24;
+                    wire node32 = !node16 && !node24;
+                    wire two = block_format[2];
+                    wire [255:0] masked_address = {
+                        be32(block_phase[3] ? 32'd1 : block_phase[5] ? 32'd2 : 32'd0),
+                        block_shape != 0 ? block_address[255:224] : be32({28'd0, block_step}),
+                        block_address[223:192], block_address[191:160], block_address[159:128], 96'd0
+                    };
+                    wire [7:0] xmss_domain = block_shape == 5 || prf ? 8'd3 :
+                        seed ? 8'd4 : block_pair ? 8'd1 : 8'd0;
+                    wire [255:0] xmss_key = block_shape == 5 ? block_value :
+                        seed ? ctx_secret_seed : prf ? ctx_public_seed : return_key;
+                    wire [255:0] xmss_value = block_shape == 5 ? {block_address[191:160],224'd0} :
+                        seed ? ctx_public_seed : prf ? masked_address : block_value;
+                    wire [255:0] xmss_right = seed ? masked_address : block_right;
+                    wire [183:0] chain_prefix = {
+                        (seed || block_shape == 9) ? 8'hff : block_shape == 10 ?
+                            block_address[255:248] : {4'd0,block_step},
+                        block_address[223:216],8'd0,block_address[191:160],identifier
+                    };
+                    wire [175:0] node_prefix = {
+                        block_shape == 14 ? 16'h8282 : 16'h8383,block_address[255:224],identifier
+                    };
+                    logic [1087:0] slh16, slh24, slh32, xmss32, chain32, parent32;
+                    always_comb begin
+                        slh16 = 0;
+                        slh16[511:0] = {block_value[127:0],block_address,ctx_public_seed[127:0]};
+                        if (two) begin
+                            slh16[639:512] = block_right[127:0];
+                            slh16[647:640] = 8'h1f;
+                        end else slh16[519:512] = 8'h1f;
+                        slh24 = 0;
+                        slh24[639:0] = {block_value[191:0],block_address,ctx_public_seed[191:0]};
+                        if (two) begin
+                            slh24[831:640] = block_right[191:0];
+                            slh24[839:832] = 8'h1f;
+                        end else slh24[647:640] = 8'h1f;
+                        slh32 = 0;
+                        slh32[767:0] = {block_value,block_address,ctx_public_seed};
+                        if (two) begin
+                            slh32[1023:768] = block_right;
+                            slh32[1031:1024] = 8'h1f;
+                        end else slh32[775:768] = 8'h1f;
+                        xmss32 = 0;
+                        xmss32[255:248] = xmss_domain;
+                        xmss32[511:256] = xmss_key;
+                        xmss32[767:512] = xmss_value;
+                        if (two) begin
+                            xmss32[1023:768] = xmss_right;
+                            xmss32[1031:1024] = 8'h1f;
+                        end else xmss32[775:768] = 8'h1f;
+                        chain32 = 0;
+                        chain32[183:0] = chain_prefix;
+                        chain32[439:184] = block_value;
+                        chain32[447:440] = 8'h1f;
+                        parent32 = 0;
+                        parent32[175:0] = node_prefix;
+                        parent32[431:176] = block_value;
+                        if (two) begin
+                            parent32[687:432] = block_right;
+                            parent32[695:688] = 8'h1f;
+                        end else parent32[439:432] = 8'h1f;
+                    end
+                    wire [1087:0] payload =
+                        ({1088{node16}} & slh16) |
+                        ({1088{node24}} & slh24) |
+                        ({1088{node32 && !xmss && !lms}} & slh32) |
+                        ({1088{node32 && xmss}} & xmss32) |
+                        ({1088{node32 && lms_chain}} & chain32) |
+                        ({1088{node32 && lms_node}} & parent32);
+                    assign unified_state = {512'd0, 1'b1, payload[1086:0]};
+                end
+                assign ctx_perm_state = unified_state;
+                assign ctx_perm_tag   = again ? t : ctx_request_tag;
+                // Register response selection before it fans out through retire,
+                // caller ready and executor transitions. Reuse the stall-hold
+                // registers; digest/capture data stay in their existing banks.
+                logic response_held;
+                logic [TAG_BITS-1:0] held_tag, next_response_tag;
+                logic [255:0] held_digest, held_capture;
+                logic [PIPELINE-1:0] waiting_responses;
+                // Completion and publication own separate lifetimes. The slot
+                // remains complete/busy until retirement, while this queue bit
+                // is removed as soon as its response payload is published.
+                logic [PIPELINE-1:0] awaiting_response;
+                logic [PIPELINE-1:0] next_awaiting_response;
+                logic [TAG_BITS-1:0] prepared_response_tag;
+                wire publish_response = !response_held || ctx_response_ready;
+                assign ctx_response_valid = response_held;
+                assign ctx_response_tag = held_tag;
+                assign published_digest = held_digest;
+                assign published_capture = held_capture;
+                always_comb begin
+                    waiting_responses = awaiting_response;
+                    // Prepare the following queue head on the bitmap update
+                    // edge. The published data still read committed banks on
+                    // the original publication edge, now from a registered tag.
+                    next_awaiting_response = awaiting_response;
+                    if (publish_response && |waiting_responses)
+                        next_awaiting_response[next_response_tag] = 0;
+                    if (accept && zero_request)
+                        next_awaiting_response[ctx_request_tag] = 1;
+                    if (ctx_perm_done && !again)
+                        next_awaiting_response[t] = 1;
+                    prepared_response_tag = 0;
+                    for (integer j = PIPELINE - 1; j >= 0; j = j - 1)
+                        if (next_awaiting_response[j]) prepared_response_tag = TAG_BITS'(j);
+                end
+                always_ff @(posedge clk) begin
+                    if (rst) begin
+                        awaiting_response <= 0;
+                        next_response_tag <= 0;
+                    end
+                    else begin
+                        awaiting_response <= next_awaiting_response;
+                        next_response_tag <= prepared_response_tag;
+                    end
+                end
+                always_ff @(posedge clk) begin
+                    if (rst) begin
+                        response_held <= 0;
+                        held_tag <= 0;
+                    end else if (!response_held || ctx_response_ready) begin
+                        response_held <= |waiting_responses;
+                        held_tag <= next_response_tag;
+                        // Completion is visible after its bank write commits.
+                        // Publish payload and tag on the same edge, retaining
+                        // both under backpressure. Workspace writes now start
+                        // at these registers rather than an asynchronous RAM.
+                        if (|waiting_responses) begin
+                            held_digest <= initial_pending[next_response_tag] ?
+                                key_value[next_response_tag] : digest[next_response_tag];
+                            held_capture <= !captured_valid[next_response_tag] ? 256'd0 :
+                                capture_initial[next_response_tag] ? key_value[next_response_tag] :
+                                captured[next_response_tag];
+                        end
+                    end
+                end
+`ifndef SYNTHESIS
+                logic [TAG_BITS-1:0] reference_response_tag;
+                always_comb begin
+                    reference_response_tag = 0;
+                    for (integer j = PIPELINE - 1; j >= 0; j = j - 1)
+                        if (awaiting_response[j]) reference_response_tag = TAG_BITS'(j);
+                end
+                always @(posedge clk) begin : debug_response_selection
+                    if (!rst) begin
+                        if (next_response_tag !== reference_response_tag)
+                            $fatal(1, "prepared response head differs from queue priority");
+                        for (integer j = 0; j < PIPELINE; j++) begin
+                            if (awaiting_response[j] !==
+                                (complete[j] && !(response_held && held_tag == TAG_BITS'(j))))
+                                $fatal(1, "response queue differs from completion ownership");
+                        end
+                    end
+                    if (!rst && response_held) begin
+                        if (held_tag >= PIPELINE)
+                            $fatal(1, "published response tag out of range");
+                        else if (!complete[held_tag] || !busy[held_tag])
+                            $fatal(1, "published response does not own a completed slot");
+                        else begin
+                            if (held_digest !== (initial_pending[held_tag] ?
+                                key_value[held_tag] : digest[held_tag]))
+                                $fatal(1, "published digest differs from its completed slot");
+                            if (held_capture !== (!captured_valid[held_tag] ? 256'd0 :
+                                capture_initial[held_tag] ? key_value[held_tag] : captured[held_tag]))
+                                $fatal(1, "published capture differs from its completed slot");
+                        end
+                    end
+                end
+`endif
+`ifndef SYNTHESIS
+                always @(posedge clk) begin : debug_format_controls
+                    if (!rst) begin
+                        if (pending_valid && (ctx_first_phase !== starting_phase(requested_shape,
+                            ctx_request_no_seed, ctx_request_family) || ctx_first_format !==
+                            format_controls(first_phase, requested_shape, requested_pair, ctx_request_family)))
+                            $fatal(1, "registered request format differs from its recipe");
+                        if (ctx_perm_done) begin
+                            if (feedback_required[t] !== (!node_done || more_steps[t]))
+                                $fatal(1, "registered feedback decision differs from its context");
+                            if (return_format !== format_controls(next_phase,
+                                fixed_shape[t], paired[t], family[t]))
+                                $fatal(1, "registered feedback format differs from its phase");
+                        end
+                    end
+                end
+`endif
+                // A KEY return always feeds MASK immediately, so feedback priority excludes
+                // accepting an initial value on the same edge. Each bank has one write port.
+                wire key_return = ctx_perm_done && return_phase[2];
+                wire initial_transfer = key_return && return_initial_pending;
+                wire key_write = key_return || (accept && ctx_request_no_seed);
+                wire [TAG_BITS-1:0] key_write_tag = key_return ? t : ctx_request_tag;
+                wire [255:0] key_write_data = key_return ? ctx_perm_digest[255:0] :
+                    ctx_request_initial_value;
+                wire mask_left = ctx_perm_done && paired[t] && return_phase[3];
+                wire digest_write = ctx_perm_done && (node_done || initial_transfer || mask_left);
+                wire [255:0] digest_write_data = initial_transfer ? return_key :
+                    mask_left ? return_digest ^ ctx_perm_digest[255:0] : ctx_perm_digest[255:0];
+                wire capture_transfer = initial_transfer && return_capture_initial;
+                wire right_write = accept && requested_pair && requested_shape == 8;
+                wire captured_write = capture_now || capture_transfer || right_write;
+                wire [TAG_BITS-1:0] captured_write_tag = right_write ? ctx_request_tag : t;
+                wire [255:0] captured_write_data = right_write ? ctx_request_right :
+                    capture_transfer ? return_key : ctx_perm_digest[255:0];
+                always_ff @(posedge clk) begin
+                    if (!rst) begin
+                        if (key_write) key_value[key_write_tag] <= key_write_data;
+                        if (digest_write) digest[t] <= digest_write_data;
+                        if (captured_write) captured[captured_write_tag] <= captured_write_data;
+                    end
+                end
+                always_ff @(posedge clk) begin
+                    if (rst) begin
+                        node_phase <= 0;
+                        more_steps <= 0;
+                        feedback_required <= 0;
+                        initial_pending <= 0;
+                        capture_initial <= 0;
+                        captured_valid <= 0;
+                        busy <= 0;
+                        complete <= 0;
+                        capture_enable <= 0;
+                        preserve_counter <= 0;
+                    end else begin
+                        if (ctx_response_valid && ctx_response_ready) begin
+                            complete[ctx_response_tag] <= 0;
+                            busy[ctx_response_tag] <= 0;
+                        end
+                        if (accept) begin
+                            busy[ctx_request_tag] <= 1;
+                            steps[ctx_request_tag] <= ctx_request_steps + {1'b0, ctx_request_start};
+                            iteration[ctx_request_tag] <= ctx_request_no_seed ?
+                                {1'b0, ctx_request_start} + 1'b1 : 5'd0;
+                            phase[ctx_request_tag] <= first_phase;
+                            node_phase[ctx_request_tag] <= first_node_phase;
+                            more_steps[ctx_request_tag] <= first_more_steps;
+                            feedback_required[ctx_request_tag] <= !first_node_phase || first_more_steps;
+                            if (busy == 0) begin
+                                shared_shape <= requested_shape;
+                                shared_pair <= requested_pair;
+                                preserve_counter <= ctx_step_domain == 3 || requested_shape != 0;
+                            end
+                            initial_pending[ctx_request_tag] <= ctx_request_no_seed;
+                            if (zero_request) complete[ctx_request_tag] <= 1;
+                            capture_after[ctx_request_tag]   <= ctx_request_capture_after;
+                            capture_enable[ctx_request_tag]  <= ctx_request_capture;
+                            captured_valid[ctx_request_tag]  <= 0;
+                            capture_initial[ctx_request_tag] <= 0;
+                            if (ctx_request_no_seed && ctx_request_capture &&
+                                ctx_request_capture_after == {1'b0, ctx_request_start}) begin
+                                capture_initial[ctx_request_tag] <= 1;
+                                captured_valid[ctx_request_tag]  <= 1;
+                            end
+                        end
+                        if (ctx_perm_done) begin
+                            if (capture_now) begin
+                                capture_initial[t] <= 0;
+                                captured_valid[t]  <= 1;
+                            end
+                            if (capture_transfer) capture_initial[t] <= 0;
+                            if (digest_write) initial_pending[t] <= 0;
+                            if (again) begin
+                                phase[t] <= next_phase;
+                                node_phase[t] <= next_node_phase;
+                                feedback_required[t] <= !next_node_phase || next_more_steps;
+                                if (node_done) more_steps[t] <= next_more_steps;
+                                if (node_done) iteration[t] <= iteration[t] + 1'b1;
+                            end else complete[t] <= 1;
+                        end
+                    end
+                end
+                begin : shared_coordinates
+                    logic [4:0] layer;
+                    logic [63:0] tree;
+                    logic [7:0] domain;
+                    logic [1:0] kind;
+                    logic [19:0] leaves[0:PIPELINE-1];
+                    logic [7:0] chains[0:PIPELINE-1];
+                    logic [31:0] indices[0:PIPELINE-1];
+                    always_ff @(posedge clk)
+                        if (!rst && accept) begin
+                            if (busy == 0) begin
+                                layer  <= ctx_request_layer;
+                                tree   <= ctx_request_tree;
+                                domain <= ctx_step_domain;
+                                kind   <= ctx_request_family;
+                            end
+                            leaves[ctx_request_tag]  <= ctx_request_leaf;
+                            chains[ctx_request_tag]  <= ctx_request_a;
+                            indices[ctx_request_tag] <= ctx_request_b;
+                        end
+`ifndef SYNTHESIS
+                    always @(posedge clk)
+                        if (!rst && accept && |busy) begin
+                            if (ctx_request_layer != layer || ctx_request_tree != tree ||
+                                ctx_request_family != kind || ctx_step_domain != domain ||
+                                requested_shape != shared_shape || requested_pair != shared_pair)
+                                $fatal(1, "shared coordinates changed before contexts drained");
+                        end
+`endif
+                    for (genvar j = 0; j < PIPELINE; j++) begin
+                        assign address[j] = {
+                            be32(indices[j]),
+                            be32({24'd0, chains[j]}),
+                            be32({12'd0, leaves[j]}),
+                            be32({24'd0, domain}),
+                            be32(tree[31:0]),
+                            be32(tree[63:32]),
+                            32'd0,
+                            be32({27'd0, layer})
+                        };
+                        assign family[j] = kind;
+                        assign fixed_shape[j] = shared_shape;
+                        assign paired[j] = shared_pair;
+                    end
+                end
+`ifndef SYNTHESIS
+                // Diagnostics observe physical returns independently of functional control.
+                always_ff @(posedge clk) begin : debug_statistics
+                    if (rst) begin
+                        ctx_hash_count <= 0;
+                        ctx_permutation_count <= 0;
+                    end else if (ctx_perm_done) begin
+                        ctx_hash_count <= ctx_hash_count + 1'b1;
+                        ctx_permutation_count <= ctx_permutation_count + 1'b1;
+                    end
+                end
+`endif
+            end
+            // Shared P>1 Keccak datapath and streaming absorb control.
+
+            logic [1:0] hash_state;
+            logic first_block, running_last;
+            logic [3:0] append_index;
+            wire [24:0] state_write_enable;
+            wire [1599:0] state_write_data;
+            logic [1599:0] sponge_state;
+            wire [1599:0] advanced_state;
+            wire round_complete, round_update;
+            // Fixed requests and streaming permutations share the P-stage datapath.
+            // P1's iterative datapath lives only in scalar_execution.
+            localparam integer ROUNDS = UNROLL * PIPELINE;
+            logic [1599:0] state_reg[0:PIPELINE-1];
+            logic [PIPELINE-1:0] stage_valid, stage_fixed;
+            logic [4:0] stage_base[0:PIPELINE-1];
+            logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
+            logic sent;
+            // The penultimate stage already knows whether this traversal is the
+            // last. Register that decision alongside the final stage's metadata,
+            // before it drives the 1600-bit loop mux and first Keccak round.
+            logic recycle;
+            always_ff @(posedge clk)
+                if (rst) recycle <= 0;
+                else recycle <= stage_valid[PIPELINE-2] &&
+                    stage_base[PIPELINE-2] + ROUNDS < 24;
+`ifndef SYNTHESIS
+            always @(posedge clk) begin : debug_recycle_equivalence
+                if (!rst && recycle !== (stage_valid[PIPELINE-1] &&
+                    stage_base[PIPELINE-1] + ROUNDS < 24))
+                    $fatal(1, "registered recycle decision changed");
+            end
+`endif
+            wire ready = !rst && !recycle;
+            wire finished = !rst && stage_valid[PIPELINE-1] && !recycle;
+            wire normal_valid = hash_state == HASH_RUN && !sent;
+            wire issue_valid = engine_mode ? batch_perm_valid : normal_valid;
+            wire [1599:0] issue_state = normal_valid ? sponge_state : batch_perm_state;
+            wire [TAG_BITS-1:0] issue_tag = engine_mode ? batch_perm_tag : '0;
+            // Finish context lookup and block formatting before the first round.
+            // This elastic register also holds a request while the round pipeline
+            // recycles. Its valid bit owns the data across stalls and reset.
+            logic launch_valid, launch_fixed;
+            logic [1087:0] launch_state;
+            wire [511:0] launch_capacity = launch_fixed ? 512'd0 : sponge_state[1599:1088];
+            logic [TAG_BITS-1:0] launch_tag;
+            wire launch_ready = !rst && (!launch_valid || ready);
+            always_ff @(posedge clk) begin
+                if (rst) launch_valid <= 0;
+                else if (launch_ready) begin
+                    launch_valid <= issue_valid;
+                    if (issue_valid) begin
+                        launch_fixed <= engine_mode;
+                        launch_tag <= issue_tag;
+                    end
+                end
+            end
+            // Invalid data need not hold or reset. Retain only a blocked request.
+            always_ff @(posedge clk)
+                if (launch_ready) launch_state <= issue_state[1087:0];
+`ifndef SYNTHESIS
+            // Original elastic capacity snapshot is an independent simulation oracle.
+            logic [511:0] debug_launch_capacity_snapshot;
+            longint unsigned debug_launch_fixed_consumed = 0;
+            longint unsigned debug_launch_stream_consumed = 0;
+            longint unsigned debug_launch_stream_stalls = 0;
+            longint unsigned debug_launch_stream_nonzero = 0;
+            longint unsigned debug_launch_reset_pending = 0;
+            always @(posedge clk) begin : debug_launch_capacity_reuse
+                if (launch_ready) debug_launch_capacity_snapshot <= issue_state[1599:1088];
+                if (rst && launch_valid) debug_launch_reset_pending++;
+                if (!rst && launch_valid) begin
+                    if (launch_capacity !== debug_launch_capacity_snapshot)
+                        $fatal(1, "live sponge capacity differs from original elastic launch snapshot");
+                    if (launch_fixed && !recycle) debug_launch_fixed_consumed++;
+                    if (!launch_fixed) begin
+                        if (recycle) debug_launch_stream_stalls++;
+                        else debug_launch_stream_consumed++;
+                        if (|launch_capacity) debug_launch_stream_nonzero++;
+                    end
+                end
+            end
+            final $display("LAUNCH_CAPACITY_ORACLE fixed=%0d stream=%0d stalled=%0d nonzero=%0d reset_pending=%0d",
+                debug_launch_fixed_consumed, debug_launch_stream_consumed,
+                debug_launch_stream_stalls, debug_launch_stream_nonzero, debug_launch_reset_pending);
+`endif
+            wire [1599:0] finished_state = state_reg[PIPELINE-1];
+            for (genvar s = 0; s < PIPELINE; s = s + 1) begin : stages
+                wire [1599:0] rounds[0:UNROLL];
+                wire [4:0] start_round;
+                wire [TAG_BITS-1:0] source_tag;
+                wire source_valid, source_fixed;
+                if (s == 0) begin : input_stage
+                    assign rounds[0] = recycle ? state_reg[PIPELINE-1] : {launch_capacity, launch_state};
+                    assign start_round = recycle ? stage_base[PIPELINE-1] + 5'(ROUNDS) : 5'd0;
+                    assign source_tag = recycle ? stage_tag[PIPELINE-1] : launch_tag;
+                    assign source_valid = recycle || launch_valid;
+                    assign source_fixed = recycle ? stage_fixed[PIPELINE-1] : launch_fixed;
+                end else begin : following_stage
+                    assign rounds[0] = state_reg[s-1];
+                    assign start_round = stage_base[s-1];
+                    assign source_tag = stage_tag[s-1];
+                    assign source_valid = stage_valid[s-1];
+                    assign source_fixed = stage_fixed[s-1];
+                end
+                for (genvar r = 0; r < UNROLL; r = r + 1) begin : unrolled
+                    // verilog_format: off
+                    (* keep_hierarchy="yes" *) keccak round_logic(.state_in(rounds[r]),
+                        .round_index(start_round+5'(s*UNROLL+r)),.state_out(rounds[r+1]));
+                    // verilog_format: on
+                end
+                for (genvar w = 0; w < 25; w = w + 1) begin : words
+                    if (s < PIPELINE - 1) begin : advancing
+                        // Reset flushes metadata. Intermediate data can advance
+                        // through reset and bubbles without a global enable net.
+                        always_ff @(posedge clk)
+                            state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
+                    end else begin : retained
+                        always_ff @(posedge clk)
+                            if (!rst) begin
+                                if (SHARED_STATE && state_write_enable[w])
+                                    state_reg[s][64*w+:64] <= state_write_data[64*w+:64];
+                                else if (source_valid)
+                                    state_reg[s][64*w+:64] <= rounds[UNROLL][64*w+:64];
+                            end
+                    end
+                end
+                always_ff @(posedge clk) begin
+                    if (rst) stage_valid[s] <= 0;
+                    else begin
+                        stage_valid[s] <= source_valid;
+                        if (source_valid) begin
+                            stage_base[s] <= start_round;
+                            stage_tag[s]  <= source_tag;
+                            stage_fixed[s] <= source_fixed;
+                        end
+                    end
+                end
+            end
+            assign batch_perm_ready = engine_mode && launch_ready;
+            assign batch_perm_done = finished && stage_fixed[PIPELINE-1];
+            assign batch_perm_digest = finished_state;
+            assign batch_perm_result_tag = stage_tag[PIPELINE-1];
+            if (SHARED_STATE) assign sponge_state = finished_state;
+            assign advanced_state = finished_state;
+            assign round_complete = finished && !stage_fixed[PIPELINE-1];
+            assign round_update = hash_state == HASH_RUN && round_complete;
+            always_ff @(posedge clk) begin
+                if (rst) sent <= 0;
+                else if (!engine_mode) begin
+                    if (normal_valid && launch_ready) sent <= 1;
+                    if (finished) sent <= 0;
+                end
+            end
+`ifndef SYNTHESIS
+            always @(posedge clk)
+                if (!rst && SHARED_STATE && |state_write_enable)
+                    if (|(stage_valid & ~(finished ?
+                                          PIPELINE'(1 << (PIPELINE - 1)) : {PIPELINE{1'b0}})))
+                        $fatal(1, "sponge write while pipeline occupied");
+`endif
+            wire permutation_complete = !engine_mode && hash_state == HASH_RUN && round_complete;
+
+            assign hash_ready = hash_state == HASH_IDLE;
+            assign block_ready = hash_state == HASH_WAIT_BLOCK;
+            assign digest = sponge_state[DIGEST_BYTES*8-1:0];
+            assign finish_valid = permutation_complete && running_last;
+
+`ifndef SYNTHESIS
+            initial begin
+                if (UNROLL < 1 || PIPELINE < 1 || PIPELINE > 24 || ROUNDS > 24 ||
+                    (24 % ROUNDS) != 0)
+                    $error("recipe lane requires positive U/P and U*P dividing 24");
+            end
+`endif
+
+            // Mutually exclusive word updates expose one data mux instead of a
+            // priority network for whole-state loads mixed with partial absorption.
+            wire take_stream = hash_state == HASH_WAIT_BLOCK && staged_valid;
+            wire clear_stream = take_stream && first_block && append_index == 0;
+            // One selected rate pair is absorbed per stream beat. Share that XOR
+            // before distributing the result to the enabled state words.
+            logic [127:0] previous_rate;
+            always @* begin
+                case (append_index)
+                    0: previous_rate = sponge_state[0+:128];
+                    1: previous_rate = sponge_state[128+:128];
+                    2: previous_rate = sponge_state[256+:128];
+                    3: previous_rate = sponge_state[384+:128];
+                    4: previous_rate = sponge_state[512+:128];
+                    5: previous_rate = sponge_state[640+:128];
+                    6: previous_rate = sponge_state[768+:128];
+                    7: previous_rate = sponge_state[896+:128];
+                    default: previous_rate = {64'd0, sponge_state[1024+:64]};
+                endcase
+            end
+            wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
+            genvar word_index;
+            for (word_index = 0; word_index < 25; word_index = word_index + 1) begin : state_words
+                wire select_stream = word_index < 17 && take_stream &&
+                    append_index == word_index / 2;
+                wire [63:0] round_or_clear = (clear_stream || SHARED_STATE) ?
+                    64'd0 : advanced_state[word_index*64+:64];
+                wire [63:0] absorb_word = word_index % 2 == 0 ? absorbed_block[63:0] :
+                    absorbed_block[127:64];
+                wire [63:0] next_word;
+                assign next_word = select_stream ? absorb_word : round_or_clear;
+                assign state_write_data[word_index*64+:64] = next_word;
+                // A completed permutation already resides in the shared register.
+                // Only absorption, initialization or a new chain block needs a write.
+                assign state_write_enable[word_index] = !rst &&
+                    ((!SHARED_STATE && round_update) || select_stream ||
+                     clear_stream);
+                if (!SHARED_STATE) begin : private_state
+                    always_ff @(posedge clk)
+                        if (state_write_enable[word_index])
+                            sponge_state[word_index*64+:64] <= next_word;
+                end
+            end
+
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    hash_state   <= HASH_IDLE;
+                    first_block  <= 1;
+                    running_last <= 0;
+                    append_index <= 0;
+                end else
+                    case (hash_state)
+                        HASH_IDLE:
+                        if (state == START) begin
+                            first_block  <= 1;
+                            append_index <= 0;
+                            hash_state   <= HASH_WAIT_BLOCK;
+                        end
+                        HASH_WAIT_BLOCK:
+                        if (staged_valid) begin
+                            if (append_index == 8) begin
+                                running_last <= staged_last;
+                                append_index <= 0;
+                                hash_state   <= HASH_RUN;
+                            end else append_index <= append_index + 1'b1;
+                        end
+                        HASH_RUN:
+                        if (round_complete) begin
+                            if (running_last) hash_state <= HASH_IDLE;
+                            else begin
+                                first_block <= 0;
+                                hash_state  <= HASH_WAIT_BLOCK;
+                            end
+                        end
+                        default: hash_state <= HASH_IDLE;
+                    endcase
+            end
+
+            always_ff @(posedge clk) begin
+                if (rst) begin
+                    staged_valid <= 0;
+                    staged_last <= 0;
+                    staged_data <= 0;
+                    position <= 0;
+                    list_cursor <= 0;
+                    list_remainder <= 0;
+                    state <= IDLE;
+                    error <= 0;
+                    beat <= 0;
+                end else begin
+                    if (STREAM_ENABLE && output_accept) begin
+                        staged_valid <= fetched_valid;
+                        if (fetched_valid) begin
+                            staged_data <= stream_data;
+                            staged_last <= fetched_last;
+                        end
+                    end
+                    case (state)
+                        IDLE:
+                        if (request_valid && request_ready) begin
+                            staged_valid <= 0;
+                            position <= 0;
+                            list_cursor <= 0;
+                            list_remainder <= 0;
+                            error <= 0;
+                            beat <= 0;
+                            state <= scalar_fixed ? FIXED_WAIT : START;
+                        end
+                        FIXED_WAIT:
+                        if (engine_valid && response_ready) begin
+                            state <= IDLE;
+                        end
+                        START:
+                        if (hash_ready) begin
+                            state <= STREAM;
+                        end
+                        STREAM:
+                        if (STREAM_ENABLE && stream_accept) begin
+                            position <= position + 13'(stream_advance);
+                            begin
+                                if (position < prefix_bytes) begin
+                                    if (position + stream_advance >= prefix_bytes)
+                                        list_remainder <= position + stream_advance - prefix_bytes;
+                                end else if (next_remainder >= stream_node_bytes) begin
+                                    list_remainder <= next_remainder - stream_node_bytes;
+                                    list_cursor <= list_cursor + 1'b1;
+                                end else list_remainder <= next_remainder;
+                            end
+                            if (beat == 8) begin
+                                beat <= 0;
+                                if (stream_last) state <= WAIT_HASH;
+                            end else beat <= beat + 1'b1;
+                        end
+                        WAIT_HASH: if (completed) state <= RESPONSE;
+                        RESPONSE:
+                        if (response_ready) begin
+                            state <= IDLE;
+                        end
+                        default:   state <= IDLE;
+                    endcase
+                end
+            end
+
+`ifndef SYNTHESIS
+            // Diagnostics observe the functional handshakes without driving the FSM.
+            always_ff @(posedge clk) begin : debug_statistics
+                if (rst) begin
+                    hash_count <= 0;
+                    permutation_count <= 0;
+                end else begin
+                    if (state == START && hash_ready) hash_count <= hash_count + 1'b1;
+                    if (state == STREAM && STREAM_ENABLE && stream_accept && beat == 8)
+                        permutation_count <= permutation_count + 1'b1;
+                end
+            end
+`endif
+        end
+    endgenerate
+    // Functional observation aliases preserve existing simulation probes.
+    wire permutation_complete, running_last, batch_perm_done;
+    wire [PIPELINE-1:0] stage_valid;
+    generate
+        if (PIPELINE == 1) begin : scalar_observation
+            assign permutation_complete = scalar_execution.permutation_complete;
+            assign running_last = scalar_execution.running_last;
+            assign batch_perm_done = 1'b0;
+            assign stage_valid = '0;
+        end else begin : scheduled_observation
+            assign permutation_complete = scheduled_execution.permutation_complete;
+            assign running_last = scheduled_execution.running_last;
+            assign batch_perm_done = scheduled_execution.batch_perm_done;
+            assign stage_valid = scheduled_execution.stage_valid;
+        end
+    endgenerate
 endmodule
 `default_nettype wire
+
+`endif // !MHBS_SHA2

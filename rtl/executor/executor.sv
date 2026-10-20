@@ -1,1006 +1,758 @@
-`timescale 1ns/1ps
+`timescale 1ns / 1ps
 `default_nettype none
-// HBS microprogram ABI 3, fixed K1U1. Each ISSUE consumes exactly one HASH.
-// L0/L1 are logical node/context slots sharing one physical Hash lane.
-// Only typed metadata and branch instructions may retire between HASH and its explicit WAIT.
-module executor #(
-    parameter integer UNROLL=1, LANES=1,
-    parameter bit PROFILE_ENABLE=0, SWAP_PHYSICAL_LANES=0
-) (
-    input wire [63:0] image_header, profile_descriptor, profile_identity,
-    output wire [8:0] program_address,
-    input wire [63:0] program_data,
-    input wire [8:0] job_entry,
-    output wire [4:0] descriptor_address,
-    input wire [63:0] descriptor_data,
-    input wire clk, rst,
-    input wire job_valid, output wire job_ready, input wire [1:0] job_operation,
-    input wire [6:0] job_message_length,
-    input wire [31:0] job_index,
-    input wire [127:0] job_identifier,
-    input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
-    input wire message_valid, output wire message_ready,
-    input wire [63:0] message_data,
-    input wire verify_valid, output wire verify_ready,
-    input wire [255:0] verify_data,
-    output logic verify_pass,
-    output logic out_valid, output logic [255:0] out_data,
-    output wire [5:0] out_bytes,
-    output wire busy, output logic done, error, output logic [15:0] error_code,
-    output wire [63:0] hash_count, permutation_count,
-    output logic [63:0] cycles
-);
-    `include "rtl/executor/instructions.svh"
-    localparam integer MAX_MESSAGE_BYTES=87;
-    typedef enum logic [2:0] {IDLE,MESSAGE,LAUNCH,EXEC,FINISH,FAILED,MACRO} phase_t;
-    phase_t phase;
-    logic [1:0] operation;
-    wire [7:0] n=profile_descriptor[7:0], hp=profile_descriptor[15:8];
-    wire [7:0] layers=profile_descriptor[23:16], fors_k=profile_descriptor[31:24];
-    wire [7:0] fors_a=profile_descriptor[39:32], digest_bytes=profile_descriptor[47:40];
-    wire [7:0] total_height=profile_descriptor[55:48], chain_count=profile_descriptor[63:56];
-    wire [5:0] node_bytes=n[5:0];
-    wire [7:0] len1=n<<1;
-    wire [8:0] fors_bytes=({1'b0,fors_k}*{1'b0,fors_a}+9'd7)>>3;
-    wire [7:0] tree_bits=total_height-hp;
-    wire family_slh=profile_identity==0 || profile_identity==1 || profile_identity==2
-        || profile_identity==4 || profile_identity==5 || profile_identity==6;
-    wire family_xmss=profile_identity>=8 && profile_identity<=10;
-    wire family_lms=profile_identity>=11 && profile_identity<=13;
-    wire family_stateful=family_xmss || family_lms;
-    logic [63:0] expected_profile;
-    always_comb case(
-        profile_identity
-    )
-        0:expected_profile=64'h2342220621160310;
-        1:expected_profile=64'h33422a0821160318;
-        2:expected_profile=64'h4344310923110420;
-        4:expected_profile=64'h233f1e0c0e070910;
-        5:expected_profile=64'h333f270e11070918;
-        6:expected_profile=64'h43402f0e16080820;
-        8,11:expected_profile=64'h430a200000010a20;
-        9:expected_profile=64'h4310200000011020;
-        10,13:expected_profile=64'h4314200000011420;
-        12:expected_profile=64'h430f200000010f20;
-        default:expected_profile=0;
-    endcase
-    wire slh_config_valid=(n==16 || n==24 || n==32) && hp>0 && hp<=10
-        && layers>0 && layers<=31 && fors_k>0 && fors_k<=35 && fors_a>0 && fors_a<=14
-        && (fors_k*fors_a)<=320 && digest_bytes<=49 && digest_bytes>0
-        && total_height>=hp && tree_bits<=64 && chain_count<=67 && chain_count>0;
-    wire config_valid=family_slh ? slh_config_valid : expected_profile!=0 && profile_descriptor==expected_profile;
-    logic [31:0] accepted_index;
-    logic [127:0] accepted_identifier;
-    logic [255:0] accepted_randomizer;
-    wire [255:0] runtime_randomizer=family_lms ? accepted_randomizer : job_randomizer;
-    wire index_valid=!family_stateful || job_operation==0 || job_index<(32'd1<<hp);
-
-
-    // Every architectural field has fixed writers. There is no indexed scalar
-    // register file, general integer ALU, or common scalar writeback network.
-    logic [4:0] ctx_layer;
-    logic [63:0] ctx_tree;
-    logic [19:0] ctx_leaf;
-    logic [5:0] ctx_group;
-    // Digest bit offset is part of the bounded FORS context. Only explicit
-    // GROUP_INIT/NEXT update it; this avoids a multiplier before TARGET.
-    logic [8:0] ctx_fors_offset;
-    logic [19:0] ctx_target;
-    logic [20:0] ctx_cursor;
-    logic [6:0] ctx_chain;
-    logic [3:0] ctx_step [0:1],ctx_digit [0:1];
-    logic [4:0] ctx_height,ctx_level;
-    logic [19:0] ctx_index,ctx_path;
-    logic [19:0] ctx_fors_base;
-    logic [1:0] ctx_mask,ctx_digit_valid;
-    logic [6:0] ctx_reduce_index,ctx_reduce_span;
-    logic [19:0] addr_leaf [0:1];
-    logic [6:0] addr_a [0:1];
-    logic [31:0] addr_b [0:1];
-    logic root_equal,root_compare_valid;
-    localparam [1:0] CHAIN_FULL=0,CHAIN_CAP_FULL=1,CHAIN_CAP_PREFIX=2,CHAIN_SUFFIX=3;
-    typedef enum logic [3:0] {CHAIN_SEED,CHAIN_F,CHAIN_ISSUE,CHAIN_RUN,
-        CHAIN_CAP,CHAIN_RESULT,CHAIN_DONE,CHAIN_KEY_CHECK,CHAIN_MASK_CHECK,
-        CHAIN_VALUE_INIT,CHAIN_CAPTURE_SAVE} chain_state_t;
-    chain_state_t chain_state;
-    logic [1:0] chain_mode;
-    logic chain_slot,chain_feedback,chain_shadow_valid;
-    localparam [1:0] C_SEED=0,C_F=1,C_KEY=2,C_MASK=3;
-    logic [1:0] chain_hash_kind;
-    wire chain_hash_stage=chain_hash_kind==C_F;
-    logic chain_pending_terminal;
-    logic [5:0] chain_seed_blocks,chain_key_blocks,chain_mask_blocks;
-    logic [3:0] chain_digit;
-    // Preflight fixes every F recipe field except the output length and
-    // block limit. Snapshot only those two fields; reconstruct the validated
-    // constants without retaining a second arbitrary 64-bit recipe bank.
-    logic [5:0] chain_f_bytes,chain_f_blocks;
-    // Family fixes shape/domain; only validated block bounds need snapshots.
-    wire [63:0] chain_seed_recipe={4'd0,(family_xmss ? 4'd5 : family_lms ? 4'd9 : 4'd1),
-        (family_slh ? 8'd5 : 8'd0),8'd1,2'd0,node_bytes,2'd0,chain_seed_blocks,24'd0};
-    wire [63:0] chain_f_recipe={4'd0,(family_xmss ? 4'd6 : family_lms ? 4'd10 : 4'd2),
-        8'd0,8'd1,2'd0,chain_f_bytes,2'd0,chain_f_blocks,24'd0};
-    wire [63:0] chain_key_recipe={4'd0,4'd5,8'd2,8'd1,8'd32,2'd0,chain_key_blocks,24'd0};
-    wire [63:0] chain_mask_recipe={4'd0,4'd5,8'd3,8'd1,8'd32,2'd0,chain_mask_blocks,24'd0};
-    logic [5:0] chain_expected_hashes;
-    logic [63:0] macro_count,macro_busy_cycles,macro_hashes;
-    wire chain_active=phase==MACRO;
-    wire [3:0] chain_terminal=chain_mode==CHAIN_CAP_PREFIX ? chain_digit : 4'd15;
-    wire chain_capture_mode=chain_mode==CHAIN_CAP_FULL || chain_mode==CHAIN_CAP_PREFIX;
-    // The result write is the last transaction; retire on that same edge.
-    wire chain_complete=chain_active && (chain_state==CHAIN_RESULT || chain_state==CHAIN_DONE) && !error;
-    // Word 123 is a private transactional capture shadow. It is inaccessible
-    // through every legal object/space selector and uses the existing 1R1W port.
-    wire chain_capture_write,chain_cap_commit,chain_result_commit;
-    wire [255:0] node [0:10];
-    // Fixed architectural objects share one physical asynchronous 1R1W RAM.
-    // Its addresses are private wires, never microprogram operands: LIST
-    // 0..67, STACK 68..88, AUTH 89..108, node object 112+object. K1 recipes
-    // consume either LIST, R, or one logical result; never two RAM operands.
-    // V2, the public root V3, and RIGHT retain their dedicated fixed buses.
-    (* ram_style="distributed" *) logic [255:0] node_memory [0:127];
-    wire [6:0] node_memory_read_address;
-    wire [255:0] node_memory_read=node_memory[node_memory_read_address];
-    logic [15:0] scratch_valid;
-    function automatic scratch_object(input [7:0] object);
-        scratch_object=object==0 || object==1 || object==4 || object==5
-            || object==7 || object==8 || object==9 || object==10
-            ;
-    endfunction
-    wire [7:0] cpu_node_target=opcode==OP_XMSS_MASK ? 8'd4 : d;
-    wire cpu_node_write=execute && (opcode==OP_NMOV || opcode==OP_LOAD || opcode==OP_XMSS_MASK
-        || (opcode==OP_INPUT && verify_valid));
-    wire [255:0] cpu_load_value=node_memory_read;
-    wire [255:0] cpu_node_value=opcode==OP_NMOV ?
-        read_node(a)
-        : opcode==OP_XMSS_MASK ? (scratch_read ^ node[6])
-        : opcode==OP_INPUT ? trim_node(verify_data) : cpu_load_value;
-    wire scratch_write=cpu_node_write && scratch_object(cpu_node_target);
-    wire result_write=execute && opcode==OP_WAIT && group_complete;
-    wire [3:0] result_object=group_mask[1] ? 4'd5 : 4'd4;
-    wire [255:0] scratch_read=scratch_valid[node_memory_read_address[3:0]]
-        ? node_memory_read : 256'd0;
-    logic node_memory_write;
-    logic [6:0] node_memory_write_address;
-    logic [255:0] node_memory_write_value;
-    always_ff @(posedge clk) if(node_memory_write)
-        node_memory[node_memory_write_address]<=node_memory_write_value;
-    always_ff @(posedge clk) begin
-        if(rst || job_accept) scratch_valid<=0;
-        else if(scratch_write)
-            scratch_valid[cpu_node_target[3:0]]<=1;
-        else if(result_write) scratch_valid[result_object]<=1;
-        else if(chain_cap_commit) scratch_valid[chain_slot ? 8 : 7]<=1;
-        else if(chain_result_commit) scratch_valid[chain_slot ? 5 : 4]<=1;
-    end
-    genvar object;
-    generate for(object=0;object<11;object=object+1) begin: node_objects
-        if(object==0 || object==1 || object==4 || object==5 || object>=7) begin: scratch
-            // The constant views are observations, not extra datapath reads.
+`include "rtl/executor/instructions.svh"
+// K1U1 template executor. CHAIN owns WOTS/LMOTS and leaf reduction only;
+// every Merkle/FORS traversal, merge and authentication access is a program op.
+// verilog_format: off
+module executor #(parameter integer UNROLL=1,PIPELINE=1)(
 `ifndef SYNTHESIS
-            assign node[object]=scratch_valid[object] ? node_memory[112+object] : 256'd0;
-`else
-            assign node[object]=256'd0;
+ output logic [15:0] error_code, output logic [63:0] cycles,
+ output wire [63:0] hash_count,permutation_count,
 `endif
-        end else begin: direct
-            logic [255:0] value;
-            assign node[object]=value;
-            always_ff @(posedge clk) begin
-                if(rst) value<=0;
-                else if(job_accept) value<=object==3 ? trim_node(job_public_root) : 256'd0;
-                else if(cpu_node_write && cpu_node_target==object) value<=cpu_node_value;
-            end
-        end
-    end endgenerate
-    logic [391:0] hmsg_digest;
-    logic hmsg_valid,digits_valid;
-    logic [255:0] digit_message;
-    logic [11:0] digit_checksum;
-    // Message reception finishes before any image instruction can issue a
-    // Hash. A single dedicated read port therefore serves the physical lane;
-    // bytes beyond message_length are masked by the lane's SHAKE padding.
-    // Old words may remain across jobs and reset, without being observable.
-    (* ram_style="distributed" *) logic [63:0] message_words [0:15];
-    wire [3:0] message_word_address;
-    wire [63:0] message_word_data=message_words[message_word_address];
+ input wire clk,rst,input wire [63:0] image_header,profile_descriptor,
+ output wire [6:0] program_address,input wire [63:0] program_data,
+ output wire [4:0] template_address,input wire [63:0] template_data,
+ output wire [9:0] descriptor_addresses,input wire [127:0] descriptor_data,
+ input wire [6:0] job_entry,input wire [1:0] job_operation,
+ input wire job_valid,output wire job_ready,input wire [6:0] job_message_length,
+ input wire [31:0] job_index,input wire [127:0] job_identifier,
+ input wire [255:0] job_secret_seed,job_secret_prf,job_public_seed,job_public_root,job_randomizer,
+ input wire message_valid,output wire message_ready,input wire [63:0] message_data,
+ input wire verify_valid,output wire verify_ready,input wire [255:0] verify_data,output logic verify_pass,
+ output wire out_valid,output wire [255:0] out_data,output wire [5:0] out_bytes,
+ output wire busy,output logic done,error
+);
+// verilog_format: on
+    localparam integer N=32,W=256,V=392,INDEX_BITS=8,MAX_MESSAGE_BYTES=87,DIGEST_BYTES=49;
+    localparam integer FORS_DIGEST_BITS=320,WORKSPACE_DEPTH=128;
+    wire [4:0] config_code=profile_descriptor[4:0];
+    wire decoded_stateful=config_code>=5'h18 && config_code<=5'h1d;
+    wire decoded_xmss=decoded_stateful && config_code<5'h1b;
+`ifdef MHBS_SHA2
+    wire valid_profile=profile_descriptor[63:6]==0 && profile_descriptor[5] &&
+        (decoded_stateful || config_code==0 || config_code==4);
+`else
+    wire valid_profile=profile_descriptor[63:5]==0 && (decoded_stateful ||
+        config_code==0 || config_code==1 || config_code==2 || config_code==4 || config_code==5 || config_code==6);
+`endif
+    wire [4:0] decoded_height=(config_code==5'h18 || config_code==5'h1b) ? 5'd10 :
+        config_code==5'h19 ? 5'd16 : config_code==5'h1c ? 5'd15 : 5'd20;
+    typedef enum logic [5:0] {
+        IDLE,MESSAGE,LAUNCH,FETCH,LOAD_DESCRIPTOR,DECODE,CHAIN_SETUP,CHAIN_STORE,
+        CHAIN_OUTPUT0,CHAIN_NEXT,REDUCE_SETUP,LEAF_SETUP,HASH_ISSUE,HASH_WAIT,HASH_RESULT,
+        ROUTE,TRANSFORM,EMIT,EMIT_NEXT,OUTPUT_CHUNK,DRAIN,FINISH,VERIFY_INPUT,VERIFY_RANDOM,
+        VERIFY_CHAIN_INPUT,VERIFY_CHAIN_RUN,VERIFY_CHAIN_ADVANCE,LT_INIT,LT_SETUP,LT_STORE,
+        LT_COPY,LT_NEXT,FAILED,LT_FINISH,SF_LEAF,SF_LEAF_DONE,SF_RANDOM,
+        CONTROL,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT
+    } state_t;
+    state_t state,continuation;
+    logic abort_execution;
+    wire execution_rst=rst || abort_execution;
+    logic [1:0] operation;
+    wire verifying=operation==2;
+    logic stateful,xmss,small_signature;
+    logic [4:0] stateful_height;
+    logic [1:0] profile_code;
+    logic [5:0] node_bytes;
+    wire [3:0] FORS_A=small_signature ? (profile_code==0 ? 4'd12 : 4'd14) :
+        profile_code==0 ? 4'd6 : profile_code==1 ? 4'd8 : 4'd9;
+    wire [7:0] LEN1={1'b0,node_bytes,1'b0};
+    logic [MAX_MESSAGE_BYTES*8-1:0] message_buffer;
     logic [6:0] message_length,message_received;
-    wire message_write=!rst && phase==MESSAGE && message_valid;
-    always_ff @(posedge clk) if(message_write)
-        message_words[message_received[6:3]]<=message_data;
-
-    function automatic [255:0] trim_node(input [255:0] value);
-        case(n)
-            16:trim_node={128'd0,value[127:0]};
-            24:trim_node={64'd0,value[191:0]};
-            default:trim_node=value;
+    wire [255:0] secret_seed=job_secret_seed,secret_prf=job_secret_prf;
+    wire [255:0] public_seed=job_public_seed,randomizer=job_randomizer;
+    logic [255:0] value[0:3];
+    logic [FORS_DIGEST_BITS-W-1:0] fors_digest_tail;
+    logic [63:0] scalar_tree;
+    logic [19:0] scalar_leaf;
+    logic [11:0] checksum;
+    logic [7:0] transform_index,chain_cursor,endpoint_count,lt_count,lt_cursor;
+    logic [3:0] lt_level;
+    logic [4:0] layer,node_level,tree_height,auth_level;
+    logic [5:0] group_index;
+    logic [20:0] leaf_cursor,node_index,target,target_at_level,control_base,control_limit;
+    logic [3:0] control_flags;
+    logic [1:0] indexing;
+    logic [3:0] macro_op,macro_flags;
+    logic [4:0] macro_desc,macro_route;
+    logic [63:0] saved_descriptor,saved_chain_descriptor;
+    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_chain_descriptor;
+    wire [63:0] route_descriptor=descriptor_data[127:64];
+    wire sign_only=stateful && !verifying && macro_flags[2];
+    logic [19:0] chain_leaf;
+    logic [20:0] chain_address;
+    logic [255:0] node_value,emit_value;
+    logic [V-1:0] result;
+    logic [5:0] emit_length;
+    logic [7:0] emit_base;
+    logic [3:0] emit_count,emit_cursor;
+    logic seq_start,seq_complete,control_complete;
+    wire seq_ready,seq_done,seq_error,cmd_valid,command_keep_coordinates,control_valid,control_condition;
+    wire [47:0] cmd;
+    wire [63:0] control;
+    logic [63:0] saved_control;
+    // verilog_format: off
+    sequencer sequencer(.clk,.rst(execution_rst),.start(seq_start),.entry(job_entry),.ready(seq_ready),
+        .done(seq_done),.error(seq_error),.program_address,.program_data,.template_address,.template_data,
+        .command_valid(cmd_valid),.command_ready(state==FETCH),.command_done(seq_complete),.command(cmd),
+        .command_keep_coordinates,.control_valid,.control,.control_ready(state==FETCH),
+        .control_done(control_complete),.control_condition);
+    // verilog_format: on
+    logic [4:0] hash_recipe_id;
+    assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[48:44] : macro_route,hash_recipe_id};
+    always_comb begin
+        hash_recipe_id=macro_desc;
+        case(state)
+            EMIT:hash_recipe_id=5'(emit_base+emit_cursor);
+            CHAIN_SETUP:hash_recipe_id=chain_descriptor[56:52];
+            VERIFY_CHAIN_RUN:hash_recipe_id=chain_descriptor[48:44];
+            REDUCE_SETUP,LT_SETUP:hash_recipe_id=chain_descriptor[40:36];
+            SF_LEAF:hash_recipe_id=chain_descriptor[32:28];
+            default:begin end
         endcase
+    end
+    logic [63:0] task_recipe,task_step;
+    logic task_chain,task_capture;
+    logic [4:0] task_steps,task_capture_after;
+    logic [19:0] task_leaf;
+    logic [7:0] task_a;
+    logic [20:0] task_b;
+    wire lane_ready,lane_valid,lane_error;
+    wire [V-1:0] lane_value;
+    wire [255:0] lane_capture;
+    wire [7:0] lane_list_next;
+`ifndef SYNTHESIS
+    wire [63:0] lane_hashes,lane_permutations;
+    logic [63:0] hash_base,permutation_base;
+    assign hash_count=lane_hashes-hash_base;
+    assign permutation_count=lane_permutations-permutation_base;
+`endif
+    logic endpoint_write;
+    logic [7:0] endpoint_address,endpoint_read_address;
+    logic [255:0] endpoint_data;
+    wire [255:0] endpoint_value0,endpoint_value1;
+    wire [7:0] endpoint_read0=endpoint_read_address;
+    wire [7:0] endpoint_read1=endpoint_read_address==127 ? 8'd126 : endpoint_read_address+1'b1;
+    // verilog_format: off
+    (* keep_hierarchy="yes" *) value #(.WIDTH(W),.DEPTH(WORKSPACE_DEPTH),.ADDRESS_BITS(INDEX_BITS)) endpoints(
+        .clk,.write_enable(endpoint_write),.write_address(endpoint_address),.write_data(endpoint_data),
+        .read0(endpoint_read0),.read1(endpoint_read1),.value0(endpoint_value0),.value1(endpoint_value1));
+    recipe #(.N(N),.DIGEST_BYTES(DIGEST_BYTES),.INDEX_BITS(INDEX_BITS),.UNROLL(UNROLL),.PIPELINE(PIPELINE),
+        .MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),.SHARED_STATE(1'b1),.RECIPE_MASK(16'hfffe)) lane(
+`ifndef SYNTHESIS
+        .hash_count(lane_hashes),.permutation_count(lane_permutations),.batch_hashes(),.batch_permutations(),
+`endif
+        .clk,.rst(execution_rst),.node_bytes,.identifier(job_identifier),
+        .batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),.batch_request_tag(1'b0),
+        .batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+        .batch_leaf(20'd0),.batch_a(8'd0),.batch_b(32'd0),.batch_family(2'd0),.batch_no_seed(1'b0),
+        .batch_start(4'd0),.batch_initial_value(256'd0),.batch_fixed_shape(4'd0),.batch_pair(1'b0),
+        .batch_right(256'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
+        .batch_response_valid(),.batch_response_ready(1'b0),.batch_response_tag(),.batch_response_digest(),
+        .batch_response_capture(),.batch_read_tag(1'b0),.batch_read_digest(),.batch_read_capture(),
+        .request_valid(state==HASH_ISSUE),.request_ready(lane_ready),.request_recipe(task_recipe),
+        .request_step_recipe(task_step),.request_chain(task_chain),.request_steps(task_steps),
+        .request_capture_after(task_capture_after),.request_capture(task_capture),
+        .secret_seed,.secret_prf,.public_seed,.root(value[3]),
+        .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0] : randomizer),
+        .message_buffer,.message_length,.request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
+        .request_a(task_a),.request_b({11'd0,task_b}),.request_left(result[255:0]),.request_right(node_value),
+        .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
+        .list_data0(endpoint_value0),.list_data1(endpoint_value1),.response_valid(lane_valid),
+        .response_ready(state==HASH_WAIT),.response_value(lane_value),.response_capture(lane_capture),.error(lane_error));
+    // verilog_format: on
+    assign job_ready=state==IDLE;
+    assign message_ready=state==MESSAGE;
+    assign verify_ready=verifying && (state==VERIFY_INPUT || state==CONTROL_INPUT);
+    assign out_valid=state==OUTPUT_CHUNK;
+    assign out_data=emit_value;
+    assign out_bytes=emit_length;
+    assign busy=state!=IDLE;
+    localparam logic [1:0] ROUTE_HASH=0,ROUTE_NODE=1,ROUTE_EMIT=3;
+    logic [1:0] route_source;
+    wire [V-1:0] route_value=route_source==ROUTE_HASH ? result :
+        {{(V-W){1'b0}},route_source==ROUTE_NODE ? node_value : emit_value};
+    function automatic [31:0] be32(input [31:0] x);
+        be32 = {x[7:0], x[15:8], x[23:16], x[31:24]};
     endfunction
-    function automatic [255:0] read_node(input [7:0] address);
-        reg [255:0] value;
+    function automatic [4:0] digit(input [7:0] index);
+        reg [7:0] checksum_index;
         begin
-            value=0;
-            if(address<11) begin
-                if(scratch_object(address)) value=scratch_read;
-                else value=node[address];
+            checksum_index = index - LEN1;
+            digit = 0;
+            if (index < LEN1) begin
+                digit = {1'b0, value[2][{(index[5:0]^6'd1), 2'b0}+:4]};
+            end else begin
+                case (checksum_index)
+                    0: digit = {1'b0, checksum[11:8]};
+                    1: digit = {1'b0, checksum[7:4]};
+                    2: digit = {1'b0, checksum[3:0]};
+                    default: digit = 0;
+                endcase
             end
-            else case(address)
-                11:value=job_secret_seed;
-                12:value=job_secret_prf;
-                13:value=job_public_seed;
-                14:value=runtime_randomizer;
-                default:value=0;
-            endcase
-            read_node=trim_node(value);
         end
     endfunction
-    function automatic [1:0] select_lanes(input [7:0] selector,input [1:0] mask);
-        case(selector)
-            0:select_lanes=mask;
-            1:select_lanes=mask&2'b01;
-            2:select_lanes=mask&2'b10;
-            default:select_lanes=0;
-        endcase
-    endfunction
-    // DIGITS owns an immutable node snapshot and its bounded checksum.
-    // Later writes to V2 cannot alter the WOTS digits already produced.
-    function automatic [3:0] read_digit(input [6:0] address);
-        begin
-            if(address<len1) read_digit=digit_message[{(address[5:0]^6'd1),2'b0} +:4];
-            else if(address==len1) read_digit=digit_checksum[11:8];
-            else if(address==len1+8'd1) read_digit=digit_checksum[7:4];
-            else if(address==len1+8'd2) read_digit=digit_checksum[3:0];
-            else read_digit=0;
+    // Scalar setup uses the chain digit; batch requests use a digit prepared
+    // on the preceding acceptance edge. The checksum loop only visits message
+    // digits, so it bypasses the state/index/checksum-digit selection network.
+    wire [4:0] shared_digit = digit(chain_cursor);
+    wire [3:0] transform_digit = value[2][{(transform_index[5:0] ^ 6'd1), 2'b0}+:4];
+    wire [3:0] checksum_increment = ~transform_digit;
+`ifndef SYNTHESIS
+    always @(posedge clk) begin : debug_checksum_increment
+        if (!execution_rst && state == TRANSFORM && descriptor[59:56] == 1) begin
+            if (transform_index >= LEN1 || {1'b0, transform_digit} !== digit(transform_index))
+                $fatal(1, "checksum loop exceeded message digits");
+            if ({1'b0, checksum_increment} !== 5'd15 - digit(transform_index))
+                $fatal(1, "checksum nibble complement changed its value");
         end
-    endfunction
-    wire [4:0] checksum_byte [0:31];
-    wire [5:0] checksum_pair [0:15];
-    wire [6:0] checksum_quad [0:7];
-    wire [7:0] checksum_octet [0:3];
-    genvar check_index;
+    end
+`endif
+    wire [FORS_DIGEST_BITS-1:0] fors_digest = {fors_digest_tail, value[1]};
+    wire [FORS_DIGEST_BITS-1:0] fors_bitstream;
+    genvar fb;
     generate
-        for(check_index=0;check_index<32;check_index=check_index+1) begin: byte_sums
-            assign checksum_byte[check_index]={1'b0,~node[2][check_index*8 +:4]}
-                +{1'b0,~node[2][check_index*8+4 +:4]};
-        end
-        for(check_index=0;check_index<16;check_index=check_index+1) begin: pair_sums
-            assign checksum_pair[check_index]={1'b0,checksum_byte[check_index*2]}
-                +{1'b0,checksum_byte[check_index*2+1]};
-        end
-        for(check_index=0;check_index<8;check_index=check_index+1) begin: quad_sums
-            assign checksum_quad[check_index]={1'b0,checksum_pair[check_index*2]}
-                +{1'b0,checksum_pair[check_index*2+1]};
-        end
-        for(check_index=0;check_index<4;check_index=check_index+1) begin: octet_sums
-            assign checksum_octet[check_index]={1'b0,checksum_quad[check_index*2]}
-                +{1'b0,checksum_quad[check_index*2+1]};
+        for (fb = 0; fb < FORS_DIGEST_BITS; fb = fb + 1) begin : fors_bit_order
+            assign fors_bitstream[fb] = fors_digest[(fb/8)*8+7-(fb%8)];
         end
     endgenerate
-    wire [8:0] checksum_low={1'b0,checksum_octet[0]}+{1'b0,checksum_octet[1]};
-    wire [8:0] checksum_high=(n!=16 ? {1'b0,checksum_octet[2]} : 9'd0)
-        +(n==32 ? {1'b0,checksum_octet[3]} : 9'd0);
-    wire [9:0] checksum_total={1'b0,checksum_low}+{1'b0,checksum_high};
-    task automatic fault(input [15:0] code);
-        begin error<=1;error_code<=code;phase<=FAILED;end
-    endtask
-    // Current IR plus one prefetched instruction. A pending synchronous ROM
-    // response also reserves a queue position. Redirect discards the obsolete
-    // response and starts the target read on that same edge.
-    logic fetch_active, ir_valid, prefetch_valid, fetch_pending;
-    logic [63:0] ir, prefetch_word;
-    (* dont_touch="true" *) logic [3:0] node_source_address;
-    wire issue_now=1'b0;
-    logic [8:0] fetch_pc;
-    wire [7:0] opcode=ir[63:56], d=ir[55:48], a=ir[47:40], b=ir[39:32];
-    wire [31:0] imm=ir[31:0];
-    logic retire, redirect, halt_fetch;
-    logic [8:0] redirect_pc;
-    logic fetch_issue;
-    integer fetch_occupancy;
-    wire start_fetch=phase==LAUNCH;
-    assign program_address=start_fetch ? job_entry : redirect ? redirect_pc : fetch_pc;
-    always_comb begin
-        fetch_occupancy=(ir_valid ? 1 : 0)+(prefetch_valid ? 1 : 0)
-            +(fetch_pending ? 1 : 0)-(retire ? 1 : 0);
-        fetch_issue=fetch_active && !halt_fetch && fetch_occupancy<2;
-        if(start_fetch || redirect) fetch_issue=1;
-        if(error || phase==FAILED || rst) fetch_issue=0;
-    end
-    always_ff @(posedge clk) begin
-        if(rst) begin
-            fetch_active<=0;ir_valid<=0;prefetch_valid<=0;fetch_pending<=0;
-            fetch_pc<=0;ir<=0;prefetch_word<=0;node_source_address<=0;
-        end else if(error || phase==FAILED || halt_fetch) begin
-            fetch_active<=0;ir_valid<=0;prefetch_valid<=0;fetch_pending<=0;
-        end else if(start_fetch || redirect) begin
-            fetch_active<=1;ir_valid<=0;prefetch_valid<=0;fetch_pending<=1;
-            fetch_pc<=(start_fetch ? job_entry : redirect_pc)+9'd1;
-        end else begin
-            fetch_pending<=fetch_issue;
-            if(fetch_issue) fetch_pc<=fetch_pc+9'd1;
-            case({fetch_pending,retire})
-                2'b01:begin ir<=prefetch_word;node_source_address<=prefetch_word[40 +: $bits(node_source_address)];ir_valid<=prefetch_valid;prefetch_valid<=0;end
-                2'b10:begin
-                    if(!ir_valid) begin ir<=program_data;node_source_address<=program_data[40 +: $bits(node_source_address)];ir_valid<=1;end
-                    else begin prefetch_word<=program_data;prefetch_valid<=1;end
-                end
-                2'b11:begin
-                    ir_valid<=1;
-                    if(prefetch_valid) begin ir<=prefetch_word;node_source_address<=prefetch_word[40 +: $bits(node_source_address)];prefetch_word<=program_data;prefetch_valid<=1;end
-                    else begin ir<=program_data;node_source_address<=program_data[40 +: $bits(node_source_address)];prefetch_valid<=0;end
-                end
+    function automatic [9:0] fors_group_offset(input [5:0] group_number);
+        begin
+            case (FORS_A)
+                6: fors_group_offset = ({group_number, 2'b0} + {group_number, 1'b0});
+                8: fors_group_offset = {group_number, 3'b0};
+                9: fors_group_offset = ({group_number, 3'b0} + group_number);
+                12: fors_group_offset = ({group_number, 3'b0} + {group_number, 2'b0});
+                default: fors_group_offset = ({group_number, 4'b0} - {group_number, 1'b0});
+            endcase
+        end
+    endfunction
+    function automatic [13:0] fors_target(input [9:0] offset);
+        reg [13:0] segment;
+        begin
+            segment = fors_bitstream >> offset;
+            // verilog_format: off
+            case (FORS_A)
+                6: fors_target = {8'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5]};
+                8: fors_target = {6'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7]};
+                9: fors_target = {5'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8]};
+                12: fors_target = {2'd0,segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11]};
+                default: fors_target = {segment[0],segment[1],segment[2],segment[3],segment[4],segment[5],segment[6],segment[7],segment[8],segment[9],segment[10],segment[11],segment[12],segment[13]};
+            endcase
+            // verilog_format: on
+        end
+    endfunction
+    function automatic [63:0] parsed_tree(input [V-1:0] digest);
+        reg [63:0] bytes;
+        integer j;
+        begin
+            if (small_signature) begin
+                case (node_bytes)
+                    16: bytes = {digest[168+:56], 8'd0};
+                    24: bytes = {digest[240+:56], 8'd0};
+                    default: bytes = {digest[312+:56], 8'd0};
+                endcase
+            end else
+                case (node_bytes)
+                    16: bytes = digest[200+:64];
+                    24: bytes = digest[264+:64];
+                    default: bytes = digest[320+:64];
+                endcase
+            for (j = 0; j < 8; j = j + 1) parsed_tree[(7-j)*8+:8] = bytes[j*8+:8];
+            if (small_signature && node_bytes != 32) parsed_tree[63:54] = 0;
+            else if (!small_signature && node_bytes != 32) parsed_tree[63] = 0;
+        end
+    endfunction
+    function automatic [9:0] parsed_leaf(input [V-1:0] digest);
+        begin
+            if (small_signature) begin
+                case (node_bytes)
+                    16: parsed_leaf = {1'b0, digest[224], digest[232+:8]};
+                    24: parsed_leaf = {1'b0, digest[296], digest[304+:8]};
+                    default: parsed_leaf = {2'b0, digest[368+:8]};
+                endcase
+            end else
+                parsed_leaf=node_bytes==16 ? {7'b0,digest[264 +:3]}
+                : node_bytes==24 ? {7'b0,digest[328 +:3]} : {6'b0,digest[384 +:4]};
+        end
+    endfunction
+
+    function automatic [20:0] narrow_read(input [4:0] selector);
+        begin
+            case(selector)
+                `CTX_LEAF:narrow_read={1'b0,task_leaf};
+                `CTX_A:narrow_read={13'd0,task_a};
+                `CTX_B:narrow_read=task_b;
+                `CTX_CURSOR:narrow_read=leaf_cursor;
+                `CTX_INDEX:narrow_read=node_index;
+                `CTX_LEVEL:narrow_read={16'd0,node_level};
+                `CTX_TARGET:narrow_read=target;
+                `CTX_PATH:narrow_read=target_at_level;
+                `CTX_BASE:narrow_read=control_base;
+                `CTX_HEIGHT:narrow_read={16'd0,tree_height};
+                `CTX_LIMIT:narrow_read=control_limit;
+                `CTX_LAYER:narrow_read={16'd0,layer};
+                `CTX_GROUP:narrow_read={15'd0,group_index};
+                `CTX_AUTH_LEVEL:narrow_read={16'd0,auth_level};
+                `CTX_FLAGS:narrow_read={17'd0,control_flags};
+                `CTX_MODE:narrow_read={19'd0,indexing};
+                `CTX_Q:narrow_read={1'b0,job_index[19:0]};
+                `CTX_SCALAR_LEAF:narrow_read={1'b0,scalar_leaf};
+                `CTX_FORS_TARGET:narrow_read={7'd0,fors_target(fors_group_offset(group_index))};
+                `CTX_PROFILE_HEIGHT:narrow_read={16'd0,stateful_height};
+                `CTX_ZERO:narrow_read=0;
+                `CTX_ONE:narrow_read=1;
+                `CTX_OPERATION:narrow_read={19'd0,operation};
+                `CTX_XMSS:narrow_read={20'd0,xmss};
+                `CTX_STATEFUL:narrow_read={20'd0,stateful};
+                default:narrow_read=0;
+            endcase
+        end
+    endfunction
+    function automatic [20:0] narrow_mask(input [4:0] selector);
+        case(selector)
+            `CTX_LEAF:narrow_mask=21'hfffff;
+            `CTX_A:narrow_mask=21'hff;
+            `CTX_LEVEL,`CTX_HEIGHT,`CTX_LAYER,`CTX_AUTH_LEVEL:narrow_mask=21'h1f;
+            `CTX_GROUP:narrow_mask=21'h3f;
+            `CTX_FLAGS:narrow_mask=21'hf;
+            `CTX_MODE:narrow_mask=21'h3;
+            default:narrow_mask=21'h1fffff;
+        endcase
+    endfunction
+    task automatic narrow_write(input [4:0] selector,input [20:0] data);
+        begin
+            case(selector)
+                `CTX_LEAF:task_leaf<=data[19:0];
+                `CTX_A:task_a<=data[7:0];
+                `CTX_B:task_b<=data;
+                `CTX_CURSOR:leaf_cursor<=data;
+                `CTX_INDEX:node_index<=data;
+                `CTX_LEVEL:node_level<=data[4:0];
+                `CTX_TARGET:target<=data;
+                `CTX_PATH:target_at_level<=data;
+                `CTX_BASE:control_base<=data;
+                `CTX_HEIGHT:tree_height<=data[4:0];
+                `CTX_LIMIT:control_limit<=data;
+                `CTX_LAYER:layer<=data[4:0];
+                `CTX_GROUP:group_index<=data[5:0];
+                `CTX_AUTH_LEVEL:auth_level<=data[4:0];
+                `CTX_FLAGS:control_flags<=data[3:0];
+                `CTX_MODE:indexing<=data[1:0];
                 default:begin end
             endcase
         end
-    end
-
-    logic group_valid;
-    logic [1:0] group_mask;
-    // A one-hot logical destination is retained until explicit WAIT publishes
-    // the physical response. Hardware never serializes a two-lane request.
-    wire [1:0] response_pending=group_valid ? group_mask : 2'b00;
-    logic [63:0] group_recipe, group_tree;
-    logic [4:0] group_layer;
-    logic [19:0] group_leaf_value;
-    logic [6:0] group_a_value;
-    logic [31:0] group_b_value;
-    logic [1:0] ctx_address_type,group_address_type;
-    wire [19:0] group_leaf [0:1];
-    wire [6:0] group_a [0:1];
-    wire [31:0] group_b [0:1];
-    wire [391:0] result [0:1];
-    wire [1:0] lane_ready,lane_valid,lane_error;
-    wire [391:0] lane_value [0:1];
-    wire [6:0] lane_list0 [0:1],lane_list1 [0:1];
-    wire physical_ready,physical_valid,physical_error;
-    wire [391:0] physical_value;
-    wire [6:0] physical_list0,physical_list1;
-    logic [63:0] hash_base,permutation_base;
-    wire [63:0] total_hashes,total_permutations;
-    wire lane_fault=group_valid && physical_valid && physical_error;
-    wire group_complete=group_valid && physical_valid;
-    wire chain_response=chain_active && chain_state==CHAIN_RUN && group_complete && !error && !lane_fault;
-    wire chain_value_result=chain_hash_kind==C_SEED || chain_hash_kind==C_F;
-    wire [4:0] chain_position=chain_hash_stage ? {1'b0,group_b_value[3:0]}+5'd1 : 5'd0;
-    wire chain_at_end=chain_value_result && chain_position=={1'b0,chain_terminal};
-    wire chain_capture_now=chain_value_result && chain_capture_mode && chain_position=={1'b0,chain_digit};
-    // XMSS needs the value across KEY/MASK hashes. Word124 is private; a
-    // capture copies it to word123 on a separate edge, using the same 1R1W RAM.
-    wire chain_private_write=family_xmss && chain_active && !error && !rst
-        && (chain_state==CHAIN_VALUE_INIT || (chain_response && chain_value_result));
-    assign chain_capture_write=chain_active && !error && !rst
-        && (family_xmss ? chain_state==CHAIN_CAPTURE_SAVE : chain_response && chain_capture_now);
-    assign chain_cap_commit=chain_active && chain_state==CHAIN_CAP && !error && !rst;
-    assign chain_result_commit=chain_active && chain_state==CHAIN_RESULT && !error && !rst;
-    function automatic chain_recipe_valid(input [63:0] value,input bit seed);
-        reg [3:0] expected_shape;
+    endtask
+    function automatic [255:0] wide_read(input [4:0] selector);
+        case(selector)
+            `WIDE_NODE:wide_read=node_value;
+            `WIDE_LEFT:wide_read=result[255:0];
+            `WIDE_V0:wide_read=value[0];
+            `WIDE_V1:wide_read=value[1];
+            `WIDE_V2:wide_read=value[2];
+            `WIDE_V3:wide_read=value[3];
+            `WIDE_EMIT:wide_read=emit_value;
+            default:wide_read=0;
+        endcase
+    endfunction
+    task automatic wide_write(input [4:0] selector,input [255:0] data);
         begin
-            expected_shape=family_xmss ? (seed ? 4'd5 : 4'd6)
-                : family_lms ? (seed ? 4'd9 : 4'd10) : (seed ? 4'd1 : 4'd2);
-            chain_recipe_valid=value[63:60]==0 && value[59:56]==expected_shape
-                && value[55:48]==(seed && family_slh ? 8'd5 : 8'd0) && value[47:40]==8'd1
-                && value[39:38]==0 && value[37:32]==node_bytes && value[31:30]==0
-                && value[29:24]>=1 && value[29:24]<=32 && value[23:0]==0;
+            case(selector)
+                `WIDE_NODE:node_value<=data;
+                `WIDE_LEFT:result<={{(V-W){1'b0}},data};
+                `WIDE_V0:value[0]<=data;
+                `WIDE_V1:value[1]<=data;
+                `WIDE_V2:value[2]<=data;
+                `WIDE_V3:value[3]<=data;
+                `WIDE_EMIT:emit_value<=data;
+                default:begin end
+            endcase
         end
-    endfunction
-    function automatic chain_key_recipe_valid(input [63:0] value,input bit mask);
-        chain_key_recipe_valid=value[63:56]==8'd5 && value[55:48]==(mask ? 8'd3 : 8'd2)
-            && value[47:40]==8'd1 && value[39:32]==8'd32 && value[31:30]==0
-            && value[29:24]>=1 && value[29:24]<=32 && value[23:0]==0;
-    endfunction
-    wire chain_start=chain_active && !error && (family_xmss
-        ? chain_state==CHAIN_MASK_CHECK && chain_key_recipe_valid(descriptor_data,1'b1)
-        : chain_state==CHAIN_F && chain_recipe_valid(descriptor_data,1'b0));
-    // KEY/MASK are bounded substages of one XMSS step. Only an F response
-    // advances the chain position; each request still executes exactly one Hash.
-    wire [1:0] chain_next_kind=!family_xmss ? C_F
-        : chain_hash_kind==C_KEY ? C_MASK : chain_hash_kind==C_MASK ? C_F : C_KEY;
-    wire [63:0] chain_next_recipe=chain_next_kind==C_KEY ? chain_key_recipe
-        : chain_next_kind==C_MASK ? chain_mask_recipe : chain_f_recipe;
-    wire chain_reissue=chain_response && !chain_at_end
-        && !(family_xmss && chain_capture_now);
-    wire [3:0] chain_next_step=chain_hash_stage ? group_b_value[3:0]+4'd1 : 4'd0+group_b_value[3:0];
-    wire macro_request=chain_active && !error && (chain_state==CHAIN_ISSUE || chain_reissue
-        || (family_xmss && (chain_state==CHAIN_VALUE_INIT
-            || (chain_state==CHAIN_CAPTURE_SAVE && !chain_pending_terminal))));
-    wire chain_issue=macro_request && physical_ready;
-    wire [63:0] physical_recipe=chain_reissue ? chain_next_recipe : group_recipe;
-    wire [31:0] physical_b_value=chain_reissue ? {28'd0,chain_next_step} : group_b_value;
-    // Verification-only observation wires; they add no architectural state.
-    wire [1:0] trace_hash_valid=((phase==EXEC && ir_valid && opcode==OP_WAIT && group_complete && !error && !lane_fault && !illegal)
-        || chain_response)
-        ? group_mask : 2'b00;
-    wire [63:0] trace_recipe=group_recipe,trace_tree=group_tree;
-    wire [1:0] trace_address_type=group_address_type;
-    wire trace_stateful=family_stateful;
-    wire [4:0] trace_layer=group_layer;
-    wire [19:0] trace_leaf[0:1];
-    wire [6:0] trace_a[0:1];
-    wire [31:0] trace_b[0:1];
-    wire [391:0] trace_result[0:1];
-    assign hash_count=PROFILE_ENABLE ? total_hashes-hash_base : 64'd0;
-    assign permutation_count=PROFILE_ENABLE ? total_permutations-permutation_base : 64'd0;
-    assign descriptor_address=chain_active && chain_state==CHAIN_SEED ? 5'd7
-        : chain_active && chain_state==CHAIN_F ? 5'd8
-        : chain_active && chain_state==CHAIN_KEY_CHECK ? 5'd4
-        : chain_active && chain_state==CHAIN_MASK_CHECK ? 5'd5 : d[4:0];
-    genvar logical_slot;
-    generate for(logical_slot=0;logical_slot<2;logical_slot=logical_slot+1) begin: logical_slots
-        assign group_leaf[logical_slot]=group_leaf_value;
-        assign group_a[logical_slot]=group_a_value;
-        assign group_b[logical_slot]=group_b_value;
-        assign trace_leaf[logical_slot]=group_leaf_value;
-        assign trace_a[logical_slot]=group_a_value;
-        assign trace_b[logical_slot]=group_b_value;
-        assign lane_ready[logical_slot]=physical_ready && group_mask[logical_slot];
-        assign lane_valid[logical_slot]=physical_valid && group_mask[logical_slot];
-        assign lane_error[logical_slot]=physical_error && group_mask[logical_slot];
-        assign lane_value[logical_slot]=physical_value;
-        assign lane_list0[logical_slot]=physical_list0;
-        assign lane_list1[logical_slot]=physical_list1;
-        assign result[logical_slot]=physical_value;
-        assign trace_result[logical_slot]=physical_value;
-    end endgenerate
-    generate for(genvar physical=0;physical<1;physical=physical+1) begin: lanes
-        recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(7),.UNROLL(UNROLL),
-            .MAX_MESSAGE_BYTES(MAX_MESSAGE_BYTES),.RECIPE_MASK(16'hfffe),
-            .PROFILE_ENABLE(PROFILE_ENABLE)) lane (
-            .clk,.rst(rst || error),.node_bytes,
-            .request_valid((phase==EXEC && group_valid && !physical_valid && !error) || macro_request),.request_ready(physical_ready),
-            .request_recipe(physical_recipe),
-            .request_key(chain_active && family_xmss ? hmsg_digest[255:0] : node[2]),.request_identifier(accepted_identifier),.request_index(accepted_index),
-            .request_address_type(group_address_type),
-            .secret_seed(job_secret_seed),.secret_prf(job_secret_prf),.public_seed(job_public_seed),
-            .root(node[3]),.randomizer(group_recipe[59:56]==4 || group_recipe[59:56]==8 || group_recipe[59:56]==11 ? scratch_read : runtime_randomizer),
-            .message_word_address,.message_word_data,.message_length,
-            .request_layer(group_layer),.request_tree(group_tree),
-            .request_leaf(group_leaf_value),.request_a(group_a_value),.request_b(physical_b_value),
-            .request_left(chain_active && family_xmss
-                ? (physical_recipe[59:56]==6 ? node_memory_read ^ physical_value[255:0] : node_memory_read)
-                : chain_active && (chain_feedback || chain_reissue) ? physical_value[255:0] : scratch_read),.request_right(node[6]),
-            .list_index0(physical_list0),.list_index1(physical_list1),.list_data0(list_value),.list_data1(256'd0),
-            .response_valid(physical_valid),
-            .response_ready((phase==EXEC && ir_valid && opcode==OP_WAIT && group_complete && !error && !lane_fault && !illegal) || chain_response),
-            .response_value(physical_value),.error(physical_error),
-            .hash_count(total_hashes),.permutation_count(total_permutations)
-        );
-    end endgenerate
-    initial if(LANES!=1 || UNROLL!=1 || SWAP_PHYSICAL_LANES)
-        $error("Microprogram production core requires fixed K1U1 without lane swap");
-
-    // Bounded digest transforms. These circuits cannot launch a Hash.
-    logic [63:0] parsed_tree;
-    logic [19:0] parsed_leaf;
-    // TARGET reads one bounded MD window. A fixed byte-bit reversal matches
-    // FORS's MSB-first bit stream; the final reversal restores the integer.
-    // Padding covers every legal final window without reading tree/leaf bytes.
-    wire [332:0] fors_bitstream;
-    assign fors_bitstream[332:320]=13'd0;
-    genvar fors_byte,fors_bit;
-    generate for(fors_byte=0;fors_byte<40;fors_byte=fors_byte+1) begin: fors_bytes_reverse
-        for(fors_bit=0;fors_bit<8;fors_bit=fors_bit+1) begin: bits_reverse
-            assign fors_bitstream[fors_byte*8+fors_bit]=hmsg_digest[fors_byte*8+7-fors_bit];
-        end
-    end endgenerate
-    wire [8:0] target_offset=ctx_fors_offset;
-    wire [13:0] fors_window=fors_bitstream[target_offset +:14];
-    wire [13:0] fors_window_reverse={fors_window[0],fors_window[1],fors_window[2],fors_window[3],
-        fors_window[4],fors_window[5],fors_window[6],fors_window[7],fors_window[8],fors_window[9],
-        fors_window[10],fors_window[11],fors_window[12],fors_window[13]};
-    wire [13:0] target_value=fors_window_reverse>>(4'd14-fors_a[3:0]);
-    integer byte_index;
+    endtask
+    wire [4:0] control_op=saved_control[61:57],control_dst=saved_control[56:52];
+    wire [4:0] control_src=saved_control[51:47],control_aux=saved_control[46:42];
+    wire [20:0] control_immediate=saved_control[41:21];
+    wire [3:0] control_cond=saved_control[13:10];
+    wire [20:0] control_dst_value=narrow_read(control_dst);
+    wire [20:0] control_src_value=narrow_read(control_src);
+    wire [20:0] control_aux_value=narrow_read(control_aux);
+    logic [40:0] control_alu;
     always_comb begin
-        parsed_tree=0;parsed_leaf=0;
-        for(byte_index=0;byte_index<8;byte_index=byte_index+1)
-            if(byte_index<((tree_bits+7)>>3))
-                parsed_tree=(parsed_tree<<8)|{56'd0,hmsg_digest[(fors_bytes+byte_index)*8 +:8]};
-        if(tree_bits<64) parsed_tree=parsed_tree&((64'd1<<tree_bits)-1'b1);
-        for(byte_index=0;byte_index<2;byte_index=byte_index+1)
-            if(byte_index<((hp+7)>>3))
-                parsed_leaf=(parsed_leaf<<8)|{12'd0,hmsg_digest[(fors_bytes+((tree_bits+7)>>3)+byte_index)*8 +:8]};
-        parsed_leaf=parsed_leaf&((20'd1<<hp)-1'b1);
-    end
-    wire [20:0] cursor_limit=21'd1<<ctx_height;
-    wire [19:0] group_base={14'd0,ctx_group}<<fors_a;
-    wire [1:0] pair_mask={ctx_chain+8'd1<chain_count,ctx_chain<chain_count};
-    wire [1:0] selected_lanes=select_lanes(d,ctx_mask);
-    wire [1:0] issue_mask=select_lanes(a,ctx_mask);
-    wire [21:0] cursor_next={1'b0,ctx_cursor}+imm[1:0];
-    wire [9:0] fors_offset_next={1'b0,ctx_fors_offset}+{2'd0,fors_a};
-    wire [7:0] macro_chain_index={1'b0,ctx_chain}+{7'd0,issue_mask[1]};
-    wire [7:0] chain_next={1'b0,ctx_chain}+imm[1:0];
-    wire [4:0] requested_height=d==0 ? hp[4:0] : d==1 ? fors_a[4:0] : imm[4:0];
-    logic [20:0] begin_index;
-    always_comb case(d)
-        0:begin_index=ctx_cursor;
-        1:begin_index={1'b0,ctx_target};
-        2:begin_index={1'b0,ctx_leaf};
-        default:begin_index=imm[20:0];
-    endcase
-    logic [20:0] memory_address;
-    always_comb case(b)
-        IDX_LEVEL:memory_address={16'd0,ctx_level};
-        IDX_CHAIN0:memory_address={9'd0,ctx_chain};
-        IDX_CHAIN1:memory_address={9'd0,ctx_chain}+16'd1;
-        IDX_GROUP:memory_address={15'd0,ctx_group};
-        IDX_CURSOR:memory_address=ctx_cursor;
-        IDX_REDUCE_LEFT:memory_address={8'd0,ctx_reduce_index,1'b0};
-        IDX_REDUCE_RIGHT:memory_address={8'd0,ctx_reduce_index,1'b1};
-        IDX_REDUCE_OUT:memory_address={9'd0,ctx_reduce_index};
-        default:memory_address=imm[20:0];
-    endcase
-    wire [6:0] list_address=group_valid ? lane_list0[0] : memory_address[6:0];
-    wire [255:0] list_value=list_address<68 ? node_memory_read : 256'd0;
-    wire [6:0] cpu_load_address=a==0 ? memory_address[6:0]
-        : (a==1 ? 7'd68 : 7'd89)+memory_address[6:0];
-    assign node_memory_read_address=chain_active && chain_state==CHAIN_CAP ? 7'd123
-        : chain_active && family_xmss ? (chain_state==CHAIN_VALUE_INIT
-            ? (chain_slot ? 7'd117 : 7'd116) : 7'd124)
-        : group_valid
-        ? ((group_recipe[59:56]==12 || group_recipe[59:56]==15) ? list_address
-            : {3'b111,(group_recipe[59:56]==4 || group_recipe[59:56]==8 || group_recipe[59:56]==11) ? 4'd0 : result_object})
-        : opcode==OP_LOAD ? cpu_load_address
-        : opcode==OP_XMSS_MASK ? (d==0 ? 7'd121 : 7'd122) : {3'b111,node_source_address};
-    always_comb begin
-        node_memory_write=0;
-        node_memory_write_address=0;
-        node_memory_write_value=0;
-        if(scratch_write) begin
-            node_memory_write=1;
-            node_memory_write_address={3'b111,cpu_node_target[3:0]};
-            node_memory_write_value=cpu_node_value;
-        end else if(execute && opcode==OP_STORE) begin
-            node_memory_write=1;
-            node_memory_write_address=d==0 ? memory_address[6:0]
-                : (d==1 ? 7'd68 : 7'd89)+memory_address[6:0];
-            node_memory_write_value=read_node(a);
-        end else if(result_write) begin
-            node_memory_write=1;
-            node_memory_write_address={3'b111,result_object};
-            node_memory_write_value=trim_node(physical_value[255:0]);
-        end else if(chain_private_write) begin
-            node_memory_write=1;
-            node_memory_write_address=7'd124;
-            node_memory_write_value=chain_state==CHAIN_VALUE_INIT ? node_memory_read : physical_value[255:0];
-        end else if(chain_capture_write) begin
-            node_memory_write=1;
-            node_memory_write_address=7'd123;
-            node_memory_write_value=family_xmss ? node_memory_read : trim_node(physical_value[255:0]);
-        end else if(chain_cap_commit) begin
-            node_memory_write=1;
-            node_memory_write_address=chain_slot ? 7'd120 : 7'd119;
-            node_memory_write_value=node_memory_read;
-        end else if(chain_result_commit) begin
-            node_memory_write=1;
-            node_memory_write_address=chain_slot ? 7'd117 : 7'd116;
-            node_memory_write_value=family_xmss ? node_memory_read : trim_node(physical_value[255:0]);
-        end
-    end
-    logic condition;
-    always_comb begin
-        condition=0;
-        case(d)
-            COND_CURSOR_MORE:condition=ctx_cursor<cursor_limit;
-            COND_CHAIN_MORE:condition=ctx_chain<chain_count;
-            COND_GROUP_MORE:condition=ctx_group<fors_k;
-            COND_LAYER_MORE:condition=ctx_layer<layers;
-            COND_FINAL_LAYER:condition=ctx_layer+8'd1==layers;
-            COND_LEVEL_MORE:condition=ctx_level<ctx_height;
-            COND_TARGET_LEAF:condition=ctx_cursor==ctx_target;
-            COND_INDEX_ODD:condition=ctx_index[0];
-            COND_AUTH_MATCH:condition=ctx_index==(ctx_path^20'd1);
-            COND_SAME_PARENT:condition=ctx_index[19:1]==ctx_path[19:1];
-            COND_STEP_EQ_DIGIT:condition=ctx_step[a[0]]==ctx_digit[a[0]];
-            COND_STEP_MORE:condition=ctx_step[a[0]]<15;
-            COND_LANE_ENABLED:condition=ctx_mask[a[0]];
-            COND_MASK_ZERO:condition=ctx_mask==0;
-            COND_FORS_PAIR_TARGET:condition=ctx_cursor=={ctx_target[19:1],1'b0};
-            COND_REDUCE_MORE:condition=ctx_reduce_index<ctx_reduce_span;
-            COND_REDUCE_AGAIN:condition=ctx_reduce_span>1;
-            COND_ROOT_EQUAL:condition=root_equal;
-            COND_LTREE_PAIR:condition={ctx_reduce_index,1'b1}<{1'b0,ctx_reduce_span};
-            COND_LTREE_MORE:condition={ctx_reduce_index,1'b0}<{1'b0,ctx_reduce_span};
-            default:condition=0;
+        case(control_op)
+            `CTRL_SET:control_alu={20'd0,control_immediate};
+            `CTRL_MOV:control_alu={20'd0,control_src_value};
+            `CTRL_INC:control_alu={20'd0,control_dst_value}+41'd1;
+            `CTRL_SHR:control_alu={20'd0,control_dst_value}>>control_immediate[4:0];
+            `CTRL_SHL:control_alu={20'd0,control_dst_value}<<control_immediate[4:0];
+            `CTRL_XOR1:control_alu={20'd0,control_dst_value}^41'd1;
+            `CTRL_ADD:control_alu={20'd0,control_src_value}+{20'd0,control_aux_value};
+            default:control_alu=0;
         endcase
     end
-    logic illegal;
-    wire metadata_safe=typed_metadata(opcode);
-    wire job_accept=phase==IDLE && job_valid && !error && config_valid
-        && image_header[63:32]==32'h48425350 && image_header[31:27]==5'd3
-        && job_operation<=2 && index_valid && (job_operation==0 ? job_message_length==0
-            : (family_stateful || job_message_length>0) && job_message_length<=MAX_MESSAGE_BYTES);
-    wire execute=phase==EXEC && ir_valid && !error && !lane_fault && !illegal;
-
-    // A malformed instruction retires nothing and changes no context, node,
-    // stream, or lane result. Fault control only cancels execution.
+    wire [20:0] branch_left=narrow_read(control[56:52]);
+    wire [20:0] branch_right=control[46:42]==1 ? control[41:21] : narrow_read(control[51:47]);
+    logic branch_taken;
     always_comb begin
-        retire=chain_complete;redirect=0;redirect_pc=imm[8:0];halt_fetch=0;illegal=0;
-        if(phase==EXEC && ir_valid && !error && !lane_fault) begin
-            illegal=!typed_encoding_valid(ir) || (group_valid && !metadata_safe && opcode!=OP_WAIT);
-            retire=1;
-            if(!illegal) case(opcode)
-                OP_LAYER_NEXT:illegal=ctx_layer>=layers;
-                OP_GROUP_NEXT:illegal=ctx_group>=fors_k || fors_offset_next>10'd320;
-                OP_CURSOR_NEXT:illegal=cursor_next>{1'b0,cursor_limit};
-                OP_CHAIN_NEXT:illegal=ctx_chain>=chain_count || chain_next>chain_count+8'd1;
-                OP_HEIGHT:illegal=requested_height==0 || requested_height>(family_slh ? (d==2 ? 4 : 14) : 20);
-                OP_TARGET:illegal=d==0 && (!hmsg_valid || ctx_group>=fors_k);
-                OP_DIGITS:retire=1;
-                OP_DIGIT_LOAD:illegal=!digits_valid
-                    || (selected_lanes[0] && (ctx_chain>=chain_count || ctx_chain>=len1+8'd3))
-                    || (selected_lanes[1] && (ctx_chain+8'd1>=chain_count || ctx_chain+8'd1>=len1+8'd3));
-                OP_STEP_INIT:illegal=a==1 && (!digits_valid || (selected_lanes & ~ctx_digit_valid)!=0);
-                OP_STEP_NEXT:illegal=(selected_lanes[0] && ctx_step[0]==15)
-                    || (selected_lanes[1] && ctx_step[1]==15);
-                OP_MASK:illegal=d==3 && (!digits_valid || (pair_mask & ~ctx_digit_valid)!=0);
-                OP_NODE_BEGIN:illegal=ctx_height==0 || begin_index>=cursor_limit
-                    || ctx_target>=cursor_limit || (a==1 && ctx_group>=fors_k);
-                OP_NODE_PARENT,OP_LEVEL_NEXT:illegal=ctx_level>=ctx_height;
-                OP_ADRS:case(d)
-                    0,1:illegal=ctx_chain>=chain_count || (d==0 && ctx_cursor>=(21'd1<<hp));
-                    2:illegal=ctx_group>=fors_k || ctx_cursor>=(21'd1<<fors_a);
-                    3:illegal=ctx_group>=fors_k || ctx_target>=(21'd1<<fors_a);
-                    4:illegal=ctx_group>=fors_k;
-                    5:illegal=ctx_level>ctx_height || (family_xmss && ctx_level==0);
-                    6:illegal=a==0 && ctx_cursor>=(21'd1<<hp);
-                    8:illegal=ctx_reduce_index>=ctx_reduce_span || ctx_level==0;
-                    9,10:illegal=!family_xmss || ctx_reduce_span<=1 || {ctx_reduce_index,1'b1}>={1'b0,ctx_reduce_span}
-                        || ctx_level>7 || (d==9 && ctx_cursor>=(21'd1<<hp));
-                    default:begin end
-                endcase
-                OP_REDUCE_INIT:illegal=d==2 ? !family_xmss
-                    : cursor_limit>68 || ctx_height==0 || (d==1 && ctx_group>=fors_k);
-                OP_REDUCE_NEXT:illegal=d==0 ? ctx_reduce_index>=ctx_reduce_span
-                    : (ctx_reduce_span<=1 || ctx_level>=ctx_height || (d==2 && !family_xmss));
-                OP_XMSS_MASK:illegal=!family_xmss;
-                OP_PARSE:illegal=!hmsg_valid;
-                OP_LOAD:illegal=memory_address>=(a==0 ? 68 : family_slh ? 16 : a==1 ? 21 : 20);
-                OP_STORE:illegal=memory_address>=(d==0 ? 68 : family_slh ? 16 : d==1 ? 21 : 20);
-                OP_HASH:illegal=(issue_mask!=2'b01 && issue_mask!=2'b10)
-                    || (family_slh && ((descriptor_data[59:56]!=1 && descriptor_data[59:56]!=2
-                        && descriptor_data[59:56]!=3 && descriptor_data[59:56]!=4 && descriptor_data[59:56]!=12)
-                        || (issue_mask[1] && descriptor_data[59:56]!=1 && descriptor_data[59:56]!=2)
-                        || (issue_mask[1] && descriptor_data[59:56]==2 && descriptor_data[47:40]!=1)))
-                    || (family_stateful && issue_mask[1] && descriptor_data[59:56]!=5 && descriptor_data[59:56]!=6
-                        && descriptor_data[59:56]!=9 && descriptor_data[59:56]!=10)
-                    || (family_xmss && (descriptor_data[59:56]<5 || descriptor_data[59:56]>8))
-                    || (family_lms && (descriptor_data[59:56]<9 || descriptor_data[59:56]==12))
-                    ;
-                OP_CHAIN:begin
-                    retire=0;
-                    illegal=(issue_mask!=2'b01 && issue_mask!=2'b10)
-                        || macro_chain_index>=chain_count
-                        || (b==0 && ctx_cursor>=(21'd1<<hp))
-                        || (d!=CHAIN_FULL && (!digits_valid || !ctx_digit_valid[issue_mask[1]]));
-                end
-                OP_WAIT:begin retire=group_complete;illegal=!group_valid;end
-                OP_INPUT:begin retire=verify_valid;illegal=operation!=2;end
-                OP_EMIT:illegal=operation==2;
-                OP_ROOT_COMPARE:illegal=operation!=2;
-                OP_END:begin halt_fetch=1;illegal=operation==2 && !root_compare_valid;end
-                OP_JMP:redirect=1;
-                OP_BR:begin
-                    redirect=condition^b[0];
-                    illegal=(d==COND_ROOT_EQUAL && !root_compare_valid)
-                        || (d==COND_STEP_EQ_DIGIT && !ctx_digit_valid[a[0]])
-                        || ((d==COND_LTREE_PAIR || d==COND_LTREE_MORE) && !family_xmss);
-                end
-                default:begin end
-            endcase
-            if(illegal) begin retire=0;redirect=0;halt_fetch=1;end
-        end
-        if(lane_fault) halt_fetch=1;
+        case(control[13:10])
+            `COND_ALWAYS:branch_taken=1;
+            `COND_EQ:branch_taken=branch_left==branch_right;
+            `COND_NE:branch_taken=branch_left!=branch_right;
+            `COND_LT:branch_taken=branch_left<branch_right;
+            `COND_GE:branch_taken=branch_left>=branch_right;
+            `COND_ODD:branch_taken=branch_left[0];
+            `COND_ZERO:branch_taken=branch_left==0;
+            `COND_BITSET:branch_taken=(branch_left&control[41:21])!=0;
+            `COND_SIBLING:branch_taken=branch_left==(branch_right^21'd1);
+            `COND_SAME_PARENT:branch_taken=branch_left[20:1]==branch_right[20:1];
+            default:branch_taken=0;
+        endcase
     end
-    assign job_ready=phase==IDLE && !error;
-    assign message_ready=phase==MESSAGE;
-    assign verify_ready=phase==EXEC && ir_valid && opcode==OP_INPUT && !group_valid
-        && operation==2 && !error && !lane_fault && !illegal;
-    assign out_bytes=node_bytes;
-    assign busy=phase!=IDLE && phase!=FAILED;
+    assign control_condition=branch_taken;
+    wire [21:0] control_load_address={1'b0,control_src_value}+{1'b0,control_immediate};
+    wire [21:0] control_store_address={1'b0,control_dst_value}+{1'b0,control_immediate};
+    wire [63:0] emit_descriptor=descriptor_data[63:0];
+    logic [255:0] emit_source;
+    always_comb begin
+        case(emit_descriptor[59:56])
+            0:emit_source=secret_seed;
+            1:emit_source=secret_prf;
+            2:emit_source=public_seed;
+            3:emit_source=value[3];
+            4:emit_source=xmss ? value[0] : randomizer;
+            5:emit_source={128'd0,job_identifier};
+            6:emit_source={224'd0,be32(job_index)};
+            7:emit_source={224'd0,be32(emit_descriptor[31:0])};
+            default:emit_source=0;
+        endcase
+    end
+    always_comb begin
+        endpoint_write=0;endpoint_address=0;endpoint_data=0;
+        if(state==CONTROL_STORE) begin
+            endpoint_write=1;endpoint_address=control_store_address[7:0];
+            endpoint_data=wide_read(control_src);
+        end else if(state==CHAIN_STORE && indexing!=1) begin
+            endpoint_write=1;endpoint_address=chain_cursor;endpoint_data=result[255:0];
+        end else if(state==LT_STORE) begin
+            endpoint_write=1;endpoint_address=lt_cursor>>1;endpoint_data=result[255:0];
+        end else if(state==LT_COPY) begin
+            endpoint_write=1;endpoint_address=lt_cursor>>1;endpoint_data=endpoint_value0;
+        end else if(state==ROUTE && macro_route!=0 && route_descriptor[53]) begin
+            endpoint_write=1;endpoint_address={2'd0,group_index};endpoint_data=route_value[255:0];
+        end
+    end
+    task automatic fail;
+        begin error<=1;abort_execution<=1;state<=FAILED;end
+    endtask
+    task automatic complete_macro;
+        begin seq_complete<=1;state<=FETCH;end
+    endtask
+    task automatic complete_control;
+        begin control_complete<=1;state<=FETCH;end
+    endtask
+    task automatic route_result(input [1:0] source);
+        begin route_source<=source;state<=ROUTE;end
+    endtask
+    task automatic start_hash(input [63:0] selected_recipe,input state_t ret);
+        begin task_recipe<=selected_recipe;continuation<=ret;state<=HASH_ISSUE;end
+    endtask
+    task automatic start_output(input [255:0] data,input [5:0] length,input state_t ret);
+        begin emit_value<=data;emit_length<=length;continuation<=ret;state<=OUTPUT_CHUNK;end
+    endtask
+    task automatic read_verify_node(input state_t ret);
+        begin continuation<=ret;state<=VERIFY_INPUT;end
+    endtask
     always_ff @(posedge clk) begin
-        if(rst || job_accept) begin
-            ctx_layer<=0;ctx_tree<=0;ctx_leaf<=job_accept && family_stateful && job_operation!=0 ? job_index[19:0] : 20'd0;ctx_group<=0;ctx_fors_offset<=0;ctx_target<=0;
-            ctx_cursor<=0;ctx_chain<=0;ctx_height<=0;ctx_level<=0;
-            ctx_index<=0;ctx_path<=0;ctx_fors_base<=0;ctx_mask<=0;
-            ctx_reduce_index<=0;ctx_reduce_span<=0;ctx_digit_valid<=0;ctx_address_type<=0;
-            for(integer lane=0;lane<2;lane=lane+1) begin
-                ctx_step[lane]<=0;ctx_digit[lane]<=0;
-                addr_leaf[lane]<=0;addr_a[lane]<=0;addr_b[lane]<=0;
-            end
-        end else if(chain_complete) begin
-            ctx_step[chain_slot]<=chain_terminal;
-        end else if(execute) begin
-            case(opcode)
-                OP_LAYER_INIT:ctx_layer<=d==0 ? 5'd0 : layers[4:0]-5'd1;
-                OP_LAYER_NEXT:ctx_layer<=ctx_layer+5'd1;
-                OP_TREE_NEXT:begin
-                    ctx_leaf<=ctx_tree[19:0]&((20'd1<<hp)-1'b1);
-                    ctx_tree<=ctx_tree>>hp;
+        if(rst) endpoint_read_address<=0;
+        else begin
+            case(state)
+                HASH_ISSUE,HASH_WAIT:endpoint_read_address<=lane_list_next;
+                REDUCE_SETUP,LT_FINISH:endpoint_read_address<=0;
+                LT_INIT:endpoint_read_address<=lt_cursor;
+                LT_NEXT:begin
+                    if(lt_cursor+2<lt_count) endpoint_read_address<=lt_cursor+2;
+                    else endpoint_read_address<=0;
                 end
-                OP_GROUP_INIT:begin ctx_group<=0;ctx_fors_offset<=0;end
-                OP_GROUP_NEXT:begin ctx_group<=ctx_group+6'd1;ctx_fors_offset<=fors_offset_next[8:0];end
-                OP_CURSOR_INIT:ctx_cursor<=0;
-                OP_CURSOR_NEXT:ctx_cursor<=cursor_next[20:0];
-                OP_CHAIN_INIT:begin ctx_chain<=0;ctx_digit_valid<=0;end
-                OP_CHAIN_NEXT:begin ctx_chain<=chain_next[6:0];ctx_digit_valid<=0;end
-                OP_HEIGHT:ctx_height<=requested_height;
-                OP_TARGET:ctx_target<=d==0 ? {6'd0,target_value} : ctx_leaf;
-                OP_DIGITS:ctx_digit_valid<=0;
-                OP_DIGIT_LOAD:begin
-                    if(selected_lanes[0]) ctx_digit[0]<=read_digit(ctx_chain);
-                    if(selected_lanes[1]) ctx_digit[1]<=read_digit(ctx_chain+7'd1);
-                    ctx_digit_valid<=ctx_digit_valid|selected_lanes;
-                end
-                OP_STEP_INIT:begin
-                    if(selected_lanes[0]) ctx_step[0]<=a==0 ? 4'd0 : ctx_digit[0];
-                    if(selected_lanes[1]) ctx_step[1]<=a==0 ? 4'd0 : ctx_digit[1];
-                end
-                OP_STEP_NEXT:begin
-                    if(selected_lanes[0]) ctx_step[0]<=ctx_step[0]+4'd1;
-                    if(selected_lanes[1]) ctx_step[1]<=ctx_step[1]+4'd1;
-                end
-                OP_MASK:case(d)
-                    0:ctx_mask<=imm[1:0];
-                    1:ctx_mask<=pair_mask;
-                    2:ctx_mask<=pair_mask & {ctx_step[1]<15,ctx_step[0]<15};
-                    3:ctx_mask<=pair_mask & {ctx_step[1]<ctx_digit[1],ctx_step[0]<ctx_digit[0]};
-                    default:begin end
-                endcase
-                OP_NODE_BEGIN:begin
-                    ctx_level<=0;ctx_index<=begin_index[19:0];ctx_path<=ctx_target;
-                    ctx_fors_base<=a==1 ? group_base : 20'd0;
-                end
-                OP_NODE_PARENT:begin
-                    ctx_level<=ctx_level+5'd1;ctx_index<=ctx_index>>1;
-                    ctx_path<=ctx_path>>1;ctx_fors_base<=ctx_fors_base>>1;
-                end
-                OP_LEVEL_INIT:ctx_level<=0;
-                OP_LEVEL_NEXT:ctx_level<=ctx_level+5'd1;
-                OP_ADRS:case(d)
-                    0,1:begin
-                        ctx_address_type<=0;
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=d==0 ? ctx_cursor[19:0] : ctx_leaf;
-                            addr_a[lane]<=ctx_chain+7'(lane);
-                            addr_b[lane]<={28'd0,ctx_step[lane]};
-                        end
-                    end
-                    2,3:begin
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=ctx_leaf;addr_a[lane]<=0;
-                            addr_b[lane]<={12'd0,group_base}+(d==2 ? {11'd0,ctx_cursor} : {12'd0,ctx_target})+(d==2 ? 32'(lane) : 32'd0);
-                        end
-                    end
-                    4,5:begin
-                        ctx_address_type<=d==5 ? 2'd2 : 2'd0;
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=d==4 ? ctx_leaf : 20'd0;
-                            addr_a[lane]<=family_xmss && d==5 ? 7'(ctx_level-5'd1) : {2'd0,ctx_level};
-                            addr_b[lane]<=family_lms && d==5 ? (32'd1<<(hp-ctx_level))+{12'd0,ctx_index}
-                                : (d==4 ? {12'd0,ctx_fors_base} : 32'd0)+{12'd0,ctx_index};
-                        end
-                    end
-                    6,7:begin
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=d==7 || a==1 ? ctx_leaf : ctx_cursor[19:0];
-                            addr_a[lane]<=0;addr_b[lane]<=0;
-                        end
-                    end
-                    8:begin
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=a==1 ? ctx_leaf : 20'd0;
-                            addr_a[lane]<={2'd0,ctx_level};
-                            addr_b[lane]<=(a==1 ? {12'd0,ctx_fors_base} : 32'd0)+{25'd0,ctx_reduce_index};
-                        end
-                    end
-                    9,10:begin
-                        ctx_address_type<=1;
-                        for(integer lane=0;lane<2;lane=lane+1) begin
-                            addr_leaf[lane]<=d==9 ? ctx_cursor[19:0] : ctx_leaf;
-                            addr_a[lane]<={2'd0,ctx_level};addr_b[lane]<={25'd0,ctx_reduce_index};
-                        end
-                    end
-                    default:begin end
-                endcase
-                OP_REDUCE_INIT:begin
-                    ctx_reduce_span<=d==2 ? 7'd67 : cursor_limit[6:0];ctx_reduce_index<=0;
-                    ctx_level<=0;ctx_fors_base<=d==1 ? group_base : 20'd0;
-                end
-                OP_REDUCE_NEXT:begin
-                    if(d==0) ctx_reduce_index<=ctx_reduce_index+7'd1;
-                    else begin
-                        ctx_reduce_span<=d==2 ? (ctx_reduce_span+8'd1)>>1 : ctx_reduce_span>>1;ctx_reduce_index<=0;
-                        ctx_level<=ctx_level+5'd1;ctx_fors_base<=ctx_fors_base>>1;
-                    end
-                end
-                OP_PARSE:begin ctx_tree<=parsed_tree;ctx_leaf<=parsed_leaf;end
+                CONTROL:if(control_op==`CTRL_LOAD && control_load_address<108)
+                    endpoint_read_address<=control_load_address[7:0];
                 default:begin end
             endcase
         end
     end
-    // Optional observation counters have no control role and vanish when
-    // PROFILE_ENABLE is false. Busy includes recipe setup and commit clocks.
-    always_ff @(posedge clk) begin
-        if(rst || job_accept || !PROFILE_ENABLE) begin
-            macro_count<=0;macro_busy_cycles<=0;macro_hashes<=0;
-        end else if(!error) begin
-            if(chain_start) macro_count<=macro_count+64'd1;
-            if(chain_active) macro_busy_cycles<=macro_busy_cycles+64'd1;
-            if(chain_issue) macro_hashes<=macro_hashes+64'd1;
+`ifndef SYNTHESIS
+    initial if(UNROLL!=1 || PIPELINE!=1) $fatal(1,"image-chain is K1U1 only");
+    logic [15:0] diagnostic_reason;
+    always_comb begin
+        diagnostic_reason=0;
+        if(state==IDLE && job_valid) begin
+            if(image_header[63:57]!=`CHAIN_HEADER_MAGIC) diagnostic_reason=16'h3010;
+            else if(!valid_profile) diagnostic_reason=16'h3009;
+            else if(decoded_stateful && job_index>=(32'd1<<decoded_height)) diagnostic_reason=16'h3008;
+        end else if(seq_error) diagnostic_reason=16'h3011;
+        else if(state==HASH_WAIT && lane_valid && lane_error) diagnostic_reason=16'h3007;
+    end
+    always_ff @(posedge clk) begin : debug_statistics
+        if(rst) begin cycles<=0;hash_base<=0;permutation_base<=0;error_code<=0;end
+        else begin
+            if(state==IDLE && job_valid) begin
+                cycles<=0;hash_base<=lane_hashes;permutation_base<=lane_permutations;error_code<=0;
+            end else if(state!=IDLE && state!=FAILED) cycles<=cycles+1'b1;
+            if(diagnostic_reason!=0) error_code<=diagnostic_reason;
+            else if(state==FAILED && error_code==0) error_code<=16'h3012;
         end
     end
+    always @(posedge clk) begin : debug_workspace
+        if(!execution_rst) begin
+            if(endpoint_write && endpoint_address>=WORKSPACE_DEPTH) $fatal(1,"workspace write out of range");
+            if(endpoint_read_address>=WORKSPACE_DEPTH) $fatal(1,"workspace read out of range");
+        end
+    end
+`endif
+
     always_ff @(posedge clk) begin
         if(rst) begin
-            phase<=IDLE;operation<=0;done<=0;error<=0;error_code<=0;verify_pass<=0;
-            out_valid<=0;out_data<=0;cycles<=0;hash_base<=0;permutation_base<=0;
-            message_length<=0;message_received<=0;
-            hmsg_digest<=0;hmsg_valid<=0;digits_valid<=0;digit_checksum<=0;
-            root_equal<=0;root_compare_valid<=0;group_valid<=0;group_mask<=0;
-            group_recipe<=0;group_layer<=0;group_tree<=0;group_address_type<=0;
-            accepted_index<=0;accepted_identifier<=0;accepted_randomizer<=0;
-            chain_state<=CHAIN_SEED;chain_mode<=0;chain_slot<=0;chain_digit<=0;
-            chain_f_bytes<=0;chain_f_blocks<=0;chain_expected_hashes<=0;
-            chain_seed_blocks<=0;chain_key_blocks<=0;chain_mask_blocks<=0;chain_pending_terminal<=0;
-            chain_hash_kind<=C_SEED;chain_feedback<=0;chain_shadow_valid<=0;
-            group_leaf_value<=0;group_a_value<=0;group_b_value<=0;
+            state<=IDLE;continuation<=IDLE;done<=0;error<=0;abort_execution<=0;
+            seq_start<=0;seq_complete<=0;control_complete<=0;verify_pass<=0;
+            stateful<=0;xmss<=0;small_signature<=0;stateful_height<=10;
+            profile_code<=0;node_bytes<=16;operation<=0;message_length<=0;message_received<=0;
+            scalar_tree<=0;scalar_leaf<=0;layer<=0;group_index<=0;
+            leaf_cursor<=0;node_index<=0;node_level<=0;target<=0;target_at_level<=0;
+            tree_height<=0;auth_level<=0;control_base<=0;control_limit<=0;control_flags<=0;indexing<=0;
+            macro_op<=0;macro_desc<=0;macro_route<=0;macro_flags<=0;
+            saved_descriptor<=0;saved_chain_descriptor<=0;saved_control<=0;
+            task_recipe<=0;task_step<=0;task_chain<=0;task_capture<=0;
+            task_steps<=0;task_capture_after<=0;task_leaf<=0;task_a<=0;task_b<=0;
+            chain_cursor<=0;endpoint_count<=0;chain_leaf<=0;chain_address<=0;
+            lt_count<=0;lt_cursor<=0;lt_level<=0;checksum<=0;transform_index<=0;
+            route_source<=0;emit_length<=0;emit_base<=0;emit_count<=0;emit_cursor<=0;
         end else begin
-            done<=0;out_valid<=0;
-            if(PROFILE_ENABLE && phase!=IDLE && phase!=FAILED) cycles<=cycles+1'b1;
-            if(lane_fault) begin
-                group_valid<=0;chain_shadow_valid<=0;if(family_xmss) hmsg_digest<=0;fault(16'h3007);
-            end else if(illegal) begin
-                group_valid<=0;chain_shadow_valid<=0;fault(16'h3006);
-            end else case(phase)
-                IDLE:if(job_valid && !error) begin
-                    if(!config_valid || image_header[63:32]!=32'h48425350 || image_header[31:27]!=5'd3)
-                        fault(16'h3006);
-                    else if(job_operation>2 || (job_operation==0 ? job_message_length!=0
-                        : (!family_stateful && job_message_length==0) || job_message_length>87)) fault(16'h3002);
-                    else if(!index_valid) fault(16'h3008);
-                    else begin
-                        accepted_index<=job_index;accepted_identifier<=job_identifier;accepted_randomizer<=job_randomizer;
-                        operation<=job_operation;verify_pass<=0;cycles<=0;
-                        root_equal<=0;root_compare_valid<=0;
-                        hash_base<=total_hashes;permutation_base<=total_permutations;
-                        message_length<=job_message_length;message_received<=0;
-                        hmsg_digest<=0;hmsg_valid<=0;digits_valid<=0;
-                        phase<=job_operation==0 || job_message_length==0 ? LAUNCH : MESSAGE;
-                    end
+            done<=0;seq_start<=0;seq_complete<=0;control_complete<=0;abort_execution<=0;
+            if(seq_error && state!=IDLE && state!=FAILED) fail();
+            else case(state)
+                IDLE:if(job_valid) begin
+                    error<=0;operation<=job_operation;stateful<=decoded_stateful;xmss<=decoded_xmss;
+                    stateful_height<=decoded_height;small_signature<=!decoded_stateful && config_code[2];
+                    profile_code<=config_code[1:0];
+                    node_bytes<=decoded_stateful ? 6'd32 : config_code[1:0]==0 ? 6'd16 : config_code[1:0]==1 ? 6'd24 : 6'd32;
+                    verify_pass<=0;message_length<=job_message_length;message_received<=0;
+                    scalar_tree<=0;scalar_leaf<=decoded_stateful ? job_index[19:0] : 0;
+                    layer<=0;group_index<=0;value[3]<=job_public_root;
+                    task_leaf<=decoded_stateful ? job_index[19:0] : 0;task_a<=0;task_b<=0;
+                    if(image_header[63:57]!=`CHAIN_HEADER_MAGIC || !valid_profile ||
+                        (decoded_stateful && job_index>=(32'd1<<decoded_height))) fail();
+                    else if(job_operation!=0 && job_message_length!=0) state<=MESSAGE;
+                    else state<=LAUNCH;
                 end
                 MESSAGE:if(message_valid) begin
+                    message_buffer[{message_received[6:3],6'b0}+:64]<=message_data;
                     message_received<=message_received+7'd8;
-                    if(message_received+7'd8>=message_length) phase<=LAUNCH;
+                    if(message_received+7'd8>=message_length) state<=LAUNCH;
                 end
-                LAUNCH:phase<=EXEC;
-                EXEC:if(ir_valid) begin
-                    case(opcode)
-                        OP_NMOV:begin
-                            if(d==2 || d==3) root_compare_valid<=0;
+                LAUNCH:if(seq_ready) begin seq_start<=1;state<=FETCH;end
+                FETCH:begin
+                    if(seq_done) begin
+                        if(verifying) verify_pass<=value[2][127:0]==job_public_root[127:0] &&
+                            (node_bytes==16 || value[2][191:128]==job_public_root[191:128]) &&
+                            (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
+                        state<=DRAIN;
+                    end else if(control_valid) begin saved_control<=control;state<=CONTROL;end
+                    else if(cmd_valid) begin
+                        macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];macro_flags<=cmd[27:24];
+                        if(!command_keep_coordinates) begin layer<=cmd[23:19];group_index<=cmd[18:13];end
+                        task_chain<=0;task_capture<=0;task_steps<=0;state<=LOAD_DESCRIPTOR;
+                    end
+                end
+                LOAD_DESCRIPTOR:begin saved_descriptor<=descriptor_data[63:0];state<=DECODE;end
+                DECODE:case(macro_op)
+                    1:begin
+                        if(verifying && stateful && (saved_descriptor[59:56]==5 || saved_descriptor[59:56]==11))
+                            read_verify_node(SF_RANDOM);
+                        else if(verifying && saved_descriptor[59:56]==3) read_verify_node(VERIFY_RANDOM);
+                        else start_hash(saved_descriptor,HASH_RESULT);
+                    end
+                    2:begin
+                        chain_cursor<=0;endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor;
+                        chain_leaf<=task_leaf;chain_address<=task_b;state<=CHAIN_SETUP;
+                    end
+                    4:begin checksum<=0;transform_index<=0;state<=TRANSFORM;end
+                    5:if(verifying && stateful) complete_macro();
+                    else begin emit_base<=descriptor[59:52];emit_count<=descriptor[51:48];emit_cursor<=0;state<=EMIT;end
+                    default:fail();
+                endcase
+                CHAIN_SETUP:begin
+                    if(endpoint_count==0 || endpoint_count>67) fail();
+                    else if(verifying) begin
+                        task_chain<=0;task_capture<=0;task_step<=descriptor_data[127:64];task_steps<=0;
+                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+                        task_b<=indexing==1 ? chain_address : 21'(digit(chain_cursor));
+                        read_verify_node(VERIFY_CHAIN_INPUT);
+                    end else begin
+                        task_chain<=1;task_step<=descriptor_data[127:64];
+                        task_capture<=leaf_cursor==target && macro_flags[0];
+                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+                        task_b<=indexing==1 ? chain_address : 21'd0;
+                        task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target)) ?
+                            digit(chain_cursor) : chain_descriptor[19:15];
+                        task_capture_after<=indexing==1 ? 0 : digit(chain_cursor);
+                        start_hash(descriptor_data[63:0],CHAIN_STORE);
+                    end
+                end
+                CHAIN_STORE:begin
+                    if(chain_cursor==0) node_value<=result[255:0];
+                    task_chain<=0;
+                    if(sign_only || (!verifying && macro_flags[0] && leaf_cursor==target)) state<=CHAIN_OUTPUT0;
+                    else state<=CHAIN_NEXT;
+                end
+                CHAIN_OUTPUT0:start_output(sign_only ? result[255:0] : lane_capture,node_bytes,CHAIN_NEXT);
+                CHAIN_NEXT:begin
+                    if(indexing!=1 && chain_cursor+1<endpoint_count) begin chain_cursor<=chain_cursor+1'b1;state<=CHAIN_SETUP;end
+                    else if(sign_only) begin
+                        // Verify consumes endpoints below; Sign emits the prefix only.
+                        complete_macro();
+                    end else if(!stateful && !verifying && macro_flags[3] && leaf_cursor==target) begin
+                        node_value<=0;state<=LEAF_SETUP;
+                    end else if(stateful && chain_descriptor[13:12]==2) begin
+                        lt_count<=endpoint_count;lt_cursor<=0;lt_level<=0;state<=LT_INIT;
+                    end else if(chain_descriptor[13:12]==0) route_result(ROUTE_NODE);
+                    else state<=REDUCE_SETUP;
+                end
+                REDUCE_SETUP:begin
+                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;task_b<=0;
+                    start_hash(descriptor_data[63:0],stateful ? SF_LEAF : LEAF_SETUP);
+                end
+                LEAF_SETUP:begin
+                    if(!stateful && !verifying && macro_flags[3] && leaf_cursor==target) route_result(ROUTE_NODE);
+                    else begin node_value<=result[255:0];route_result(ROUTE_HASH);end
+                end
+                LT_INIT:begin
+                    if(lt_cursor+1>=lt_count) state<=LT_COPY;
+                    else state<=LT_SETUP;
+                end
+                LT_SETUP:begin
+                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;
+                    task_a<={4'd0,lt_level};task_b<=21'(lt_cursor>>1);
+                    result<={{(V-W){1'b0}},endpoint_value0};node_value<=endpoint_value1;
+                    start_hash(descriptor_data[63:0],LT_STORE);
+                end
+                LT_STORE:state<=LT_NEXT;
+                LT_COPY:state<=LT_NEXT;
+                LT_NEXT:begin
+                    if(lt_cursor+2<lt_count) begin lt_cursor<=lt_cursor+2;state<=LT_INIT;end
+                    else if(lt_count<=2) state<=LT_FINISH;
+                    else begin lt_count<=(lt_count+1)>>1;lt_cursor<=0;lt_level<=lt_level+1'b1;state<=LT_INIT;end
+                end
+                LT_FINISH:begin
+                    node_value<=endpoint_value0;result<={{(V-W){1'b0}},endpoint_value0};
+                    if(verifying) value[2]<=endpoint_value0;
+                    route_result(ROUTE_NODE);
+                end
+                SF_LEAF:begin
+                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;
+                    task_b<=(21'd1<<stateful_height)+leaf_cursor;
+                    start_hash(descriptor_data[63:0],SF_LEAF_DONE);
+                end
+                SF_LEAF_DONE:begin
+                    node_value<=result[255:0];
+                    if(verifying) value[2]<=result[255:0];
+                    route_result(ROUTE_HASH);
+                end
+                SF_RANDOM:begin
+                    value[0]<=emit_value;
+                    if(xmss) complete_macro();
+                    else start_hash(saved_descriptor,HASH_RESULT);
+                end
+                HASH_ISSUE:if(lane_ready) state<=HASH_WAIT;
+                HASH_WAIT:if(lane_valid) begin
+                    result<=lane_value;
+                    if(lane_error) fail();else state<=continuation;
+                end
+                HASH_RESULT:route_result(ROUTE_HASH);
+                ROUTE:begin
+                    if(macro_route!=0) begin
+                        if(!route_descriptor[53]) begin
+                            value[route_descriptor[57:56]]<=route_value[255:0];
+                            if(route_descriptor[57:56]==1) fors_digest_tail<=route_value[FORS_DIGEST_BITS-1:W];
                         end
-                        OP_LOAD:begin
-                            if(d==2 || d==3) root_compare_valid<=0;
+                        if(route_descriptor[54]) begin scalar_tree<=parsed_tree(route_value);scalar_leaf<=parsed_leaf(route_value);end
+                        if(!verifying && route_descriptor[55]) start_output(route_value[255:0],node_bytes,FETCH);
+                        else state<=FETCH;
+                        seq_complete<=1;
+                    end else complete_macro();
+                end
+                TRANSFORM:begin
+                    if(descriptor[59:56]==2) begin
+                        scalar_leaf<=20'(scalar_tree&((64'd1<<descriptor[43:40])-1));
+                        scalar_tree<=scalar_tree>>descriptor[43:40];complete_macro();
+                    end else if(descriptor[59:56]==1) begin
+                        checksum<=checksum+{8'd0,checksum_increment};
+                        if(transform_index+1==LEN1) complete_macro();
+                        else transform_index<=transform_index+1'b1;
+                    end else fail();
+                end
+                EMIT:start_output(emit_source,emit_descriptor[53:48],EMIT_NEXT);
+                EMIT_NEXT:begin
+                    if(emit_cursor+1<emit_count) begin emit_cursor<=emit_cursor+1'b1;state<=EMIT;end
+                    else complete_macro();
+                end
+                VERIFY_INPUT:if(verify_valid) begin emit_value<=verify_data;state<=continuation;end
+                VERIFY_RANDOM:route_result(ROUTE_EMIT);
+                VERIFY_CHAIN_INPUT:begin
+                    result<={{(V-W){1'b0}},emit_value};
+                    if(indexing==1) start_hash(task_step,LEAF_SETUP);
+                    else state<=VERIFY_CHAIN_RUN;
+                end
+                VERIFY_CHAIN_RUN:if(task_b[3:0]==15) state<=CHAIN_STORE;
+                    else start_hash(descriptor_data[63:0],VERIFY_CHAIN_ADVANCE);
+                VERIFY_CHAIN_ADVANCE:begin task_b<={17'd0,task_b[3:0]+4'd1};state<=VERIFY_CHAIN_RUN;end
+                OUTPUT_CHUNK:state<=continuation;
+                CONTROL:begin
+                    case(control_op)
+                        `CTRL_SET,`CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL:begin
+                            if(control_dst>15 || (control_op==`CTRL_MOV && control_src>24) ||
+                                (control_op==`CTRL_ADD && (control_src>24 || control_aux>24)) ||
+                                ((control_op==`CTRL_SHR || control_op==`CTRL_SHL) &&
+                                    (control_immediate==0 || control_immediate>20)) ||
+                                (|control_alu[40:21]) || (control_alu[20:0]&~narrow_mask(control_dst))!=0 ||
+                                ((control_dst==`CTX_HEIGHT || control_dst==`CTX_LEVEL || control_dst==`CTX_AUTH_LEVEL) && control_alu>20) ||
+                                (control_dst==`CTX_MODE && control_alu>2)) fail();
+                            else begin narrow_write(control_dst,control_alu[20:0]);complete_control();end
                         end
-                        OP_HASH:begin
-                            group_valid<=1;group_mask<=issue_mask;
-                            group_recipe<=descriptor_data;group_layer<=ctx_layer;group_tree<=ctx_tree;
-                            group_address_type<=family_lms ? 2'd0 : ctx_address_type;
-                            group_leaf_value<=addr_leaf[issue_mask[1]];
-                            group_a_value<=addr_a[issue_mask[1]];
-                            group_b_value<=addr_b[issue_mask[1]];
+                        `CTRL_BR:begin
+                            if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
+                                ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
+                            else complete_control();
                         end
-                        OP_CHAIN:begin
-                            phase<=MACRO;chain_state<=CHAIN_SEED;
-                            chain_mode<=d[1:0];chain_slot<=issue_mask[1];
-                            chain_digit<=d==CHAIN_FULL ? 4'd0 : ctx_digit[issue_mask[1]];
-                            if(family_xmss) chain_expected_hashes<=d==CHAIN_FULL || d==CHAIN_CAP_FULL ? 6'd46
-                                : d==CHAIN_CAP_PREFIX ? 6'd1+6'(ctx_digit[issue_mask[1]])*6'd3
-                                : (6'd15-6'(ctx_digit[issue_mask[1]]))*6'd3;
-                            else chain_expected_hashes<=d==CHAIN_FULL || d==CHAIN_CAP_FULL ? 6'd16
-                                : d==CHAIN_CAP_PREFIX ? 6'd1+{2'd0,ctx_digit[issue_mask[1]]}
-                                : 6'd15-{2'd0,ctx_digit[issue_mask[1]]};
-                            chain_hash_kind<=d==CHAIN_SUFFIX && !family_xmss ? C_F : C_SEED;chain_feedback<=0;chain_shadow_valid<=0;
-                            group_valid<=0;group_mask<=issue_mask;
-                            group_layer<=ctx_layer;group_tree<=ctx_tree;group_address_type<=0;
-                            group_leaf_value<=b==0 ? ctx_cursor[19:0] : ctx_leaf;
-                            group_a_value<=macro_chain_index[6:0];
-                            group_b_value<=d==CHAIN_SUFFIX ? {28'd0,ctx_digit[issue_mask[1]]} : 32'd0;
+                        `CTRL_CALL,`CTRL_RET:complete_control();
+                        `CTRL_LOAD:begin
+                            if(control_dst>6 || control_src>24 || control_load_address>=108) fail();
+                            else state<=CONTROL_LOAD;
                         end
-                        OP_WAIT:if(group_complete) begin
-                            if(group_mask[0] && group_recipe[59:56]==4) begin hmsg_digest<=result[0];hmsg_valid<=1;end
-                            group_valid<=0;
+                        `CTRL_STORE:begin
+                            if(control_src>7 || control_dst>24 || control_store_address>=108) fail();
+                            else state<=CONTROL_STORE;
                         end
-                        OP_DIGITS:begin digit_message<=node[2];digit_checksum<={2'd0,checksum_total};digits_valid<=1;end
-                        OP_INPUT:if(verify_valid) begin
-                            if(d==2 || d==3) root_compare_valid<=0;
+                        `CTRL_INPUT:begin
+                            if(!verifying || control_dst>6) fail();else state<=CONTROL_INPUT;
                         end
-                        OP_EMIT:begin out_valid<=1;out_data<=read_node(a);end
-                        OP_ROOT_COMPARE:begin root_equal<=read_node(2)==read_node(3);root_compare_valid<=1;end
-                        OP_END:begin verify_pass<=operation==2 && root_equal;phase<=FINISH;end
-                        default:begin end
+                        `CTRL_OUTPUT:begin
+                            if(verifying || control_src>7) fail();else begin
+                                start_output(wide_read(control_src),node_bytes,CONTROL_OUTPUT);
+                            end
+                        end
+                        `CTRL_WMOV:begin
+                            if(control_dst>6 || control_src>7) fail();
+                            else begin wide_write(control_dst,wide_read(control_src));complete_control();end
+                        end
+                        default:fail();
                     endcase
                 end
-                MACRO:case(chain_state)
-                    CHAIN_SEED:begin
-                        if(!chain_recipe_valid(descriptor_data,1'b1)) begin
-                            chain_shadow_valid<=0;fault(16'h3006);
-                        end else begin
-                            group_recipe<=descriptor_data;chain_seed_blocks<=descriptor_data[29:24];chain_state<=CHAIN_F;
-                        end
-                    end
-                    CHAIN_F:begin
-                        if(!chain_recipe_valid(descriptor_data,1'b0)) begin
-                            chain_shadow_valid<=0;fault(16'h3006);
-                        end else begin
-                            chain_f_bytes<=descriptor_data[37:32];chain_f_blocks<=descriptor_data[29:24];
-                            if(family_xmss) chain_state<=CHAIN_KEY_CHECK;
-                            else begin
-                                if(chain_mode==CHAIN_SUFFIX) group_recipe<=descriptor_data;
-                                if(chain_mode==CHAIN_SUFFIX && chain_digit==15) chain_state<=CHAIN_DONE;
-                                else begin group_valid<=1;chain_state<=CHAIN_ISSUE;end
-                            end
-                        end
-                    end
-                    CHAIN_KEY_CHECK:begin
-                        if(!chain_key_recipe_valid(descriptor_data,1'b0)) begin
-                            chain_shadow_valid<=0;fault(16'h3006);
-                        end else begin chain_key_blocks<=descriptor_data[29:24];chain_state<=CHAIN_MASK_CHECK;end
-                    end
-                    CHAIN_MASK_CHECK:begin
-                        if(!chain_key_recipe_valid(descriptor_data,1'b1)) begin
-                            chain_shadow_valid<=0;fault(16'h3006);
-                        end else begin
-                            chain_mask_blocks<=descriptor_data[29:24];
-                            if(chain_mode==CHAIN_SUFFIX && chain_digit==15) chain_state<=CHAIN_DONE;
-                            else begin
-                                group_valid<=1;
-                                if(chain_mode==CHAIN_SUFFIX) begin
-                                    group_recipe<=chain_key_recipe;chain_hash_kind<=C_KEY;chain_state<=CHAIN_VALUE_INIT;
-                                end else chain_state<=CHAIN_ISSUE;
-                            end
-                        end
-                    end
-                    CHAIN_VALUE_INIT:if(chain_issue) chain_state<=CHAIN_RUN;
-                    CHAIN_ISSUE:if(chain_issue) chain_state<=CHAIN_RUN;
-                    CHAIN_RUN:if(chain_response) begin
-                        if(family_xmss && chain_hash_kind==C_KEY) hmsg_digest[255:0]<=physical_value[255:0];
-                        if(chain_capture_now && !family_xmss) chain_shadow_valid<=1;
-                        if(family_xmss && chain_capture_now) begin
-                            chain_pending_terminal<=chain_at_end;
-                            group_recipe<=chain_next_recipe;chain_hash_kind<=chain_next_kind;
-                            group_b_value<={28'd0,chain_next_step};
-                            chain_state<=CHAIN_CAPTURE_SAVE;
-                        end else if(chain_at_end) begin
-                            group_valid<=0;
-                            if(chain_capture_mode && !(chain_shadow_valid || chain_capture_now)) begin
-                                chain_shadow_valid<=0;fault(16'h3006);
-                            end else chain_state<=chain_capture_mode ? CHAIN_CAP : CHAIN_RESULT;
-                        end else begin
-                            chain_feedback<=1;chain_hash_kind<=chain_next_kind;
-                            group_recipe<=chain_next_recipe;
-                            group_b_value<={28'd0,chain_next_step};
-                            chain_state<=chain_issue ? CHAIN_RUN : CHAIN_ISSUE;
-                        end
-                    end
-                    CHAIN_CAPTURE_SAVE:begin
-                        chain_shadow_valid<=1;
-                        if(chain_pending_terminal) begin group_valid<=0;chain_state<=CHAIN_CAP;end
-                        else if(chain_issue) chain_state<=CHAIN_RUN;
-                    end
-                    CHAIN_CAP:chain_state<=CHAIN_RESULT;
-                    CHAIN_RESULT:begin
-                        chain_shadow_valid<=0;phase<=EXEC;
-                        if(family_xmss) hmsg_digest<=0;
-                    end
-                    CHAIN_DONE:begin
-                        chain_shadow_valid<=0;phase<=EXEC;
-                        // The H_msg buffer is invalid throughout a stateful Job.
-                        // Return it to its canonical invalid observation after use.
-                        if(family_xmss) hmsg_digest<=0;
-                    end
-                    default:begin group_valid<=0;chain_shadow_valid<=0;fault(16'h3006);end
-                endcase
-                FINISH:begin done<=1;phase<=IDLE;end
-                FAILED:group_valid<=0;
-                default:fault(16'h3006);
+                CONTROL_LOAD:begin wide_write(control_dst,endpoint_value0);complete_control();end
+                CONTROL_STORE:complete_control();
+                CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,verify_data);complete_control();end
+                CONTROL_OUTPUT:complete_control();
+                DRAIN:state<=FINISH;
+                FINISH:begin done<=1;state<=IDLE;end
+                FAILED:state<=IDLE;
+                default:fail();
             endcase
         end
     end

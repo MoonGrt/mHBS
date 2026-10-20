@@ -1,68 +1,16 @@
-# 默认镜像 ABI：`hbs_micro64` 3
+# image-chain：模板控制镜像
 
-默认顶层 `top` 执行有类型 HBS 微指令和阻塞单链宏。ABI 3 与 ABI 2、ABI 1 的标量指令、v4.2 的宏镜像均不兼容。`model/microcode.py` 定义编码与操作数权限，编译器为 `model/mHBS.py`，逐指令软件模型为 `model/executor.py`。完整语义见 [Micro_ISA.md](Micro_ISA.md)。
+当前为 `main_chain64_v4` / layout 4：program128×64、template32×64、descriptor32×64，PC7位、模板索引5位。它与历史 HashFlow opcode36/37 的 ABI3/ABI4 不兼容。历史实现保存在 `3a625c1` 及之前的 Git 提交。
 
-## 镜像布局
+[完整控制 ISA](Chain_Template_ISA.md) 定义所有指令与权限。HASH、CHAIN、TRANSFORM、EMIT 沿用 main 的宏及配方语义，TREE 模板被拒绝。
 
-| 文件 | 容量 | 读取方式 |
-|---|---|---|
-| `program.mem` | 512×64 位，4096 字节 | 一拍同步读，9 位地址 |
-| `descriptor.mem` | 32×64 位，256 字节 | 异步单读，5 位地址 |
+## 物理字段
 
-每行一个 16 位十六进制字。实际指令区之后填零；零指令非法，不能进入填充区。没有 template 文件，Job 和消息不放入程序镜像。
+- descriptor0：`[63:57]=0x53`；Verify入口`[56:50]`、Sign入口`[49:43]`、Keygen入口`[42:36]`；`[35:18]` Keygen输出长度，`[17:0]` Sign输出长度。
+- descriptor1：`[4:0]`配置码，bit5后端（0 SHAKE、1 SHA2），`[63:6]`必须为零。SLH配置码0/1/2/4/5/6，XMSS为0x18～0x1A，LMS为0x1B～0x1D。SHA2只允许SLH128f/s及stateful配置。
+- template：`[2:0]`操作（HASH1、CHAIN2、TRANSFORM4、EMIT5）；`[7:3]`描述符；`[12:8]`路由；bit13 CAPTURE、bit14 AUTH、bit15 EXTERNAL_ROOT、bit16 SIGN_ONLY；高位为零。
+- 普通program保留main的SINGLE/RUN/LOOP字段；bit29扩展模板索引，bit28表示保留软件设置的坐标。kind3用于显式控制，opcode0为HALT，其余字段见完整ISA。
 
-| Descriptor | 内容 |
-|---|---|
-| 0 | magic `0x48425350` 位于 `[63:32]`；ABI=3 位于 `[31:27]`；Keygen/Sign/Verify 入口分别为 `[26:18]`/`[17:9]`/`[8:0]` |
-| 1 | SLH编码0/1/2/4/5/6；XMSS h10/h16/h20为8/9/10；LMS h10/h15/h20为11/12/13；其余位为零 |
-| 2…11 | 单次 Hash 配方：shape、domain、arity、输出字节数、最大 rate 块数 |
-| 12 | 实际指令数，1…512 |
-| 13 | Keygen 输出字节数 `[31:0]`，Sign 输出字节数 `[63:32]` |
-| 14 | 由低到高八个字节：n、hp、d、k、a、m、h、WOTS 链数 |
-| 15…31 | 零填充 |
+描述符保留main的格式及物理引用映射，只有header采用新入口/版本字段。固定表中保留合法但未使用的TREE参数记录，不意味着硬件支持TREE。有效记录数、程序可达记录数、非零记录数分别统计；零值profile身份仍是有效记录。
 
-## 执行模型
-
-64 位指令容器仍为 `opcode[63:56] | d[55:48] | a[47:40] | b[39:32] | imm[31:0]`。这些位是各 opcode 私有的枚举、节点对象、受限索引、立即数或直接分支目标；它们不编码通用寄存器。
-
-上下文由独立的 HBS 字段组成。TREE 保留完整 64 位，只允许摘要装载、固定层推进和 ADRS 读取。计数器、链步、层级与归约索引各有独立宽度和更新权限；没有任意字段之间的搬运、整数 ALU 或通用移位器。树循环、链号推进和是否继续合并由 image 的直接分支决定；单条 WOTS 链内循环可由 CHAIN 宏执行。
-
-节点为 256 位，低 n 字节有效。SLH逻辑LIST/STACK/AUTH深度仍为68/16/16；stateful为68/21/20，只能通过相应空间允许的具名索引或合法立即索引访问。Job 常量只读，节点不参与整数运算。
-
-生产配置固定 K1U1（一个物理 Hash lane、每周期一轮 Keccak）。L0/L1 保留为逻辑上下文及结果槽；HASH 有效 mask 必须为 1 或 2，mask 0/3 原子故障。每条 HASH 执行一次密码学 Hash，并须以 WAIT 提交；硬件不自动拆分双槽请求。等待期间仅允许权限表列出的上下文更新、地址更新与直接分支；节点访问、摘要变换、I/O 和结束须位于 WAIT 后。HASH 锁存 recipe、mask 和地址，数据源保持稳定；未参与 lane 的结果保持不变。多块 SHAKE 吸收仍属于一次 Hash。
-
-PARSE/TARGET 使用独立的 49 字节 H_msg 暂存；WOTS digits/checksum 是有界数据变换。上述变换与地址更新均不能发射 Hash。
-
-## 可信边界与兼容性
-
-assembler、VM 与 RTL 使用同一操作数权限定义。生成器检查容量、保留字段、入口、跳转、对象与索引权限、profile、配方及 HASH/WAIT 控制流。RTL 在指令生效前检查编码与动态范围；故障指令不得提交上下文或节点修改。计数器允许规定的终止值，但禁止继续递增后静默回卷。RTL 不扫描整幅镜像。
-
-Job 的 secret/prf/public/random 种子端口须在整项操作期间保持不变；公共顶层使用参数满足此约定。HASH 锁存 recipe、mask 和地址，RTL 冻结节点与消息输入；它不额外复制这些 Job 种子。
-
-LIST/STACK/AUTH 不由复位清零。合法 image 必须先写后读，不能依赖 VM 初始化存储为零的便利行为。完整 descriptor 配方保留位、profile 一致性、整幅程序控制流和输出次序属于离线验证边界；RTL 不重复整镜像扫描。VM 在 END 额外检查输出字节数和 Verify 输入是否恰好耗尽；RTL 的 END 不执行整项输出/输入长度核算，集成与顶层测试检查这些算法约定。
-
-外部消息、Verify 节点、输出与签名缓存协议保持兼容，见 [Job_Interface.md](Job_Interface.md)。镜像参数仍为 `PROGRAM_INIT_FILE` 和 `DESCRIPTOR_INIT_FILE`。新 RTL 拒绝 ABI 1/2，不提供历史镜像兼容执行模式。
-
-本分支仅提供ABI3工具和执行器，不携带源仓库的ABI1/2或v4.2 legacy实现。源节点说明中的历史工具、旧归档和旧提交仅作为源项目历史语境；本次移植的原始材料与校验保存在 `docs/manifests/experiments/image_chain_import_20261021/`。
-
-## ABI 3 单链宏
-
-新增 opcode36 CHAIN，`d` 为 FULL(0)/CAP_FULL(1)/CAP_PREFIX(2)/SUFFIX(3)，`a` 为现有 lane 选择器，`b` 为 CURSOR(0)/LEAF(1)，`imm=0`。有效 mask 必须单选，链号为 CHAIN+slot；输入范围先检查再截断。配方 7/8 固定为 WOTS PRF/F，宏启动前同时校验并锁存。descriptor 布局与容量不变，没有新的 template 或宏描述符表。
-
-宏负责一次 PRF 加至多 15 次 F，或从输入节点执行后缀链；CAP 模式截取 digit 节点。宏阻塞 image，内部每个 lane 请求仍只执行一次 Hash。它不递增链号、不访问 LIST/STACK/AUTH、不输出节点，也不执行树归约。宏自行等待和提交，后面不加 WAIT。普通 HASH/WAIT 的一请求一 Hash 及有限重叠语义保持。
-
-成功只提交选中 L、必要的对应 CAP 和 STEP 终值；架构 ADRS、链号及树上下文保持。截取先进入私有 RAM shadow，全部计算成功后才提交。非法参数/配方在首个 Hash 前拒绝，途中错误不修改架构节点或 STEP；已执行物理 Hash/置换允许计数。复位取消宏及 shadow 有效位。SUFFIX digit15 不启动 Hash，CAP_PREFIX digit0 仍执行一次 PRF。完整规则见[指令表](Micro_ISA.md)。
-
-ABI 2 的 `a9b4e0e2` 与第三轮独立归档作为此次迁移基线；旧源码在其 source_snapshot 中可复核，不覆盖 ABI 1 历史工具与任何封存证据。
-
-## 标准 XMSS／LMS 兼容扩展
-
-ABI号与原操作码不变；增加opcode38 `XMSS_MASK`，d=0/1分别选择NODE/TMPNODE，与RIGHT中的MASK异或后写入L0，其余字段零，仅XMSS授权。XMSS的L-tree ADRS选择器9/10、条件18/19及归约选择器2仅对XMSS开放；SLH保留原权限与动态范围。stateful配置码8～13，descriptor15～31仍必须为零。
-
-共用物理节点RAM：LIST0～67、STACK68～88、AUTH89～108、对象112～122、私有捕获123、私有链VALUE124；不增加读口。普通节点为32字节，XMSS KEY复用stateful期间无效的SLH H_msg暂存低256位。stateful禁止PARSE/FORS摘要访问；KEY所有权和有效性单独检查。叶索引/target/index/path20位、cursor21位、height/level5位、ADRS B32位。LMS叶地址为2^h+q，父节点编号逐层右移。
-
-XMSS CHAIN每步KEY→MASK→F，仅F完成后推进STEP；FULL为46次Hash。LMS FULL为SECRET加15次F，共16次Hash。digit0捕获初始秘密节点，SUFFIX digit15不发Hash。宏成功后才提交目标节点、捕获与STEP；私有VALUE/捕获不改变RAM容量。二元XMSS归约执行KEY→MASK0→MASK1→FINAL，L-tree奇数尾项直接搬移，不增加Hash。
-
-运行时q、identifier及LMS C在Job接受时锁存。q必须小于2^h，消息允许0～87字节。Keygen输出root；Sign和签名缓存输出节点payload，标准OID/type/index由软件适配器组装与校验。所有统计为64位，PROFILE_ENABLE=0时综合裁剪。descriptor1借现有RELEASE空拍读取，不增加原SLH启动周期。
-
-本分支拒绝opcode37，L-tree、叶压缩、主树及认证路径全部由image显式指令表达。
+镜像必须在部署前经过Python解码/权限校验。硬件检查后端、profile、q、模板类型及执行中的标量/RAM权限，不代替完整离线验证。错误后停止，直到复位。
