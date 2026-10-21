@@ -1,16 +1,12 @@
-# mHBS — image-chain 模板架构
+# mHBS — image-soft-chain 软件 CHAIN 尝试
 
-本分支以 `main@050512998fea28cc44667a1cd694d5ad5077767c` 的 `program + template + descriptor` 架构为基础，固定 K1U1、单物理 Hash 通道、单任务在途。默认 SHAKE；定义 `MHBS_SHA2` 选择 SHA2。硬件只包含所选后端。
+本分支从已验证的 C1 `image-chain` 派生，C1 快照提交为 `39477f5`。固定 K1U1、一个物理 Hash 通道和单任务在途；默认 SHAKE，定义 `MHBS_SHA2` 选择 SHA2。
 
-| 分支 | 控制粒度 | Program / Template / Descriptor 容量（64位字） |
-|---|---|---|
-| image | image 显式控制 Hash、链和树 | 512 / 0 / 32 |
-| image-chain | template 执行整组 CHAIN，program 控制主树及 FORS 树 | 128 / 32 / 32 |
-| image-chain-tree | main 的 CHAIN＋TREE 模板架构 | 16 / 16 / 32 |
+保留 `program + template + descriptor`，将完整 CHAIN 控制移到 program：链号和链步推进、签名捕获、端点存取、XMSS L-tree、LMS 列表及叶压缩均由显式指令决定。硬件只接受 HASH、TRANSFORM、EMIT 模板。C1 的复合 Hash 配方保留，包括 XMSS KEY/MASK 和 SHA2 HMAC/MGF1；本尝试只研究 CHAIN 控制归属。
 
-CHAIN 包含整组 WOTS／LMOTS、端点归约、XMSS L-tree 和叶压缩。主树和 FORS 树的叶遍历、父 Hash、树栈、认证路径均由 program 的显式指令控制，硬件没有 TREE 操作。控制器复用128×256位工作区，不增加通用寄存器文件或第二个节点银行。
+程序 ROM 为 256×64 位，模板和描述符各为 32×64 位。布局修订版为 5，header 标识 `0x54`，与原 C1 布局不兼容。三个7位入口指向地址0/1/2跳板，跳板通过8位目标访问实际程序。CALL最多嵌套两层。具体字段和权限见 [Chain_Template_ISA.md](docs/Chain_Template_ISA.md)。
 
-本分支使用独立的模板控制镜像版本，header 标识为 `0x53`。它不是历史 HashFlow ABI3／ABI4 的 opcode36／37 镜像；旧镜像与 main TREE 镜像均不得混用。具体编码、权限及故障语义见 [Chain_Template_ISA.md](docs/Chain_Template_ISA.md)。历史尝试保留在 Git 和原实验目录中。
+沿用128×256位工作区和窄上下文，不增加节点缓存或通用寄存器文件。原 `image`、`image-chain`、`image-chain-tree` 的分支和工作区保持不变。
 
 ## 参数和数据接口
 
@@ -52,4 +48,4 @@ HASH_BACKEND=sha2 scripts/synthesize.sh 1 1
 
 面积使用 `common`，不包含程序／模板／描述符 ROM 和签名缓存。实验使用 Vivado2025.2、`xc7a200tffg1156-3`、100MHz OOC、每任务2线程；不自动布局布线。100MHz ATP 是假定频率指标，综合时序不能当作布线频率证据。
 
-[实验索引](docs/manifests/experiments/INDEX.md) 保存各次冻结源码、镜像校验、验证摘要、分层面积和时序报告。程序有效字数、模板记录数、描述符记录数与动态宏调用次数分别统计；TREE 子 CHAIN 与 program 直接 CHAIN 不混计。
+[实验索引](docs/manifests/experiments/INDEX.md) 保存各次冻结源码、镜像校验、验证摘要、分层面积和时序报告。程序有效字数、模板记录数、描述符记录数与动态指令数分别统计。验收要求 CHAIN 控制完全来自程序，且密码学工作量与冻结 C1 一致；不预设面积、周期或 ATP 排序。

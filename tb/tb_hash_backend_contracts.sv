@@ -12,11 +12,11 @@ module tb_hash_backend_contracts;
     logic [63:0] profile=0;
     logic [31:0] job_index=0;
     logic [6:0] message_length=1;
-    wire [6:0] program_address;wire [4:0] template_address;
+    wire [7:0] program_address;wire [4:0] template_address;
     wire [9:0] descriptor_addresses;
     wire [127:0] descriptor_data;
     function automatic [63:0] descriptor(input [4:0] address);
-        descriptor=address==0 ? 64'ha6000000018042c0 : address==1 ? profile : 0;
+        descriptor=address==0 ? 64'ha808080000000000 : address==1 ? profile : 0;
     endfunction
     assign descriptor_data={descriptor(descriptor_addresses[9:5]),descriptor(descriptor_addresses[4:0])};
     wire message_ready, busy, done, error, out_valid;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise layout-4 control faults and RAM/CALL boundaries in production RTL."""
+"""Exercise layout-5 control faults and RAM/CALL boundaries in production RTL."""
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import argparse,json,os,re,subprocess,time
@@ -41,9 +41,9 @@ def main():
                     elapsed_seconds=time.monotonic()-started,log=str(folder/'run.log'))
     with ThreadPoolExecutor(max_workers=args.jobs) as pool:results=list(pool.map(run,configurations))
     unchanged=all(digest(ROOT/name)==value for name,value in identity.items())
-    report=dict(schema='mhbs.chain_controls.v1',source_sha256=identity,source_unchanged=unchanged,
+    report=dict(schema='mhbs.soft_chain_controls.v1',source_sha256=identity,source_unchanged=unchanged,
                 passed=sum(row['passed'] for row in results),total=len(results),results=results,
-                checks='bounded narrow arithmetic; call/ret; RAM107; readonly/bounds/overflow; PC; TREE/header/backend/encoding rejection; quiescent faults')
+                checks='bounded narrow arithmetic; two-level call/ret/high8-bitPC; RAM107; readonly/bounds/overflow; PC; CHAIN/TREE/header/backend/encoding rejection; quiescent faults')
     (work/'VALIDATION.json').write_text(json.dumps(report,indent=2)+'\n')
     if not unchanged or not all(row['passed'] for row in results):raise SystemExit(1)
 if __name__=='__main__':main()

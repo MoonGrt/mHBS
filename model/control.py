@@ -1,14 +1,14 @@
-"""Layout-4 explicit tree control for main-compatible task templates.
+"""Layout-5 explicit chain and tree control for main-compatible task templates.
 
 Control words update one narrow context or one node.  They never issue hashes
 or advance a tree implicitly.  Macro words retain main's low-17-bit template.
 """
 from enum import IntEnum
 
-PROGRAM_WORDS = 128
+PROGRAM_WORDS = 256
 TEMPLATE_WORDS = 32
 DESCRIPTOR_WORDS = 32
-HEADER_MAGIC = 0x53
+HEADER_MAGIC = 0x54
 KEEP_COORD = 1 << 28
 
 class Op(IntEnum):
@@ -20,6 +20,7 @@ class Ctx(IntEnum):
     BASE=8; HEIGHT=9; LIMIT=10; LAYER=11; GROUP=12; AUTH_LEVEL=13
     FLAGS=14; MODE=15; Q=16; SCALAR_LEAF=17; FORS_TARGET=18
     PROFILE_HEIGHT=19; ZERO=20; ONE=21; OPERATION=22; XMSS=23; STATEFUL=24
+    DIGIT=25; LT_COUNT=26; LT_CURSOR=27; LT_LEVEL=28
 
 class Wide(IntEnum):
     NODE=0; LEFT=1; V0=2; V1=3; V2=4; V3=5; EMIT=6; ZERO=7
@@ -32,15 +33,15 @@ STACK_BASE=68
 AUTH_BASE=88
 
 def control(op, dst=0, src=0, aux=0, imm=0, target=0, cond=0):
-    for value,width in ((op,5),(dst,5),(src,5),(aux,5),(imm,21),(target,7),(cond,4)):
+    for value,width in ((op,5),(dst,5),(src,5),(aux,5),(imm,21),(target,8),(cond,4)):
         if not 0 <= int(value) < (1 << width):
             raise ValueError('control field overflow')
     return (3 << 62) | (int(op)<<57) | (int(dst)<<52) | (int(src)<<47) | \
-           (int(aux)<<42) | (int(imm)<<21) | (int(target)<<14) | (int(cond)<<10)
+           (int(aux)<<42) | (int(imm)<<21) | (int(target)<<13) | (int(cond)<<9)
 
 def fields(word):
     return (Op((word>>57)&31),(word>>52)&31,(word>>47)&31,(word>>42)&31,
-            (word>>21)&0x1fffff,(word>>14)&127,Cond((word>>10)&15))
+            (word>>21)&0x1fffff,(word>>13)&255,Cond((word>>9)&15))
 
 def macro(tid, layer=0, group=0, keep=True):
     if not 0 <= tid < TEMPLATE_WORDS:

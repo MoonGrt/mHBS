@@ -1,8 +1,8 @@
 `timescale 1ns / 1ps
 `default_nettype none
 `include "rtl/executor/instructions.svh"
-// K1U1 template executor. CHAIN owns WOTS/LMOTS and leaf reduction only;
-// every Merkle/FORS traversal, merge and authentication access is a program op.
+// K1U1 template executor. Each HASH launches one complete recipe; software
+// controls chain steps, captures, endpoint reduction, trees and authentication.
 // verilog_format: off
 module executor #(parameter integer UNROLL=1,PIPELINE=1)(
 `ifndef SYNTHESIS
@@ -10,7 +10,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
  output wire [63:0] hash_count,permutation_count,
 `endif
  input wire clk,rst,input wire [63:0] image_header,profile_descriptor,
- output wire [6:0] program_address,input wire [63:0] program_data,
+ output wire [7:0] program_address,input wire [63:0] program_data,
  output wire [4:0] template_address,input wire [63:0] template_data,
  output wire [9:0] descriptor_addresses,input wire [127:0] descriptor_data,
  input wire [6:0] job_entry,input wire [1:0] job_operation,
@@ -25,6 +25,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
 // verilog_format: on
     localparam integer N=32,W=256,V=392,INDEX_BITS=8,MAX_MESSAGE_BYTES=87,DIGEST_BYTES=49;
     localparam integer FORS_DIGEST_BITS=320,WORKSPACE_DEPTH=128;
+    wire valid_image_header=image_header[63:57]==`CHAIN_HEADER_MAGIC &&
+        image_header[42:36]==0 && image_header[49:43]==1 && image_header[56:50]==2;
     wire [4:0] config_code=profile_descriptor[4:0];
     wire decoded_stateful=config_code>=5'h18 && config_code<=5'h1d;
     wire decoded_xmss=decoded_stateful && config_code<5'h1b;
@@ -37,13 +39,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
 `endif
     wire [4:0] decoded_height=(config_code==5'h18 || config_code==5'h1b) ? 5'd10 :
         config_code==5'h19 ? 5'd16 : config_code==5'h1c ? 5'd15 : 5'd20;
-    typedef enum logic [5:0] {
-        IDLE,MESSAGE,LAUNCH,FETCH,LOAD_DESCRIPTOR,DECODE,CHAIN_SETUP,CHAIN_STORE,
-        CHAIN_OUTPUT0,CHAIN_NEXT,REDUCE_SETUP,LEAF_SETUP,HASH_ISSUE,HASH_WAIT,HASH_RESULT,
+    typedef enum logic [4:0] {
+        IDLE,MESSAGE,LAUNCH,FETCH,LOAD_DESCRIPTOR,DECODE,HASH_ISSUE,HASH_WAIT,HASH_RESULT,
         ROUTE,TRANSFORM,EMIT,EMIT_NEXT,OUTPUT_CHUNK,DRAIN,FINISH,VERIFY_INPUT,VERIFY_RANDOM,
-        VERIFY_CHAIN_INPUT,VERIFY_CHAIN_RUN,VERIFY_CHAIN_ADVANCE,LT_INIT,LT_SETUP,LT_STORE,
-        LT_COPY,LT_NEXT,FAILED,LT_FINISH,SF_LEAF,SF_LEAF_DONE,SF_RANDOM,
-        CONTROL,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT
+        FAILED,SF_RANDOM,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT
     } state_t;
     state_t state,continuation;
     logic abort_execution;
@@ -66,21 +65,18 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     logic [63:0] scalar_tree;
     logic [19:0] scalar_leaf;
     logic [11:0] checksum;
-    logic [7:0] transform_index,chain_cursor,endpoint_count,lt_count,lt_cursor;
+    logic [7:0] transform_index,lt_count,lt_cursor;
     logic [3:0] lt_level;
     logic [4:0] layer,node_level,tree_height,auth_level;
     logic [5:0] group_index;
     logic [20:0] leaf_cursor,node_index,target,target_at_level,control_base,control_limit;
     logic [3:0] control_flags;
     logic [1:0] indexing;
-    logic [3:0] macro_op,macro_flags;
+    logic [3:0] macro_op;
     logic [4:0] macro_desc,macro_route;
-    logic [63:0] saved_descriptor,saved_chain_descriptor;
-    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_chain_descriptor;
+    logic [63:0] saved_descriptor;
+    wire [63:0] descriptor=saved_descriptor;
     wire [63:0] route_descriptor=descriptor_data[127:64];
-    wire sign_only=stateful && !verifying && macro_flags[2];
-    logic [19:0] chain_leaf;
-    logic [20:0] chain_address;
     logic [255:0] node_value,emit_value;
     logic [V-1:0] result;
     logic [5:0] emit_length;
@@ -97,28 +93,14 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         .command_keep_coordinates,.control_valid,.control,.control_ready(state==FETCH),
         .control_done(control_complete),.control_condition);
     // verilog_format: on
-    logic [4:0] hash_recipe_id;
-    assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[48:44] : macro_route,hash_recipe_id};
-    always_comb begin
-        hash_recipe_id=macro_desc;
-        case(state)
-            EMIT:hash_recipe_id=5'(emit_base+emit_cursor);
-            CHAIN_SETUP:hash_recipe_id=chain_descriptor[56:52];
-            VERIFY_CHAIN_RUN:hash_recipe_id=chain_descriptor[48:44];
-            REDUCE_SETUP,LT_SETUP:hash_recipe_id=chain_descriptor[40:36];
-            SF_LEAF:hash_recipe_id=chain_descriptor[32:28];
-            default:begin end
-        endcase
-    end
-    logic [63:0] task_recipe,task_step;
-    logic task_chain,task_capture;
-    logic [4:0] task_steps,task_capture_after;
+    wire [4:0] hash_recipe_id=state==EMIT ? 5'(emit_base+emit_cursor) : macro_desc;
+    assign descriptor_addresses={macro_route,hash_recipe_id};
+    logic [63:0] task_recipe;
     logic [19:0] task_leaf;
     logic [7:0] task_a;
     logic [20:0] task_b;
     wire lane_ready,lane_valid,lane_error;
     wire [V-1:0] lane_value;
-    wire [255:0] lane_capture;
     wire [7:0] lane_list_next;
 `ifndef SYNTHESIS
     wire [63:0] lane_hashes,lane_permutations;
@@ -150,15 +132,15 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         .batch_response_valid(),.batch_response_ready(1'b0),.batch_response_tag(),.batch_response_digest(),
         .batch_response_capture(),.batch_read_tag(1'b0),.batch_read_digest(),.batch_read_capture(),
         .request_valid(state==HASH_ISSUE),.request_ready(lane_ready),.request_recipe(task_recipe),
-        .request_step_recipe(task_step),.request_chain(task_chain),.request_steps(task_steps),
-        .request_capture_after(task_capture_after),.request_capture(task_capture),
+        .request_step_recipe(64'd0),.request_chain(1'b0),.request_steps(5'd0),
+        .request_capture_after(5'd0),.request_capture(1'b0),
         .secret_seed,.secret_prf,.public_seed,.root(value[3]),
         .randomizer((task_recipe[59:56]==4 || task_recipe[59:56]==6 || (verifying && stateful)) ? value[0] : randomizer),
         .message_buffer,.message_length,.request_layer(layer),.request_tree(scalar_tree),.request_leaf(task_leaf),
         .request_a(task_a),.request_b({11'd0,task_b}),.request_left(result[255:0]),.request_right(node_value),
         .list_index0(),.list_index1(),.list_next_index0(lane_list_next),
         .list_data0(endpoint_value0),.list_data1(endpoint_value1),.response_valid(lane_valid),
-        .response_ready(state==HASH_WAIT),.response_value(lane_value),.response_capture(lane_capture),.error(lane_error));
+        .response_ready(state==HASH_WAIT),.response_value(lane_value),.response_capture(),.error(lane_error));
     // verilog_format: on
     assign job_ready=state==IDLE;
     assign message_ready=state==MESSAGE;
@@ -191,10 +173,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             end
         end
     endfunction
-    // Scalar setup uses the chain digit; batch requests use a digit prepared
-    // on the preceding acceptance edge. The checksum loop only visits message
-    // digits, so it bypasses the state/index/checksum-digit selection network.
-    wire [4:0] shared_digit = digit(chain_cursor);
+    // Software selects chain digits with A; checksum visits message digits only.
     wire [3:0] transform_digit = value[2][{(transform_index[5:0] ^ 6'd1), 2'b0}+:4];
     wire [3:0] checksum_increment = ~transform_digit;
 `ifndef SYNTHESIS
@@ -304,6 +283,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 `CTX_OPERATION:narrow_read={19'd0,operation};
                 `CTX_XMSS:narrow_read={20'd0,xmss};
                 `CTX_STATEFUL:narrow_read={20'd0,stateful};
+                `CTX_DIGIT:narrow_read={16'd0,digit(task_a)};
+                `CTX_LT_COUNT:narrow_read={13'd0,lt_count};
+                `CTX_LT_CURSOR:narrow_read={13'd0,lt_cursor};
+                `CTX_LT_LEVEL:narrow_read={17'd0,lt_level};
                 default:narrow_read=0;
             endcase
         end
@@ -311,7 +294,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     function automatic [20:0] narrow_mask(input [4:0] selector);
         case(selector)
             `CTX_LEAF:narrow_mask=21'hfffff;
-            `CTX_A:narrow_mask=21'hff;
+            `CTX_A,`CTX_LT_COUNT,`CTX_LT_CURSOR:narrow_mask=21'hff;
+            `CTX_LT_LEVEL:narrow_mask=21'hf;
             `CTX_LEVEL,`CTX_HEIGHT,`CTX_LAYER,`CTX_AUTH_LEVEL:narrow_mask=21'h1f;
             `CTX_GROUP:narrow_mask=21'h3f;
             `CTX_FLAGS:narrow_mask=21'hf;
@@ -338,6 +322,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 `CTX_AUTH_LEVEL:auth_level<=data[4:0];
                 `CTX_FLAGS:control_flags<=data[3:0];
                 `CTX_MODE:indexing<=data[1:0];
+                `CTX_LT_COUNT:lt_count<=data[7:0];
+                `CTX_LT_CURSOR:lt_cursor<=data[7:0];
+                `CTX_LT_LEVEL:lt_level<=data[3:0];
                 default:begin end
             endcase
         end
@@ -371,7 +358,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     wire [4:0] control_op=control[61:57],control_dst=control[56:52];
     wire [4:0] control_src=control[51:47],control_aux=control[46:42];
     wire [20:0] control_immediate=control[41:21];
-    wire [3:0] control_cond=control[13:10];
+    wire [3:0] control_cond=control[12:9];
     wire [20:0] control_dst_value=narrow_read(control_dst);
     wire [20:0] control_src_value=narrow_read(control_src);
     wire [20:0] control_aux_value=narrow_read(control_aux);
@@ -392,7 +379,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     wire [20:0] branch_right=control[46:42]==1 ? control[41:21] : narrow_read(control[51:47]);
     logic branch_taken;
     always_comb begin
-        case(control[13:10])
+        case(control[12:9])
             `COND_ALWAYS:branch_taken=1;
             `COND_EQ:branch_taken=branch_left==branch_right;
             `COND_NE:branch_taken=branch_left!=branch_right;
@@ -429,12 +416,6 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         if(state==CONTROL_STORE) begin
             endpoint_write=1;endpoint_address=control_store_address[7:0];
             endpoint_data=wide_read(control_src);
-        end else if(state==CHAIN_STORE && indexing!=1) begin
-            endpoint_write=1;endpoint_address=chain_cursor;endpoint_data=result[255:0];
-        end else if(state==LT_STORE) begin
-            endpoint_write=1;endpoint_address=lt_cursor>>1;endpoint_data=result[255:0];
-        end else if(state==LT_COPY) begin
-            endpoint_write=1;endpoint_address=lt_cursor>>1;endpoint_data=endpoint_value0;
         end else if(state==ROUTE && macro_route!=0 && route_descriptor[53]) begin
             endpoint_write=1;endpoint_address={2'd0,group_index};endpoint_data=route_value[255:0];
         end
@@ -464,8 +445,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         begin
                     case(control_op)
                         `CTRL_SET,`CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL:begin
-                            if(control_dst>15 || (control_op==`CTRL_MOV && control_src>24) ||
-                                (control_op==`CTRL_ADD && (control_src>24 || control_aux>24)) ||
+                            if((control_dst>15 && (control_dst<26 || control_dst>28)) ||
+                                (control_op==`CTRL_MOV && control_src>28) ||
+                                (control_op==`CTRL_ADD && (control_src>28 || control_aux>28)) ||
                                 ((control_op==`CTRL_SHR || control_op==`CTRL_SHL) &&
                                     (control_immediate==0 || control_immediate>20)) ||
                                 (|control_alu[40:21]) || (control_alu[20:0]&~narrow_mask(control_dst))!=0 ||
@@ -474,17 +456,17 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                             else begin narrow_write(control_dst,control_alu[20:0]);complete_control();end
                         end
                         `CTRL_BR:begin
-                            if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
+                            if(control_cond>9 || control_aux>1 || control_dst>28 || control_src>28 ||
                                 ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
                             else complete_control();
                         end
                         `CTRL_CALL,`CTRL_RET:complete_control();
                         `CTRL_LOAD:begin
-                            if(control_dst>6 || control_src>24 || control_load_address>=108) fail();
+                            if(control_dst>6 || control_src>28 || control_load_address>=108) fail();
                             else state<=CONTROL_LOAD;
                         end
                         `CTRL_STORE:begin
-                            if(control_src>7 || control_dst>24 || control_store_address>=108) fail();
+                            if(control_src>7 || control_dst>28 || control_store_address>=108) fail();
                             else state<=CONTROL_STORE;
                         end
                         `CTRL_INPUT:begin
@@ -508,12 +490,6 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         else begin
             case(state)
                 HASH_ISSUE,HASH_WAIT:endpoint_read_address<=lane_list_next;
-                REDUCE_SETUP,LT_FINISH:endpoint_read_address<=0;
-                LT_INIT:endpoint_read_address<=lt_cursor;
-                LT_NEXT:begin
-                    if(lt_cursor+2<lt_count) endpoint_read_address<=lt_cursor+2;
-                    else endpoint_read_address<=0;
-                end
                 FETCH:if(control_valid && control_op==`CTRL_LOAD && control_load_address<108)
                     endpoint_read_address<=control_load_address[7:0];
                 default:begin end
@@ -521,12 +497,12 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         end
     end
 `ifndef SYNTHESIS
-    initial if(UNROLL!=1 || PIPELINE!=1) $fatal(1,"image-chain is K1U1 only");
+    initial if(UNROLL!=1 || PIPELINE!=1) $fatal(1,"image-soft-chain is K1U1 only");
     logic [15:0] diagnostic_reason;
     always_comb begin
         diagnostic_reason=0;
         if(state==IDLE && job_valid) begin
-            if(image_header[63:57]!=`CHAIN_HEADER_MAGIC) diagnostic_reason=16'h3010;
+            if(!valid_image_header) diagnostic_reason=16'h3010;
             else if(!valid_profile) diagnostic_reason=16'h3009;
             else if(decoded_stateful && job_index>=(32'd1<<decoded_height)) diagnostic_reason=16'h3008;
         end else if(seq_error) diagnostic_reason=16'h3011;
@@ -559,11 +535,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             scalar_tree<=0;scalar_leaf<=0;layer<=0;group_index<=0;
             leaf_cursor<=0;node_index<=0;node_level<=0;target<=0;target_at_level<=0;
             tree_height<=0;auth_level<=0;control_base<=0;control_limit<=0;control_flags<=0;indexing<=0;
-            macro_op<=0;macro_desc<=0;macro_route<=0;macro_flags<=0;
-            saved_descriptor<=0;saved_chain_descriptor<=0;
-            task_recipe<=0;task_step<=0;task_chain<=0;task_capture<=0;
-            task_steps<=0;task_capture_after<=0;task_leaf<=0;task_a<=0;task_b<=0;
-            chain_cursor<=0;endpoint_count<=0;chain_leaf<=0;chain_address<=0;
+            macro_op<=0;macro_desc<=0;macro_route<=0;
+            saved_descriptor<=0;task_recipe<=0;task_leaf<=0;task_a<=0;task_b<=0;
             lt_count<=0;lt_cursor<=0;lt_level<=0;checksum<=0;transform_index<=0;
             route_source<=0;emit_length<=0;emit_base<=0;emit_count<=0;emit_cursor<=0;
         end else begin
@@ -579,7 +552,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                     scalar_tree<=0;scalar_leaf<=decoded_stateful ? job_index[19:0] : 0;
                     layer<=0;group_index<=0;value[3]<=job_public_root;
                     task_leaf<=decoded_stateful ? job_index[19:0] : 0;task_a<=0;task_b<=0;
-                    if(image_header[63:57]!=`CHAIN_HEADER_MAGIC || !valid_profile ||
+                    if(!valid_image_header || !valid_profile ||
                         (decoded_stateful && job_index>=(32'd1<<decoded_height))) fail();
                     else if(job_operation!=0 && job_message_length!=0) state<=MESSAGE;
                     else state<=LAUNCH;
@@ -598,9 +571,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                         state<=DRAIN;
                     end else if(control_valid) execute_control();
                     else if(cmd_valid) begin
-                        macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];macro_flags<=cmd[27:24];
+                        macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];
                         if(!command_keep_coordinates) begin layer<=cmd[23:19];group_index<=cmd[18:13];end
-                        task_chain<=0;task_capture<=0;task_steps<=0;state<=LOAD_DESCRIPTOR;
+                        state<=LOAD_DESCRIPTOR;
                     end
                 end
                 LOAD_DESCRIPTOR:begin saved_descriptor<=descriptor_data[63:0];state<=DECODE;end
@@ -611,92 +584,11 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                         else if(verifying && saved_descriptor[59:56]==3) read_verify_node(VERIFY_RANDOM);
                         else start_hash(saved_descriptor,HASH_RESULT);
                     end
-                    2:begin
-                        chain_cursor<=0;endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor;
-                        chain_leaf<=task_leaf;chain_address<=task_b;state<=CHAIN_SETUP;
-                    end
                     4:begin checksum<=0;transform_index<=0;state<=TRANSFORM;end
                     5:if(verifying && stateful) complete_macro();
                     else begin emit_base<=descriptor[59:52];emit_count<=descriptor[51:48];emit_cursor<=0;state<=EMIT;end
                     default:fail();
                 endcase
-                CHAIN_SETUP:begin
-                    if(endpoint_count==0 || endpoint_count>67) fail();
-                    else if(verifying) begin
-                        task_chain<=0;task_capture<=0;task_step<=descriptor_data[127:64];task_steps<=0;
-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
-                        task_b<=indexing==1 ? chain_address : 21'(digit(chain_cursor));
-                        read_verify_node(VERIFY_CHAIN_INPUT);
-                    end else begin
-                        task_chain<=1;task_step<=descriptor_data[127:64];
-                        task_capture<=leaf_cursor==target && macro_flags[0];
-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
-                        task_b<=indexing==1 ? chain_address : 21'd0;
-                        task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target)) ?
-                            digit(chain_cursor) : chain_descriptor[19:15];
-                        task_capture_after<=indexing==1 ? 0 : digit(chain_cursor);
-                        start_hash(descriptor_data[63:0],CHAIN_STORE);
-                    end
-                end
-                CHAIN_STORE:begin
-                    if(chain_cursor==0) node_value<=result[255:0];
-                    task_chain<=0;
-                    if(sign_only || (!verifying && macro_flags[0] && leaf_cursor==target)) state<=CHAIN_OUTPUT0;
-                    else state<=CHAIN_NEXT;
-                end
-                CHAIN_OUTPUT0:start_output(sign_only ? result[255:0] : lane_capture,node_bytes,CHAIN_NEXT);
-                CHAIN_NEXT:begin
-                    if(indexing!=1 && chain_cursor+1<endpoint_count) begin chain_cursor<=chain_cursor+1'b1;state<=CHAIN_SETUP;end
-                    else if(sign_only) begin
-                        // Verify consumes endpoints below; Sign emits the prefix only.
-                        complete_macro();
-                    end else if(!stateful && !verifying && macro_flags[3] && leaf_cursor==target) begin
-                        node_value<=0;state<=LEAF_SETUP;
-                    end else if(stateful && chain_descriptor[13:12]==2) begin
-                        lt_count<=endpoint_count;lt_cursor<=0;lt_level<=0;state<=LT_INIT;
-                    end else if(chain_descriptor[13:12]==0) route_result(ROUTE_NODE);
-                    else state<=REDUCE_SETUP;
-                end
-                REDUCE_SETUP:begin
-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;task_b<=0;
-                    start_hash(descriptor_data[63:0],stateful ? SF_LEAF : LEAF_SETUP);
-                end
-                LEAF_SETUP:begin
-                    if(!stateful && !verifying && macro_flags[3] && leaf_cursor==target) route_result(ROUTE_NODE);
-                    else begin node_value<=result[255:0];route_result(ROUTE_HASH);end
-                end
-                LT_INIT:begin
-                    if(lt_cursor+1>=lt_count) state<=LT_COPY;
-                    else state<=LT_SETUP;
-                end
-                LT_SETUP:begin
-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;
-                    task_a<={4'd0,lt_level};task_b<=21'(lt_cursor>>1);
-                    result<={{(V-W){1'b0}},endpoint_value0};node_value<=endpoint_value1;
-                    start_hash(descriptor_data[63:0],LT_STORE);
-                end
-                LT_STORE:state<=LT_NEXT;
-                LT_COPY:state<=LT_NEXT;
-                LT_NEXT:begin
-                    if(lt_cursor+2<lt_count) begin lt_cursor<=lt_cursor+2;state<=LT_INIT;end
-                    else if(lt_count<=2) state<=LT_FINISH;
-                    else begin lt_count<=(lt_count+1)>>1;lt_cursor<=0;lt_level<=lt_level+1'b1;state<=LT_INIT;end
-                end
-                LT_FINISH:begin
-                    node_value<=endpoint_value0;result<={{(V-W){1'b0}},endpoint_value0};
-                    if(verifying) value[2]<=endpoint_value0;
-                    route_result(ROUTE_NODE);
-                end
-                SF_LEAF:begin
-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;
-                    task_b<=(21'd1<<stateful_height)+leaf_cursor;
-                    start_hash(descriptor_data[63:0],SF_LEAF_DONE);
-                end
-                SF_LEAF_DONE:begin
-                    node_value<=result[255:0];
-                    if(verifying) value[2]<=result[255:0];
-                    route_result(ROUTE_HASH);
-                end
                 SF_RANDOM:begin
                     value[0]<=emit_value;
                     if(xmss) complete_macro();
@@ -737,14 +629,6 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 end
                 VERIFY_INPUT:if(verify_valid) begin emit_value<=verify_data;state<=continuation;end
                 VERIFY_RANDOM:route_result(ROUTE_EMIT);
-                VERIFY_CHAIN_INPUT:begin
-                    result<={{(V-W){1'b0}},emit_value};
-                    if(indexing==1) start_hash(task_step,LEAF_SETUP);
-                    else state<=VERIFY_CHAIN_RUN;
-                end
-                VERIFY_CHAIN_RUN:if(task_b[3:0]==15) state<=CHAIN_STORE;
-                    else start_hash(descriptor_data[63:0],VERIFY_CHAIN_ADVANCE);
-                VERIFY_CHAIN_ADVANCE:begin task_b<={17'd0,task_b[3:0]+4'd1};state<=VERIFY_CHAIN_RUN;end
                 OUTPUT_CHUNK:state<=continuation;
                 CONTROL_LOAD:begin wide_write(control_dst,endpoint_value0);complete_control();end
                 CONTROL_STORE:complete_control();

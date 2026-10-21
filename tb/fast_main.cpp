@@ -29,9 +29,10 @@ static void node(VlWide<8> &value,std::string hex) {
 int main(int argc,char **argv) {
  try {
     VerilatedContext context;context.commandArgs(argc,argv);
-    std::string path;bool collect_trace=false;
+    std::string path;bool collect_trace=false,collect_ordered=false;
     for(int i=1;i<argc;i++)if(std::string(argv[i]).rfind("+VECTOR=",0)==0)path=argv[i]+8;
     for(int i=1;i<argc;i++)if(std::string(argv[i])=="+HASH_TRACE=1")collect_trace=true;
+    for(int i=1;i<argc;i++)if(std::string(argv[i])=="+HASH_ORDERED=1"){collect_ordered=true;collect_trace=true;}
     if(path.empty())throw std::runtime_error("VECTOR is required");
     auto meta=lines(path+"/meta.mem"),cfg=lines(path+"/job.mem"),msg=lines(path+"/message.mem");
     auto expected=lines(path+"/expected.mem"),nodes=lines(path+"/nodes.mem");
@@ -42,19 +43,19 @@ int main(int argc,char **argv) {
     std::array<uint64_t,16> commands{};
     std::array<unsigned char,32> trace_sum{},trace_xor{};
     SHA256_CTX task_trace;SHA256_Init(&task_trace);
-    uint64_t trace_hashes=0,trace_blocks=0,task_blocks=0,child_chains=0,controls=0;
+    uint64_t trace_hashes=0,trace_blocks=0,task_blocks=0,child_chains=0,controls=0,recipe_requests=0;
     unsigned sent=0,accepted=0;
     auto tick=[&](bool observe) {
         dut.clk=0;dut.eval();
         if(observe) {
             if(dut.execution_reset){
-                hashes=0;perms=0;observed_cycles=0;commands.fill(0);child_chains=0;controls=0;
+                hashes=0;perms=0;observed_cycles=0;commands.fill(0);child_chains=0;controls=0;recipe_requests=0;
                 trace_sum.fill(0);trace_xor.fill(0);trace_hashes=0;trace_blocks=0;task_blocks=0;
                 SHA256_Init(&task_trace);
             } else {
                 observed_cycles+=dut.execution_active;hashes+=dut.hash_event+dut.batch_event;perms+=dut.permutation_event+dut.batch_event;
                 if(dut.command_event)commands[dut.command_opcode]++;
-                child_chains+=dut.child_chain_event;controls+=dut.control_event;
+                child_chains+=dut.child_chain_event;controls+=dut.control_event;recipe_requests+=dut.recipe_request_event;
                 if(collect_trace) {
                     // Feedback can finish one Hash and start the next on the same edge.
                     if(dut.trace_result_event) {
@@ -64,6 +65,7 @@ int main(int argc,char **argv) {
                         SHA256_Update(&task_trace,result,dut.trace_result_bytes);SHA256_Final(item,&task_trace);
                         unsigned carry=0;
                         for(int i=31;i>=0;i--){unsigned value=unsigned(trace_sum[i])+item[i]+carry;trace_sum[i]=value&255;carry=value>>8;trace_xor[i]^=item[i];}
+                        if(collect_ordered)std::cout<<"HASH_TASK_TRACE "<<trace_hashes<<" "<<hex_bytes(item,32)<<std::endl;
                         trace_hashes++;task_blocks=0;SHA256_Init(&task_trace);
                     }
                     if(dut.trace_block_event) {
@@ -125,7 +127,8 @@ int main(int argc,char **argv) {
     std::cout<<"MACRO_METRICS {\"commands\":"<<command_total<<",\"HASH\":"<<commands[1]
              <<",\"CHAIN\":"<<commands[2]<<",\"TREE\":"<<commands[3]
              <<",\"TRANSFORM\":"<<commands[4]<<",\"EMIT\":"<<commands[5]
-             <<",\"TREE_child_CHAIN\":"<<child_chains<<",\"control_instructions\":"<<controls<<"}"<<std::endl;
+             <<",\"TREE_child_CHAIN\":"<<child_chains<<",\"control_instructions\":"<<controls
+             <<",\"recipe_requests\":"<<recipe_requests<<",\"dynamic_instructions\":"<<command_total+controls<<"}"<<std::endl;
     if(collect_trace)std::cout<<"HASH_TRACE_METRICS {\"hashes\":"<<trace_hashes<<",\"blocks\":"<<trace_blocks
              <<",\"sum256\":\""<<hex_bytes(trace_sum.data(),32)<<"\",\"xor256\":\""<<hex_bytes(trace_xor.data(),32)<<"\"}"<<std::endl;
     std::cout<<"STATEFUL_PASS P"<<dut.configuration_pipeline<<"U"<<dut.configuration_unroll

@@ -1,11 +1,11 @@
 `timescale 1ns / 1ps
 `default_nettype none
-// One outstanding main-compatible template macro. Tree algorithms execute as
-// ordinary bounded control instructions in the program ROM.
+// One outstanding hash/transform/output template. Chain and tree algorithms
+// execute as bounded software routines in the program ROM.
 // verilog_format: off
 module sequencer (
  input wire clk,rst,start, input wire [6:0] entry, output wire ready, output logic done,error,
- output wire [6:0] program_address, input wire [63:0] program_data,
+ output wire [7:0] program_address, input wire [63:0] program_data,
  output wire [4:0] template_address, input wire [63:0] template_data,
  output wire command_valid, input wire command_ready,command_done, output wire [47:0] command,
  output wire command_keep_coordinates,
@@ -13,16 +13,16 @@ module sequencer (
  input wire control_ready,control_done,control_condition
 );
 // verilog_format: on
-    typedef enum logic [2:0] {IDLE,FETCH,LOAD,ISSUE,WAIT_MACRO,CONTROL,WAIT_CONTROL} state_t;
+    typedef enum logic [2:0] {IDLE,FETCH,LOAD,ISSUE,WAIT_MACRO,WAIT_CONTROL} state_t;
     state_t state;
-    logic [6:0] pc, return_pc;
-    logic return_valid;
+    logic [7:0] pc, return_pc[0:1];
+    logic [1:0] return_depth;
     logic [63:0] token;
     logic [16:0] template_word;
     logic [10:0] coordinate,stride;
     logic [5:0] remaining;
     logic [1:0] sp;
-    logic [6:0] loop_pc[0:1];
+    logic [7:0] loop_pc[0:1];
     logic [5:0] loop_remaining[0:1];
     logic [10:0] loop_bias[0:1],loop_delta[0:1];
     wire [1:0] kind=token[63:62];
@@ -36,7 +36,7 @@ module sequencer (
     // The token remains stable until WAIT_CONTROL retires the instruction.
     // Issue directly from LOAD; the executor does not need a second copy.
     assign control_valid=state==LOAD && kind==3 && control_op>=1 &&
-        control_op<=15 && token[9:0]==0;
+        control_op<=15 && token[8:0]==0;
     assign control=token;
     assign command={1'b0,template_word[2:0],3'd0,template_word[7:3],
         3'd0,template_word[12:8],template_word[15],template_word[16],
@@ -46,7 +46,7 @@ module sequencer (
     endtask
     task automatic advance;
         begin
-            if(pc==127) fault();
+            if(pc==8'd255) fault();
             else begin pc<=pc+1'b1;state<=FETCH;end
         end
     endtask
@@ -54,24 +54,24 @@ module sequencer (
     always_ff @(posedge clk) begin
         if(rst) begin
             state<=IDLE;done<=0;error<=0;pc<=0;token<=0;template_word<=0;
-            coordinate<=0;stride<=0;remaining<=0;sp<=0;return_pc<=0;return_valid<=0;
+            coordinate<=0;stride<=0;remaining<=0;sp<=0;return_depth<=0;
             for(i=0;i<2;i=i+1) begin
-                loop_pc[i]<=0;loop_remaining[i]<=0;loop_bias[i]<=0;loop_delta[i]<=0;
+                return_pc[i]<=0;loop_pc[i]<=0;loop_remaining[i]<=0;loop_bias[i]<=0;loop_delta[i]<=0;
             end
         end else begin
             done<=0;
             case(state)
                 IDLE:if(start) begin
-                    pc<=entry;sp<=0;loop_bias[0]<=0;loop_bias[1]<=0;
-                    return_valid<=0;error<=0;state<=FETCH;
+                    pc<={1'b0,entry};sp<=0;loop_bias[0]<=0;loop_bias[1]<=0;
+                    return_depth<=0;error<=0;state<=FETCH;
                 end
                 FETCH:begin token<=program_data;state<=LOAD;end
                 LOAD:begin
                     if(kind==3) begin
                         if(control_op==0) begin
-                            if(token[56:0]!=0 || return_valid || sp!=0) fault();
+                            if(token[56:0]!=0 || return_depth!=0 || sp!=0) fault();
                             else begin done<=1;state<=IDLE;end
-                        end else if(control_op>15 || token[9:0]!=0) fault();
+                        end else if(control_op>15 || token[8:0]!=0) fault();
                         else if(control_ready) state<=WAIT_CONTROL;
                     end else if(kind==2) begin
                         if(token[39:0]!=0 || back_count>pc) fault();
@@ -90,7 +90,7 @@ module sequencer (
                             sp<=sp+1'b1;pc<=pc-back_count;state<=FETCH;
                         end
                     end else if(token[27:0]!=0 || template_data[63:17]!=0 ||
-                        template_data[2:0]==0 || template_data[2:0]==3 || template_data[2:0]>5) fault();
+                        !(template_data[2:0]==1 || template_data[2:0]==4 || template_data[2:0]==5)) fault();
                     else begin
                         template_word<=template_data[16:0];
                         coordinate<=token[57:47]+loop_bias[0]+loop_bias[1];
@@ -104,13 +104,18 @@ module sequencer (
                     end else advance();
                 end
                 WAIT_CONTROL:if(control_done) begin
-                    if(control_op==7 && control_condition) begin pc<=token[20:14];state<=FETCH;end
+                    if(control_op==7 && control_condition) begin pc<=token[20:13];state<=FETCH;end
                     else if(control_op==8) begin
-                        if(return_valid || pc==127) fault();
-                        else begin return_pc<=pc+1'b1;return_valid<=1;pc<=token[20:14];state<=FETCH;end
+                        if(return_depth==2 || pc==8'd255) fault();
+                        else begin
+                            return_pc[return_depth[0]]<=pc+1'b1;return_depth<=return_depth+1'b1;
+                            pc<=token[20:13];state<=FETCH;
+                        end
                     end else if(control_op==9) begin
-                        if(!return_valid) fault();
-                        else begin pc<=return_pc;return_valid<=0;state<=FETCH;end
+                        if(return_depth==0) fault();
+                        else begin
+                            pc<=return_pc[!return_depth[0]];return_depth<=return_depth-1'b1;state<=FETCH;
+                        end
                     end else advance();
                 end
                 default:fault();

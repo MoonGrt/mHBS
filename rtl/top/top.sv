@@ -47,7 +47,7 @@ module top #(
     output wire [10:0] signature_nodes, output wire [15:0] signature_length
 );
 // verilog_format: on
-    wire [6:0] program_address;
+    wire [7:0] program_address;
     wire [4:0] template_address;
     wire [63:0] program_data, template_data;
     wire [9:0] descriptor_addresses;
@@ -55,7 +55,7 @@ module top #(
 
     // Algorithm-independent construction images prevent ROM constant folding.
     // The selected profile's image is patched into INIT after core synthesis.
-    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] program_memory[0:127];
+    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] program_memory[0:255];
     (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] template_memory[0:31];
     (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] descriptor_memory[0:31];
     initial begin

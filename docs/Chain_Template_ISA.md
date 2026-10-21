@@ -1,14 +1,14 @@
-# CHAIN template image layout 4
+# Software CHAIN image layout 5
 
-This branch uses main's program / template / descriptor architecture. Layout 4
-is a new local encoding; it is **not HashFlow ABI4**. HashFlow opcode 36/37 images
-and main's layout-3 TREE images are rejected. One K1U1 hash lane executes one
-macro at a time. SHAKE is the default; `MHBS_SHA2` selects SHA256 recipes.
+This experimental branch starts from the verified C1 image-chain implementation.
+It preserves the compound Hash recipes and moves all CHAIN control into the
+program. One K1U1 Hash lane executes one request at a time. SHAKE is the default;
+`MHBS_SHA2` selects SHA256 recipes. Layout 5 is independent of HashFlow ABI5.
 
 ## ROM and task templates
 
-ROM capacities are 128×64 program, 32×64 template and 32×64 descriptor. Program
-PC is seven bits and template address is five bits. Both backends retain main's
+ROM capacities are 256×64 program, 32×64 template and 32×64 descriptor. Program
+PC is eight bits and template address is five bits. Both backends retain main's
 recipe, profile and output-size fields. Descriptor 1 bit 5 is the backend marker.
 Descriptor 0 contains:
 
@@ -19,12 +19,15 @@ Descriptor 0 contains:
 | 42:36 | Keygen entry PC |
 | 49:43 | Sign entry PC |
 | 56:50 | Verify entry PC |
-| 63:57 | Required layout marker `0x53` |
+| 63:57 | Required layout marker `0x54` |
 
-Sign and Verify may share an entry; operation is a read-only context source.
+The three seven-bit entry fields point to fixed trampolines at PCs 0, 1 and 2.
+Each trampoline jumps to an eight-bit actual entry. Sign and Verify may share
+actual code; operation is a read-only context source.
 The template low 17 bits preserve main's encoding: op [2:0], recipe/macro
 descriptor [7:3], route [12:8], CAPTURE [13], AUTH [14], EXTERNAL_ROOT [15],
-SIGN_ONLY [16]. HASH=1, CHAIN=2, TRANSFORM=4, EMIT=5. TREE=3 is rejected.
+SIGN_ONLY [16]. HASH=1, TRANSFORM=4, EMIT=5. CHAIN=2 and TREE=3 are rejected.
+Old layout markers are rejected at Job startup.
 
 A macro token retains main's fields: kind [63:62], template low four bits
 [61:58], coordinate [57:47], repeat [46:41], stride [40:30]. Template bit 4
@@ -33,12 +36,12 @@ contexts. Bits 27:0 are reserved zero. The compiler emits SINGLE macro tokens. R
 counted LOOP remain supported; software tree loops use explicit BR instructions. A task cannot retire before its single macro
 completes.
 
-CHAIN retains main's grouped chains, capture, endpoint reduction and optional
-XMSS L-tree / LMS leaf construction. Its software LEAF, CURSOR, TARGET and MODE
-are explicit inputs. It does not advance the tree cursor, tree index, level,
-path or base. A complete CHAIN returns its node in NODE. Standalone stateful
-SIGN_ONLY is kept before cold full-tree recomputation, matching the initial main
-workload. Verify consumes supplied chain nodes and executes their suffixes.
+The compiler emits shared software routines for chains and reduction. A HASH
+issues one existing recipe and never advances A (chain index), B (step), or the
+next chain automatically. Digit-zero capture and digit-fifteen zero-step Verify
+are explicit branches. XMSS L-tree handles odd tails with LOAD/STORE and no Hash;
+LMS issues its list and leaf recipes explicitly. Stateful Sign retains the C1
+standalone signature chains followed by cold full-tree recomputation.
 
 ## Explicit control words
 
@@ -51,9 +54,9 @@ Control tokens have kind [63:62]=3 and the following fields:
 | 51:47 | src |
 | 46:42 | aux |
 | 41:21 | unsigned immediate |
-| 20:14 | absolute branch/call target PC |
-| 13:10 | condition |
-| 9:0 | reserved zero |
+| 20:13 | absolute branch/call target PC |
+| 12:9 | condition |
+| 8:0 | reserved zero |
 
 | Opcode | Instruction | One retirement performs |
 |---:|---|---|
@@ -65,8 +68,8 @@ Control tokens have kind [63:62]=3 and the following fields:
 | 5 | XOR1 | narrow[dst] ^= 1 |
 | 6 | ADD | narrow[dst] = narrow[src] + narrow[aux] |
 | 7 | BR | Branch to target if condition succeeds |
-| 8 | CALL | Save PC+1 and jump; a second outstanding CALL faults |
-| 9 | RET | Return through the single saved PC; missing return faults |
+| 8 | CALL | Save PC+1 and jump; a third outstanding CALL faults |
+| 9 | RET | Pop one of two saved PCs; an empty return stack faults |
 | 10 | LOAD | wide[dst] = RAM[narrow[src]+immediate] |
 | 11 | STORE | RAM[narrow[dst]+immediate] = wide[src] |
 | 12 | INPUT | Accept one Verify node into wide[dst] |
@@ -75,7 +78,7 @@ Control tokens have kind [63:62]=3 and the following fields:
 | 15 | SHL | narrow[dst] <<= immediate; shift 1..20 |
 
 No control instruction issues a hash, iterates a chain, walks a tree or captures
-an authentication path automatically. HASH and CHAIN are task templates.
+an authentication path automatically. HASH, TRANSFORM and EMIT are the only task templates.
 
 BR conditions are ALWAYS=0, EQ=1, NE=2, LT=3, GE=4, ODD=5, ZERO=6,
 BITSET=7, SIBLING=8, SAME_PARENT=9. With aux=0, compare narrow[dst] and
@@ -110,6 +113,10 @@ means `(dst >> 1) == (src >> 1)`. The latter two require register operands.
 | 20 / 21 | ZERO / ONE (read only) | 1 |
 | 22 | operation 0/1/2 (read only) | 2 |
 | 23 / 24 | XMSS / STATEFUL (read only) | 1 |
+| 25 | current A-indexed DIGIT (read only) | 4 |
+| 26 | LT_COUNT | 8 |
+| 27 | LT_CURSOR | 8 |
+| 28 | LT_LEVEL | 4 |
 
 Arithmetic overflow and writes to read-only selectors fault. HEIGHT, LEVEL and
 AUTH_LEVEL are limited to 20; MODE is limited to 2. The contexts reuse narrow
@@ -131,18 +138,18 @@ node coordinates, saves authentication nodes, pushes/loads the stack, issues
 one parent HASH, updates height/index/path/base and branches. It emits saved
 authentication nodes in order. There is no TREE template or TREE_STEP command.
 
-## Current generated sizes and verification
+## Generated images and verification
 
-Both backends generate 124 program words / 12 templates for SLH profiles,
-80 / 8 for XMSS and 81 / 8 for LMS. ROM files remain padded to capacity.
-`compile_image(...).usage` reports allocated/used counts and static macro versus
-control counts. Descriptor usage includes meaningful zero-valued identity
-records, not just nonzero words. These image sizes are compiler measurements;
-cycle and area results are reported separately for each frozen experiment.
+`compile_image(...).usage` reports allocated and effective program, template and
+descriptor records. Capacities are checked before padding; overflow raises an
+error. Descriptor usage includes meaningful zero-valued identity records.
+CHAIN and TREE template counts must both be zero for every generated image.
 
-`ControlMachine` executes the physical tokens and uses only the existing
-single-hash recipes and grouped CHAIN implementation. It never invokes the
-logical TREE oracle. Output, primitive preimage/result multiset, counts and
-Verify input consumption are checked against independently generated fixtures.
-Higher stateful trees use real-height Verify fixtures; full h15/h16/h20 tree
-operations are not automatically generated or executed.
+`ControlMachine` executes the physical program, including software chain loops,
+captures and reduction. It uses the existing compound Hash recipes, and does
+not invoke the legacy CHAIN or TREE interpreter. Ordinary list HASH obtains its
+node count from descriptor arity. Output, signature cache, Hash/block counts
+and primitive preimage/result fingerprints are compared with frozen C1 inputs.
+High stateful trees only execute real-height Verify; full h15/h16/h20 Keygen and
+Sign are excluded from this experiment. Cycle and area measurements are bound
+to frozen source identities in the experiment archive.

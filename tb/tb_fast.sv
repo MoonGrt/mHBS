@@ -13,13 +13,13 @@ module tb_fast #(parameter integer PIPELINE=1,UNROLL=1)(
  output wire [5:0] signature_read_bytes,output wire signature_complete,signature_error,
  output wire [10:0] signature_nodes,output wire [15:0] signature_length,
  output wire [31:0] configuration_pipeline,configuration_unroll,
- output wire command_event,child_chain_event,control_event,output wire [3:0] command_opcode,
+ output wire command_event,child_chain_event,control_event,recipe_request_event,output wire [3:0] command_opcode,
  output wire trace_block_event,trace_result_event,
  output wire [1087:0] trace_block_data,output wire [391:0] trace_result_data,
  output wire [7:0] trace_block_bytes,output wire [5:0] trace_result_bytes
 );
- reg [63:0] pm[0:127],tm[0:31],dm[0:31];reg [255:0] cfg[0:8];
- wire [6:0] program_address;wire [4:0] template_address;wire [9:0] descriptor_addresses;
+ reg [63:0] pm[0:255],tm[0:31],dm[0:31];reg [255:0] cfg[0:8];
+ wire [7:0] program_address;wire [4:0] template_address;wire [9:0] descriptor_addresses;
  wire [63:0] program_data=pm[program_address],template_data=tm[template_address];
  wire [127:0] descriptor_data={dm[descriptor_addresses[9:5]],dm[descriptor_addresses[4:0]]};
  wire [255:0] job_secret_seed=cfg[0],job_secret_prf=cfg[1],job_public_seed=cfg[2],job_randomizer=cfg[3],job_public_root=cfg[4];
@@ -47,13 +47,30 @@ module tb_fast #(parameter integer PIPELINE=1,UNROLL=1)(
  assign debug_stats=1;
  assign statistics_zero=!(boot_cycles|keygen_cycles|sign_cycles|hash_count|permutation_count|dut.core.cycles);
 `endif
- assign execution_active=dut.core.state!=0 && dut.core.state!=32;
+ assign execution_active=dut.core.state!=0 && dut.core.state!=15;
  assign execution_reset=dut.core.execution_rst;
  // A command is counted once when the sequencer hands it to the executor.
  assign command_event=dut.core.cmd_valid && dut.core.state==3;
  assign command_opcode=dut.core.cmd[47:44];
  assign control_event=dut.core.control_valid && dut.core.state==3;
  assign child_chain_event=0;
+ assign recipe_request_event=dut.core.lane.request_valid && dut.core.lane.request_ready;
+ // Every explicit HASH template authorizes at most one compound recipe. Some
+ // Verify prefix templates consume supplied R and legitimately issue no recipe.
+ integer recipe_budget=0;
+ always @(posedge clk)begin
+  if(execution_reset)recipe_budget=0;
+  else begin
+   if(command_event)begin
+    if(command_opcode==2 || command_opcode==3)$fatal(1,"Autonomous CHAIN/TREE template accepted");
+    if(command_opcode==1)recipe_budget=1;
+   end
+   if(recipe_request_event)begin
+    if(recipe_budget!=1 || dut.core.lane.request_chain)$fatal(1,"Hash recipe lacked explicit HASH authorization");
+    recipe_budget=0;
+   end
+  end
+ end
 `ifdef MHBS_SHA2
  assign hash_event=dut.core.lane.hash_complete_event;
  assign permutation_event=dut.core.lane.compression_complete_event;

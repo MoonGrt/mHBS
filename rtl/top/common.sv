@@ -10,7 +10,7 @@ module common #(parameter integer UNROLL=1,PIPELINE=1)(
     output wire [63:0] hash_count,permutation_count,
 `endif
     input wire clk,rst,
-    output wire [6:0] program_address, output wire [4:0] template_address,
+    output wire [7:0] program_address, output wire [4:0] template_address,
     input wire [63:0] program_data, template_data,
     output wire [9:0] descriptor_addresses, input wire [127:0] descriptor_data,
     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,

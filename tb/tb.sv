@@ -16,8 +16,8 @@ module tb;
  localparam bit DEBUG_STATS=1;
 `endif
  logic clk=0,rst=1;always #5 clk=~clk;
- reg [63:0] pm[0:127],tm[0:31],dm[0:31];
- wire [6:0] program_address;wire [4:0] template_address;wire [9:0] descriptor_addresses;
+ reg [63:0] pm[0:255],tm[0:31],dm[0:31];
+ wire [7:0] program_address;wire [4:0] template_address;wire [9:0] descriptor_addresses;
  wire [63:0] program_data=pm[program_address],template_data=tm[template_address];
  wire [127:0] descriptor_data={dm[descriptor_addresses[9:5]],dm[descriptor_addresses[4:0]]};
  reg [255:0] cfg[0:8],nodes_mem[0:1557];reg [63:0] meta[0:4];
@@ -58,9 +58,9 @@ module tb;
    batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;
    fors_positions=0;ltree_odd=0;rolling_reuse=0;
   end else begin
-   if(dut.core.state==7 && dut.core.indexing==1 && dut.core.leaf_cursor==dut.core.target)
+   if(dut.core.control_valid && dut.core.state==3 && dut.core.indexing==1 && dut.core.leaf_cursor==dut.core.target)
     fors_positions[dut.core.target[1:0]]=1;
-   if(dut.core.state==30 && dut.core.lt_count[0])ltree_odd++;
+   if(dut.core.control_valid && dut.core.state==3 && dut.core.lt_count[0] && dut.core.lt_cursor==dut.core.lt_count-1)ltree_odd++;
   end
  end
  always @(posedge clk)begin
@@ -81,7 +81,7 @@ module tb;
  always @(posedge clk)begin
   if(dut.core.rst)compute=0;
   else if(dut.core.state==0&&dut.core.job_valid)compute=0;
-  else if(dut.core.state!=0&&dut.core.state!=32)compute++;
+  else if(dut.core.state!=0&&dut.core.state!=15)compute++;
   if(rst)begin cycles=0;cursor=0;sent=0;accepted=0;end
   else begin
    cycles++;
@@ -142,7 +142,7 @@ module tb;
    rst=1;read_enable=0;repeat(5)tick();rst=0;
    if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
    if(fault)begin
-    while(dut.core.state!=13)tick();
+    while(dut.core.state!=7)tick();
     if(fault==3)force dut.core.state=type(dut.core.state)'(6'd63);
     else force dut.core.lane.error=1;
     while(!error)tick();

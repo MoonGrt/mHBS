@@ -1,7 +1,7 @@
-// Layout 4: explicit tree software, main-compatible macro templates.
+// Layout 5: explicit chain and tree software, bounded hash templates.
 `ifndef MHBS_CHAIN_INSTRUCTIONS_SVH
 `define MHBS_CHAIN_INSTRUCTIONS_SVH
-`define CHAIN_HEADER_MAGIC 7'h53
+`define CHAIN_HEADER_MAGIC 7'h54
 `define CTRL_HALT 5'd0
 `define CTRL_SET 5'd1
 `define CTRL_MOV 5'd2
@@ -43,6 +43,10 @@
 `define CTX_OPERATION 5'd22
 `define CTX_XMSS 5'd23
 `define CTX_STATEFUL 5'd24
+`define CTX_DIGIT 5'd25
+`define CTX_LT_COUNT 5'd26
+`define CTX_LT_CURSOR 5'd27
+`define CTX_LT_LEVEL 5'd28
 `define WIDE_NODE 5'd0
 `define WIDE_LEFT 5'd1
 `define WIDE_V0 5'd2

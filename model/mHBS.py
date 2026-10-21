@@ -248,15 +248,15 @@ def _compile_main_image(name, hash_backend="shake"):
 
 
 
-# Layout 4 retains the main task templates, and moves tree decisions into
-# explicitly retired scalar/node control instructions.
+# Layout 5 retains compound single-Hash recipes. All chain and tree decisions
+# retire as explicit narrow-context and node instructions.
 from model.control import (Op, Ctx as C, Wide as W, Cond, control, fields,
                            macro, template_id, HEADER_MAGIC, KEEP_COORD,
                            PROGRAM_WORDS, TEMPLATE_WORDS, STACK_BASE, AUTH_BASE)
 from model.executor import Macro, Kind, Source, Shape, CAPTURE, AUTH, EXTERNAL_ROOT, SIGN_ONLY
 
-LAYOUT_REVISION = 4
-FORMAT = 'main_chain64_v4'
+LAYOUT_REVISION = 5
+FORMAT = 'main_soft_chain64_v5'
 
 class _Assembler:
     def __init__(self, mapping):
@@ -277,9 +277,9 @@ class _Assembler:
     def finish(self):
         for pc,label in self.fixups:
             if label not in self.labels:raise ValueError('missing label '+label)
-            self.code[pc]|=self.labels[label]<<14
+            self.code[pc]|=self.labels[label]<<13
         if len(self.code)>PROGRAM_WORDS or len(self.templates)>TEMPLATE_WORDS:
-            raise ValueError(f'chain image capacity: {len(self.code)} program / {len(self.templates)} templates')
+            raise ValueError(f'software-chain image capacity: {len(self.code)} program / {len(self.templates)} templates')
         return (tuple(self.code+[0]*(PROGRAM_WORDS-len(self.code))),
                 tuple(self.templates+[0]*(TEMPLATE_WORDS-len(self.templates))))
 
@@ -307,6 +307,7 @@ def _build(name,hash_backend='shake'):
             a.label('base_fors');mov(C.BASE,C.GROUP);a.c(Op.SHL,C.BASE,imm=p.a)
             a.label('base_done')
         else:set_(C.BASE,0)
+    a.br('keygen');a.br('sign');a.br('sign')
     a.label('keygen')
     if p.family=='slh':set_(C.LAYER,p.d-1)
     ctx(p.h if p.stateful else p.hp,2 if p.family=='lms' else 0,0,C.Q if p.stateful else C.SCALAR_LEAF)
@@ -317,7 +318,7 @@ def _build(name,hash_backend='shake'):
     if p.stateful:
         a.m(Macro.TRANSFORM,48);a.m(Macro.EMIT,51)
         mov(C.LEAF,C.Q);mov(C.CURSOR,C.Q);set_(C.MODE,2 if p.family=='lms' else 0)
-        a.m(Macro.CHAIN,16,42,flags=SIGN_ONLY)
+        set_(C.FLAGS,SIGN_ONLY);a.c(Op.CALL,target='chain')
         if p.family=='lms':a.m(Macro.EMIT,52)
         ctx(p.h,2 if p.family=='lms' else 0,AUTH,C.Q)
         calltree();a.c(Op.HALT)
@@ -345,15 +346,7 @@ def _build(name,hash_backend='shake'):
     base_address()
     a.c(Op.ADD,C.B,C.BASE,C.CURSOR);set_(C.A,0)
     mov(C.INDEX,C.CURSOR);mov(C.PATH,C.TARGET);set_(C.LEVEL,0)
-    if p.family=='slh':
-        a.br('chain_fors',Cond.EQ,C.MODE,imm=1)
-        a.br('chain_external',Cond.BITSET,C.FLAGS,imm=EXTERNAL_ROOT)
-        a.br('chain_capture',Cond.BITSET,C.FLAGS,imm=CAPTURE)
-        a.m(Macro.CHAIN,17);a.br('node')
-        a.label('chain_external');a.m(Macro.CHAIN,17,flags=CAPTURE|EXTERNAL_ROOT);a.br('node')
-        a.label('chain_capture');a.m(Macro.CHAIN,17,flags=CAPTURE);a.br('node')
-        a.label('chain_fors');a.m(Macro.CHAIN,16,flags=CAPTURE)
-    else:a.m(Macro.CHAIN,16)
+    a.c(Op.CALL,target='chain')
     a.label('node');a.br('root',Cond.EQ,C.LEVEL,C.HEIGHT)
     a.br('verify_input',Cond.EQ,C.OPERATION,imm=2)
     a.br('auth_test',Cond.BITSET,C.FLAGS,imm=AUTH);a.br('after_auth')
@@ -404,9 +397,77 @@ def _build(name,hash_backend='shake'):
     a.label('auth_loop');a.c(Op.LOAD,W.NODE,C.AUTH_LEVEL,imm=AUTH_BASE);a.c(Op.OUTPUT,src=W.NODE)
     a.c(Op.INC,C.AUTH_LEVEL);a.br('auth_loop',Cond.LT,C.AUTH_LEVEL,C.HEIGHT)
     a.label('return');a.c(Op.RET)
+    # A leaf is a bounded software routine. A and B are the only chain
+    # coordinates; the dedicated L-tree cursors are narrow scalar contexts.
+    a.label('chain')
+    if p.family=='slh':
+        a.br('fors_chain',Cond.EQ,C.MODE,imm=1)
+    chain_descriptor=logical.descriptors[16 if p.stateful else 17]
+    seed,step,reduce,leaf_recipe=(field(chain_descriptor,shift,8) for shift in (52,44,36,28))
+    count=field(chain_descriptor,20,8);steps=field(chain_descriptor,15,5)
+    set_(C.A,0)
+    a.label('chain_item')
+    a.br('chain_input',Cond.EQ,C.OPERATION,imm=2)
+    set_(C.B,0);a.m(Macro.HASH,seed);a.br('capture_test')
+    a.label('chain_input');a.c(Op.INPUT,W.LEFT);mov(C.B,C.DIGIT);a.br('chain_test')
+    a.label('capture_test')
+    # Explicit output at the selected prefix never authorizes another Hash.
+    a.br('capture_emit_test',Cond.BITSET,C.FLAGS,imm=SIGN_ONLY)
+    a.br('chain_test',Cond.NE,C.CURSOR,C.TARGET)
+    a.br('capture_emit_test',Cond.BITSET,C.FLAGS,imm=CAPTURE);a.br('chain_test')
+    a.label('capture_emit_test');a.br('chain_test',Cond.NE,C.B,C.DIGIT)
+    a.c(Op.OUTPUT,src=W.LEFT)
+    a.label('chain_test')
+    a.br('chain_endpoint',Cond.GE,C.B,imm=steps)
+    a.br('chain_step',Cond.EQ,C.OPERATION,imm=2)
+    a.br('prefix_test',Cond.BITSET,C.FLAGS,imm=SIGN_ONLY)
+    if p.family=='slh':
+        a.br('chain_step',Cond.NE,C.CURSOR,C.TARGET)
+        a.br('prefix_test',Cond.BITSET,C.FLAGS,imm=EXTERNAL_ROOT)
+    a.br('chain_step')
+    a.label('prefix_test');a.br('chain_endpoint',Cond.GE,C.B,C.DIGIT)
+    a.label('chain_step');a.m(Macro.HASH,step);a.c(Op.INC,C.B)
+    a.br('chain_test',Cond.EQ,C.OPERATION,imm=2);a.br('capture_test')
+    a.label('chain_endpoint');a.c(Op.STORE,C.A,W.LEFT);a.c(Op.INC,C.A)
+    a.br('chain_item',Cond.LT,C.A,imm=count)
+    a.br('chain_reduce',Cond.EQ,C.OPERATION,imm=2)
+    a.br('chain_return',Cond.BITSET,C.FLAGS,imm=SIGN_ONLY)
+    if p.family=='slh':
+        a.br('chain_reduce',Cond.NE,C.CURSOR,C.TARGET)
+        a.br('chain_zero',Cond.BITSET,C.FLAGS,imm=EXTERNAL_ROOT)
+    a.label('chain_reduce')
+    if p.family=='xmss':
+        set_(C.LT_COUNT,count);set_(C.LT_LEVEL,0)
+        a.label('lt_layer');set_(C.LT_CURSOR,0)
+        a.label('lt_pair');mov(C.A,C.LT_LEVEL);mov(C.B,C.LT_CURSOR);a.c(Op.SHR,C.B,imm=1)
+        a.c(Op.LOAD,W.LEFT,C.LT_CURSOR);a.c(Op.INC,C.LT_CURSOR)
+        a.br('lt_store',Cond.GE,C.LT_CURSOR,C.LT_COUNT)
+        a.c(Op.LOAD,W.NODE,C.LT_CURSOR);a.m(Macro.HASH,reduce);a.c(Op.INC,C.LT_CURSOR)
+        a.label('lt_store');a.c(Op.STORE,C.B,W.LEFT)
+        a.br('lt_pair',Cond.LT,C.LT_CURSOR,C.LT_COUNT)
+        a.c(Op.INC,C.LT_COUNT);a.c(Op.SHR,C.LT_COUNT,imm=1);a.c(Op.INC,C.LT_LEVEL)
+        a.br('lt_layer',Cond.GE,C.LT_COUNT,imm=2)
+        a.c(Op.LOAD,W.NODE,C.ZERO)
+    else:
+        set_(C.A,0);set_(C.B,0);a.m(Macro.HASH,reduce)
+        if leaf_recipe:
+            set_(C.B,1<<p.h);a.c(Op.ADD,C.B,C.B,C.LEAF);a.m(Macro.HASH,leaf_recipe)
+        wmov(W.NODE,W.LEFT)
+    if p.stateful:
+        a.br('chain_return',Cond.NE,C.OPERATION,imm=2);wmov(W.V2,W.NODE)
+    a.label('chain_return');a.c(Op.RET)
+    if p.family=='slh':
+        a.label('chain_zero');wmov(W.NODE,W.ZERO);a.c(Op.RET)
+        fdesc=logical.descriptors[16];fseed=field(fdesc,52,8);fstep=field(fdesc,44,8)
+        a.label('fors_chain');a.br('fors_input',Cond.EQ,C.OPERATION,imm=2)
+        a.m(Macro.HASH,fseed);a.br('fors_step',Cond.NE,C.CURSOR,C.TARGET)
+        a.br('fors_capture',Cond.BITSET,C.FLAGS,imm=CAPTURE);a.br('fors_step')
+        a.label('fors_capture');a.c(Op.OUTPUT,src=W.LEFT);a.br('fors_step')
+        a.label('fors_input');a.c(Op.INPUT,W.LEFT)
+        a.label('fors_step');a.m(Macro.HASH,fstep);wmov(W.NODE,W.LEFT);a.c(Op.RET)
     program,templates=a.finish()
     d=list(base.descriptors)
-    d[0]=(d[0]&((1<<36)-1))|(a.labels['keygen']<<36)|(a.labels['sign']<<43)|(a.labels['sign']<<50)|(HEADER_MAGIC<<57)
+    d[0]=(d[0]&((1<<36)-1))|(0<<36)|(1<<43)|(2<<50)|(HEADER_MAGIC<<57)
     return ExternalImage(program,templates,tuple(d)),logical,mapping,a.labels,len(a.code),len(a.templates)
 
 @dataclass(frozen=True)
@@ -426,9 +487,10 @@ class ExternalImage:
     @property
     def hash_backend(self):return 'sha2' if self.descriptors[1]&32 else 'shake'
     def decode(self,hash_backend=None):
-        if (len(self.program),len(self.templates),len(self.descriptors))!=(128,32,32):raise ValueError('layout 4 capacity')
+        if (len(self.program),len(self.templates),len(self.descriptors))!=(256,32,32):raise ValueError('layout 5 capacity')
         if any(not 0<=w<1<<64 for group in (self.program,self.templates,self.descriptors) for w in group):raise ValueError('word width')
-        if self.descriptors[0]>>57!=HEADER_MAGIC:raise ValueError('chain layout version')
+        if self.descriptors[0]>>57!=HEADER_MAGIC:raise ValueError('software-chain layout version')
+        if tuple((self.descriptors[0]>>(36+7*op))&127 for op in range(3))!=(0,1,2):raise ValueError('entry trampolines')
         code=self.descriptors[1]
         if code>>6:raise ValueError('profile reserved bits')
         if hash_backend is not None and hash_backend!=self.hash_backend:raise ValueError('ROM hash backend mismatch')
@@ -440,17 +502,17 @@ class ExternalImage:
         if self.descriptors[1:]!=expected.descriptors[1:] or self.descriptors[0]&((1<<36)-1)!=expected.descriptors[0]&((1<<36)-1):raise ValueError('noncanonical recipe/profile')
         for t in self.templates:
             if not t:continue
-            if t>>17 or t&7 not in (1,2,4,5):raise ValueError('TREE or illegal template')
+            if t>>17 or t&7 not in (1,4,5):raise ValueError('CHAIN/TREE or illegal template')
             did=(t>>3)&31;rid=(t>>8)&31
             if did not in mapping.values() or rid not in mapping.values():raise ValueError('template reference')
         for word in self.program:
             kind=word>>62
             if kind==3:
-                if word&1023:raise ValueError('control reserved bits')
+                if word&511:raise ValueError('control reserved bits')
                 op,dst,src,aux,imm,target,cond=fields(word)
                 if op==Op.HALT and word!=3<<62:raise ValueError('HALT reserved bits')
                 if op==Op.BR and aux>1:raise ValueError('branch operand mode')
-                writable=range(16);readable=range(25)
+                writable=(*range(16),26,27,28);readable=range(29)
                 if op in (Op.SET,Op.MOV,Op.INC,Op.SHR,Op.XOR1,Op.ADD,Op.SHL) and dst not in writable:raise ValueError('readonly context write')
                 if op in (Op.MOV,Op.ADD) and src not in readable:raise ValueError('context selector')
                 if op==Op.ADD and aux not in readable:raise ValueError('context selector')
@@ -494,7 +556,7 @@ class ExternalImage:
         reverse={v:k for k,v in mapping.items()}
         for word in self.templates[:tcount]:
             visit(reverse[(word>>3)&31]);visit(reverse[(word>>8)&31])
-        return dict(program_allocated=128,program_used=count,template_allocated=32,template_used=tcount,
+        return dict(program_allocated=256,program_used=count,template_allocated=32,template_used=tcount,
                     descriptor_allocated=32,descriptor_used=len(used),descriptor_valid=len(mapping),
                     descriptor_nonzero=sum(bool(w) for w in self.descriptors),
                     descriptor_reachable=sorted(mapping[index] for index in used),
@@ -509,18 +571,18 @@ Image=ExternalImage
 class ControlMachine:
     """Execute physical tokens; tree traversal exists only in the program.
 
-    The inherited recipe/CHAIN implementation is the main algorithm model.
-    Neither this VM nor its compiler invokes Machine.tree().
+    Compound Hash recipes are shared with the main algorithm model. Chain and
+    tree control exists only in the physical program, never in a VM shortcut.
     """
-    _widths=(20,8,21,21,21,5,21,21,21,5,21,5,6,5,4,2)
+    _widths=(20,8,21,21,21,5,21,21,21,5,21,5,6,5,4,2,20,20,14,5,1,1,2,1,1,4,8,8,4)
     def __init__(self,image,job,root,message,operation=1,verify_nodes=(),observe=None):
         self.external=image;self.decoded=image.decode();self.profile=get_profile(self.decoded.name,image.hash_backend)
         self.vm=Machine(self.decoded.source,job,observe,index_policy='fixed_q_no_guard',recompute_auth=True)
         self.vm.active_q=job.q;self.vm.message=bytes(message);self.vm.values[3]=bytes(root)
-        self.operation=int(operation);self.ctx=[0]*16;self.ram=[bytes(self.profile.n) for _ in range(128)]
+        self.operation=int(operation);self.ctx=[0]*29;self.ram=[bytes(self.profile.n) for _ in range(128)]
         self.node=bytes(self.profile.n);self.left=bytes(self.profile.n);self.emit=bytes(self.profile.n)
         self.inputs=iter(bytes(x) for x in verify_nodes);self.input_count=0
-        self.return_pc=None;self.loops=[];self.halted=False;self.steps=0
+        self.return_stack=[];self.loops=[];self.halted=False;self.steps=0
         self.operations={op.name:0 for op in Macro};self.operations['control']=0
         self.control_trace=[];self.macro_trace=[]
         _,_,mapping=_source(self.profile.name,image.hash_backend)
@@ -533,7 +595,7 @@ class ControlMachine:
         if not self.operation and message:raise ValueError('Keygen message must be empty')
     def __getattr__(self,name):return getattr(self.vm,name)
     def narrow(self,reg):
-        if reg<16:return self.ctx[reg]
+        if reg<16 or reg in (C.LT_COUNT,C.LT_CURSOR,C.LT_LEVEL):return self.ctx[reg]
         p=self.profile
         if reg==C.Q:return self.vm.job.q
         if reg==C.SCALAR_LEAF:return self.vm.scalar_leaf
@@ -548,9 +610,12 @@ class ControlMachine:
         if reg==C.OPERATION:return self.operation
         if reg==C.XMSS:return int(p.family=='xmss')
         if reg==C.STATEFUL:return int(p.stateful)
+        if reg==C.DIGIT:
+            index=self.ctx[C.A]
+            return self.vm.digits[index] if 0<=index<len(self.vm.digits) else 0
         raise ValueError('context selector')
     def put_narrow(self,reg,value):
-        if not 0<=reg<16 or not 0<=value<1<<self._widths[reg]:raise ValueError('context write/bounds')
+        if reg not in (*range(16),26,27,28) or not 0<=value<1<<self._widths[reg]:raise ValueError('context write/bounds')
         if reg in (C.HEIGHT,C.LEVEL,C.AUTH_LEVEL) and value>20:raise ValueError('tree height/level bounds')
         if reg==C.MODE and value>2:raise ValueError('address mode bounds')
         self.ctx[reg]=value
@@ -587,39 +652,6 @@ class ControlMachine:
                 Cond.LT:lambda:left<right,Cond.GE:lambda:left>=right,Cond.ODD:lambda:bool(left&1),
                 Cond.ZERO:lambda:left==0,Cond.BITSET:lambda:bool(left&imm),
                 Cond.SIBLING:lambda:left==(right^1),Cond.SAME_PARENT:lambda:(left>>1)==(right>>1)}[cond]()
-    def reduce_endpoints(self,did,endpoints,leaf,index,layer):
-        d=self.vm.image.descriptors[did]
-        reduce,leaf_recipe,mode=(field(d,s,w) for s,w in ((36,8),(28,8),(12,2)))
-        if mode==1:value=self.vm.hash_recipe(reduce,layer=layer,leaf=leaf,values=endpoints)
-        elif mode==2:
-            level=0
-            while len(endpoints)>1:
-                endpoints=[self.vm.hash_recipe(reduce,leaf=leaf,a=level,b=i//2,left=endpoints[i],right=endpoints[i+1])
-                           for i in range(0,len(endpoints)-1,2)]+(endpoints[-1:] if len(endpoints)&1 else [])
-                level+=1
-            value=endpoints[0]
-        else:value=endpoints[0]
-        if leaf_recipe:value=self.vm.hash_recipe(leaf_recipe,leaf=leaf,b=index,left=value)
-        return value
-    def chain(self,did,flags):
-        c=self.ctx;leaf=c[C.LEAF];layer=c[C.LAYER]
-        index=(1<<self.profile.h)+leaf if self.profile.family=='lms' else c[C.B]
-        d=self.vm.image.descriptors[did]
-        if self.operation==2:
-            step,count,steps=(field(d,s,w) for s,w in ((44,8),(20,8),(15,5)))
-            endpoints=[]
-            for item in range(count):
-                value=self.input()
-                if c[C.MODE]==1:
-                    value=self.vm.hash_recipe(step,layer=layer,leaf=leaf,a=item,b=index,left=value)
-                else:
-                    for iteration in range(self.vm.digits[item],steps):
-                        value=self.vm.hash_recipe(step,layer=layer,leaf=leaf,a=item,b=iteration,left=value)
-                endpoints.append(value)
-            return self.reduce_endpoints(did,endpoints,leaf,index,layer)
-        capture=bool(flags&CAPTURE) and c[C.CURSOR]==c[C.TARGET]
-        sign_only=bool(flags&SIGN_ONLY) or (capture and bool(flags&EXTERNAL_ROOT))
-        return self.vm.chains(did,layer,leaf,index,c[C.MODE]==1,capture,sign_only)
     def macro(self,word):
         t=self.external.templates[template_id(word)]
         op=Macro(t&7);did=self.logical_ref[(t>>3)&31];rid=self.logical_ref[(t>>8)&31]
@@ -634,10 +666,8 @@ class ControlMachine:
             else:
                 if self.operation==2 and shape==Shape.PREFIX_MESSAGE:self.vm.job=__import__('dataclasses').replace(self.vm.job,random=self.input())
                 result=self.vm.hash_recipe(did,layer=self.ctx[C.LAYER],leaf=self.ctx[C.LEAF],a=self.ctx[C.A],b=self.ctx[C.B],
-                                           left=self.left[:self.profile.n],right=self.node,values=self.ram[:self.profile.k])
+                                           left=self.left[:self.profile.n],right=self.node,values=self.ram[:field(d,40,8)])
             self.left=result
-        elif op==Macro.CHAIN:
-            result=self.chain(did,flags);self.left=result;self.node=result
         elif op==Macro.TRANSFORM:
             if field(d,56,4)==1:
                 value=self.vm.values[field(d,48,2)][:self.profile.n];omega=self.vm.image.omega;mask=(1<<omega)-1
@@ -674,7 +704,7 @@ class ControlMachine:
             while True:
                 self.steps+=1
                 if self.steps>1000000000:raise ValueError('control budget')
-                if not 0<=self.pc<128:raise ValueError('program bounds')
+                if not 0<=self.pc<PROGRAM_WORDS:raise ValueError('program bounds')
                 word=self.external.program[self.pc]
                 kind=word>>62
                 if kind<2:
@@ -697,7 +727,7 @@ class ControlMachine:
                 op,dst,src,aux,imm,target,cond=fields(word);next_pc=self.pc+1
                 self.operations['control']+=1
                 if op==Op.HALT:
-                    if self.return_pc is not None or self.loops:raise ValueError('HALT within subroutine/loop')
+                    if self.return_stack or self.loops:raise ValueError('HALT within subroutine/loop')
                     break
                 if op==Op.SET:self.put_narrow(dst,imm)
                 elif op==Op.MOV:self.put_narrow(dst,self.narrow(src))
@@ -709,11 +739,11 @@ class ControlMachine:
                 elif op==Op.BR:
                     if self.branch(cond,dst,src,aux,imm):next_pc=target
                 elif op==Op.CALL:
-                    if self.return_pc is not None:raise ValueError('nested CALL')
-                    self.return_pc=self.pc+1;next_pc=target
+                    if len(self.return_stack)>=2:raise ValueError('CALL overflow')
+                    self.return_stack.append(self.pc+1);next_pc=target
                 elif op==Op.RET:
-                    if self.return_pc is None:raise ValueError('RET without CALL')
-                    next_pc=self.return_pc;self.return_pc=None
+                    if not self.return_stack:raise ValueError('RET without CALL')
+                    next_pc=self.return_stack.pop()
                 elif op==Op.LOAD:self.put_wide(dst,self.ram[self.memory_address(src,imm)])
                 elif op==Op.STORE:self.ram[self.memory_address(dst,imm)]=self.wide(src)
                 elif op==Op.INPUT:self.put_wide(dst,self.input())

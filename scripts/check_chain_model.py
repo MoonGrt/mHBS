@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check physical CHAIN control images against frozen bytes and main's VM."""
+"""Check software CHAIN images, bounds and the active instruction VM."""
 import argparse
 from dataclasses import replace
 import json
@@ -57,6 +57,8 @@ def negative_checks():
     bad_decode('wrong_capacity',replace(base,program=base.program[:16]))
     d=list(base.descriptors);d[0]&=(1<<57)-1;bad_decode('cross_tree_image',replace(base,descriptors=tuple(d)))
     t=list(base.templates);t[0]=(t[0]&~7)|3;bad_decode('TREE_template',replace(base,templates=tuple(t)))
+    t=list(base.templates);t[0]=(t[0]&~7)|2;bad_decode('CHAIN_template',replace(base,templates=tuple(t)))
+    bad_decode('readonly_digit',with_program(control(Op.SET,Ctx.DIGIT,imm=1)))
     bad_decode('readonly_context',with_program(control(Op.SET,Ctx.Q,imm=1)))
     bad_decode('unknown_context',with_program(control(Op.MOV,Ctx.LEAF,31)))
     bad_decode('unknown_wide',with_program(control(Op.WMOV,0,8)))
@@ -68,7 +70,7 @@ def negative_checks():
         ('RAM_end_overflow',(control(Op.LOAD,Wide.NODE,Ctx.ZERO,imm=128),)),
         ('counter_overflow',(control(Op.SET,Ctx.CURSOR,imm=(1<<21)-1),control(Op.INC,Ctx.CURSOR))),
         ('RET_without_CALL',(control(Op.RET),)),
-        ('nested_CALL',(control(Op.CALL,target=1),control(Op.CALL,target=2))),
+        ('CALL_depth3',(control(Op.CALL,target=1),control(Op.CALL,target=2),control(Op.CALL,target=3))),
     ):
         vm=ControlMachine(with_program(*words),job,bytes(16),b'',0)
         try:vm.run()
@@ -76,6 +78,18 @@ def negative_checks():
             if vm.output:raise AssertionError('fault output not cleared')
             cases.append(dict(test=name,status='passed'));continue
         raise AssertionError('accepted '+name)
+    # Two return slots permit main -> tree -> chain, including PC > 127.
+    program=list(base.program)
+    program[0]=control(Op.CALL,target=200)
+    for index in range(1,7):program[index]=control(Op.OUTPUT,src=Wide.ZERO)
+    program[7]=control(Op.HALT)
+    program[200]=control(Op.CALL,target=240)
+    program[201]=control(Op.RET)
+    program[240]=control(Op.SET,Ctx.A,imm=37)
+    program[241]=control(Op.RET)
+    vm=ControlMachine(replace(base,program=tuple(program)),job,bytes(16),b'',0)
+    if vm.run()!=bytes(96) or vm.narrow(Ctx.A)!=37:raise AssertionError('two-level CALL/high PC')
+    cases.append(dict(test='CALL_depth2_high_pc',status='passed'))
     return cases
 
 
@@ -83,13 +97,14 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--full',action='store_true',help='all low-tree full operations; high trees Verify only')
     parser.add_argument('--trace-compare',action='store_true')
+    parser.add_argument('--verify-only',action='store_true',help='all requested profiles Verify, no complete trees')
     parser.add_argument('--output',type=Path,default=ROOT/'build/chain_model/result.json')
     args=parser.parse_args();rows=[]
     for backend in ('shake','sha2'):
         names=profile_names(backend,include_h20=True) if args.full else ('slh_128f','xmss_h10','lms_h10')
         for name in names:
             p=get_profile(name,backend)
-            operations=('verify',) if p.stateful and p.h>10 else ('keygen','sign','verify')
+            operations=('verify',) if args.verify_only or p.stateful and p.h>10 else ('keygen','sign','verify')
             for operation in operations:
                 row=run_case(name,backend,operation,args.trace_compare);rows.append(row)
                 print('CHAIN_MODEL_PASS',backend,name,operation,row['hashes'],row['permutations'],flush=True)
