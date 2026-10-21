@@ -3,7 +3,7 @@
 
 // verilog_format: off
 module top #(
-    parameter integer UNROLL=2,PIPELINE=1,
+    parameter integer UNROLL=1,PIPELINE=1,
     parameter [255:0] SECRET_SEED=256'h00000000000000000000000000000000d1d06dcbb9181a55aabce64467d6b81d,
     parameter [255:0] SECRET_PRF=256'h00000000000000000000000000000000ca423fc52136322bce5c73a684d95cb7,
     parameter [255:0] PUBLIC_SEED=256'h00000000000000000000000000000000f416dc35e41222ef87445111008541d5,
@@ -47,16 +47,16 @@ module top #(
     output wire [10:0] signature_nodes, output wire [15:0] signature_length
 );
 // verilog_format: on
-    wire [3:0] program_address;
-    wire [3:0] template_address;
+    wire [6:0] program_address;
+    wire [4:0] template_address;
     wire [63:0] program_data, template_data;
     wire [9:0] descriptor_addresses;
     wire [127:0] descriptor_data;
 
     // Algorithm-independent construction images prevent ROM constant folding.
     // The selected profile's image is patched into INIT after core synthesis.
-    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] program_memory[0:15];
-    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] template_memory[0:15];
+    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] program_memory[0:127];
+    (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] template_memory[0:31];
     (* rom_style = "distributed", DONT_TOUCH = "yes" *) logic [63:0] descriptor_memory[0:31];
     initial begin
         if (PROGRAM_INIT_FILE != "") $readmemh(PROGRAM_INIT_FILE, program_memory);
@@ -82,9 +82,10 @@ module top #(
     wire [63:0] core_cycles;
 `endif
 
-    wire [3:0] entry = OPERATION ? image_header[44:41] : image_header[39:36];
+    wire [6:0] entry = OPERATION==2 ? image_header[56:50] :
+        OPERATION==1 ? image_header[49:43] : image_header[42:36];
     wire message_length_valid = OPERATION <= 2 &&
-        (OPERATION ? (message_length >= 7'd1 && message_length <= 7'd87)
+        (OPERATION ? ((profile_descriptor[4:0]>=24 || message_length >= 7'd1) && message_length <= 7'd87)
                        : message_length == 7'd0);
     wire core_rst = rst || !core_released;
     assign descriptor_addresses = !core_released

@@ -28,7 +28,7 @@ module tb_top_signature;
     wire [15:0] error_code;
     wire [63:0] boot_cycles, keygen_cycles, sign_cycles, hash_count, permutation_count;
 `endif
-    top #(.PIPELINE(4), .UNROLL(1)) dut (
+    top #(.PIPELINE(1), .UNROLL(1)) dut (
         .verify_valid(1'b0), .verify_data(256'd0), .*
     );
     logic [7:0] expected[0:65535], message[0:86];
@@ -57,7 +57,7 @@ module tb_top_signature;
             message_sent = 0;
         end else begin
             observed_cycles++;
-            if (observed_cycles > 2_000_000) $fatal(1, "top timeout");
+            if (observed_cycles > 20_000_000) $fatal(1, "top timeout");
             if (message_valid && message_ready) message_sent = 1;
             if (out_valid) begin
                 for (integer byte_index = 0; byte_index < out_bytes; byte_index++) begin

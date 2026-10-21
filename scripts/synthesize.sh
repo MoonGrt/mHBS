@@ -6,13 +6,13 @@ case "$hash_backend" in shake|sha2) ;; *) echo "HASH_BACKEND must be shake or sh
 export HASH_BACKEND="$hash_backend"
 default_vectors=tb/vectors
 if [[ $hash_backend == sha2 ]]; then default_vectors+=/sha2; fi
-p=${1:-1}; u=${2:-2}
+p=${1:-1}; u=${2:-1}
 if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ ]]; then
     echo 'Usage: scripts/synthesize.sh [P] [U]' >&2; exit 2
 fi
 p=$((10#$p)); u=$((10#$u))
-if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
-    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+if ((p != 1 || u != 1)); then
+    echo 'This template architecture requires K1U1.' >&2; exit 2
 fi
 vivado_bin=${VIVADO:-vivado}
 command -v "$vivado_bin" >/dev/null || { echo 'Vivado is required.' >&2; exit 2; }

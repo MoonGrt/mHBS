@@ -33,7 +33,7 @@ def descriptor_map(image):
     return order
 
 def encode(name, hash_backend="shake"):
-    from model.mHBS import ExternalImage
+    from model.mHBS import _MainExternalImage
     image=cold_image(name, hash_backend);order=descriptor_map(image);mapping={v:i for i,v in enumerate(order)}
     name=image.name
     d=[0]*32;t=[0]*16;p=[0]*16
@@ -55,7 +55,7 @@ def encode(name, hash_backend="shake"):
             if kind!=3:raise ValueError('unexpected stateful loop')
             p[j]=3<<62
         else:p[j]=(kind<<62)|(field(w,120,6)<<58)|((field(w,96,24)>>13)<<47)|(field(w,66,6)<<41)|((field(w,42,24)>>13)<<30)
-    return ExternalImage(tuple(p),tuple(t),tuple(d))
+    return _MainExternalImage(tuple(p),tuple(t),tuple(d))
 
 def decode(external):
     # New families have canonical offline-generated images. Require every word

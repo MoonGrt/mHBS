@@ -3,14 +3,14 @@
 `default_nettype none
 
 // verilog_format: off
-module common #(parameter integer UNROLL=2,PIPELINE=1)(
+module common #(parameter integer UNROLL=1,PIPELINE=1)(
 `ifndef SYNTHESIS
     output logic [15:0] error_code,
     output logic [63:0] boot_cycles,keygen_cycles,sign_cycles,
     output wire [63:0] hash_count,permutation_count,
 `endif
     input wire clk,rst,
-    output wire [3:0] program_address, output wire [3:0] template_address,
+    output wire [6:0] program_address, output wire [4:0] template_address,
     input wire [63:0] program_data, template_data,
     output wire [9:0] descriptor_addresses, input wire [127:0] descriptor_data,
     input wire [255:0] job_secret_seed, job_secret_prf, job_public_seed, job_randomizer, job_public_root,
@@ -35,9 +35,10 @@ module common #(parameter integer UNROLL=2,PIPELINE=1)(
     wire [63:0] core_cycles;
 `endif
 
-    wire [3:0] entry = job_operation ? image_header[44:41] : image_header[39:36];
+    wire [6:0] entry = job_operation==2 ? image_header[56:50] :
+        job_operation==1 ? image_header[49:43] : image_header[42:36];
     wire message_length_valid = job_operation <= 2 &&
-        (job_operation ? (message_length >= 7'd1 && message_length <= 7'd87)
+        (job_operation ? ((profile_descriptor[4:0]>=24 || message_length >= 7'd1) && message_length <= 7'd87)
                        : message_length == 7'd0);
     wire core_rst = rst || !core_released;
     assign descriptor_addresses = !core_released

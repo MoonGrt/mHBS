@@ -1,0 +1,52 @@
+{
+  "architectures": {
+    "image-chain": {
+      "validation": "/tmp/mhbs-image-chain/docs/manifests/experiments/macro_atp_acceptance_20261021_161437",
+      "synthesis": {
+        "shake": {
+          "directory": "/tmp/mhbs-image-chain/docs/manifests/experiments/restart_chain_control_20261021_161243/synthesis/shake",
+          "source_manifest": "/tmp/mhbs-image-chain/docs/manifests/experiments/restart_chain_control_20261021_161243/SOURCE.json"
+        },
+        "sha2": {
+          "directory": "/tmp/mhbs-image-chain/docs/manifests/experiments/restart_chain_control_20261021_161243/synthesis/sha2",
+          "source_manifest": "/tmp/mhbs-image-chain/docs/manifests/experiments/restart_chain_control_20261021_161243/SOURCE.json"
+        }
+      }
+    },
+    "image-chain-tree": {
+      "validation": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/macro_atp_acceptance_20261021_164159",
+      "synthesis": {
+        "shake": {
+          "directory": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_20261021_164115_438814/results",
+          "source_manifest": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_20261021_164115_438814/SOURCE.json",
+          "rtl_tar": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_20261021_164115_438814/rtl.tar.gz",
+          "utilization": "core_utilization.rpt"
+        },
+        "sha2": {
+          "directory": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_164114_500491/results",
+          "source_manifest": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_164114_500491/SOURCE.json",
+          "rtl_tar": "/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_164114_500491/rtl.tar.gz",
+          "utilization": "core_utilization.rpt"
+        }
+      }
+    }
+  },
+  "changes": {
+    "image-chain": [
+      "复用sequencer保持的控制token，删除重复saved_control",
+      "控制授权和执行各省一拍，RAM和输入输出仍保留必要等待",
+      "保留原SHAKE/SHA2配方、镜像及接口"
+    ],
+    "image-chain-tree": [
+      "SHAKE各状态字就地吸收，删除9选1的128位状态读取网络",
+      "无捕获输出的中间链在端点写回边沿推进，复用原数据路径",
+      "SHA2单上下文复用压缩器保持的CV，删除重复256位CV银行，保留原摘要/响应/raw读口语义"
+    ]
+  },
+  "rejected_candidates": [
+    "消息与摘要共用存储：功能通过，但选择网络增长，组合后SHAKE 5385.750/SHA2 4878.125等效Slice，均大于基线；已撤回，生命周期限制也已撤回。",
+    "父节点响应直达提交：减少空拍却新增256位数据选择源，组合面积回退；已撤回。",
+    "SHA2 scalar_result与digest共址：标准镜像通过；补齐全部原raw读口语义后面积4796.375等效Slice，高于4760基线；已撤回。",
+    "以上功能/面积证据和冻结版本均保留于各阶段实验，不作为最终候选面积或周期。"
+  ]
+}

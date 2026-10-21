@@ -147,5 +147,17 @@
 | u5_atp_optimization_20261020_151648 | [U5_ATP_Optimization_20261020_151648](u5_atp_optimization_20261020_151648/reports/U5_ATP_Optimization_20261020_151648.md) | [证据](u5_atp_optimization_20261020_151648/ARTIFACTS.json) |
 | u5_atp_optimization_20261020_152253 | [U5_ATP_Architecture_20261020](u5_atp_optimization_20261020_152253/reports/U5_ATP_Architecture_20261020.md)，[U5_ATP_Optimization_20261020_152253](u5_atp_optimization_20261020_152253/reports/U5_ATP_Optimization_20261020_152253.md) | [证据](u5_atp_optimization_20261020_152253/ARTIFACTS.json) |
 | timing_targets_20261020_154052 | [Timing_Targets_20261020_154052](timing_targets_20261020_154052/reports/Timing_Targets_20261020_154052.md) | [证据](timing_targets_20261020_154052/ARTIFACTS.json) |
+| image_chain_import_20261021 | [HashFlow ABI3 image-chain 移植](image_chain_import_20261021/reports/Image_Chain.md) | [证据](image_chain_import_20261021/ARTIFACTS.json) |
+| image_chain_stateful_20261021_121656 | [Stateful_Extension](image_chain_stateful_20261021_121656/reports/Stateful_Extension.md) | [证据](image_chain_stateful_20261021_121656/ARTIFACTS.json) |
 
 后台补齐：`python3 scripts/experiment_archive.py --sync --watch`。只整理已产生的结果，不停止综合，不从其他源码借用数据。
+| image_chain_atp_20261021_125914 | [Chain_ATP_Optimization](image_chain_atp_20261021_125914/reports/Chain_ATP_Optimization.md) | [证据](image_chain_atp_20261021_125914/ARTIFACTS.json) |
+| 2026-10-21 14:49:36 | [macro_granularity_20261021_144936](macro_granularity_20261021_144936/reports/Macro_Granularity.md) | K1U1 template reconstruction; SHAKE/SHA2 comparison; measured |
+
+| 20261021_151056 | program tree + CHAIN template K1U1 SHAKE/SHA2 | [报告](template_chain_20261021_151056/reports/Template_CHAIN.md) | 测试入口缺陷；保留，最终验收见151824 |
+
+| 20261021_151824 | program tree + CHAIN template K1U1 SHAKE/SHA2 | [报告](template_chain_20261021_151824/reports/Template_CHAIN.md) | 44整核＋142附加＋12补充Sign通过 |
+
+| 20261021_161243 | image-chain C1 控制握手优化 | [报告](restart_chain_control_20261021_161243/reports/Chain_Control_ATP.md) | 两后端共同核面积下降；完整回归见161437 |
+| 20261021_161437 | image-chain ATP optimization complete regression | [报告](macro_atp_acceptance_20261021_161437/reports/Macro_ATP_Acceptance.md) | 44整核＋53附加＋12补充Sign通过；不布线 |
+| 20261021_164834 | image-chain / image-chain-tree 面积周期联合优化 | [报告](macro_atp_restart_20261021_164834/reports/Macro_ATP_Restart.md) | 两后端三目标均降低ATP；88整核＋24补充Sign通过；不布线 |

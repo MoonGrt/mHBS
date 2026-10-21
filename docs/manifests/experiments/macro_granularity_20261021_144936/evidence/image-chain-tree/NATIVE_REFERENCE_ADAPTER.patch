@@ -1,0 +1,68 @@
+--- a/xmss/hash.c
++++ b/xmss/hash.c
+@@ -26,6 +26,8 @@
+                      unsigned char *out,
+                      const unsigned char *in, unsigned long long inlen)
+ {
++    extern void ref_count_hash(int, size_t);
++    ref_count_hash(params->func == XMSS_SHA2 ? 1 : 2, inlen);
+     unsigned char buf[64];
+ 
+     if (params->n == 24 && params->func == XMSS_SHA2) {
+--- a/xmss/xmss_core.c
++++ b/xmss/xmss_core.c
+@@ -219,7 +219,7 @@
+      * to be on the safe side (there is no index value left to indicate that the 
+      * key is finished, hence external handling would be necessary)
+      */ 
+-    if (idx >= ((1ULL << params->full_height) - 1)) {
++    if (idx > ((1ULL << params->full_height) - 1)) {
+         // Delete secret key here. We only do this in memory, production code
+         // has to make sure that this happens on disk.
+         memset(sk, 0xFF, params->index_bytes);
+--- a/lms/hash.h
++++ b/lms/hash.h
+@@ -1,6 +1,7 @@
+ #if !defined( HASH_H__ )
+ #define HASH_H__
+ #include "sha256.h"
++#include <openssl/evp.h>
+ #include <stddef.h>
+ #include <stdbool.h>
+ 
+@@ -14,11 +15,13 @@
+  * Hash types
+  */
+ enum {
++    HASH_SHAKE256 = 2,
+     HASH_SHA256 = 1,    /* SHA256 */
+ };
+ 
+ union hash_context {
+     SHA256_CTX sha256;
++    struct { EVP_MD_CTX *shake; size_t shake_bytes; };
+     /* Any other hash contexts would go here */
+ };
+ 
+--- a/lms/lm_ots_common.c
++++ b/lms/lm_ots_common.c
+@@ -22,6 +22,7 @@
+         v_h = HASH_SHA256; v_n = 32; v_w = 4; v_p = 67; v_ls = 4; break;
+     case LMOTS_SHA256_N32_W8:
+         v_h = HASH_SHA256; v_n = 32; v_w = 8; v_p = 34; v_ls = 0; break;
++    case 0x0b: v_h = HASH_SHAKE256; v_n = 32; v_w = 4; v_p = 67; v_ls = 4; break;
+     default: return false;
+     }
+ 
+--- a/lms/lm_common.c
++++ b/lms/lm_common.c
+@@ -25,6 +25,9 @@
+         v_h = HASH_SHA256; v_n = 32; v_height = 20; break;
+     case LMS_SHA256_N32_H25:
+         v_h = HASH_SHA256; v_n = 32; v_height = 25; break;
++    case 0x10: v_h = HASH_SHAKE256; v_n = 32; v_height = 10; break;
++    case 0x11: v_h = HASH_SHAKE256; v_n = 32; v_height = 15; break;
++    case 0x12: v_h = HASH_SHAKE256; v_n = 32; v_height = 20; break;
+     default: return false;
+     }
+ 

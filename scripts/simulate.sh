@@ -11,15 +11,15 @@ usage() {
     echo 'Usage: scripts/simulate.sh [profile] [keygen|sign|verify] [P] [U] [+OPTION=VALUE ...]'
     echo '       scripts/simulate.sh --smoke [P] [U]'
     echo '       scripts/simulate.sh --all [P] [U]'
-    echo 'Defaults: slh_128f sign P1U2; SIM_SYNTHESIS=0; SIM_VCD=0; HASH_BACKEND=shake|sha2; vectors default to tb/vectors[/sha2]; compile threads=2.'
-    echo 'VCD: SIM_VCD=1 scripts/simulate.sh slh_128f keygen 4 1 [+VCD=/absolute/path.vcd]'
+    echo 'Defaults: slh_128f sign K1U1; SIM_SYNTHESIS=0; SIM_VCD=0; HASH_BACKEND=shake|sha2; vectors default to tb/vectors[/sha2]; compile threads=2.'
+    echo 'VCD: SIM_VCD=1 scripts/simulate.sh slh_128f keygen 1 1 [+VCD=/absolute/path.vcd]'
 }
 if [[ ${PROFILE_ENABLE+x} ]]; then echo "PROFILE_ENABLE removed; use SIM_SYNTHESIS=1 for the SYNTHESIS macro view." >&2; exit 2; fi
 mode=single
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
-    --smoke|--all) mode=${1#--}; shift; profile=; operation=; p=${1:-1}; u=${2:-2}; shift "$(( $# >= 2 ? 2 : $# ))" ;;
-    *) profile=${1:-slh_128f}; operation=${2:-sign}; p=${3:-1}; u=${4:-2}; shift "$(( $# >= 4 ? 4 : $# ))" ;;
+    --smoke|--all) mode=${1#--}; shift; profile=; operation=; p=${1:-1}; u=${2:-1}; shift "$(( $# >= 2 ? 2 : $# ))" ;;
+    *) profile=${1:-slh_128f}; operation=${2:-sign}; p=${3:-1}; u=${4:-1}; shift "$(( $# >= 4 ? 4 : $# ))" ;;
 esac
 synthesis=${SIM_SYNTHESIS:-0}
 trace_vcd=${SIM_VCD:-0}
@@ -29,8 +29,8 @@ if [[ ! $p =~ ^[0-9]+$ || ! $u =~ ^[0-9]+$ || ! $synthesis =~ ^[01]$ || ! $lut6 
     echo 'P/U must be integers; SIM_SYNTHESIS, SIM_VCD and KECCAK_LUT6 must be 0 or 1.' >&2; exit 2
 fi
 p=$((10#$p)); u=$((10#$u))
-if ((p < 1 || p > 24 || u < 1 || p*u > 24 || 24%(p*u) != 0)); then
-    echo 'Require 1<=P<=24, U>0 and P*U dividing 24.' >&2; exit 2
+if ((p != 1 || u != 1)); then
+    echo 'This template architecture requires K1U1.' >&2; exit 2
 fi
 verilator_bin=${VERILATOR:-verilator}
 command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
@@ -48,7 +48,7 @@ if [[ $trace_vcd == 1 ]]; then
 fi
 if [[ $hash_backend == sha2 ]]; then work+=_sha2; fi
 mkdir -p "$work"
-identity=$( { sha256sum "${sources[@]}" tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis" "HASH_BACKEND=$hash_backend" "SIM_VCD=$trace_vcd"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+identity=$( { sha256sum "${sources[@]}" rtl/executor/instructions.svh tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis" "HASH_BACKEND=$hash_backend" "SIM_VCD=$trace_vcd"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
 exec 9>"$work/compile.lock"
 flock 9
     if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
@@ -66,6 +66,9 @@ run_case() {
     local name=$1 op=$2
     shift 2
     name=$(python3 -c 'from model.profiles import get_profile; import sys; print(get_profile(sys.argv[1], hash_backend=sys.argv[2]).name)' "$name" "$hash_backend")
+    if [[ $op != verify && ( $name == xmss_h16 || $name == xmss_h20 || $name == lms_h15 || $name == lms_h20 ) && ${ALLOW_FULL_STATEFUL_TREE:-0} != 1 ]]; then
+        echo "High-tree Keygen/Sign is disabled in this round: $name/$op" >&2; return 2
+    fi
     local vector="$vectors_root/$name/$op" canonical="$work/${name}_${op}.log"
     local log
     local trace_arguments=()
@@ -88,8 +91,8 @@ run_case() {
     cp "$log" "$canonical"
     rm "$log"
 }
-profiles=(slh_128f slh_192f slh_256f slh_128s slh_192s slh_256s xmss_h10 xmss_h16 lms_h10 lms_h15)
-if [[ $hash_backend == sha2 ]]; then profiles=(slh_128f slh_128s xmss_h10 xmss_h16 lms_h10 lms_h15); fi
+profiles=(slh_128f slh_192f slh_256f slh_128s slh_192s slh_256s xmss_h10 xmss_h16 xmss_h20 lms_h10 lms_h15 lms_h20)
+if [[ $hash_backend == sha2 ]]; then profiles=(slh_128f slh_128s xmss_h10 xmss_h16 xmss_h20 lms_h10 lms_h15 lms_h20); fi
 if [[ $mode == smoke ]]; then
     for name in "${profiles[@]}"; do run_case "$name" verify "$@"; done
     run_case slh_128f keygen "$@"
@@ -97,7 +100,7 @@ if [[ $mode == smoke ]]; then
 elif [[ $mode == all ]]; then
     for name in "${profiles[@]}"; do
         for op in keygen sign verify; do
-            if [[ $name == *_h20 && $op != verify ]]; then continue; fi
+            if [[ $op != verify && ( $name == xmss_h16 || $name == xmss_h20 || $name == lms_h15 || $name == lms_h20 ) ]]; then continue; fi
             run_case "$name" "$op" "$@"
         done
     done

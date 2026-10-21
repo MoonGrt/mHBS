@@ -167,7 +167,7 @@ LAYOUT_REVISION = 3
 
 
 @dataclass(frozen=True)
-class ExternalImage:
+class _MainExternalImage:
     program: tuple[int, ...]
     templates: tuple[int, ...]
     descriptors: tuple[int, ...]
@@ -230,12 +230,12 @@ def _convert_embedded(image):
     logical, job, root, message, sign = image.decode()
     d = list(image.descriptors)
     d[0] |= (logical.entry(False) << 36) | (logical.entry(True) << 41)
-    result = ExternalImage(image.program[:16], image.templates, tuple(d))
+    result = _MainExternalImage(image.program[:16], image.templates, tuple(d))
     result.decode()
     return result
 
 
-def compile_image(name, hash_backend="shake"):
+def _compile_main_image(name, hash_backend="shake"):
     """Build the external-input 16/16/32-word image for any supported profile."""
     from model.stateful import PROFILE_CODES, encode
     name=get_profile(name, hash_backend).name
@@ -247,34 +247,496 @@ def compile_image(name, hash_backend="shake"):
         _pack_embedded(name, Job(zero, zero, zero, zero), b'\0', zero, False, hash_backend))
 
 
-# Clear public name for callers that already distinguish logical and ROM images.
-compile_external = compile_image
-Image = ExternalImage
 
+# Layout 4 retains the main task templates, and moves tree decisions into
+# explicitly retired scalar/node control instructions.
+from model.control import (Op, Ctx as C, Wide as W, Cond, control, fields,
+                           macro, template_id, HEADER_MAGIC, KEEP_COORD,
+                           PROGRAM_WORDS, TEMPLATE_WORDS, STACK_BASE, AUTH_BASE)
+from model.executor import Macro, Kind, Source, Shape, CAPTURE, AUTH, EXTERNAL_ROOT, SIGN_ONLY
+
+LAYOUT_REVISION = 4
+FORMAT = 'main_chain64_v4'
+
+class _Assembler:
+    def __init__(self, mapping):
+        self.code=[]; self.templates=[]; self.labels={}; self.fixups=[]; self.mapping=mapping
+    def label(self,name):
+        if name in self.labels:raise ValueError('duplicate label '+name)
+        self.labels[name]=len(self.code)
+    def c(self,op,dst=0,src=0,aux=0,imm=0,target=0,cond=0):
+        if isinstance(target,str):
+            self.fixups.append((len(self.code),target));target=0
+        self.code.append(control(op,dst,src,aux,imm,target,cond))
+    def br(self,target,cond=Cond.ALWAYS,dst=C.ZERO,src=C.ZERO,imm=None):
+        self.c(Op.BR,dst,src,aux=int(imm is not None),imm=imm or 0,target=target,cond=cond)
+    def m(self,op,did,rid=0,flags=0):
+        word=int(op)|(self.mapping[did]<<3)|(self.mapping[rid]<<8)|((flags&3)<<13)|((flags&8)<<12)|((flags&4)<<14)
+        if word not in self.templates:self.templates.append(word)
+        self.code.append(macro(self.templates.index(word)))
+    def finish(self):
+        for pc,label in self.fixups:
+            if label not in self.labels:raise ValueError('missing label '+label)
+            self.code[pc]|=self.labels[label]<<14
+        if len(self.code)>PROGRAM_WORDS or len(self.templates)>TEMPLATE_WORDS:
+            raise ValueError(f'chain image capacity: {len(self.code)} program / {len(self.templates)} templates')
+        return (tuple(self.code+[0]*(PROGRAM_WORDS-len(self.code))),
+                tuple(self.templates+[0]*(TEMPLATE_WORDS-len(self.templates))))
+
+def _source(name,backend):
+    from model.stateful import cold_image,descriptor_map
+    p=get_profile(name,backend)
+    logical=cold_image(p.name,backend) if p.stateful else compile_logical_image(p.name,hash_backend=backend)
+    mapping={v:i for i,v in enumerate(descriptor_map(logical))} if p.stateful else TO_PHYSICAL
+    return p,logical,mapping
+
+def _build(name,hash_backend='shake'):
+    p,logical,mapping=_source(name,hash_backend)
+    base=_compile_main_image(p.name,hash_backend)
+    a=_Assembler(mapping)
+    def set_(reg,val):a.c(Op.SET,reg,imm=val)
+    def mov(dst,src):a.c(Op.MOV,dst,src)
+    def wmov(dst,src):a.c(Op.WMOV,dst,src)
+    def ctx(height,mode,flags,target):
+        set_(C.HEIGHT,height);set_(C.LIMIT,1<<height);set_(C.MODE,mode);set_(C.FLAGS,flags);mov(C.TARGET,target)
+    def calltree():a.c(Op.CALL,target='tree')
+    def base_address():
+        if p.family=='lms':mov(C.BASE,C.LIMIT)
+        elif p.family=='slh':
+            set_(C.BASE,0);a.br('base_fors',Cond.EQ,C.MODE,imm=1);a.br('base_done')
+            a.label('base_fors');mov(C.BASE,C.GROUP);a.c(Op.SHL,C.BASE,imm=p.a)
+            a.label('base_done')
+        else:set_(C.BASE,0)
+    a.label('keygen')
+    if p.family=='slh':set_(C.LAYER,p.d-1)
+    ctx(p.h if p.stateful else p.hp,2 if p.family=='lms' else 0,0,C.Q if p.stateful else C.SCALAR_LEAF)
+    calltree();wmov(W.V3,W.V2);a.m(Macro.EMIT,50);a.c(Op.HALT)
+    a.label('sign')
+    a.m(Macro.HASH,2,45 if p.family=='xmss' else 42 if p.family=='lms' else 40)
+    if p.family!='lms':a.m(Macro.HASH,3,42 if p.stateful else 41)
+    if p.stateful:
+        a.m(Macro.TRANSFORM,48);a.m(Macro.EMIT,51)
+        mov(C.LEAF,C.Q);mov(C.CURSOR,C.Q);set_(C.MODE,2 if p.family=='lms' else 0)
+        a.m(Macro.CHAIN,16,42,flags=SIGN_ONLY)
+        if p.family=='lms':a.m(Macro.EMIT,52)
+        ctx(p.h,2 if p.family=='lms' else 0,AUTH,C.Q)
+        calltree();a.c(Op.HALT)
+    else:
+        set_(C.GROUP,0);ctx(p.a,1,CAPTURE|AUTH,C.FORS_TARGET)
+        a.label('fors_loop');mov(C.TARGET,C.FORS_TARGET);calltree();a.c(Op.INC,C.GROUP)
+        a.br('fors_loop',Cond.LT,C.GROUP,imm=p.k)
+        set_(C.A,0);set_(C.B,0);a.m(Macro.HASH,11,42);a.m(Macro.TRANSFORM,48)
+        set_(C.GROUP,0);set_(C.LAYER,0);ctx(p.hp,0,CAPTURE|AUTH,C.SCALAR_LEAF)
+        a.label('ht_loop');a.br('ht_normal',Cond.LT,C.LAYER,imm=p.d-1)
+        set_(C.FLAGS,CAPTURE|AUTH|EXTERNAL_ROOT)
+        a.label('ht_normal');mov(C.TARGET,C.SCALAR_LEAF);calltree()
+        a.br('sign_done',Cond.EQ,C.LAYER,imm=p.d-1)
+        a.m(Macro.TRANSFORM,49);a.m(Macro.TRANSFORM,48);a.c(Op.INC,C.LAYER);a.br('ht_loop')
+        a.label('sign_done');a.c(Op.HALT)
+    # One bounded software routine implements DFS. No control instruction
+    # advances a leaf, climbs a parent, captures authentication or hashes twice.
+    a.label('tree');a.br('verify_init',Cond.EQ,C.OPERATION,imm=2)
+    set_(C.CURSOR,0)
+    a.label('leaf')
+    mov(C.LEAF,C.CURSOR)
+    if not p.stateful:
+        a.br('leaf_address',Cond.NE,C.MODE,imm=1);mov(C.LEAF,C.SCALAR_LEAF)
+        a.label('leaf_address')
+    base_address()
+    a.c(Op.ADD,C.B,C.BASE,C.CURSOR);set_(C.A,0)
+    mov(C.INDEX,C.CURSOR);mov(C.PATH,C.TARGET);set_(C.LEVEL,0)
+    if p.family=='slh':
+        a.br('chain_fors',Cond.EQ,C.MODE,imm=1)
+        a.br('chain_external',Cond.BITSET,C.FLAGS,imm=EXTERNAL_ROOT)
+        a.br('chain_capture',Cond.BITSET,C.FLAGS,imm=CAPTURE)
+        a.m(Macro.CHAIN,17);a.br('node')
+        a.label('chain_external');a.m(Macro.CHAIN,17,flags=CAPTURE|EXTERNAL_ROOT);a.br('node')
+        a.label('chain_capture');a.m(Macro.CHAIN,17,flags=CAPTURE);a.br('node')
+        a.label('chain_fors');a.m(Macro.CHAIN,16,flags=CAPTURE)
+    else:a.m(Macro.CHAIN,16)
+    a.label('node');a.br('root',Cond.EQ,C.LEVEL,C.HEIGHT)
+    a.br('verify_input',Cond.EQ,C.OPERATION,imm=2)
+    a.br('auth_test',Cond.BITSET,C.FLAGS,imm=AUTH);a.br('after_auth')
+    a.label('auth_test');a.br('auth_store',Cond.SIBLING,C.INDEX,C.PATH);a.br('after_auth')
+    a.label('auth_store');a.c(Op.STORE,C.LEVEL,W.NODE,imm=AUTH_BASE)
+    a.label('after_auth');a.br('parent_load',Cond.ODD,C.INDEX)
+    a.c(Op.STORE,C.LEVEL,W.NODE,imm=STACK_BASE);a.c(Op.INC,C.CURSOR)
+    a.br('leaf',Cond.LT,C.CURSOR,C.LIMIT)
+    a.c(Op.HALT) # unreachable for a valid complete tree; decoder checks bounds
+    a.label('parent_load');a.c(Op.LOAD,W.LEFT,C.LEVEL,imm=STACK_BASE)
+    a.label('parent_setup');mov(C.A,C.LEVEL)
+    if p.family!='xmss':a.c(Op.INC,C.A)
+    set_(C.LEAF,0)
+    if p.family=='slh':
+        a.br('parent_address',Cond.NE,C.MODE,imm=1);mov(C.LEAF,C.SCALAR_LEAF)
+        a.label('parent_address')
+    a.c(Op.SHR,C.INDEX,imm=1);a.c(Op.SHR,C.PATH,imm=1);a.c(Op.SHR,C.BASE,imm=1)
+    a.c(Op.ADD,C.B,C.BASE,C.INDEX);a.c(Op.INC,C.LEVEL)
+    if p.family=='slh':
+        a.br('parent_hash',Cond.EQ,C.OPERATION,imm=2)
+        a.br('parent_shortcut_test',Cond.BITSET,C.FLAGS,imm=EXTERNAL_ROOT);a.br('parent_hash')
+        a.label('parent_shortcut_test');a.br('parent_zero',Cond.EQ,C.INDEX,C.PATH)
+        a.label('parent_hash');a.br('hash_fors',Cond.EQ,C.MODE,imm=1)
+        a.m(Macro.HASH,10);a.br('parent_done')
+        a.label('hash_fors');a.m(Macro.HASH,6)
+    else:a.m(Macro.HASH,7)
+    a.label('parent_done');wmov(W.NODE,W.LEFT);a.br('node')
+    if p.family=='slh':
+        a.label('parent_zero');wmov(W.NODE,W.ZERO);a.br('node')
+    a.label('verify_init')
+    mov(C.CURSOR,C.TARGET)
+    if p.stateful:
+        wmov(W.NODE,W.V2);mov(C.INDEX,C.TARGET);mov(C.PATH,C.TARGET);set_(C.LEVEL,0)
+        base_address();a.br('node')
+    else:a.br('leaf')
+    a.label('verify_input');a.br('verify_odd',Cond.ODD,C.INDEX)
+    wmov(W.LEFT,W.NODE);a.c(Op.INPUT,W.NODE);a.br('parent_setup')
+    a.label('verify_odd');a.c(Op.INPUT,W.LEFT);a.br('parent_setup')
+    a.label('root')
+    if p.family=='slh':
+        a.br('fors_root',Cond.EQ,C.MODE,imm=1);wmov(W.V2,W.NODE);a.br('root_saved')
+        a.label('fors_root');a.c(Op.STORE,C.GROUP,W.NODE)
+        a.label('root_saved')
+    else:wmov(W.V2,W.NODE)
+    a.br('return',Cond.EQ,C.OPERATION,imm=2)
+    a.br('auth_output',Cond.BITSET,C.FLAGS,imm=AUTH);a.br('return')
+    a.label('auth_output');set_(C.AUTH_LEVEL,0)
+    a.label('auth_loop');a.c(Op.LOAD,W.NODE,C.AUTH_LEVEL,imm=AUTH_BASE);a.c(Op.OUTPUT,src=W.NODE)
+    a.c(Op.INC,C.AUTH_LEVEL);a.br('auth_loop',Cond.LT,C.AUTH_LEVEL,C.HEIGHT)
+    a.label('return');a.c(Op.RET)
+    program,templates=a.finish()
+    d=list(base.descriptors)
+    d[0]=(d[0]&((1<<36)-1))|(a.labels['keygen']<<36)|(a.labels['sign']<<43)|(a.labels['sign']<<50)|(HEADER_MAGIC<<57)
+    return ExternalImage(program,templates,tuple(d)),logical,mapping,a.labels,len(a.code),len(a.templates)
+
+@dataclass(frozen=True)
+class DecodedImage:
+    source: LogicalImage
+    external: object
+    def __getattr__(self,name):return getattr(self.source,name)
+    def entry(self,sign=False,operation=None):
+        op=int(sign) if operation is None else int(operation)
+        return (self.external.descriptors[0]>>(36+7*op))&127
+
+@dataclass(frozen=True)
+class ExternalImage:
+    program: tuple[int,...]
+    templates: tuple[int,...]
+    descriptors: tuple[int,...]
+    @property
+    def hash_backend(self):return 'sha2' if self.descriptors[1]&32 else 'shake'
+    def decode(self,hash_backend=None):
+        if (len(self.program),len(self.templates),len(self.descriptors))!=(128,32,32):raise ValueError('layout 4 capacity')
+        if any(not 0<=w<1<<64 for group in (self.program,self.templates,self.descriptors) for w in group):raise ValueError('word width')
+        if self.descriptors[0]>>57!=HEADER_MAGIC:raise ValueError('chain layout version')
+        code=self.descriptors[1]
+        if code>>6:raise ValueError('profile reserved bits')
+        if hash_backend is not None and hash_backend!=self.hash_backend:raise ValueError('ROM hash backend mismatch')
+        from model.stateful import PROFILE_CODES
+        names={**SLH_PROFILE_CODES,**PROFILE_CODES}
+        if code&31 not in names:raise ValueError('profile code')
+        p,logical,mapping=_source(names[code&31],self.hash_backend)
+        expected=_compile_main_image(p.name,self.hash_backend)
+        if self.descriptors[1:]!=expected.descriptors[1:] or self.descriptors[0]&((1<<36)-1)!=expected.descriptors[0]&((1<<36)-1):raise ValueError('noncanonical recipe/profile')
+        for t in self.templates:
+            if not t:continue
+            if t>>17 or t&7 not in (1,2,4,5):raise ValueError('TREE or illegal template')
+            did=(t>>3)&31;rid=(t>>8)&31
+            if did not in mapping.values() or rid not in mapping.values():raise ValueError('template reference')
+        for word in self.program:
+            kind=word>>62
+            if kind==3:
+                if word&1023:raise ValueError('control reserved bits')
+                op,dst,src,aux,imm,target,cond=fields(word)
+                if op==Op.HALT and word!=3<<62:raise ValueError('HALT reserved bits')
+                if op==Op.BR and aux>1:raise ValueError('branch operand mode')
+                writable=range(16);readable=range(25)
+                if op in (Op.SET,Op.MOV,Op.INC,Op.SHR,Op.XOR1,Op.ADD,Op.SHL) and dst not in writable:raise ValueError('readonly context write')
+                if op in (Op.MOV,Op.ADD) and src not in readable:raise ValueError('context selector')
+                if op==Op.ADD and aux not in readable:raise ValueError('context selector')
+                if op==Op.SET and (imm>=1<<ControlMachine._widths[dst] or (dst in (C.HEIGHT,C.LEVEL,C.AUTH_LEVEL) and imm>20) or (dst==C.MODE and imm>2)):raise ValueError('context immediate overflow')
+                if op in (Op.SHR,Op.SHL) and not 1<=imm<=20:raise ValueError('shift bound')
+                if op==Op.BR and (dst not in readable or src not in readable):raise ValueError('branch context selector')
+                if op in (Op.LOAD,Op.INPUT,Op.WMOV) and not 0<=dst<7:raise ValueError('wide destination')
+                if op in (Op.STORE,Op.OUTPUT,Op.WMOV) and not 0<=src<=7:raise ValueError('wide source')
+                if op==Op.LOAD and src not in readable:raise ValueError('memory context selector')
+                if op==Op.STORE and dst not in readable:raise ValueError('memory context selector')
+            elif kind<2:
+                if not word:continue
+                if word&((1<<28)-1) or not self.templates[template_id(word)]:raise ValueError('macro token')
+            else:
+                if word&((1<<40)-1) or not (word>>51)&63:raise ValueError('counted LOOP fields')
+        return DecodedImage(logical,self)
+    def write(self,folder):
+        self.decode();folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
+        for name,words in zip(('program','template','descriptor'),(self.program,self.templates,self.descriptors)):
+            (folder/(name+'.mem')).write_text(''.join(f'{w:016x}\n' for w in words))
+    @classmethod
+    def read(cls,folder):
+        return cls(*(tuple(int(w,16) for w in (Path(folder)/(n+'.mem')).read_text().split()) for n in ('program','template','descriptor')))
+    @property
+    def usage(self):
+        decoded=self.decode();_,_,mapping=_source(decoded.name,self.hash_backend)
+        _,_,_,labels,count,tcount=_build(decoded.name,self.hash_backend)
+        ops={'HASH':0,'CHAIN':0,'TREE':0,'TRANSFORM':0,'EMIT':0,'control':0}
+        for word in self.program[:count]:
+            if word>>62==3:ops['control']+=1
+            else:ops[Macro(self.templates[template_id(word)]&7).name]+=1
+        used={0,1}
+        def visit(index):
+            if index in used:return
+            used.add(index);word=decoded.source.descriptors[index];kind=word>>60
+            for shift in {int(Kind.CHAIN):(52,44,36,28),int(Kind.EMIT):(52,)}.get(kind,()):
+                ref=field(word,shift,8)
+                if ref:visit(ref)
+            if kind==Kind.EMIT:
+                for ref in range(field(word,52,8),field(word,52,8)+field(word,48,4)):visit(ref)
+        reverse={v:k for k,v in mapping.items()}
+        for word in self.templates[:tcount]:
+            visit(reverse[(word>>3)&31]);visit(reverse[(word>>8)&31])
+        return dict(program_allocated=128,program_used=count,template_allocated=32,template_used=tcount,
+                    descriptor_allocated=32,descriptor_used=len(used),descriptor_valid=len(mapping),
+                    descriptor_nonzero=sum(bool(w) for w in self.descriptors),
+                    descriptor_reachable=sorted(mapping[index] for index in used),
+                    static_operations=ops,entries=labels)
+
+def compile_image(name,hash_backend='shake'):
+    return _build(name,hash_backend)[0]
+
+compile_external=compile_image
+Image=ExternalImage
+
+class ControlMachine:
+    """Execute physical tokens; tree traversal exists only in the program.
+
+    The inherited recipe/CHAIN implementation is the main algorithm model.
+    Neither this VM nor its compiler invokes Machine.tree().
+    """
+    _widths=(20,8,21,21,21,5,21,21,21,5,21,5,6,5,4,2)
+    def __init__(self,image,job,root,message,operation=1,verify_nodes=(),observe=None):
+        self.external=image;self.decoded=image.decode();self.profile=get_profile(self.decoded.name,image.hash_backend)
+        self.vm=Machine(self.decoded.source,job,observe,index_policy='fixed_q_no_guard',recompute_auth=True)
+        self.vm.active_q=job.q;self.vm.message=bytes(message);self.vm.values[3]=bytes(root)
+        self.operation=int(operation);self.ctx=[0]*16;self.ram=[bytes(self.profile.n) for _ in range(128)]
+        self.node=bytes(self.profile.n);self.left=bytes(self.profile.n);self.emit=bytes(self.profile.n)
+        self.inputs=iter(bytes(x) for x in verify_nodes);self.input_count=0
+        self.return_pc=None;self.loops=[];self.halted=False;self.steps=0
+        self.operations={op.name:0 for op in Macro};self.operations['control']=0
+        self.control_trace=[];self.macro_trace=[]
+        _,_,mapping=_source(self.profile.name,image.hash_backend)
+        self.logical_ref={v:k for k,v in mapping.items()}
+        if not 0<=self.operation<=2:raise ValueError('operation')
+        if self.profile.stateful and not 0<=job.q<1<<self.profile.h:raise ValueError('index exhausted')
+        if not self.profile.stateful and (job.q or any(job.identifier)):raise ValueError('SLH-only job')
+        if len(root)!=self.profile.n:raise ValueError('root size')
+        if self.operation and not (0 if self.profile.stateful else 1)<=len(message)<=87:raise ValueError('message length')
+        if not self.operation and message:raise ValueError('Keygen message must be empty')
+    def __getattr__(self,name):return getattr(self.vm,name)
+    def narrow(self,reg):
+        if reg<16:return self.ctx[reg]
+        p=self.profile
+        if reg==C.Q:return self.vm.job.q
+        if reg==C.SCALAR_LEAF:return self.vm.scalar_leaf
+        if reg==C.FORS_TARGET:
+            fb=(p.k*p.a+7)//8
+            shift=8*fb-p.a*(self.ctx[C.GROUP]+1)
+            if shift<0:raise ValueError('FORS digest bounds')
+            return (int.from_bytes(self.vm.values[1][:fb],'big')>>shift)&((1<<p.a)-1)
+        if reg==C.PROFILE_HEIGHT:return p.h
+        if reg==C.ZERO:return 0
+        if reg==C.ONE:return 1
+        if reg==C.OPERATION:return self.operation
+        if reg==C.XMSS:return int(p.family=='xmss')
+        if reg==C.STATEFUL:return int(p.stateful)
+        raise ValueError('context selector')
+    def put_narrow(self,reg,value):
+        if not 0<=reg<16 or not 0<=value<1<<self._widths[reg]:raise ValueError('context write/bounds')
+        if reg in (C.HEIGHT,C.LEVEL,C.AUTH_LEVEL) and value>20:raise ValueError('tree height/level bounds')
+        if reg==C.MODE and value>2:raise ValueError('address mode bounds')
+        self.ctx[reg]=value
+    def wide(self,reg):
+        if reg==W.NODE:return self.node
+        if reg==W.LEFT:return self.left[:self.profile.n]
+        if W.V0<=reg<=W.V3:return self.vm.values[reg-W.V0][:self.profile.n]
+        if reg==W.EMIT:return self.emit
+        if reg==W.ZERO:return bytes(self.profile.n)
+        raise ValueError('wide selector')
+    def put_wide(self,reg,value):
+        value=bytes(value)[:self.profile.n]
+        if reg==W.NODE:self.node=value
+        elif reg==W.LEFT:self.left=value
+        elif W.V0<=reg<=W.V3:
+            slot=reg-W.V0
+            self.vm.values[slot]=value+(self.vm.values[slot][self.profile.n:] if slot==1 else b'')
+        elif reg==W.EMIT:self.emit=value
+        else:raise ValueError('wide write')
+    def input(self):
+        try:value=next(self.inputs)
+        except StopIteration:raise ValueError('truncated Verify input') from None
+        if len(value)!=self.profile.n:raise ValueError('Verify node size')
+        self.input_count+=1;return value
+    def memory_address(self,reg,imm):
+        address=self.narrow(reg)+imm
+        if not 0<=address<128 or 108<=address:raise ValueError('workspace bounds')
+        if 68<=address<88 and not self.narrow(reg)<20:raise ValueError('stack level')
+        if 88<=address<108 and not self.narrow(reg)<20:raise ValueError('authentication level')
+        return address
+    def branch(self,cond,dst,src,aux,imm):
+        left=self.narrow(dst);right=imm if aux else self.narrow(src)
+        return {Cond.ALWAYS:lambda:True,Cond.EQ:lambda:left==right,Cond.NE:lambda:left!=right,
+                Cond.LT:lambda:left<right,Cond.GE:lambda:left>=right,Cond.ODD:lambda:bool(left&1),
+                Cond.ZERO:lambda:left==0,Cond.BITSET:lambda:bool(left&imm),
+                Cond.SIBLING:lambda:left==(right^1),Cond.SAME_PARENT:lambda:(left>>1)==(right>>1)}[cond]()
+    def reduce_endpoints(self,did,endpoints,leaf,index,layer):
+        d=self.vm.image.descriptors[did]
+        reduce,leaf_recipe,mode=(field(d,s,w) for s,w in ((36,8),(28,8),(12,2)))
+        if mode==1:value=self.vm.hash_recipe(reduce,layer=layer,leaf=leaf,values=endpoints)
+        elif mode==2:
+            level=0
+            while len(endpoints)>1:
+                endpoints=[self.vm.hash_recipe(reduce,leaf=leaf,a=level,b=i//2,left=endpoints[i],right=endpoints[i+1])
+                           for i in range(0,len(endpoints)-1,2)]+(endpoints[-1:] if len(endpoints)&1 else [])
+                level+=1
+            value=endpoints[0]
+        else:value=endpoints[0]
+        if leaf_recipe:value=self.vm.hash_recipe(leaf_recipe,leaf=leaf,b=index,left=value)
+        return value
+    def chain(self,did,flags):
+        c=self.ctx;leaf=c[C.LEAF];layer=c[C.LAYER]
+        index=(1<<self.profile.h)+leaf if self.profile.family=='lms' else c[C.B]
+        d=self.vm.image.descriptors[did]
+        if self.operation==2:
+            step,count,steps=(field(d,s,w) for s,w in ((44,8),(20,8),(15,5)))
+            endpoints=[]
+            for item in range(count):
+                value=self.input()
+                if c[C.MODE]==1:
+                    value=self.vm.hash_recipe(step,layer=layer,leaf=leaf,a=item,b=index,left=value)
+                else:
+                    for iteration in range(self.vm.digits[item],steps):
+                        value=self.vm.hash_recipe(step,layer=layer,leaf=leaf,a=item,b=iteration,left=value)
+                endpoints.append(value)
+            return self.reduce_endpoints(did,endpoints,leaf,index,layer)
+        capture=bool(flags&CAPTURE) and c[C.CURSOR]==c[C.TARGET]
+        sign_only=bool(flags&SIGN_ONLY) or (capture and bool(flags&EXTERNAL_ROOT))
+        return self.vm.chains(did,layer,leaf,index,c[C.MODE]==1,capture,sign_only)
+    def macro(self,word):
+        t=self.external.templates[template_id(word)]
+        op=Macro(t&7);did=self.logical_ref[(t>>3)&31];rid=self.logical_ref[(t>>8)&31]
+        flags=((t>>13)&3)|(((t>>15)&1)<<3)|(((t>>16)&1)<<2)
+        if not word&KEEP_COORD:
+            coordinate=(word>>47)&2047;self.ctx[C.LAYER]=coordinate>>6;self.ctx[C.GROUP]=coordinate&63
+        self.operations[op.name]+=1;self.macro_trace.append((self.pc,op.name,did,flags,self.ctx.copy()))
+        result=bytes(self.profile.n);d=self.vm.image.descriptors[did]
+        if op==Macro.HASH:
+            shape=Shape(field(d,56,4))
+            if self.operation==2 and shape in (Shape.MESSAGE_PRF,Shape.INDEX_PRF):result=self.input()
+            else:
+                if self.operation==2 and shape==Shape.PREFIX_MESSAGE:self.vm.job=__import__('dataclasses').replace(self.vm.job,random=self.input())
+                result=self.vm.hash_recipe(did,layer=self.ctx[C.LAYER],leaf=self.ctx[C.LEAF],a=self.ctx[C.A],b=self.ctx[C.B],
+                                           left=self.left[:self.profile.n],right=self.node,values=self.ram[:self.profile.k])
+            self.left=result
+        elif op==Macro.CHAIN:
+            result=self.chain(did,flags);self.left=result;self.node=result
+        elif op==Macro.TRANSFORM:
+            if field(d,56,4)==1:
+                value=self.vm.values[field(d,48,2)][:self.profile.n];omega=self.vm.image.omega;mask=(1<<omega)-1
+                self.vm.digits=[(x>>shift)&mask for x in value for shift in range(8-omega,-1,-omega)]
+                checksum=sum(mask-x for x in self.vm.digits)
+                len2=(len(self.vm.digits)*mask).bit_length()//omega+1
+                self.vm.digits +=[(checksum>>shift)&mask for shift in range((len2-1)*omega,-1,-omega)]
+            elif field(d,56,4)==2:
+                shift=field(d,40,4);self.vm.scalar_leaf=self.vm.scalar_tree&((1<<shift)-1);self.vm.scalar_tree>>=shift
+            else:raise ValueError('transform')
+        elif op==Macro.EMIT:
+            if self.operation!=2:
+                for i in range(field(d,52,8),field(d,52,8)+field(d,48,4)):
+                    seg=self.vm.image.descriptors[i];src=Source(field(seg,56,4));length=field(seg,48,8)
+                    value={Source.SECRET:self.vm.job.secret,Source.PRF:self.vm.job.prf,Source.PUBLIC:self.vm.job.public,
+                           Source.ROOT:self.vm.values[3],Source.RANDOM:self.vm.values[0] if self.profile.family=='xmss' else self.vm.job.random,
+                           Source.IDENTIFIER:self.vm.job.identifier,Source.INDEX:self.vm.active_q.to_bytes(4,'big'),
+                           Source.CONSTANT:field(seg,0,32).to_bytes(4,'big')}[src]
+                    self.vm.output.extend(value[:length])
+        else:raise ValueError('TREE unavailable')
+        if rid:
+            r=self.vm.image.descriptors[rid]
+            if field(r,53,1):self.ram[self.ctx[C.GROUP]]=result[:self.profile.n]
+            else:self.vm.values[field(r,56,2)]=result
+            if self.operation!=2 and field(r,55,1):self.vm.output.extend(result[:self.profile.n])
+            if field(r,54,1):
+                fb=(self.profile.k*self.profile.a+7)//8;tb=(self.profile.h-self.profile.hp+7)//8;lb=(self.profile.hp+7)//8
+                self.vm.scalar_tree=int.from_bytes(result[fb:fb+tb],'big')&((1<<(self.profile.h-self.profile.hp))-1)
+                self.vm.scalar_leaf=int.from_bytes(result[fb+tb:fb+tb+lb],'big')&((1<<self.profile.hp)-1)
+    def run(self):
+        if self.halted:raise ValueError('halted until reset')
+        self.pc=self.decoded.entry(operation=self.operation)
+        try:
+            while True:
+                self.steps+=1
+                if self.steps>1000000000:raise ValueError('control budget')
+                if not 0<=self.pc<128:raise ValueError('program bounds')
+                word=self.external.program[self.pc]
+                kind=word>>62
+                if kind<2:
+                    coordinate=((word>>47)&2047)+sum(frame[2] for frame in self.loops)
+                    for iteration in range(((word>>41)&63)+1):
+                        issued=(word&~(2047<<47))|(((coordinate+iteration*((word>>30)&2047))&2047)<<47)
+                        self.macro(issued)
+                    self.pc+=1;continue
+                if kind==2:
+                    back=((word>>57)&31)+1
+                    if back>self.pc:raise ValueError('LOOP target')
+                    if self.loops and self.loops[-1][0]==self.pc:
+                        frame=self.loops[-1]
+                        if frame[1]>1:frame[1]-=1;frame[2]=(frame[2]+frame[3])&2047;self.pc-=back
+                        else:self.loops.pop();self.pc+=1
+                    else:
+                        if len(self.loops)==2:raise ValueError('LOOP nesting')
+                        self.loops.append([self.pc,(word>>51)&63,(word>>40)&2047,(word>>40)&2047]);self.pc-=back
+                    continue
+                op,dst,src,aux,imm,target,cond=fields(word);next_pc=self.pc+1
+                self.operations['control']+=1
+                if op==Op.HALT:
+                    if self.return_pc is not None or self.loops:raise ValueError('HALT within subroutine/loop')
+                    break
+                if op==Op.SET:self.put_narrow(dst,imm)
+                elif op==Op.MOV:self.put_narrow(dst,self.narrow(src))
+                elif op==Op.INC:self.put_narrow(dst,self.narrow(dst)+1)
+                elif op==Op.SHR:self.put_narrow(dst,self.narrow(dst)>>imm)
+                elif op==Op.XOR1:self.put_narrow(dst,self.narrow(dst)^1)
+                elif op==Op.ADD:self.put_narrow(dst,self.narrow(src)+self.narrow(aux))
+                elif op==Op.SHL:self.put_narrow(dst,self.narrow(dst)<<imm)
+                elif op==Op.BR:
+                    if self.branch(cond,dst,src,aux,imm):next_pc=target
+                elif op==Op.CALL:
+                    if self.return_pc is not None:raise ValueError('nested CALL')
+                    self.return_pc=self.pc+1;next_pc=target
+                elif op==Op.RET:
+                    if self.return_pc is None:raise ValueError('RET without CALL')
+                    next_pc=self.return_pc;self.return_pc=None
+                elif op==Op.LOAD:self.put_wide(dst,self.ram[self.memory_address(src,imm)])
+                elif op==Op.STORE:self.ram[self.memory_address(dst,imm)]=self.wide(src)
+                elif op==Op.INPUT:self.put_wide(dst,self.input())
+                elif op==Op.OUTPUT:
+                    if self.operation==2:raise ValueError('Verify output')
+                    self.vm.output.extend(self.wide(src))
+                elif op==Op.WMOV:self.put_wide(dst,self.wide(src))
+                else:raise ValueError('control opcode')
+                self.pc=next_pc
+            self.halted=True
+            if self.operation==2:
+                self.verify_pass=self.vm.values[2][:self.profile.n]==self.vm.values[3][:self.profile.n]
+                if not self.verify_pass:raise ValueError('root comparison')
+                try:next(self.inputs)
+                except StopIteration:pass
+                else:raise ValueError('excess Verify input')
+                if self.vm.output:raise ValueError('Verify produced output')
+            elif len(self.vm.output)!=self.vm.image.output_bytes(self.operation==1):raise ValueError('output length')
+            return bytes(self.vm.output)
+        except Exception:
+            self.vm.output.clear();self.halted=True;raise
 
 class ExternalMachine:
-    def __init__(self, image, job, root, message, sign, observe=None):
-        logical = image.decode()
-        if not logical.stateful and (job.q or any(job.identifier)):
-            raise ValueError('SLH-only job')
-        if logical.stateful and not 0 <= job.q < (1 << logical.h):
-            raise ValueError('index exhausted')
-        if len(root) != logical.n:
-            raise ValueError('root size')
-        if not (1 <= len(message) <= 87 if sign else len(message) == 0):
-            raise ValueError('message length')
-        self.machine = Machine(
-            logical, job, observe,
-            index_policy='fixed_q_no_guard' if logical.stateful else 'guarded',
-            recompute_auth=logical.stateful)
-        self.message = message
-        self.sign = bool(sign)
-        self.halted = False
-        if sign:
-            self.machine.values[3] = root
-
-    def run(self):
-        if self.halted:
-            raise ValueError('halted until reset')
-        self.halted = True
-        return self.machine.run(self.sign, self.message)
+    def __init__(self,image,job,root,message,sign=True,observe=None,*,operation=None,verify_nodes=()):
+        self.machine=ControlMachine(image,job,root,message,int(sign) if operation is None else operation,verify_nodes,observe)
+    def run(self):return self.machine.run()

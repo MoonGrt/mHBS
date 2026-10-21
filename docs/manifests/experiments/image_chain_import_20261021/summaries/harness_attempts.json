@@ -1,0 +1,25 @@
+{
+  "format": "hashflow_import_harness_attempts",
+  "production_rtl_changed": false,
+  "attempts": [
+    {
+      "name": "lane_parameter_option_rename",
+      "status": "failed_harness_fixed",
+      "cause": "Icarus -Ptb_mhbs_single_hash_lane options were not renamed alongside tb_recipe, leaving UNROLL=2 and MASK=101e defaults active.",
+      "observed_failure": "tb/tb_recipe.sv:179 error case=3 got=0",
+      "fix": "Rename parameter overrides to -Ptb_recipe.UNROLL/MASK.",
+      "rerun": "build/hashflow/units/results.json",
+      "original_log_available": false
+    },
+    {
+      "name": "wrong_abi_4_5_error_classification",
+      "status": "failed_harness_fixed",
+      "cause": "New FAULT=10/11 correctly rejected by common with error3101, but inherited fault>=5 assertion additionally required3006.",
+      "observed_failure": "tb/tb.sv:345 typed operand/range fault",
+      "fix": "Exclude FAULT10/11 from the typed-operand assertion.",
+      "snapshot": "build/hashflow/first_runner_snapshot/tb.sv",
+      "log": "build/hashflow/image_chain/logs/slh_128f_verify_abi4.log",
+      "rerun": "build/hashflow/image_chain_verified/rtl.json"
+    }
+  ]
+}

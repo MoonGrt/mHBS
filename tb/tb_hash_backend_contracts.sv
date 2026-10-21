@@ -12,11 +12,11 @@ module tb_hash_backend_contracts;
     logic [63:0] profile=0;
     logic [31:0] job_index=0;
     logic [6:0] message_length=1;
-    wire [3:0] program_address, template_address;
+    wire [6:0] program_address;wire [4:0] template_address;
     wire [9:0] descriptor_addresses;
     wire [127:0] descriptor_data;
     function automatic [63:0] descriptor(input [4:0] address);
-        descriptor=address==0 ? 64'h00000600018042c0 : address==1 ? profile : 0;
+        descriptor=address==0 ? 64'ha6000000018042c0 : address==1 ? profile : 0;
     endfunction
     assign descriptor_data={descriptor(descriptor_addresses[9:5]),descriptor(descriptor_addresses[4:0])};
     wire message_ready, busy, done, error, out_valid;
@@ -25,7 +25,7 @@ module tb_hash_backend_contracts;
     wire [63:0] hash_count, permutation_count;
 `endif
     // verilog_format: off
-    common #(.PIPELINE(4),.UNROLL(1)) dut (
+    common #(.PIPELINE(1),.UNROLL(1)) dut (
         .clk,.rst,.program_address,.template_address,.descriptor_addresses,.descriptor_data,
         .program_data(64'hc000000000000000),.template_data(64'd0),
         .job_secret_seed(256'd0),.job_secret_prf(256'd0),.job_public_seed(256'd0),
@@ -76,16 +76,16 @@ module tb_hash_backend_contracts;
     wire [255:0] response_capture;
     logic [255:0] secret_seed=0, public_seed=0, left=0, right=0, fixed_expected;
     // verilog_format: off
-    recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(4),.UNROLL(1),
+    recipe #(.N(32),.DIGEST_BYTES(49),.INDEX_BITS(8),.PIPELINE(1),.UNROLL(1),
         .RECIPE_MASK(16'h7fff)) scalar (
         .clk,.rst(recipe_rst),.error(recipe_error),.node_bytes(6'd16),.identifier(128'd0),
         .batch_mode(1'b0),.batch_request_valid(1'b0),.batch_request_ready(),
-        .batch_request_tag(2'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
+        .batch_request_tag(1'd0),.batch_steps(5'd0),.batch_capture_after(5'd0),.batch_capture_enable(1'b0),
         .batch_leaf(20'd0),.batch_a(8'd0),.batch_b(32'd0),.batch_family(2'd0),.batch_no_seed(1'b0),
         .batch_start(4'd0),.batch_initial_value(256'd0),.batch_fixed_shape(4'd0),.batch_pair(1'b0),
         .batch_right(256'd0),.batch_seed_domain(8'd0),.batch_step_domain(8'd0),
         .batch_response_valid(),.batch_response_ready(1'b0),.batch_response_tag(),
-        .batch_response_digest(),.batch_response_capture(),.batch_read_tag(2'd0),
+        .batch_response_digest(),.batch_response_capture(),.batch_read_tag(1'd0),
         .batch_read_digest(),.batch_read_capture(),
         .request_valid,.request_ready,.request_recipe,.request_step_recipe(64'd0),
         .request_chain(1'b0),.request_steps(5'd0),.request_capture_after(5'd1),.request_capture,

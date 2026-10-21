@@ -1,0 +1,185 @@
+diff --git a/rtl/executor/executor.sv b/rtl/executor/executor.sv
+index 9be9c3c6..b102d947 100644
+--- a/rtl/executor/executor.sv
++++ b/rtl/executor/executor.sv
+@@ -90,7 +90,6 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+     wire seq_ready,seq_done,seq_error,cmd_valid,command_keep_coordinates,control_valid,control_condition;
+     wire [47:0] cmd;
+     wire [63:0] control;
+-    logic [63:0] saved_control;
+     // verilog_format: off
+     sequencer sequencer(.clk,.rst(execution_rst),.start(seq_start),.entry(job_entry),.ready(seq_ready),
+         .done(seq_done),.error(seq_error),.program_address,.program_data,.template_address,.template_data,
+@@ -369,10 +368,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+             endcase
+         end
+     endtask
+-    wire [4:0] control_op=saved_control[61:57],control_dst=saved_control[56:52];
+-    wire [4:0] control_src=saved_control[51:47],control_aux=saved_control[46:42];
+-    wire [20:0] control_immediate=saved_control[41:21];
+-    wire [3:0] control_cond=saved_control[13:10];
++    wire [4:0] control_op=control[61:57],control_dst=control[56:52];
++    wire [4:0] control_src=control[51:47],control_aux=control[46:42];
++    wire [20:0] control_immediate=control[41:21];
++    wire [3:0] control_cond=control[13:10];
+     wire [20:0] control_dst_value=narrow_read(control_dst);
+     wire [20:0] control_src_value=narrow_read(control_src);
+     wire [20:0] control_aux_value=narrow_read(control_aux);
+@@ -461,6 +460,49 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+     task automatic read_verify_node(input state_t ret);
+         begin continuation<=ret;state<=VERIFY_INPUT;end
+     endtask
++    task automatic execute_control;
++        begin
++                    case(control_op)
++                        `CTRL_SET,`CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL:begin
++                            if(control_dst>15 || (control_op==`CTRL_MOV && control_src>24) ||
++                                (control_op==`CTRL_ADD && (control_src>24 || control_aux>24)) ||
++                                ((control_op==`CTRL_SHR || control_op==`CTRL_SHL) &&
++                                    (control_immediate==0 || control_immediate>20)) ||
++                                (|control_alu[40:21]) || (control_alu[20:0]&~narrow_mask(control_dst))!=0 ||
++                                ((control_dst==`CTX_HEIGHT || control_dst==`CTX_LEVEL || control_dst==`CTX_AUTH_LEVEL) && control_alu>20) ||
++                                (control_dst==`CTX_MODE && control_alu>2)) fail();
++                            else begin narrow_write(control_dst,control_alu[20:0]);complete_control();end
++                        end
++                        `CTRL_BR:begin
++                            if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
++                                ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
++                            else complete_control();
++                        end
++                        `CTRL_CALL,`CTRL_RET:complete_control();
++                        `CTRL_LOAD:begin
++                            if(control_dst>6 || control_src>24 || control_load_address>=108) fail();
++                            else state<=CONTROL_LOAD;
++                        end
++                        `CTRL_STORE:begin
++                            if(control_src>7 || control_dst>24 || control_store_address>=108) fail();
++                            else state<=CONTROL_STORE;
++                        end
++                        `CTRL_INPUT:begin
++                            if(!verifying || control_dst>6) fail();else state<=CONTROL_INPUT;
++                        end
++                        `CTRL_OUTPUT:begin
++                            if(verifying || control_src>7) fail();else begin
++                                start_output(wide_read(control_src),node_bytes,CONTROL_OUTPUT);
++                            end
++                        end
++                        `CTRL_WMOV:begin
++                            if(control_dst>6 || control_src>7) fail();
++                            else begin wide_write(control_dst,wide_read(control_src));complete_control();end
++                        end
++                        default:fail();
++                    endcase
++        end
++    endtask
+     always_ff @(posedge clk) begin
+         if(rst) endpoint_read_address<=0;
+         else begin
+@@ -472,7 +514,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                     if(lt_cursor+2<lt_count) endpoint_read_address<=lt_cursor+2;
+                     else endpoint_read_address<=0;
+                 end
+-                CONTROL:if(control_op==`CTRL_LOAD && control_load_address<108)
++                FETCH:if(control_valid && control_op==`CTRL_LOAD && control_load_address<108)
+                     endpoint_read_address<=control_load_address[7:0];
+                 default:begin end
+             endcase
+@@ -518,7 +560,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+             leaf_cursor<=0;node_index<=0;node_level<=0;target<=0;target_at_level<=0;
+             tree_height<=0;auth_level<=0;control_base<=0;control_limit<=0;control_flags<=0;indexing<=0;
+             macro_op<=0;macro_desc<=0;macro_route<=0;macro_flags<=0;
+-            saved_descriptor<=0;saved_chain_descriptor<=0;saved_control<=0;
++            saved_descriptor<=0;saved_chain_descriptor<=0;
+             task_recipe<=0;task_step<=0;task_chain<=0;task_capture<=0;
+             task_steps<=0;task_capture_after<=0;task_leaf<=0;task_a<=0;task_b<=0;
+             chain_cursor<=0;endpoint_count<=0;chain_leaf<=0;chain_address<=0;
+@@ -554,7 +596,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                             (node_bytes==16 || value[2][191:128]==job_public_root[191:128]) &&
+                             (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
+                         state<=DRAIN;
+-                    end else if(control_valid) begin saved_control<=control;state<=CONTROL;end
++                    end else if(control_valid) execute_control();
+                     else if(cmd_valid) begin
+                         macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];macro_flags<=cmd[27:24];
+                         if(!command_keep_coordinates) begin layer<=cmd[23:19];group_index<=cmd[18:13];end
+@@ -704,47 +746,6 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                     else start_hash(descriptor_data[63:0],VERIFY_CHAIN_ADVANCE);
+                 VERIFY_CHAIN_ADVANCE:begin task_b<={17'd0,task_b[3:0]+4'd1};state<=VERIFY_CHAIN_RUN;end
+                 OUTPUT_CHUNK:state<=continuation;
+-                CONTROL:begin
+-                    case(control_op)
+-                        `CTRL_SET,`CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL:begin
+-                            if(control_dst>15 || (control_op==`CTRL_MOV && control_src>24) ||
+-                                (control_op==`CTRL_ADD && (control_src>24 || control_aux>24)) ||
+-                                ((control_op==`CTRL_SHR || control_op==`CTRL_SHL) &&
+-                                    (control_immediate==0 || control_immediate>20)) ||
+-                                (|control_alu[40:21]) || (control_alu[20:0]&~narrow_mask(control_dst))!=0 ||
+-                                ((control_dst==`CTX_HEIGHT || control_dst==`CTX_LEVEL || control_dst==`CTX_AUTH_LEVEL) && control_alu>20) ||
+-                                (control_dst==`CTX_MODE && control_alu>2)) fail();
+-                            else begin narrow_write(control_dst,control_alu[20:0]);complete_control();end
+-                        end
+-                        `CTRL_BR:begin
+-                            if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
+-                                ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
+-                            else complete_control();
+-                        end
+-                        `CTRL_CALL,`CTRL_RET:complete_control();
+-                        `CTRL_LOAD:begin
+-                            if(control_dst>6 || control_src>24 || control_load_address>=108) fail();
+-                            else state<=CONTROL_LOAD;
+-                        end
+-                        `CTRL_STORE:begin
+-                            if(control_src>7 || control_dst>24 || control_store_address>=108) fail();
+-                            else state<=CONTROL_STORE;
+-                        end
+-                        `CTRL_INPUT:begin
+-                            if(!verifying || control_dst>6) fail();else state<=CONTROL_INPUT;
+-                        end
+-                        `CTRL_OUTPUT:begin
+-                            if(verifying || control_src>7) fail();else begin
+-                                start_output(wide_read(control_src),node_bytes,CONTROL_OUTPUT);
+-                            end
+-                        end
+-                        `CTRL_WMOV:begin
+-                            if(control_dst>6 || control_src>7) fail();
+-                            else begin wide_write(control_dst,wide_read(control_src));complete_control();end
+-                        end
+-                        default:fail();
+-                    endcase
+-                end
+                 CONTROL_LOAD:begin wide_write(control_dst,endpoint_value0);complete_control();end
+                 CONTROL_STORE:complete_control();
+                 CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,verify_data);complete_control();end
+diff --git a/rtl/executor/sequencer.sv b/rtl/executor/sequencer.sv
+index b572dff4..84568db5 100644
+--- a/rtl/executor/sequencer.sv
++++ b/rtl/executor/sequencer.sv
+@@ -33,7 +33,10 @@ module sequencer (
+     assign template_address={token[29],token[61:58]};
+     assign command_valid=state==ISSUE;
+     assign command_keep_coordinates=token[28];
+-    assign control_valid=state==CONTROL;
++    // The token remains stable until WAIT_CONTROL retires the instruction.
++    // Issue directly from LOAD; the executor does not need a second copy.
++    assign control_valid=state==LOAD && kind==3 && control_op>=1 &&
++        control_op<=15 && token[9:0]==0;
+     assign control=token;
+     assign command={1'b0,template_word[2:0],3'd0,template_word[7:3],
+         3'd0,template_word[12:8],template_word[15],template_word[16],
+@@ -69,7 +72,7 @@ module sequencer (
+                             if(token[56:0]!=0 || return_valid || sp!=0) fault();
+                             else begin done<=1;state<=IDLE;end
+                         end else if(control_op>15 || token[9:0]!=0) fault();
+-                        else state<=CONTROL;
++                        else if(control_ready) state<=WAIT_CONTROL;
+                     end else if(kind==2) begin
+                         if(token[39:0]!=0 || back_count>pc) fault();
+                         else if(sp!=0 && loop_pc[sp-1]==pc) begin
+@@ -100,7 +103,6 @@ module sequencer (
+                         remaining<=remaining-1'b1;coordinate<=coordinate+stride;state<=ISSUE;
+                     end else advance();
+                 end
+-                CONTROL:if(control_ready) state<=WAIT_CONTROL;
+                 WAIT_CONTROL:if(control_done) begin
+                     if(control_op==7 && control_condition) begin pc<=token[20:14];state<=FETCH;end
+                     else if(control_op==8) begin

@@ -31,7 +31,7 @@ def main():
             profile=get_profile(name,backend)
             image=compile_image(name,hash_backend=backend)
             assert profile.h==20 and image.descriptors[1]==code+(32 if backend=='sha2' else 0)
-            assert len(image.program)==16 and len(image.templates)==16 and len(image.descriptors)==32
+            assert len(image.program)==128 and len(image.templates)==32 and len(image.descriptors)==32
             static.append(dict(backend=backend,profile=name,height=20,descriptor=image.descriptors[1],
                                verification='static ROM encoding; universal RTL elaboration; no simulated Job'))
     for name in ('slh_192f','slh_256f','slh_192s','slh_256s'):
@@ -42,7 +42,7 @@ def main():
         else:
             raise AssertionError('Unsupported SHA2 SLH profile accepted: '+name)
     names=[name.strip() for name in (ROOT/'sources.txt').read_text().splitlines() if name.strip()]
-    checked=[*names,'sources.txt','scripts/check_hash_backend_contracts.py','tb/tb_hash_backend_contracts.sv']
+    checked=[*names,'rtl/executor/instructions.svh','sources.txt','scripts/check_hash_backend_contracts.py','tb/tb_hash_backend_contracts.sv']
     source_sha={name:sha256((ROOT/name).read_bytes()).hexdigest() for name in checked}
     public=bytes(range(65,97));left=bytes(range(161,193));right=bytes(range(193,225))
     address=bytes([3])+bytes.fromhex('0123456789abcdef')+bytes([0x83])

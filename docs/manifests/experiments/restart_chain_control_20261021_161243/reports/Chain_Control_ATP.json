@@ -1,0 +1,100 @@
+{
+  "candidate": "C1: control token sharing and direct acceptance",
+  "status": "candidate measured; complete regression is separately pending",
+  "baseline_commit": "271666416f21a403d3c4b63124238f02991f0a99",
+  "source_root": "/tmp/mhbs-image-chain/build/restart_chain_atp/20261021_161243/candidate/source",
+  "changes": [
+    "Token held by sequencer while WAIT_CONTROL; executor duplicate saved_control removed.",
+    "LOAD directly issues legal control token; executor FETCH accepts and executes it on the same edge.",
+    "RAM loads/stores, verify input and output still retain their required memory/handshake states.",
+    "Cryptographic recipes, public ABI, images and ports are unchanged."
+  ],
+  "synthesis": {
+    "shake": {
+      "lut": 20099,
+      "ff": 6324,
+      "bram": 0,
+      "dsp": 0,
+      "equivalent_slice": 5815.25,
+      "baseline_lut": 20511,
+      "baseline_ff": 6400,
+      "baseline_equivalent_slice": 5927.75,
+      "area_reduction_percent": 1.897853317025855,
+      "synthesis_wns_ns": -3.489,
+      "settings": "diagnostic_only=1\ntop=common\nPIPELINE=1\nUNROLL=1\nperiod_ns=10.0\nhash_backend=shake\npart=xc7a200tffg1156-3\nthreads=2\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nvivado=2025.2\n",
+      "debug_audit": {
+        "passed": true,
+        "diagnostic_ports": 0,
+        "diagnostic_registers": 0,
+        "functional_error_present": 1,
+        "scope": "synthesized design"
+      },
+      "log": "/tmp/mhbs-image-chain/build/restart_chain_atp/20261021_161243/synth/shake/vivado.log"
+    },
+    "sha2": {
+      "lut": 17198,
+      "ff": 7273,
+      "bram": 0,
+      "dsp": 0,
+      "equivalent_slice": 5208.625,
+      "baseline_lut": 17905,
+      "baseline_ff": 7362,
+      "baseline_equivalent_slice": 5396.5,
+      "area_reduction_percent": 3.4814231446307797,
+      "synthesis_wns_ns": -3.012,
+      "settings": "diagnostic_only=1\ntop=common\nPIPELINE=1\nUNROLL=1\nperiod_ns=10.0\nhash_backend=sha2\npart=xc7a200tffg1156-3\nthreads=2\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nvivado=2025.2\n",
+      "debug_audit": {
+        "passed": true,
+        "diagnostic_ports": 0,
+        "diagnostic_registers": 0,
+        "functional_error_present": 1,
+        "scope": "synthesized design"
+      },
+      "log": "/tmp/mhbs-image-chain/build/restart_chain_atp/20261021_161243/synth/sha2/vivado.log"
+    }
+  },
+  "target_sign_check": {
+    "candidate": "C1",
+    "backend": "shake",
+    "profile": "slh_128f",
+    "operation": "sign",
+    "cycles": 2958730,
+    "hashes": 104937,
+    "blocks": 105641,
+    "baseline_cycles": 3165156,
+    "cycle_saving": 206426,
+    "primitive_trace": {
+      "hashes": 104937,
+      "blocks": 105641,
+      "sum256": "341e297bb901f6d9bbf5db96987a8c753a87dad5a9527b6adb54b7ecdffe08ef",
+      "xor256": "7c50fdcfc634085b5bd5d1fb72436b160a7143a705e96d7b7cb4067cce468bb1"
+    },
+    "macro_metrics": {
+      "commands": 4564,
+      "HASH": 2233,
+      "CHAIN": 2288,
+      "TREE": 0,
+      "TRANSFORM": 43,
+      "EMIT": 0,
+      "TREE_child_CHAIN": 0,
+      "control_instructions": 103213
+    },
+    "full_output_and_signature_cache": true,
+    "passed": true,
+    "log": "/tmp/mhbs-image-chain/build/restart_chain_slh_sign.log",
+    "log_sha256": "29d291a0272fd13299b5a44f7e8f424126a45231874e89e415381d40891f71ed",
+    "baseline_atp_slice_ms": 187622.53479,
+    "atp_slice_ms_assuming_100mhz": 172057.546325,
+    "atp_reduction_percent": 8.295905650364121
+  },
+  "control_checks": {
+    "configurations": 4,
+    "passed": 4,
+    "cases": 80
+  },
+  "production_matches_freeze": true,
+  "full_regression": "Handled by parent macro_atp_acceptance_20261021_161437; no full acceptance claim here.",
+  "high_tree_policy": "No full h16/h15/h20 Keygen/Sign launched",
+  "frequency_scope": "100MHz assumed for ATP; synthesis timing diagnostic only; no routing performed",
+  "source_changes": "rtl/executor/executor.sv and rtl/executor/sequencer.sv only"
+}

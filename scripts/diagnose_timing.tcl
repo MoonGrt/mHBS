@@ -16,6 +16,7 @@ create_project -in_memory -part $part
 set defines [list SYNTHESIS]
 if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
 set_property verilog_define $defines [current_fileset]
+set_property include_dirs [list $root] [current_fileset]
 set handle [open [file join $root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
@@ -35,6 +36,8 @@ report_utilization -hierarchical -file [file join $out hierarchical.rpt]
 report_timing_summary -max_paths 10 -file [file join $out timing.rpt]
 report_timing -delay_type max -max_paths 20 -nworst 2 -sort_by group -input_pins -nets \
     -file [file join $out critical_paths.rpt]
+source [file join $root scripts audit_debug.tcl]
+mhbs_audit_debug [file join $out debug_audit.json]
 write_checkpoint -force [file join $out synthesized.dcp]
 puts "MHBS_TIMING_DIAGNOSTIC_PASS P${p}U${u} period_ns=$period"
 exit

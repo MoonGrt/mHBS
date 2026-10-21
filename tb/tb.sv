@@ -16,8 +16,8 @@ module tb;
  localparam bit DEBUG_STATS=1;
 `endif
  logic clk=0,rst=1;always #5 clk=~clk;
- reg [63:0] pm[0:15],tm[0:15],dm[0:31];
- wire [3:0] program_address,template_address;wire [9:0] descriptor_addresses;
+ reg [63:0] pm[0:127],tm[0:31],dm[0:31];
+ wire [6:0] program_address;wire [4:0] template_address;wire [9:0] descriptor_addresses;
  wire [63:0] program_data=pm[program_address],template_data=tm[template_address];
  wire [127:0] descriptor_data={dm[descriptor_addresses[9:5]],dm[descriptor_addresses[4:0]]};
  reg [255:0] cfg[0:8],nodes_mem[0:1557];reg [63:0] meta[0:4];
@@ -54,27 +54,13 @@ module tb;
  logic [3:0] fors_positions=0;
  integer ltree_odd=0,rolling_reuse=0;
  always @(posedge clk)begin
-  if(dut.core.execution_rst)begin batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;fors_positions=0;ltree_odd=0;rolling_reuse=0;end
-  else begin
-   begin
-    if(dut.core.state==58 && dut.core.fors_target_wave)fors_positions[dut.core.target[1:0]]=1;
-    if(dut.core.state==46 && dut.core.lt_count[0])ltree_odd++;
-    if(dut.core.pipe_rolling && dut.core.pipe_selected && dut.core.pipe_ready && dut.core.pipe_valid
-      && dut.core.lane.batch_request_tag==dut.core.pipe_tag)rolling_reuse++;
-    if(dut.core.state==55 && dut.core.endpoint_write)$fatal(1,"L-tree writes before batch inputs accepted");
-   end
-   // Retire before allocation: a slot may be reused on the same edge.
-   if(dut.core.pipe_valid&&dut.core.lane.batch_response_ready)begin
-    if(!batch_tags[dut.core.pipe_tag])$fatal(1,"unallocated batch return");
-    batch_tags[dut.core.pipe_tag]=0;batch_live--;batch_returns++;
-   end
-   if(dut.core.pipe_selected&&dut.core.pipe_ready)begin
-    if(batch_tags[dut.core.lane.batch_request_tag])$fatal(1,"live tag overwritten");
-    batch_tags[dut.core.lane.batch_request_tag]=1;batch_live++;batch_requests++;
-   end
-   if(batch_live>batch_max_live)batch_max_live=batch_live;
-   if(batch_live>PIPELINE)$fatal(1,"too many live batch contexts");
-   if(batch_live<0)$fatal(1,"duplicate batch return");
+  if(dut.core.execution_rst)begin
+   batch_live=0;batch_max_live=0;batch_requests=0;batch_returns=0;batch_tags=0;
+   fors_positions=0;ltree_odd=0;rolling_reuse=0;
+  end else begin
+   if(dut.core.state==7 && dut.core.indexing==1 && dut.core.leaf_cursor==dut.core.target)
+    fors_positions[dut.core.target[1:0]]=1;
+   if(dut.core.state==30 && dut.core.lt_count[0])ltree_odd++;
   end
  end
  always @(posedge clk)begin
@@ -156,19 +142,13 @@ module tb;
    rst=1;read_enable=0;repeat(5)tick();rst=0;
    if(interrupt_run&&r==0)begin repeat(1000)tick();rst=1;repeat(5)tick();rst=0;end
    if(fault)begin
-    if(fault==2)begin
-`ifdef MHBS_SHA2
-     while(!dut.core.pipe_mode || batch_live==0)tick();
-`else
-     while(!dut.core.pipe_mode || !dut.core.lane.stage_valid)tick();
-`endif
-    end
-    else begin while(dut.core.state!=23)tick();end
-    if(fault==3)force dut.core.state=type(dut.core.state)'(7'd127);
+    while(dut.core.state!=13)tick();
+    if(fault==3)force dut.core.state=type(dut.core.state)'(6'd63);
     else force dut.core.lane.error=1;
     while(!error)tick();
+    if(fault==3)begin release dut.core.state;repeat(3)tick();end
 `ifndef SYNTHESIS
-    if(error_code!=(fault==3 ? 16'h3006 : 16'h3007))$fatal(1,"fault code %h",error_code);
+    if(error_code!=(fault==3 ? 16'h3012 : 16'h3007))$fatal(1,"fault code %h",error_code);
 `endif
     repeat(40)begin tick();if(out_valid||busy||done||verify_ready||verify_pass)$fatal(1,"fault halt");end
     $display("STATEFUL_FAULT_PASS");$finish;tick();
@@ -190,7 +170,7 @@ module tb;
     if(PIPELINE>1 && dut.core.stateful && (batch_max_live<2 || batch_live!=0 || batch_requests!=batch_returns))
      $fatal(1,"stateful batch overlap/drain %0d/%0d max %0d",batch_requests,batch_returns,batch_max_live);
     $display("BATCH_OBSERVED requests=%0d returns=%0d max_live=%0d",batch_requests,batch_returns,batch_max_live);
-     $display("P4_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
+     $display("CHAIN_COVERAGE fors_positions=%h ltree_odd=%0d rolling_reuse=%0d",fors_positions,ltree_odd,rolling_reuse);
     if(cursor!=meta[0])$fatal(1,"length %0d expected %0d",cursor,meta[0]);
     if(job_operation==2)begin
      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);

@@ -4,11 +4,11 @@ if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
 set package_root [file normalize [file join [file dirname [info script]] ..]]
 cd $package_root
 set p 1
-set u 2
+set u 1
 if {[llength $argv] > 0} {set p [lindex $argv 0]}
 if {[llength $argv] > 1} {set u [lindex $argv 1]}
 if {![string is integer -strict $p] || ![string is integer -strict $u]} {error "P/U must be integers"}
-if {$p < 1 || $p > 24 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
+if {$p != 1 || $u != 1} {error "image-chain requires K1U1"}
 set part xc7a200tffg1156-3
 set lut6 0
 if {[info exists ::env(KECCAK_LUT6)]} {set lut6 $::env(KECCAK_LUT6)}
@@ -25,6 +25,8 @@ set defines [list SYNTHESIS]
 if {$lut6} {lappend defines MHBS_XILINX_LUT6}
 if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
 set_property verilog_define $defines [current_fileset]
+set_property include_dirs [list $source_root] [current_fileset]
+cd $source_root
 set handle [open [file join $source_root sources.txt] r]
 set sources [split [string trim [read $handle]] \n]
 close $handle

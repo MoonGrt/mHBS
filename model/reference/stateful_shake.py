@@ -55,13 +55,13 @@ def parse_public_key(name, public_key, hash_backend="shake"):
     if public_key[4:8]!=be(profile.lmots_typecode):raise ValueError('public key OTS type')
     return public_key[24:56],bytes(32),public_key[8:24]
 
-def verify_serialized(name,message,signature,public_key,observe=None,hash_backend="shake"):
+def verify_serialized(name,message,signature,public_key,observe=None,hash_backend="shake",*,observe_hash=None):
     try:
         root,seed,identifier=parse_public_key(name,public_key,hash_backend)
         parse_signature(name,signature,hash_backend)
     except ValueError:
         return False
-    return verify(name,message,signature,seed,root,identifier,observe,hash_backend)
+    return verify(name,message,signature,seed,root,identifier,observe,hash_backend,observe_hash=observe_hash)
 
 def hardware_verify_input(name,signature,public_key,hash_backend="shake"):
     """Checked adapter for the existing Job metadata and node-wise Verify bus."""
@@ -70,8 +70,8 @@ def hardware_verify_input(name,signature,public_key,hash_backend="shake"):
     return dict(q=q,public_root=root,public_seed=seed,identifier=identifier,
                 nodes=(random,*chains,*auth))
 
-def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),observe=None,hash_backend="shake"):
-    if len(public_seed)!=32 or len(public_root)!=32 or len(identifier)!=16 or not 1<=len(message)<=87:return False
+def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),observe=None,hash_backend="shake",*,observe_hash=None):
+    if len(public_seed)!=32 or len(public_root)!=32 or len(identifier)!=16 or not 0<=len(message)<=87:return False
     try:q,r,chains,auth=parse_signature(name,signature,hash_backend)
     except ValueError:return False
     from model.profiles import get_profile
@@ -83,7 +83,9 @@ def verify(name,message,signature,public_seed,public_root,identifier=bytes(16),o
     def h(data):
         nonlocal hashes,perms
         hashes+=1;perms+=len(data)//136+1 if hash_backend=='shake' else (len(data)+72)//64
-        return H(data,hash_backend)
+        result=H(data,hash_backend)
+        if observe_hash is not None:observe_hash(0,data,result)
+        return result
     def mask(domain,leaf,level,index,left,right=None):
         addr=bytes(12)+be(domain)+be(leaf)+be(level)+be(index)
         key=h(be(3,32)+public_seed+addr+be(0));m0=h(be(3,32)+public_seed+addr+be(1))
