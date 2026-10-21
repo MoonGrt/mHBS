@@ -1,0 +1,714 @@
+{
+  "schema": "mhbs.soft_chain.final_independent_audit.v1",
+  "status": "passed",
+  "run": "/tmp/mhbs-image-soft-chain/build/soft_chain/20261021_173641",
+  "scope": "Static launch, fixture, image, ownership and baseline identity audit; runtime regressions remain independently tracked",
+  "coverage": {
+    "default_cases": 44,
+    "supplement_sign_cases": 12,
+    "total_cases": 56,
+    "profiles": 20,
+    "high_tree_operations": [
+      "verify"
+    ],
+    "route": false
+  },
+  "no_high_complete_tree_launch": true,
+  "frozen_source_identity_equal": true,
+  "C1_area_validation_source_equal_files": [
+    "rtl/hash/keccak.sv",
+    "rtl/hash/sha2-recipe.sv",
+    "rtl/hash/shake-recipe.sv",
+    "rtl/hash/sha256.sv",
+    "rtl/memory/signature.sv",
+    "rtl/memory/value.sv",
+    "rtl/top/common.sv",
+    "rtl/top/top.sv",
+    "rtl/executor/instructions.svh",
+    "rtl/executor/executor.sv",
+    "rtl/executor/sequencer.sv",
+    "sources.txt"
+  ],
+  "hash_frontends": [
+    {
+      "path": "rtl/hash/shake-recipe.sv",
+      "sha256": "04422c2e5fea88053540d4cdf331cff9a296dfc590da562533b2eefa8f2ef1b7",
+      "identical_to_C1": true
+    },
+    {
+      "path": "rtl/hash/sha2-recipe.sv",
+      "sha256": "798454974b2eb7ce98cafba2838e54f4f0961b8cfb9f2546c19216ac14874f81",
+      "identical_to_C1": true
+    },
+    {
+      "path": "rtl/hash/keccak.sv",
+      "sha256": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+      "identical_to_C1": true
+    },
+    {
+      "path": "rtl/hash/sha256.sv",
+      "sha256": "611775b5ff93a5ab3f2785c77cc38f5f604b9153f65d1e81a00e14ea349a7b0a",
+      "identical_to_C1": true
+    }
+  ],
+  "compiler_chain_context_writes": {
+    "slh_128f": [
+      1,
+      2
+    ],
+    "xmss_h10": [
+      1,
+      2,
+      26,
+      27,
+      28
+    ],
+    "lms_h10": [
+      1,
+      2
+    ]
+  },
+  "live_storage_review": {
+    "status": "passed",
+    "details": [
+      "Software leaf procedures mutate A/B and LT counters only; outer tree CURSOR/TARGET/INDEX/PATH/BASE/LEVEL/HEIGHT remain live and preserved.",
+      "L-tree uses LIST0..66 in-place; all pair inputs are read before storing index floor(cursor/2); odd tails move without Hash.",
+      "Executor request_chain, step count and capture are tied to zero; ordinary HASH blocks program retirement until recipe response.",
+      "SHAKE scalar KEY remains temporary_key, masked LEFT remains chain_value and RIGHT stays in node_value until final result; MASK1 remains in sponge state.",
+      "SHA2 preserves digest, key_value and captured banks; captured holds RIGHT/MASK1 and is not repurposed for software capture; request_capture is zero.",
+      "All hash frontends are byte-identical to certified C1; composite KEY/MASK and HMAC/MGF1 schedules are retained."
+    ]
+  },
+  "images": [
+    {
+      "backend": "shake",
+      "profile": "slh_128f",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "3f7e0bac0931833cd2e546ce3ceb1749afd25fa5b52f45ca1dc67492fcfd6698",
+        "program.mem": "e1ca371250d946f5539a11ae30eb6ed70cba8e4e6ee529ccb0203633de3d9991"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "slh_192f",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "eca433e88776a0ac6956b633b058bada08116e9f11c684c6b0af1ed7d20c7695",
+        "program.mem": "1fb8d93b649d5d6376cd21a4a89e2fda8d04fc3b4af892eec2bd31733f2d8f4a"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "slh_256f",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "f4cc83ff4b1310b6e377b9feae8b95a26c82db3d76e0392212a1409367ac7470",
+        "program.mem": "9dbd8870a639d7df2c3b92e114c243074ff0f38dbb5a5aba2ab10a21383587ac"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "slh_128s",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "830d45a5736fe22732058337426ad283e50c717c656dd54a96959857202e9909",
+        "program.mem": "78d48f4465f067424ab1c87993d5d056b5d5c565e283149e03860cd45160885f"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "slh_192s",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "531f438024a893f55df644b395bd68bf545cca61ed1f1aac44e91145bc947c92",
+        "program.mem": "b8ef0997e99e98bbb6ede382a80ae2f92e4562f393ce59f1c47f9b7d0a8f2d71"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "slh_256s",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "3e6a4f300d3fc6ca25c99d73ee2581bdc384e803a0ef3252fe02f4f5da52cb9e",
+        "program.mem": "8e0e81036300eb70de67d1feb58be780c8f94e037136dbe34df15d80cb79c195"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "xmss_h10",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "4de6bdb5f65f617603c5a4544d56fcf89d4e8979cf53e7a9585f90297510b999",
+        "program.mem": "9c60115802c35d8250519706c0c40bab29de8f83205ff179d1bd65446ec9f529"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "xmss_h16",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "210a5f686614eace9527439dfc02eb3bd954b3f303c1a8cc8c85b508be87982e",
+        "program.mem": "f186fbed2ffddcd7ffb4b598055870e1600020139ca8837a31551185a4a93b53"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "xmss_h20",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "db3fa837b36499132741dfadccb0102015ed70e787af447edb36956d303963ae",
+        "program.mem": "a61fd22fcf68cd3998d2519f2c8f07031c1fbf4f3c3af48d70ce85b2c7d399a0"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "lms_h10",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "6b5d1dbbb7e36cba2a7330e199cf2f0fc7c352bde7f2309043cdcfdf105ad249",
+        "program.mem": "88f4dfd935c91c82e56d234b76f93d4d4cbb687acf31ef593666d315a9323b21"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "lms_h15",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "14fea665fb304d43dfa5b33d041bb5075611b8c9e6fdd89c63188d974cc0c48c",
+        "program.mem": "7bd856c911c33cb9daf828966a84a40fe9d173e37b19b0a4ce9b1696263f6047"
+      }
+    },
+    {
+      "backend": "shake",
+      "profile": "lms_h20",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "0542f4e9ceea1fca3a37af782d93cb7e993a9ad134bd061f1665d3d4e37414a9",
+        "program.mem": "7307ef92d0fcf244d7fddb9e2d0ada25bbad3ea625bf76c45fdaec72d479ff0c"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "slh_128f",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "b1086a36c0ba156632e3bd3d97f78434430e4418317a2f43649985807f9b059c",
+        "program.mem": "e1ca371250d946f5539a11ae30eb6ed70cba8e4e6ee529ccb0203633de3d9991"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "slh_128s",
+      "program_used": 169,
+      "template_used": 13,
+      "descriptor_used": 24,
+      "rom_sha256": {
+        "template.mem": "0c7f5a2a66edb953d6786e34acc75fcc4c6379b8569d54ad8a3657c3da436462",
+        "descriptor.mem": "cb1e3cd8ad14b567960f754aa454651688b2ff6092f2d5605095cd92539d79e1",
+        "program.mem": "78d48f4465f067424ab1c87993d5d056b5d5c565e283149e03860cd45160885f"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "xmss_h10",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "156041b461a979ab1c452abd8f5bb3c7560638c72e9707fccd02346100247528",
+        "program.mem": "9c60115802c35d8250519706c0c40bab29de8f83205ff179d1bd65446ec9f529"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "xmss_h16",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "def292995e0c334f4217ae5ee35fe470f8b63e20535b4d4c314a1ea09b5c8d57",
+        "program.mem": "f186fbed2ffddcd7ffb4b598055870e1600020139ca8837a31551185a4a93b53"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "xmss_h20",
+      "program_used": 134,
+      "template_used": 9,
+      "descriptor_used": 18,
+      "rom_sha256": {
+        "template.mem": "c3ff1a3a7dacfe6140243ac66b13ccbc656b08e9fd040b4962757bbd575f3a5b",
+        "descriptor.mem": "8b388edac88c533738be8c6875d3a0ed690e9d8294db51976f18b9b9a0d012d3",
+        "program.mem": "a61fd22fcf68cd3998d2519f2c8f07031c1fbf4f3c3af48d70ce85b2c7d399a0"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "lms_h10",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "591a7761a3cc61f1353a159cf9968dc8c7fd9f3096e5dae90976fd310782b3af",
+        "program.mem": "88f4dfd935c91c82e56d234b76f93d4d4cbb687acf31ef593666d315a9323b21"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "lms_h15",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "0112b5b388e761c864a342629b4f0b0d5d919fa147a63ea7f1155d0e947c77b3",
+        "program.mem": "7bd856c911c33cb9daf828966a84a40fe9d173e37b19b0a4ce9b1696263f6047"
+      }
+    },
+    {
+      "backend": "sha2",
+      "profile": "lms_h20",
+      "program_used": 123,
+      "template_used": 10,
+      "descriptor_used": 21,
+      "rom_sha256": {
+        "template.mem": "4058968d7da620b1f22e00eda3cf093f6c5f6b82d241a91c1e079ffdb60f7494",
+        "descriptor.mem": "d2fdc565ad76329cde61fb129deebf889622afd49c2eef00f84eaee20c472bdd",
+        "program.mem": "7307ef92d0fcf244d7fddb9e2d0ada25bbad3ea625bf76c45fdaec72d479ff0c"
+      }
+    }
+  ],
+  "fixtures": [
+    {
+      "case": "sha2/lms_h10/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128f/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128f/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h10/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h10/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h15/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h20/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128f/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128f/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128s/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128s/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/slh_128s/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h16/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h20/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h15/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h20/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128f/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128f/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128s/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128s/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_128s/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192f/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192f/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192f/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192s/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192s/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_192s/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256f/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256f/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256f/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256s/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256s/sign",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/slh_256s/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/keygen",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h16/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h20/verify",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/sign_q1",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/sign_q1",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/sign_q1023",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/sign_q1023",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/sign_q1",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h10/sign_q1",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/sign_q1023",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h10/sign_q1023",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/xmss_h10/sign_empty",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "shake/lms_h10/sign_empty",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/lms_h10/sign_empty",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    },
+    {
+      "case": "sha2/xmss_h10/sign_empty",
+      "external_fixture_equal": true,
+      "all_roms_canonical": true
+    }
+  ],
+  "focus_C1_workloads": {
+    "sha2/lms_h10/sign": {
+      "cycles": 81139250,
+      "hashes": 1101347,
+      "permutations": 1136162,
+      "primitive_trace": {
+        "hashes": 1101347,
+        "blocks": 1136162,
+        "sum256": "542c1c0f201b3fbc6978a0a2b964743329e86fa34aee61d43dd587a31c1bd880",
+        "xor256": "eefe5f7f519029c9b0a4383465b6718534a107b754c85b71b37ba7046739b50e"
+      }
+    },
+    "sha2/slh_128f/sign": {
+      "cycles": 15409870,
+      "hashes": 104925,
+      "permutations": 211432,
+      "primitive_trace": {
+        "hashes": 104925,
+        "blocks": 211432,
+        "sum256": "e63dc62b931cf903eaaba015982f0518f4cda14d3ec63115158009ac72fa5589",
+        "xor256": "696a7c57e6b3056c9076d884331a80a6363ce6d18db4382ac984175f9e773a3f"
+      }
+    },
+    "sha2/xmss_h10/sign": {
+      "cycles": 497967390,
+      "hashes": 3431950,
+      "permutations": 7001183,
+      "primitive_trace": {
+        "hashes": 3431950,
+        "blocks": 7001183,
+        "sum256": "fddee43deee89ff8831b0e7edbc880e347a7da1c6329aadfeadbfa33fc4bfc12",
+        "xor256": "cb4159959e107b0eec6c9019857d89074b2789314ff3a88535606836c1a02480"
+      }
+    },
+    "shake/lms_h10/sign": {
+      "cycles": 28639398,
+      "hashes": 1101392,
+      "permutations": 1116752,
+      "primitive_trace": {
+        "hashes": 1101392,
+        "blocks": 1116752,
+        "sum256": "a751e688e9fcae10b71e51e4a6b259d1ebe30e9fa3b948c6d1b0b054a4044fbc",
+        "xor256": "87f8a378dfd67d62161b1d7bc1e4345c1504d625ce6598d6f9cc3619bed1f8fe"
+      }
+    },
+    "shake/slh_128f/sign": {
+      "cycles": 2958730,
+      "hashes": 104937,
+      "permutations": 105641,
+      "primitive_trace": {
+        "hashes": 104937,
+        "blocks": 105641,
+        "sum256": "341e297bb901f6d9bbf5db96987a8c753a87dad5a9527b6adb54b7ecdffe08ef",
+        "xor256": "7c50fdcfc634085b5bd5d1fb72436b160a7143a705e96d7b7cb4067cce468bb1"
+      }
+    },
+    "shake/xmss_h10/sign": {
+      "cycles": 86678790,
+      "hashes": 3431815,
+      "permutations": 3431815,
+      "primitive_trace": {
+        "hashes": 3431815,
+        "blocks": 3431815,
+        "sum256": "ba5d0164bfecb94f169e1a85254546a5f9cf8224f4e4d5a0a4aae7e5b68a7c97",
+        "xor256": "b750bcc4ad0cb7225a997be531a2a8e4a2187afed6431d5e991a57f6715fdcd9"
+      }
+    }
+  },
+  "runtime_status_at_audit": {
+    "pending": 27,
+    "running": 4,
+    "passed": 25,
+    "failed": 0
+  },
+  "checks_status_at_audit": {
+    "control_faults": "passed",
+    "model_verify_bounds": "passed",
+    "ordered_hash_trace": "passed",
+    "shake_recipes": "passed",
+    "shake_recipes_synthesis": "passed",
+    "shake_signature_views": "running",
+    "shake_slh_128f_stall_reset": "passed",
+    "shake_slh_128f_truncate": "passed",
+    "shake_slh_128f_tamper1": "passed",
+    "shake_slh_128f_tamper2": "passed",
+    "shake_slh_128f_tamper3": "passed",
+    "shake_slh_128f_tamper4": "passed",
+    "shake_slh_128f_tamper5": "passed",
+    "shake_xmss_h10_stall_reset": "passed",
+    "shake_xmss_h10_truncate": "passed",
+    "shake_xmss_h10_tamper1": "passed",
+    "shake_xmss_h10_tamper2": "passed",
+    "shake_xmss_h10_tamper3": "passed",
+    "shake_xmss_h10_tamper4": "passed",
+    "shake_xmss_h10_tamper5": "passed",
+    "shake_lms_h10_stall_reset": "passed",
+    "shake_lms_h10_truncate": "passed",
+    "shake_lms_h10_tamper1": "passed",
+    "shake_lms_h10_tamper2": "passed",
+    "shake_lms_h10_tamper3": "passed",
+    "shake_lms_h10_tamper4": "passed",
+    "shake_lms_h10_tamper5": "passed",
+    "shake_xmss_h10_q_overflow": "passed",
+    "shake_lms_h10_q_overflow": "passed",
+    "sha2_recipes": "passed",
+    "sha2_recipes_synthesis": "passed",
+    "sha2_signature_views": "running"
+  }
+}

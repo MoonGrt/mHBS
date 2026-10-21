@@ -161,3 +161,5 @@
 | 20261021_161243 | image-chain C1 控制握手优化 | [报告](restart_chain_control_20261021_161243/reports/Chain_Control_ATP.md) | 两后端共同核面积下降；完整回归见161437 |
 | 20261021_161437 | image-chain ATP optimization complete regression | [报告](macro_atp_acceptance_20261021_161437/reports/Macro_ATP_Acceptance.md) | 44整核＋53附加＋12补充Sign通过；不布线 |
 | 20261021_164834 | image-chain / image-chain-tree 面积周期联合优化 | [报告](macro_atp_restart_20261021_164834/reports/Macro_ATP_Restart.md) | 两后端三目标均降低ATP；88整核＋24补充Sign通过；不布线 |
+
+| 20261021_173641 | image-soft-chain software CHAIN | [报告](soft_chain_20261021_173641/reports/Analysis.md) | 56项整核＋55项附加检查通过；双后端综合完成；不布线 |
