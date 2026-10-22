@@ -1,0 +1,55 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Wed Oct 21 12:27:45 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source /tmp/mhbs-image-chain-tree/scripts/check_synthesis_pruning.tcl
+# set checkpoint [file normalize [lindex $argv 0]]
+# set output [file normalize [lindex $argv 1]]
+# set_param general.maxThreads 2
+# open_checkpoint $checkpoint
+Command: open_checkpoint /tmp/mhbs-image-chain-tree/build/synth/stateful_extension_release_20261021/synthesis/common.dcp
+
+Starting open_checkpoint Task
+
+Time (s): cpu = 00:00:00.02 ; elapsed = 00:00:00.02 . Memory (MB): peak = 1572.402 ; gain = 0.000 ; free physical = 80070 ; free virtual = 117727
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+Netlist sorting complete. Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.06 . Memory (MB): peak = 1820.477 ; gain = 0.000 ; free physical = 79821 ; free virtual = 117499
+INFO: [Netlist 29-17] Analyzing 1142 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-479] Netlist was created with Vivado 2025.2
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Read ShapeDB Complete: Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.01 . Memory (MB): peak = 1932.977 ; gain = 3.000 ; free physical = 79706 ; free virtual = 117393
+INFO: [Timing 38-478] Restoring timing data from binary archive.
+INFO: [Timing 38-479] Binary timing data restore complete.
+INFO: [Project 1-856] Restoring constraints from binary archive.
+INFO: [Project 1-853] Binary constraint restore complete.
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2574.711 ; gain = 0.000 ; free physical = 79100 ; free virtual = 116809
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 183 instances were transformed.
+  RAM32M => RAM32M (RAMD32(x6), RAMS32(x2)): 11 instances
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+INFO: [Project 1-604] Checkpoint was created with Vivado v2025.2 (64-bit) build 6299465
+open_checkpoint: Time (s): cpu = 00:00:08 ; elapsed = 00:00:07 . Memory (MB): peak = 2574.746 ; gain = 1002.344 ; free physical = 79100 ; free virtual = 116808
+# set names {boot_cycles keygen_cycles sign_cycles cycles hash_count permutation_count hash_base permutation_base macro_count macro_busy_cycles macro_hashes tree_count tree_busy_cycles tree_hashes tree_chains tree_input_wait_cycles tree_child_busy_cycles}
+# set expression "(^|/)([join $names |])_reg"
+# set failures {}
+# foreach cell [get_cells -hier -filter {IS_PRIMITIVE == 1}] {
+#     if {[string match FD* [get_property REF_NAME $cell]] && [regexp $expression $cell]} {
+#         lappend failures $cell
+#     }
+# }
+# if {[llength $failures]} {error "Statistics survived PROFILE_ENABLE=0: $failures"}
+# set handle [open $output w]
+# puts $handle {{"passed":true,"method":"primitive FF name audit on actual synthesized checkpoint","profile_enable":false,"statistic_registers":0,"scope":"cycles, bases, Hash, permutation, CHAIN and TREE statistics","placement_or_routing_run":false}}
+# close $handle
+# puts STATEFUL_PRUNING_PASS
+STATEFUL_PRUNING_PASS
+# exit
+INFO: [Common 17-206] Exiting Vivado at Wed Oct 21 12:27:54 2026...

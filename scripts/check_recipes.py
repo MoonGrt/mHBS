@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[1]
+from ablation_paths import ROOT, DESIGN, source_files, headers, bench, build_dir, rtl, prepare_vector
 
 def be(v, n=4):
     return v.to_bytes(n, 'big')
@@ -18,7 +18,7 @@ def h(data, n=32):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
-    parser.add_argument('--pipeline',type=int,default=4)
+    parser.add_argument('--pipeline',type=int,default=1)
     parser.add_argument('--unroll',type=int,default=1)
     parser.add_argument('--recipe-mask',type=lambda value:int(value,0),default=0xffff,
                         help='Compile-time recipe mask; e.g. 0x101e tests SLH without LMS list support')
@@ -27,7 +27,7 @@ def main():
     if not 0 < args.recipe_mask <= 0xffff:
         parser.error('--recipe-mask must be between 1 and 0xffff')
     mask_suffix = '' if args.recipe_mask == 0xffff else f'_mask{args.recipe_mask:04x}'
-    work = ROOT / (f'build/recipe_check/P{args.pipeline}U{args.unroll}' + mask_suffix + ('_synthesis' if args.synthesis else ''))
+    work = build_dir(f'recipe_check/P{args.pipeline}U{args.unroll}' + mask_suffix + ('_synthesis' if args.synthesis else ''))
     if args.hash_backend == 'sha2': work = work.parent / (work.name + '_sha2')
     work.mkdir(parents=True, exist_ok=True)
     sk, prf, pub, root, rand, left, right = [bytes(range(k, k+32)) for k in (1, 33, 65, 97, 129, 161, 193)]
@@ -149,7 +149,7 @@ def main():
     vector = work / 'recipes.mem'
     vector.write_text(''.join(values))
     obj = work / 'obj'
-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/shake-recipe.sv', 'rtl/hash/sha256.sv', 'rtl/hash/sha2-recipe.sv', 'tb/tb_recipe.sv']
+    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), rtl('hash/keccak.sv'), rtl('hash/shake-recipe.sv'), rtl('hash/sha256.sv'), rtl('hash/sha2-recipe.sv'), bench('tb_recipe.sv')]
     if args.synthesis: cmd.append('-DSYNTHESIS')
     if args.hash_backend == 'sha2': cmd.append('-DMHBS_SHA2')
     with (work / 'compile.log').open('w') as log:

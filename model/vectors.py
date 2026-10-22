@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import tempfile
 
+from model import DESIGN
 from model.profiles import PROFILES, ALIASES, get_profile, profile_names
 from model.hashes import block_count
 from model.executor import Job, Machine, compile_image
@@ -16,7 +17,8 @@ from model.mHBS import compile_image as compile_hardware_image
 from model.reference import slh_dsa, stateful_shake
 
 ROOT = Path(__file__).resolve().parents[1]
-MEM_FILES = ('program.mem', 'template.mem', 'descriptor.mem', 'job.mem',
+IMAGE_FILES = ('program.mem', 'template.mem', 'descriptor.mem')
+MEM_FILES = (*IMAGE_FILES, 'job.mem',
              'message.mem', 'nodes.mem', 'expected.mem', 'meta.mem')
 
 
@@ -203,11 +205,39 @@ def generate_verify_profile(name: str, config: dict, output: str, hash_backend="
                                  n:hashlib.sha256((folder/n).read_bytes()).hexdigest() for n in MEM_FILES})])
 
 
+
+def separate_images(rows: list[dict], output: Path, hash_backend: str) -> None:
+    """Keep canonical ROMs separate from the repository's input/output fixtures.
+
+    Custom output directories remain self-contained legacy simulation bundles.
+    The low-level generation functions retain their original bundle contract.
+    """
+    fixture_root = ROOT / 'tb' / 'vectors' / DESIGN
+    if not output.resolve().is_relative_to(fixture_root.resolve()):
+        return
+    for row in rows:
+        image_dir = ROOT / 'image' / DESIGN / hash_backend / row['profile']
+        compile_hardware_image(row['profile'], hash_backend=hash_backend).write(image_dir)
+        image_sha256 = {name: hashlib.sha256((image_dir / name).read_bytes()).hexdigest()
+                        for name in IMAGE_FILES}
+        for operation in row['operations']:
+            folder = output / row['profile'] / operation['operation']
+            for name in IMAGE_FILES:
+                source = folder / name
+                if source.exists():
+                    if hashlib.sha256(source.read_bytes()).hexdigest() != image_sha256[name]:
+                        raise AssertionError(f'{source}: fixture ROM differs from canonical image')
+                    source.unlink()
+                operation['sha256'].pop(name, None)
+        row['image_dir'] = image_dir.relative_to(ROOT).as_posix()
+        row['image_sha256'] = image_sha256
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--profile', default='all', help='profile name or all; legacy omega names are retired')
     parser.add_argument('--hash', dest='hash_backend', choices=('shake','sha2'), default='shake')
-    parser.add_argument('--output', type=Path, help='Default: tb/vectors for SHAKE, tb/vectors/sha2 for SHA2')
+    parser.add_argument('--output', type=Path, help='Default: tb/vectors/<design> for SHAKE; append /sha2 for SHA2')
     parser.add_argument('--include-h20-full', action='store_true', help='Explicitly enable expensive h20 full-tree vector generation')
     parser.add_argument('--include-high-full', action='store_true', help='Explicitly enable h16/h15 complete-tree vector generation')
     parser.add_argument('--verify-only', action='store_true', help='Stateful real-height synthetic-path Verify; never computes a full tree')
@@ -219,7 +249,9 @@ def main():
     parser.add_argument('--workers', type=int, default=4)
     args = parser.parse_args()
     if args.output is None:
-        args.output=ROOT/'tb/vectors' if args.hash_backend=='shake' else ROOT/'tb/vectors/sha2'
+        args.output = ROOT / 'tb' / 'vectors' / DESIGN
+        if args.hash_backend == 'sha2':
+            args.output /= 'sha2'
     manifest=args.output/'generation.json'
     if manifest.exists() and json.loads(manifest.read_text()).get('hash_backend','shake') != args.hash_backend:
         parser.error('--output already contains vectors for the other hash backend')
@@ -267,6 +299,7 @@ def main():
         for future in futures:
             row=future.result();rows.append(row)
             print('VECTOR_PASS',row['profile'],'verify' if args.verify_only else 'keygen/sign/verify',flush=True)
+    separate_images(rows, args.output, args.hash_backend)
     path=args.output/'generation.json'
     existing = json.loads(path.read_text()).get('profiles', []) if path.exists() else []
     merged={r['profile']:r for r in existing if r['profile'] in PROFILES}
@@ -277,7 +310,7 @@ def main():
     path=args.output/'generation.json'
     temporary=path.with_suffix(f'.{__import__("os").getpid()}.json.tmp')
     temporary.write_text(json.dumps(result,indent=2)+'\n');temporary.replace(path)
-    print('VECTOR_GENERATION_PASS',len(rows)*3,'cases',flush=True)
+    print('VECTOR_GENERATION_PASS',sum(len(row['operations']) for row in rows),'cases',flush=True)
 
 
 if __name__ == '__main__':

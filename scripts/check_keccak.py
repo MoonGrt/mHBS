@@ -5,7 +5,7 @@ from pathlib import Path
 import random
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[1]
+from ablation_paths import ROOT, DESIGN, rtl, bench, build_dir
 MASK = (1 << 64) - 1
 RHO = (0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39,
        41, 45, 15, 21, 8, 18, 2, 61, 56, 14)
@@ -43,7 +43,7 @@ def round_reference(state, index):
 
 
 def main():
-    work = ROOT / "build" / "keccak_check"
+    work = build_dir('keccak_check')
     work.mkdir(parents=True, exist_ok=True)
     init = 0x6666966996696666
     for inputs in range(64):
@@ -63,7 +63,7 @@ def main():
                    "--Mdir", str(obj)]
         if mapping == "lut6":
             command.append("+define+MHBS_XILINX_LUT6")
-        command += ["rtl/hash/keccak.sv", "tb/tb_keccak.sv"]
+        command += [rtl('hash/keccak.sv'), bench('tb_keccak.sv')]
         with (work / f"{mapping}_compile.log").open("w") as log:
             subprocess.run(command, cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
         result = subprocess.run([str(obj / "Vtb_keccak"), f"+VECTOR={vector_file}",

@@ -17,10 +17,19 @@ set defines [list SYNTHESIS]
 if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
 set_property verilog_define $defines [current_fileset]
 set_property include_dirs [list $root] [current_fileset]
-set handle [open [file join $root sources.txt] r]
+set design i
+if {[info exists ::env(MHBS_DESIGN)]} {set design $::env(MHBS_DESIGN)}
+if {$design ni {i c t}} {error "MHBS_DESIGN must be i, c or t"}
+set manifest [file join $root rtl $design sources.txt]
+if {![file exists $manifest]} {set manifest [file join $root sources.txt]}
+set handle [open $manifest r]
 set sources [split [string trim [read $handle]] \n]
 close $handle
-foreach source $sources {read_verilog -sv [file join $root $source]}
+foreach source $sources {
+    if {[string match "#*" $source] || $source eq ""} {continue}
+    if {[string match "rtl/*" $source] && ![string match "rtl/$design/*" $source] && [file exists [file join $root rtl $design [string range $source 4 end]]]} {set source [file join rtl $design [string range $source 4 end]]}
+    read_verilog -sv [file join $root $source]
+}
 set clock_file [file join $out diagnostic_clock.xdc]
 set handle [open $clock_file w]
 puts $handle "create_clock -name clk -period $period \[get_ports clk\]"

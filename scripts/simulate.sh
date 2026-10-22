@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
+design=$(python3 scripts/ablation_paths.py design)
+export MHBS_DESIGN="$design"
 hash_backend=${HASH_BACKEND:-shake}
 case "$hash_backend" in shake|sha2) ;; *) echo "HASH_BACKEND must be shake or sha2." >&2; exit 2;; esac
 export HASH_BACKEND="$hash_backend"
@@ -32,10 +34,12 @@ p=$((10#$p)); u=$((10#$u))
 if ((p != 1 || u != 1)); then
     echo 'This template architecture requires K1U1.' >&2; exit 2
 fi
+main_tb=$(python3 scripts/ablation_paths.py bench tb.sv)
 verilator_bin=${VERILATOR:-verilator}
 command -v "$verilator_bin" >/dev/null || { echo 'Verilator is required.' >&2; exit 2; }
-mapfile -t sources < sources.txt
-work="build/sim/P${p}U${u}_synthesis${synthesis}"
+mapfile -t sources < <(python3 scripts/ablation_paths.py sources)
+mapfile -t headers < <(python3 scripts/ablation_paths.py headers)
+work="build/ablation/${design}/sim/P${p}U${u}_synthesis${synthesis}"
 defines=()
 if [[ $hash_backend == sha2 ]]; then defines+=(-DMHBS_SHA2); fi
 trace_options=()
@@ -48,14 +52,14 @@ if [[ $trace_vcd == 1 ]]; then
 fi
 if [[ $hash_backend == sha2 ]]; then work+=_sha2; fi
 mkdir -p "$work"
-identity=$( { sha256sum "${sources[@]}" rtl/executor/instructions.svh tb/tb.sv; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis" "HASH_BACKEND=$hash_backend" "SIM_VCD=$trace_vcd"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
+identity=$( { sha256sum "${sources[@]}" "${headers[@]}" "$main_tb"; printf '%s\n' "KECCAK_LUT6=$lut6" "SYNTHESIS=$synthesis" "HASH_BACKEND=$hash_backend" "SIM_VCD=$trace_vcd"; "$verilator_bin" --version; } | sha256sum | cut -d' ' -f1)
 exec 9>"$work/compile.lock"
 flock 9
     if [[ ! -x "$work/obj/Vtb" || ! -f "$work/source.sha256" || $(cat "$work/source.sha256") != "$identity" ]]; then
     echo "Compile P${p}U${u} SYNTHESIS=$synthesis; log: $work/compile.log"
     if ! "$verilator_bin" --binary --timing -O3 -j 2 -Wno-fatal --top-module tb \
         "-GPIPELINE=$p" "-GUNROLL=$u" \
-        --Mdir "$work/obj" "${trace_options[@]}" "${defines[@]}" "${sources[@]}" tb/tb.sv >"$work/compile.log" 2>&1; then
+        --Mdir "$work/obj" "${trace_options[@]}" "${defines[@]}" "${sources[@]}" "$main_tb" >"$work/compile.log" 2>&1; then
         tail -n 40 "$work/compile.log" >&2; exit 1
     fi
     printf '%s\n' "$identity" > "$work/source.sha256"
@@ -69,7 +73,10 @@ run_case() {
     if [[ $op != verify && ( $name == xmss_h16 || $name == xmss_h20 || $name == lms_h15 || $name == lms_h20 ) && ${ALLOW_FULL_STATEFUL_TREE:-0} != 1 ]]; then
         echo "High-tree Keygen/Sign is disabled in this round: $name/$op" >&2; return 2
     fi
-    local vector="$vectors_root/$name/$op" canonical="$work/${name}_${op}.log"
+    local vector canonical="$work/${name}_${op}.log"
+    local vector_args=("$name" "$op" --hash "$hash_backend")
+    if [[ -n ${VECTORS_DIR:-} ]]; then vector_args+=(--vectors-root "$VECTORS_DIR"); fi
+    vector=$(python3 scripts/ablation_paths.py vector "${vector_args[@]}")
     local log
     local trace_arguments=()
     if [[ $trace_vcd == 1 ]]; then

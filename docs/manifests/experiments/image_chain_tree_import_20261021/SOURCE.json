@@ -1,0 +1,156 @@
+{
+  "LANES": 1,
+  "UNROLL": 1,
+  "abi": 4,
+  "base_commit": "050512998fea28cc44667a1cd694d5ad5077767c",
+  "branch": "image-chain-tree",
+  "files": {
+    "rtl/executor/executor.sv": "c63abeb4408e69a960eb9da3ca032076e6964a6c7d766ab41de8971534ff55ae",
+    "rtl/executor/instructions.svh": "f69a5e7c5fecdae18038137335d549cfbe722a2e1749c618cc91f598234baa9e",
+    "rtl/hash/keccak.sv": "bbdea79a40e6d7d71661273d830f2c1d824d5b376bd40c488a4794203486ab8f",
+    "rtl/hash/shake-recipe.sv": "315922ca1ad0924eca8a798a0a0442ec42dcd16fa8b7c2b381313a5fb439d949",
+    "rtl/memory/signature.sv": "918d7b83f92c242cd048c0f7d029d3e60a5c318ab7f1c1508064009fb801e75e",
+    "rtl/top/common.sv": "45e238faecef0c987fcec6c1f0950d5221fd94555f211642d0fa151814216f06",
+    "rtl/top/top.sv": "2cfe61f2984095e966c29d48eb215248582a0c3e47b1ad87f74e300acf904001",
+    "sources.txt": "32fc1e3f6233566604a84617d40ca869e4fd313ff458ed636ea103aac0fbe15d"
+  },
+  "hash_backend": "shake",
+  "production": [
+    {
+      "mode": "normalize",
+      "sources": [
+        "rtl/hash_lane/mhbs_keccak.sv"
+      ],
+      "target": "rtl/hash/keccak.sv"
+    },
+    {
+      "mode": "normalize",
+      "sources": [
+        "rtl/hash_lane/mhbs_single_hash_lane.sv",
+        "rtl/hash_lane/mhbs_single_shake_context.sv"
+      ],
+      "target": "rtl/hash/shake-recipe.sv"
+    },
+    {
+      "mode": "normalize",
+      "sources": [
+        "rtl/memory/mhbs_signature_store.sv"
+      ],
+      "target": "rtl/memory/signature.sv"
+    },
+    {
+      "mode": "normalize",
+      "sources": [
+        "rtl/top/mhbs_micro_processor.sv"
+      ],
+      "target": "rtl/executor/executor.sv"
+    },
+    {
+      "mode": "normalize",
+      "sources": [
+        "rtl/top/mhbs_typed_defs.svh"
+      ],
+      "target": "rtl/executor/instructions.svh"
+    },
+    {
+      "mode": "partition_common",
+      "sources": [
+        "rtl/top/mhbs_top.sv"
+      ],
+      "target": "rtl/top/common.sv"
+    },
+    {
+      "mode": "partition_shell",
+      "sources": [
+        "rtl/top/mhbs_top.sv"
+      ],
+      "target": "rtl/top/top.sv"
+    }
+  ],
+  "replacements": {
+    "build/micro": "build/image-chain-tree",
+    "docs/ABI.md": "docs/ABI.md",
+    "docs/Architecture.md": "docs/Architecture.md",
+    "docs/Job_Interface.md": "docs/Job_Interface.md",
+    "docs/Micro_ISA.md": "docs/ISA.md",
+    "docs/Verification.md": "docs/Verification.md",
+    "generate_micro_tree_vectors": "generate_tree_vectors",
+    "manifests/micro/images": "tb/vectors",
+    "manifests/micro_sources.txt": "sources.txt",
+    "manifests/unified_sources.txt": "sources.txt",
+    "mhbs_keccak": "keccak",
+    "mhbs_micro_common": "common",
+    "mhbs_micro_processor": "executor",
+    "mhbs_signature_store": "signature",
+    "mhbs_single_hash_lane": "recipe",
+    "mhbs_single_shake_context": "shake_context",
+    "mhbs_top": "top",
+    "micro_common_partition": "common_partition",
+    "micro_flow": "run_hash_backends",
+    "model.micro_isa": "model.microcode",
+    "model.micro_program": "model.mHBS",
+    "model.micro_vm": "model.executor",
+    "model.profiles": "model.profiles",
+    "model.reference.slh_dsa": "model.reference.slh_dsa",
+    "model.unified_hbs": "model.executor",
+    "model/micro_isa.py": "model/microcode.py",
+    "model/micro_program.py": "model/mHBS.py",
+    "model/micro_vm.py": "model/executor.py",
+    "model/profiles.py": "model/profiles.py",
+    "model/reference/slh_dsa.py": "model/reference/slh_dsa.py",
+    "rtl/hash_lane/mhbs_keccak.sv": "rtl/hash/keccak.sv",
+    "rtl/hash_lane/mhbs_single_hash_lane.sv": "rtl/hash/shake-recipe.sv",
+    "rtl/hash_lane/mhbs_single_shake_context.sv": "rtl/hash/shake-context.sv",
+    "rtl/memory/mhbs_signature_store.sv": "rtl/memory/signature.sv",
+    "rtl/top/mhbs_micro_processor.sv": "rtl/executor/executor.sv",
+    "rtl/top/mhbs_top.sv": "rtl/top/top.sv",
+    "rtl/top/mhbs_typed_defs.svh": "rtl/executor/instructions.svh",
+    "scripts.generate_micro_tree_vectors": "scripts.generate_tree_vectors",
+    "scripts.micro_common_partition": "scripts.common_partition",
+    "scripts.micro_flow": "scripts.run_hash_backends",
+    "scripts.verify_micro_hash_lane": "scripts.check_recipes",
+    "scripts.verify_micro_hash_work": "scripts.check_hash_work",
+    "scripts.verify_micro_synthesis_mode": "scripts.check_statistics",
+    "scripts.verify_micro_top": "scripts.check_top_signature",
+    "scripts.verify_micro_units": "scripts.check_hash_backend_contracts",
+    "scripts/generate_micro_tree_vectors.py": "scripts/generate_tree_vectors.py",
+    "scripts/micro_common_partition.py": "scripts/common_partition.py",
+    "scripts/micro_flow.py": "scripts/run_hash_backends.py",
+    "scripts/verify_micro_hash_lane.py": "scripts/check_recipes.py",
+    "scripts/verify_micro_hash_work.py": "scripts/check_hash_work.py",
+    "scripts/verify_micro_synthesis_mode.py": "scripts/check_statistics.py",
+    "scripts/verify_micro_top.py": "scripts/check_top_signature.py",
+    "scripts/verify_micro_units.py": "scripts/check_hash_backend_contracts.py",
+    "tb/integration/micro_trace.cpp": "tb/hash_trace.cpp",
+    "tb/integration/tb_mhbs_micro.sv": "tb/tb.sv",
+    "tb/integration/tb_mhbs_micro_top.sv": "tb/tb_top_signature.sv",
+    "tb/unit/mhbs_tree_vectors.svh": "tb/tree_vectors.svh",
+    "tb/unit/tb_mhbs_micro_processor.sv": "tb/tb_hash_backend_contracts.sv",
+    "tb/unit/tb_mhbs_single_hash_lane.sv": "tb/tb_recipe.sv",
+    "tb_mhbs_micro": "tb",
+    "tb_mhbs_micro_processor": "tb_hash_backend_contracts",
+    "tb_mhbs_micro_top": "tb_top_signature",
+    "tb_mhbs_single_hash_lane": "tb_recipe",
+    "tests.slh_fixtures": "model.vectors",
+    "tests/kat": "tb/kat",
+    "tests/slh_fixtures.py": "model/vectors.py",
+    "verify_micro_hash_lane": "check_recipes",
+    "verify_micro_hash_work": "check_hash_work",
+    "verify_micro_synthesis_mode": "check_statistics",
+    "verify_micro_top": "check_top_signature",
+    "verify_micro_units": "check_hash_backend_contracts"
+  },
+  "source_commit": "cc1f60b408f38f2c1346f2300681ce1692d0ce16",
+  "source_regression": {
+    "path": "manifests/micro/validation/20261016_tree_opt_round1/functional/rtl.json",
+    "sha256": "2732db798e617f7df581693335136ef073d220affa3f953657d0e0887f4cefa7"
+  },
+  "tool_notes": [
+    "Source paths/module identifiers mapped to existing project names",
+    "Source top partition extracted once and stored as common/top",
+    "Standalone Job value type replaces otherwise-unused legacy macro-model dependency",
+    "Source32bit statistics and PROFILE_ENABLE retained",
+    "Source synthesis8threads changed2peruser; no routing"
+  ],
+  "upstream_sha256": "1d6b83512e6244f07754c0e71dc35ff1b0e4010165988abd8fec98137389150f"
+}

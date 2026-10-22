@@ -10,7 +10,7 @@ import random
 import subprocess
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
+from ablation_paths import ROOT, DESIGN, rtl, bench, build_dir
 IV = bytes.fromhex('6a09e667 bb67ae85 3c6ef372 a54ff53a 510e527f 9b05688c 1f83d9ab 5be0cd19')
 K = tuple(int(word, 16) for word in '''
 428a2f98 71374491 b5c0fbcf e9b5dba5 3956c25b 59f111f1 923f82a4 ab1c5ed5
@@ -85,12 +85,12 @@ def main():
     for p, u in configurations:
         if p < 1 or u < 1 or p*u > 24 or 24 % (p*u):
             parser.error('Require positive P/U and P*U dividing 24')
-    work = ROOT / 'build' / ('sha256_check_synthesis' if args.synthesis else 'sha256_check')
+    work = build_dir('sha256_check_synthesis' if args.synthesis else 'sha256_check')
     work.mkdir(parents=True, exist_ok=True)
     rows, lengths = make_vectors()
     vector = work/'vectors.mem'
     vector.write_text('\n'.join(rows)+'\n')
-    sources = ['rtl/hash/sha256.sv', 'tb/tb_sha256.sv', 'scripts/check_sha256.py']
+    sources = [rtl('hash/sha256.sv'), bench('tb_sha256.sv'), 'scripts/check_sha256.py']
     source_sha = {name: sha256((ROOT/name).read_bytes()).hexdigest() for name in sources}
     verilator = os.environ.get('VERILATOR', 'verilator')
 
@@ -100,7 +100,7 @@ def main():
         folder.mkdir(parents=True, exist_ok=True)
         command = [verilator, '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal',
                    '--top-module', 'tb_sha256', f'-GPIPELINE={p}', f'-GUNROLL={u}',
-                   '--Mdir', str(folder/'obj'), 'rtl/hash/sha256.sv', 'tb/tb_sha256.sv']
+                   '--Mdir', str(folder/'obj'), rtl('hash/sha256.sv'), bench('tb_sha256.sv')]
         if args.synthesis:
             command.append('-DSYNTHESIS')
         started = time.monotonic()

@@ -1,0 +1,26 @@
+--- a/model/executor.py
++++ b/model/executor.py
+@@ -385,6 +385,7 @@
+     for sign in (False, True):
+         words = image.words(sign)
+         allocated = False
++        message_repurposed = False
+         for word in words[:-1]:
+             if word >> 124 != 1 or not field(word, 107, 1) or field(word, 106, 1):
+                 raise ValueError("exclusive macro template required")
+@@ -398,6 +399,15 @@
+                 Macro.TREE: Kind.TREE, Macro.TRANSFORM: Kind.TRANSFORM, Macro.EMIT: Kind.EMIT}[op])
+             rid = field(word, 80, 8)
+             if rid: ref(rid, Kind.ROUTE)
++            # H_msg retires the original Job message. Hardware then reuses
++            # its existing store for independent FORS and WOTS value slots.
++            # Check both Sign and its node-input Verify interpretation.
++            if op == Macro.HASH and field(d[field(word, 88, 8)], 56, 4) in (3, 4, 6, 11):
++                if message_repurposed:
++                    raise ValueError("message recipe after digest storage reuse")
++            if (rid and not field(d[rid], 53, 1) and field(d[rid], 56, 2) in (1, 2)) or (
++                    image.stateful and op in (Macro.CHAIN, Macro.TREE)):
++                message_repurposed = True
+ 
+ 
+ @dataclass(frozen=True)

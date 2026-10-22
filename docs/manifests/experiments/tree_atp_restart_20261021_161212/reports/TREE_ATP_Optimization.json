@@ -1,0 +1,620 @@
+{
+  "branch": "image-chain-tree",
+  "baseline_commit": "80e5d3ff4dc6b9addca0b51fe1615a1d71a7d583",
+  "candidate": "T5",
+  "frequency_assumed_mhz": 100,
+  "scope": "K1U1 common; SHAKE+SHA2; one Hash lane; same program/template/descriptor images and standard outputs",
+  "final_area": {
+    "shake": {
+      "lut": 17624,
+      "ff": 6198,
+      "equivalent_slice": 5180.75,
+      "bram36": 0,
+      "dsp": 0,
+      "clock_constraint_ns": 10,
+      "frequency_assumed_mhz": 100,
+      "synthesis_experiment": "synth_P1U1_generic_20261021_164115_438814",
+      "area_change_percent": -2.194638474608268
+    },
+    "sha2": {
+      "lut": 15235,
+      "ff": 6942,
+      "equivalent_slice": 4676.5,
+      "bram36": 0,
+      "dsp": 0,
+      "clock_constraint_ns": 10,
+      "frequency_assumed_mhz": 100,
+      "synthesis_experiment": "synth_P1U1_generic_sha2_20261021_164114_500491",
+      "area_change_percent": -1.7542016806722738
+    }
+  },
+  "targets": [
+    {
+      "backend": "shake",
+      "profile": "slh_128f",
+      "operation": "sign",
+      "baseline_cycles": 2619846,
+      "cycles": 2614610,
+      "cycles_saved": 5236,
+      "hashes": 104937,
+      "permutations": 105641,
+      "atp_slice_ms_at_assumed_100mhz": 135456.407575,
+      "baseline_atp_slice_ms": 138773.24262,
+      "atp_change_percent": -2.3901113661244033
+    },
+    {
+      "backend": "shake",
+      "profile": "xmss_h10",
+      "operation": "sign",
+      "baseline_cycles": 86567075,
+      "cycles": 86499491,
+      "cycles_saved": 67584,
+      "hashes": 3431815,
+      "permutations": 3431815,
+      "atp_slice_ms_at_assumed_100mhz": 4481322.3799825,
+      "baseline_atp_slice_ms": 4585457.96275,
+      "atp_change_percent": -2.270996345696452
+    },
+    {
+      "backend": "shake",
+      "profile": "lms_h10",
+      "operation": "sign",
+      "baseline_cycles": 28524614,
+      "cycles": 28457030,
+      "cycles_saved": 67584,
+      "hashes": 1101392,
+      "permutations": 1116752,
+      "atp_slice_ms_at_assumed_100mhz": 1474287.581725,
+      "baseline_atp_slice_ms": 1510948.80358,
+      "atp_change_percent": -2.426370884846396
+    },
+    {
+      "backend": "sha2",
+      "profile": "slh_128f",
+      "operation": "sign",
+      "baseline_cycles": 15071002,
+      "cycles": 15065766,
+      "cycles_saved": 5236,
+      "hashes": 104925,
+      "permutations": 211432,
+      "atp_slice_ms_at_assumed_100mhz": 704550.54699,
+      "baseline_atp_slice_ms": 717379.6952,
+      "atp_change_percent": -1.788334447690687
+    },
+    {
+      "backend": "sha2",
+      "profile": "xmss_h10",
+      "operation": "sign",
+      "baseline_cycles": 497855675,
+      "cycles": 497788091,
+      "cycles_saved": 67584,
+      "hashes": 3431950,
+      "permutations": 7001183,
+      "atp_slice_ms_at_assumed_100mhz": 23279060.075615,
+      "baseline_atp_slice_ms": 23697930.13,
+      "atp_change_percent": -1.7675385659726373
+    },
+    {
+      "backend": "sha2",
+      "profile": "lms_h10",
+      "operation": "sign",
+      "baseline_cycles": 81024466,
+      "cycles": 80956882,
+      "cycles_saved": 67584,
+      "hashes": 1101347,
+      "permutations": 1136162,
+      "atp_slice_ms_at_assumed_100mhz": 3785948.58673,
+      "baseline_atp_slice_ms": 3856764.5816,
+      "atp_change_percent": -1.8361503112700128
+    }
+  ],
+  "stages": [
+    {
+      "id": "T0",
+      "change": "80e5d3ff original",
+      "status": "baseline",
+      "shake": {
+        "lut": 18081,
+        "ff": 6214,
+        "equivalent_slice": 5297
+      },
+      "sha2": {
+        "lut": 15435,
+        "ff": 7210,
+        "equivalent_slice": 4760
+      }
+    },
+    {
+      "id": "T1",
+      "change": "Local SHAKE absorb XOR; no execution-cycle change",
+      "status": "retained_component",
+      "shake": {
+        "lut": 17677,
+        "ff": 6215,
+        "equivalent_slice": 5196.125
+      },
+      "synthesis_experiment": "synth_P1U1_generic_20261021_161212_040387",
+      "checks": "459 SHAKE recipes; 128f Sign exact original cycle"
+    },
+    {
+      "id": "T2a",
+      "change": "T1 plus independent FORS320/WOTS256 reuse of dead message storage",
+      "status": "superseded",
+      "shake": {
+        "lut": 17827,
+        "ff": 5623,
+        "equivalent_slice": 5159.625
+      },
+      "synthesis_experiment": "synth_P1U1_generic_20261021_161633_208436"
+    },
+    {
+      "id": "T2",
+      "change": "T2a plus direct parent return into node_value and parent coordinates",
+      "status": "rejected_area_regression",
+      "shake": {
+        "lut": 18708,
+        "ff": 5670,
+        "equivalent_slice": 5385.75
+      },
+      "sha2": {
+        "lut": 16182,
+        "ff": 6661,
+        "equivalent_slice": 4878.125
+      },
+      "validation": "macro_atp_acceptance_20261021_161843",
+      "synthesis_experiments": [
+        "synth_P1U1_generic_20261021_161951_634089",
+        "synth_P1U1_generic_sha2_20261021_161953_045098"
+      ],
+      "checks": "44 core and 52 auxiliary passed; dedicated 20 generated-ROM + two model and two RTL lifetime rejection checks passed",
+      "reason": "The broad message write/read selection and direct lane result path increased LUT area. Rejected despite functional pass. Both message reuse and parent-response shortcut fully reverted."
+    },
+    {
+      "id": "T3",
+      "change": "T1 + CHAIN_STORE cursor/next-setup fusion + SHA2 digest/scalar response low32 sharing",
+      "status": "rejected_custom_recipe_compatibility",
+      "shake": {
+        "lut": 17624,
+        "ff": 6198,
+        "equivalent_slice": 5180.75
+      },
+      "sha2": {
+        "lut": 14905,
+        "ff": 6946,
+        "equivalent_slice": 4594.5
+      },
+      "validation": "macro_atp_acceptance_20261021_162635",
+      "reason": "44+52 standard tests passed, but generalized custom scalar output and raw read views were not equivalent."
+    },
+    {
+      "id": "T4",
+      "change": "T3 plus full scalar/raw compatibility using dead CV for retention",
+      "status": "rejected_area_regression",
+      "shake": {
+        "lut": 17624,
+        "ff": 6198,
+        "equivalent_slice": 5180.75
+      },
+      "sha2": {
+        "lut": 15707,
+        "ff": 6957,
+        "equivalent_slice": 4796.375
+      },
+      "validation": "macro_atp_acceptance_20261021_163739",
+      "reason": "374 exact recipe comparisons passed, but preserving both old scalar/raw views introduced extra LUTs and SHA2 area regressed."
+    },
+    {
+      "id": "T5",
+      "change": "T1 + CHAIN_STORE cursor/next-setup fusion + P1 SHA2 CV reuse from compressor output; all original scalar/digest banks restored",
+      "status": "selected",
+      "shake": {
+        "lut": 17624,
+        "ff": 6198,
+        "equivalent_slice": 5180.75,
+        "bram36": 0,
+        "dsp": 0,
+        "clock_constraint_ns": 10,
+        "frequency_assumed_mhz": 100,
+        "synthesis_experiment": "synth_P1U1_generic_20261021_164115_438814",
+        "area_change_percent": -2.194638474608268
+      },
+      "sha2": {
+        "lut": 15235,
+        "ff": 6942,
+        "equivalent_slice": 4676.5,
+        "bram36": 0,
+        "dsp": 0,
+        "clock_constraint_ns": 10,
+        "frequency_assumed_mhz": 100,
+        "synthesis_experiment": "synth_P1U1_generic_sha2_20261021_164114_500491",
+        "area_change_percent": -1.7542016806722738
+      }
+    }
+  ],
+  "production_sha256": {
+    "rtl/executor/executor.sv": "c5e934f001e88afcac50c85b75a71d7816e52a2f1e9a60d81954fd3f46028b9c",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/sha2-recipe.sv": "bcb53b5f22603850376d9e3f1c6c1fd2556749fc2e5cd02db90f19b390aeb3f2",
+    "rtl/hash/sha256.sv": "611775b5ff93a5ab3f2785c77cc38f5f604b9153f65d1e81a00e14ea349a7b0a",
+    "rtl/hash/shake-recipe.sv": "39060d0ce8065a656da30810bef6c4cb57c58e49bb7a132de1a9acddda0bdc0d",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/top/common.sv": "9b6bce3fb7d8c51708c4c45aa3e313dee3581442c6e18f4f1c6f4e4eaa4f11b1",
+    "rtl/top/top.sv": "acfa920ae462aed5ab54241702828f7a12cda58d4f1c358a1811e1ecc0ac3261"
+  },
+  "validation_acceptance": "macro_atp_acceptance_20261021_164159",
+  "validation_core_passed": 44,
+  "validation_auxiliary": {
+    "shake_recipes": {
+      "status": "passed",
+      "seconds": 6.144591070711613,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_recipes.log",
+      "log_sha256": "94eeb3cd3ffda7ae54cf7b5897729e7e3fc9ca93c21b8200222c8693b0667c0e",
+      "summary": "RECIPE_PASS cases=459 mask=ffff stream_stall_cycles=12627\n- tb/tb_recipe.sv:170: Verilog $finish\n"
+    },
+    "shake_recipes_synthesis": {
+      "status": "passed",
+      "seconds": 5.736895096022636,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_recipes_synthesis.log",
+      "log_sha256": "94eeb3cd3ffda7ae54cf7b5897729e7e3fc9ca93c21b8200222c8693b0667c0e",
+      "summary": "RECIPE_PASS cases=459 mask=ffff stream_stall_cycles=12627\n- tb/tb_recipe.sv:170: Verilog $finish\n"
+    },
+    "shake_signature_views": {
+      "status": "passed",
+      "seconds": 31.937840421684086,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_signature_views.log",
+      "log_sha256": "a9935b0fe1ba4d5a67055134ef932665b42b3332abacd1e6d907e43d6c973548",
+      "summary": "SYNTHESIS=0 MHBS_SIGNATURE_STORE=0 TOP_SIGNATURE_PASS bytes=17088 hashes=104937 permutations=105641\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=0 MHBS_SIGNATURE_STORE=1 TOP_SIGNATURE_PASS bytes=17088 hashes=104937 permutations=105641\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=1 MHBS_SIGNATURE_STORE=0 TOP_SIGNATURE_PASS bytes=17088 hashes=104937 permutations=105641\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=1 MHBS_SIGNATURE_STORE=1 TOP_SIGNATURE_PASS bytes=17088 hashes=104937 permutations=105641\n- tb/tb_top_signature.sv:130: Verilog $finish\n"
+    },
+    "shake_slh_128f_stall_reset": {
+      "status": "passed",
+      "seconds": 8.948529897257686,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_stall_reset.log",
+      "log_sha256": "08358569a87b86da0b39113c098d2ce5ed07e48695856a7d9bedb0ed54c6029f",
+      "summary": "Compile P1U1 SYNTHESIS=0; log: build/sim/P1U1_synthesis0/compile.log\nSTATEFUL_PASS P1U1 op=2 cycles=224625 total=224630 hashes=6441 permutations=6533 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=224625 total=224630 hashes=6441 permutations=6533 tamper=0\n"
+    },
+    "shake_slh_128f_truncate": {
+      "status": "passed",
+      "seconds": 0.49653360387310386,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_truncate.log",
+      "log_sha256": "c4667d5935317c702c130c7c2c7fe570f4a6cff11776b40cdfb0589d9278451e",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=196907 total=196912 hashes=6441 permutations=6533 tamper=0\n"
+    },
+    "shake_slh_128f_tamper1": {
+      "status": "passed",
+      "seconds": 0.47962583089247346,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_tamper1.log",
+      "log_sha256": "ec68bf04e39e0d2d03a3bcc6afcef3d7cfae099fbf033a87daf81411b7064445",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=188207 total=188212 hashes=6141 permutations=6233 tamper=1\n"
+    },
+    "shake_slh_128f_tamper2": {
+      "status": "passed",
+      "seconds": 0.511436854954809,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_tamper2.log",
+      "log_sha256": "593047dc9b7a6f5d22f1318c1d51830d2d24c7f2c1f09412eb4afeb409efda06",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=179507 total=179512 hashes=5841 permutations=5933 tamper=2\n"
+    },
+    "shake_slh_128f_tamper3": {
+      "status": "passed",
+      "seconds": 0.4549800902605057,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_tamper3.log",
+      "log_sha256": "f70e32b63cad4a5cbb7931c6ce835faa864d12935d9aef96578ddf8c46acaf0e",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=196907 total=196912 hashes=6441 permutations=6533 tamper=3\n"
+    },
+    "shake_slh_128f_tamper4": {
+      "status": "passed",
+      "seconds": 0.4403898292221129,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_tamper4.log",
+      "log_sha256": "5ebf6648f804a3f8b3fa328940aa42ff420f24262e5c26360fa9012de8ce3fe2",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=187772 total=187777 hashes=6126 permutations=6218 tamper=4\n"
+    },
+    "shake_slh_128f_tamper5": {
+      "status": "passed",
+      "seconds": 0.43569086492061615,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_slh_128f_tamper5.log",
+      "log_sha256": "f7690b3bd7331f73f4daf9e1bea4fba6d80ccf4627e6ae9d6cdba14ec14f40e8",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=192992 total=192997 hashes=6306 permutations=6398 tamper=5\n"
+    },
+    "shake_xmss_h10_stall_reset": {
+      "status": "passed",
+      "seconds": 0.27614689990878105,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_stall_reset.log",
+      "log_sha256": "e90d43aaedf83cd29661dded6890e38c5c8543d48e88077df94244028f01a9be",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=54131 total=54136 hashes=1970 permutations=1970 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=54131 total=54136 hashes=1970 permutations=1970 tamper=0\n"
+    },
+    "shake_xmss_h10_truncate": {
+      "status": "passed",
+      "seconds": 0.17493992671370506,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_truncate.log",
+      "log_sha256": "fa6efeacd31ada1af89ecbb10f162f86ca035786169e556b9c556ca9f580c5fe",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=52414 total=52419 hashes=1970 permutations=1970 tamper=0\n"
+    },
+    "shake_xmss_h10_tamper1": {
+      "status": "passed",
+      "seconds": 0.16802289010956883,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_tamper1.log",
+      "log_sha256": "a41517a639a2ec40348bf44cc0a1f9ddce71dcf91f6bd4b7846ee12770c52bdd",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=48859 total=48864 hashes=1835 permutations=1835 tamper=1\n"
+    },
+    "shake_xmss_h10_tamper2": {
+      "status": "passed",
+      "seconds": 0.17464088276028633,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_tamper2.log",
+      "log_sha256": "9d024a17289a5c9c9b9b6be99fa14865bec41ea77d13b78fa61753c3045be617",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=52414 total=52419 hashes=1970 permutations=1970 tamper=2\n"
+    },
+    "shake_xmss_h10_tamper3": {
+      "status": "passed",
+      "seconds": 0.17109015071764588,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_tamper3.log",
+      "log_sha256": "a698df71cba6267318becde2331a55fc5b9e4cecfc67a753c9587b86fca5c13e",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=52414 total=52419 hashes=1970 permutations=1970 tamper=3\n"
+    },
+    "shake_xmss_h10_tamper4": {
+      "status": "passed",
+      "seconds": 0.17555051809176803,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_tamper4.log",
+      "log_sha256": "7c910a3f04242dd9cacafee835405bd779db80fb3cc831d0dd7ef2038e8ef43a",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=53599 total=53604 hashes=2015 permutations=2015 tamper=4\n"
+    },
+    "shake_xmss_h10_tamper5": {
+      "status": "passed",
+      "seconds": 0.16706267092376947,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_tamper5.log",
+      "log_sha256": "6d50bf2a147edf837ecdd892a3bd5c8030ecc3bc454e4e5fc520685f8c12edcf",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=50044 total=50049 hashes=1880 permutations=1880 tamper=5\n"
+    },
+    "shake_lms_h10_stall_reset": {
+      "status": "passed",
+      "seconds": 0.1438413872383535,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_stall_reset.log",
+      "log_sha256": "53f2411fffff63408e7b0a42c625d6dad9a2865744c0f969d59ca4663adcabdb",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=17130 total=17135 hashes=493 permutations=508 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=17130 total=17135 hashes=493 permutations=508 tamper=0\n"
+    },
+    "shake_lms_h10_truncate": {
+      "status": "passed",
+      "seconds": 0.10860250797122717,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_truncate.log",
+      "log_sha256": "7ce84e261f2b1877da39a612de2899888da572e72c6462661d3f262f25c6d431",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=15402 total=15407 hashes=493 permutations=508 tamper=0\n"
+    },
+    "shake_lms_h10_tamper1": {
+      "status": "passed",
+      "seconds": 0.10577748389914632,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_tamper1.log",
+      "log_sha256": "d2bf3b924c8f8d155ce2216b57e56dc3a88f3ebbca2dde1bf92827b4a8a4a600",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=15402 total=15407 hashes=493 permutations=508 tamper=1\n"
+    },
+    "shake_lms_h10_tamper2": {
+      "status": "passed",
+      "seconds": 0.10644619399681687,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_tamper2.log",
+      "log_sha256": "8451bc64405eb0b0c638e1ae3e75884f30f000a69e9c68a85dbc75acefe4d8eb",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=15402 total=15407 hashes=493 permutations=508 tamper=2\n"
+    },
+    "shake_lms_h10_tamper3": {
+      "status": "passed",
+      "seconds": 0.1054235971532762,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_tamper3.log",
+      "log_sha256": "2ae15dc19fbf560f8271dce3d8395b9d39781cff38e3bfffbb4fea85269f5394",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=15402 total=15407 hashes=493 permutations=508 tamper=3\n"
+    },
+    "shake_lms_h10_tamper4": {
+      "status": "passed",
+      "seconds": 0.10638658562675118,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_tamper4.log",
+      "log_sha256": "1c0c61177466ab2f1370838d126d4f458c27b21b57dd49f5d1bd34c4e6beffba",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=15402 total=15407 hashes=493 permutations=508 tamper=4\n"
+    },
+    "shake_lms_h10_tamper5": {
+      "status": "passed",
+      "seconds": 0.10671609593555331,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_tamper5.log",
+      "log_sha256": "420bfbd38062831c8b2c3e09d96388383d34f37a49b5bc48bacfb93b5e2e54c2",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=16272 total=16277 hashes=523 permutations=538 tamper=5\n"
+    },
+    "shake_xmss_h10_q_overflow": {
+      "status": "passed",
+      "seconds": 0.07560705440118909,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_xmss_h10_q_overflow.log",
+      "log_sha256": "44bfbffa860d27d71716c79722034b4b5899f7e8d63dc22d6fe4dadd5c41f36e",
+      "summary": "INDEX_REJECT_PASS\n"
+    },
+    "shake_lms_h10_q_overflow": {
+      "status": "passed",
+      "seconds": 0.07646847702562809,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/shake_lms_h10_q_overflow.log",
+      "log_sha256": "44bfbffa860d27d71716c79722034b4b5899f7e8d63dc22d6fe4dadd5c41f36e",
+      "summary": "INDEX_REJECT_PASS\n"
+    },
+    "sha2_recipes": {
+      "status": "passed",
+      "seconds": 4.577497697900981,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_recipes.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c",
+      "summary": "RECIPE_PASS cases=345 mask=ffff stream_stall_cycles=0\n- tb/tb_recipe.sv:170: Verilog $finish\n"
+    },
+    "sha2_recipes_synthesis": {
+      "status": "passed",
+      "seconds": 4.72492557624355,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_recipes_synthesis.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c",
+      "summary": "RECIPE_PASS cases=345 mask=ffff stream_stall_cycles=0\n- tb/tb_recipe.sv:170: Verilog $finish\n"
+    },
+    "sha2_signature_views": {
+      "status": "passed",
+      "seconds": 92.42332300497219,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_signature_views.log",
+      "log_sha256": "4cc6141f1fa1abaa635bdae52e3484f9913f8c5803314f40189f974845aa60f6",
+      "summary": "SYNTHESIS=0 MHBS_SIGNATURE_STORE=0 TOP_SIGNATURE_PASS bytes=17088 hashes=104925 permutations=211432\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=0 MHBS_SIGNATURE_STORE=1 TOP_SIGNATURE_PASS bytes=17088 hashes=104925 permutations=211432\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=1 MHBS_SIGNATURE_STORE=0 TOP_SIGNATURE_PASS bytes=17088 hashes=104925 permutations=211432\n- tb/tb_top_signature.sv:130: Verilog $finish\nSYNTHESIS=1 MHBS_SIGNATURE_STORE=1 TOP_SIGNATURE_PASS bytes=17088 hashes=104925 permutations=211432\n- tb/tb_top_signature.sv:130: Verilog $finish\n"
+    },
+    "sha2_slh_128f_stall_reset": {
+      "status": "passed",
+      "seconds": 12.540306083392352,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_stall_reset.log",
+      "log_sha256": "a346ef12953e19f498744896d2e77e22b61693ba9d66c2b12c84af8ccded808c",
+      "summary": "Compile P1U1 SYNTHESIS=0; log: build/sim/P1U1_synthesis0_sha2/compile.log\nSTATEFUL_PASS P1U1 op=2 cycles=983457 total=983462 hashes=6413 permutations=13031 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=983457 total=983462 hashes=6413 permutations=13031 tamper=0\n"
+    },
+    "sha2_slh_128f_truncate": {
+      "status": "passed",
+      "seconds": 1.8811443061567843,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_truncate.log",
+      "log_sha256": "07bf8917fff6f3c0f7a44a4a3d065031f1a45af7d869a07bd5f3ce849f458285",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=956851 total=956856 hashes=6413 permutations=13031 tamper=0\n"
+    },
+    "sha2_slh_128f_tamper1": {
+      "status": "passed",
+      "seconds": 1.9869744973257184,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_tamper1.log",
+      "log_sha256": "a8dd20a52d9252522e96f055a4dd5f1da521f7513903b0a7bb658bc12d023306",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=926191 total=926196 hashes=6203 permutations=12611 tamper=1\n"
+    },
+    "sha2_slh_128f_tamper2": {
+      "status": "passed",
+      "seconds": 2.556370384991169,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_tamper2.log",
+      "log_sha256": "9712eddf754622173aaf95e1ba62b6242e76e8872dbe7347f3fb93f5d97d6ccd",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=924001 total=924006 hashes=6188 permutations=12581 tamper=2\n"
+    },
+    "sha2_slh_128f_tamper3": {
+      "status": "passed",
+      "seconds": 2.0101693123579025,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_tamper3.log",
+      "log_sha256": "414868921186a863afe6caed63cf18fadcf37b2d8fc9bce7162468c83465e464",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=956851 total=956856 hashes=6413 permutations=13031 tamper=3\n"
+    },
+    "sha2_slh_128f_tamper4": {
+      "status": "passed",
+      "seconds": 1.944614963606,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_tamper4.log",
+      "log_sha256": "0e0f9abf724666c06529918f01d287202de9515b7d2e7c3c9dd353cecacf776f",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=904291 total=904296 hashes=6053 permutations=12311 tamper=4\n"
+    },
+    "sha2_slh_128f_tamper5": {
+      "status": "passed",
+      "seconds": 1.9650685037486255,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_slh_128f_tamper5.log",
+      "log_sha256": "f49a5e7f12163a2a46c06af42a36c3a7213dfa19bd2755cd31b49ab54ea27e08",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=924001 total=924006 hashes=6188 permutations=12581 tamper=5\n"
+    },
+    "sha2_xmss_h10_stall_reset": {
+      "status": "passed",
+      "seconds": 1.4555613929405808,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_stall_reset.log",
+      "log_sha256": "d1748b6d6cac99f5de548c1aaa8d7ab2b35e7e849b190384ca5071c48114b89e",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=271116 total=271121 hashes=1835 permutations=3747 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=271116 total=271121 hashes=1835 permutations=3747 tamper=0\n"
+    },
+    "sha2_xmss_h10_truncate": {
+      "status": "passed",
+      "seconds": 0.6156806331127882,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_truncate.log",
+      "log_sha256": "baa9cbea1f7f19d7db8334e570a55fdcdd6da83d2abcddf221551bee87672e8f",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=269003 total=269008 hashes=1835 permutations=3747 tamper=0\n"
+    },
+    "sha2_xmss_h10_tamper1": {
+      "status": "passed",
+      "seconds": 0.6301991841755807,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_tamper1.log",
+      "log_sha256": "44d3f10c2e354ae0980a9f6612e45d8073238e3081eace065e3be780fa0292ef",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=269003 total=269008 hashes=1835 permutations=3747 tamper=1\n"
+    },
+    "sha2_xmss_h10_tamper2": {
+      "status": "passed",
+      "seconds": 0.6624397421255708,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_tamper2.log",
+      "log_sha256": "9a4aa793280cff78e959ce37501d939318213fccb06962b98ff88f800d34f1c2",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=269003 total=269008 hashes=1835 permutations=3747 tamper=2\n"
+    },
+    "sha2_xmss_h10_tamper3": {
+      "status": "passed",
+      "seconds": 0.632593282032758,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_tamper3.log",
+      "log_sha256": "04979d713672773db1044e9591cb7b4eb8d6936bd96e1d5ad703a29e95097251",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=269003 total=269008 hashes=1835 permutations=3747 tamper=3\n"
+    },
+    "sha2_xmss_h10_tamper4": {
+      "status": "passed",
+      "seconds": 0.6522466889582574,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_tamper4.log",
+      "log_sha256": "4bb80f1ea2559258c3a819339423b3669ddb100f209e2ae04b3e54d9c2606f87",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=269003 total=269008 hashes=1835 permutations=3747 tamper=4\n"
+    },
+    "sha2_xmss_h10_tamper5": {
+      "status": "passed",
+      "seconds": 0.7208641460165381,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_tamper5.log",
+      "log_sha256": "f45f0a98d23fb4c8d7fb6b342c3e898f18d7c6c05e5c92373d193eb4b20a9da1",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=262553 total=262558 hashes=1790 permutations=3657 tamper=5\n"
+    },
+    "sha2_lms_h10_stall_reset": {
+      "status": "passed",
+      "seconds": 0.2609037631191313,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_stall_reset.log",
+      "log_sha256": "f0c74d66d2f7ee6e24f4949c039473502d55ebe5acbcd42d2e082455a65d2e3d",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=45460 total=45465 hashes=538 permutations=581 tamper=0\nSTATEFUL_PASS P1U1 op=2 cycles=45460 total=45465 hashes=538 permutations=581 tamper=0\n"
+    },
+    "sha2_lms_h10_truncate": {
+      "status": "passed",
+      "seconds": 0.16688569076359272,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_truncate.log",
+      "log_sha256": "8f23b5c3b4f13cbfeb9e551151e8c6589c656225ba60832cd14302d823479db0",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=43872 total=43877 hashes=538 permutations=581 tamper=0\n"
+    },
+    "sha2_lms_h10_tamper1": {
+      "status": "passed",
+      "seconds": 0.16161628905683756,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_tamper1.log",
+      "log_sha256": "91de5d13c8ce9c2e15bde0edecb0b3e7587b8d1c945c7699901a5a94dac9135b",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=42747 total=42752 hashes=523 permutations=566 tamper=1\n"
+    },
+    "sha2_lms_h10_tamper2": {
+      "status": "passed",
+      "seconds": 0.166661087423563,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_tamper2.log",
+      "log_sha256": "ad96fd4f8378d60009438101d10d3f08087c7d27bbf77befefd05ed3a0726695",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=43872 total=43877 hashes=538 permutations=581 tamper=2\n"
+    },
+    "sha2_lms_h10_tamper3": {
+      "status": "passed",
+      "seconds": 0.16955002304166555,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_tamper3.log",
+      "log_sha256": "a5b1c9d451a2de4b92ec393c7e13a6bc59fad6d00f21ae8233c36402c85bbfbf",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=43872 total=43877 hashes=538 permutations=581 tamper=3\n"
+    },
+    "sha2_lms_h10_tamper4": {
+      "status": "passed",
+      "seconds": 0.164561219047755,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_tamper4.log",
+      "log_sha256": "793ddbe4029511d3123b4659f082d8fa8386e4000366e0bb9bb4be6e5742d751",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=43872 total=43877 hashes=538 permutations=581 tamper=4\n"
+    },
+    "sha2_lms_h10_tamper5": {
+      "status": "passed",
+      "seconds": 0.17934748390689492,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_tamper5.log",
+      "log_sha256": "a5c2b03c6d84ecad6cd9f07a1026917d8c6bd4bf80b8dd71a65de012ef22f73d",
+      "summary": "STATEFUL_PASS P1U1 op=2 cycles=48372 total=48377 hashes=598 permutations=641 tamper=5\n"
+    },
+    "sha2_xmss_h10_q_overflow": {
+      "status": "passed",
+      "seconds": 0.07594568887725472,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_xmss_h10_q_overflow.log",
+      "log_sha256": "44bfbffa860d27d71716c79722034b4b5899f7e8d63dc22d6fe4dadd5c41f36e",
+      "summary": "INDEX_REJECT_PASS\n"
+    },
+    "sha2_lms_h10_q_overflow": {
+      "status": "passed",
+      "seconds": 0.07501198723912239,
+      "log": "/tmp/mhbs-image-chain-tree/build/macro_atp_acceptance/20261021_164159/checks/sha2_lms_h10_q_overflow.log",
+      "log_sha256": "44bfbffa860d27d71716c79722034b4b5899f7e8d63dc22d6fe4dadd5c41f36e",
+      "summary": "INDEX_REJECT_PASS\n"
+    }
+  },
+  "limitations": [
+    "100 MHz is the common-core synthesis constraint and an ATP assumption. No placement/routing or achieved frequency is claimed.",
+    "Standard generated ROMs remain byte-identical. Original message and all four value slots remain independent: the failed message-lifetime restriction was fully reverted.",
+    "The scalar/digest alias was fully reverted. Original scalar response and raw digest bank semantics are preserved; 374 side-by-side recipe cases against original 80e5d3ff cover custom output sizes, HMSG30/34, zero-step chains and input changes after response retirement.",
+    "XMSS h16/h20 and LMS h15/h20 full Keygen/Sign were not started. True-height Verify remains in the 44-case matrix. h20 full-tree stop remains in force."
+  ]
+}

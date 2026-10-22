@@ -4,16 +4,17 @@ from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 import argparse,json,os,re,subprocess,time
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[1]
+from ablation_paths import ROOT, DESIGN, source_files, headers, bench, build_dir, rtl, prepare_vector
 def digest(path):return sha256(path.read_bytes()).hexdigest()
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--jobs',type=int,default=2)
     args=parser.parse_args()
+    if DESIGN=='t': parser.error('The TREE design has no software-control instruction interface')
     if not 1<=args.jobs<=4:parser.error('--jobs must be 1..4')
-    work=ROOT/'build/chain_controls';work.mkdir(parents=True,exist_ok=True)
-    sources=(ROOT/'sources.txt').read_text().splitlines()
-    names=[*sources,'rtl/executor/instructions.svh','tb/tb_chain_controls.sv','scripts/check_chain_controls.py']
+    work=build_dir('chain_controls');work.mkdir(parents=True,exist_ok=True)
+    sources=source_files()
+    names=[*sources,*headers(),bench('tb_chain_controls.sv'),'scripts/check_chain_controls.py']
     identity={name:digest(ROOT/name) for name in names}
     configurations=[(backend,syn) for backend in ('shake','sha2') for syn in (False,True)]
     def run(config):
@@ -27,7 +28,7 @@ def main():
                  '--top-module','tb_chain_controls','--Mdir',str(folder/'obj')]
             if backend=='sha2':cmd.append('-DMHBS_SHA2')
             if syn:cmd.append('-DSYNTHESIS')
-            cmd.extend([*sources,'tb/tb_chain_controls.sv'])
+            cmd.extend([*sources,bench('tb_chain_controls.sv')])
             with (folder/'compile.log').open('w') as log:
                 result=subprocess.run(cmd,cwd=ROOT,stdout=log,stderr=subprocess.STDOUT)
             if result.returncode:return dict(backend=backend,synthesis=syn,passed=False,stage='compile',log=str(folder/'compile.log'))

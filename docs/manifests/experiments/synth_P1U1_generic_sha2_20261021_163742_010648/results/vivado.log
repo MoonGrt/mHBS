@@ -1,0 +1,764 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Wed Oct 21 16:37:40 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source scripts/synth.tcl
+# set hash_backend shake
+# if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+# if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
+# set package_root [file normalize [file join [file dirname [info script]] ..]]
+# cd $package_root
+# set p 1
+# set u 1
+# if {[llength $argv] > 0} {set p [lindex $argv 0]}
+# if {[llength $argv] > 1} {set u [lindex $argv 1]}
+# if {![string is integer -strict $p] || ![string is integer -strict $u]} {error "P/U must be integers"}
+# if {$p < 1 || $p > 24 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U configuration"}
+# set part xc7a200tffg1156-3
+# set lut6 0
+# if {[info exists ::env(KECCAK_LUT6)]} {set lut6 $::env(KECCAK_LUT6)}
+# if {$lut6 ni {0 1}} {error "KECCAK_LUT6 must be 0 or 1"}
+# set out [file join $package_root build synth P${p}U${u}]
+# if {!$lut6} {append out _generic}
+# if {$hash_backend eq "sha2"} {append out _sha2}
+# file mkdir $out
+# set archive [exec python3 [file join $package_root scripts experiment_archive.py] --begin-synthesis $out]
+# set source_root [file join $archive source]
+# set_param general.maxThreads 2
+# create_project -in_memory -part $part
+# set defines [list SYNTHESIS]
+# if {$lut6} {lappend defines MHBS_XILINX_LUT6}
+# if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+# set_property verilog_define $defines [current_fileset]
+# set handle [open [file join $source_root sources.txt] r]
+# set sources [split [string trim [read $handle]] \n]
+# close $handle
+# foreach source $sources {read_verilog -sv [file join $source_root $source]}
+# read_xdc [file join $source_root scripts clock.xdc]
+# synth_design -top common -part $part -mode out_of_context \
+#     -flatten_hierarchy rebuilt -max_dsp 0 \
+#     -generic PIPELINE=$p -generic UNROLL=$u
+Command: synth_design -top common -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=1 -generic UNROLL=1
+Starting synth_design
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Vivado_Tcl 4-287] User specified maximum number of block DSP allowed in design is 0
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 2 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 1137915
+---------------------------------------------------------------------------------
+Starting RTL Elaboration : Time (s): cpu = 00:00:02 ; elapsed = 00:00:03 . Memory (MB): peak = 2273.504 ; gain = 484.875 ; free physical = 66043 ; free virtual = 97156
+---------------------------------------------------------------------------------
+WARNING: [Synth 8-6901] identifier 'candidate_valid' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:409]
+WARNING: [Synth 8-6901] identifier 'compression_ready' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:409]
+WARNING: [Synth 8-6901] identifier 'candidate' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:410]
+WARNING: [Synth 8-6901] identifier 'candidate' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:410]
+WARNING: [Synth 8-6901] identifier 'schedule_cursor' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:418]
+WARNING: [Synth 8-6901] identifier 'pipe_mode' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:90]
+WARNING: [Synth 8-6901] identifier 'fors_pipe' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:94]
+WARNING: [Synth 8-6901] identifier 'lt_pipe' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:96]
+WARNING: [Synth 8-6901] identifier 'fors_leaves' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:97]
+WARNING: [Synth 8-6901] identifier 'indexing' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:97]
+WARNING: [Synth 8-6901] identifier 'verifying' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:97]
+WARNING: [Synth 8-6901] identifier 'pipe_direct' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:102]
+WARNING: [Synth 8-6901] identifier 'standalone_chain' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:155]
+WARNING: [Synth 8-6901] identifier 'macro_flags' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:155]
+WARNING: [Synth 8-6901] identifier 'pipe_valid' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:213]
+WARNING: [Synth 8-6901] identifier 'pipe_tag' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:213]
+WARNING: [Synth 8-6901] identifier 'pipe_selected' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:214]
+WARNING: [Synth 8-6901] identifier 'pipe_ready' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:214]
+WARNING: [Synth 8-6901] identifier 'issue_slot' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:214]
+WARNING: [Synth 8-6901] identifier 'pipe_issue_slot' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:219]
+WARNING: [Synth 8-6901] identifier 'lane_capture' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:239]
+WARNING: [Synth 8-6901] identifier 'emit_base' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:251]
+WARNING: [Synth 8-6901] identifier 'emit_cursor' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:251]
+WARNING: [Synth 8-6901] identifier 'batch_leaf_index' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:285]
+WARNING: [Synth 8-6901] identifier 'emit_value' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:289]
+WARNING: [Synth 8-6901] identifier 'emit_value' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:310]
+WARNING: [Synth 8-6901] identifier 'auth_write' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:582]
+WARNING: [Synth 8-6901] identifier 'stack_write' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:583]
+WARNING: [Synth 8-6901] identifier 'auth_write' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:583]
+WARNING: [Synth 8-6901] identifier 'auth_write_level' is used before its declaration [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:605]
+INFO: [Synth 8-6157] synthesizing module 'common' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/top/common.sv:6]
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'executor' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:5]
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'sequencer' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/sequencer.sv:5]
+INFO: [Synth 8-6155] done synthesizing module 'sequencer' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/sequencer.sv:5]
+INFO: [Synth 8-6157] synthesizing module 'value' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/memory/value.sv:6]
+	Parameter WIDTH bound to: 256 - type: integer 
+	Parameter DEPTH bound to: 128 - type: integer 
+	Parameter ADDRESS_BITS bound to: 8 - type: integer 
+INFO: [Synth 8-6155] done synthesizing module 'value' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/memory/value.sv:6]
+INFO: [Synth 8-6157] synthesizing module 'recipe' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:7]
+	Parameter N bound to: 32 - type: integer 
+	Parameter DIGEST_BYTES bound to: 49 - type: integer 
+	Parameter INDEX_BITS bound to: 8 - type: integer 
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+	Parameter MAX_MESSAGE_BYTES bound to: 87 - type: integer 
+	Parameter RECIPE_MASK bound to: 16'b1111111111111110 
+	Parameter SHARED_STATE bound to: 1'b1 
+INFO: [Synth 8-6157] synthesizing module 'sha256' [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha256.sv:8]
+	Parameter PIPELINE bound to: 1 - type: integer 
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter TAG_BITS bound to: 1 - type: integer 
+INFO: [Synth 8-6155] done synthesizing module 'sha256' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha256.sv:8]
+INFO: [Synth 8-6155] done synthesizing module 'recipe' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:7]
+INFO: [Synth 8-6155] done synthesizing module 'executor' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:5]
+INFO: [Synth 8-6155] done synthesizing module 'common' (0#1) [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/top/common.sv:6]
+WARNING: [Synth 8-6014] Unused sequential element execution.t_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:572]
+WARNING: [Synth 8-4767] Trying to implement RAM 'key_value_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:362]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'step_domain_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:134]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'seed_domain_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:138]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'address_b_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:135]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'address_a_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:213]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'leaf_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:213]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-4767] Trying to implement RAM 'capture_step_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/hash/sha2-recipe.sv:614]
+Reason is one or more of the following :
+	1: Only 1 word in RAM 
+WARNING: [Synth 8-6014] Unused sequential element batch_issue_phase_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:81]
+WARNING: [Synth 8-6014] Unused sequential element batch_verify_phase_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:83]
+WARNING: [Synth 8-6014] Unused sequential element pipe_cache_valid_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:1018]
+WARNING: [Synth 8-6014] Unused sequential element pipe_active_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:210]
+WARNING: [Synth 8-6014] Unused sequential element roll_available_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:1025]
+WARNING: [Synth 8-6014] Unused sequential element pipe_next_chain_reg was removed.  [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:1026]
+WARNING: [Synth 8-4767] Trying to implement RAM 'pipe_chain_index_reg' in registers. Block RAM or DRAM implementation is not possible; see log for reasons. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:598]
+Reason is one or more of the following :
+	1: No valid read/write found for RAM. 
+	2: Only 1 word in RAM 
+WARNING: [Synth 8-7129] Port node_bytes[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port node_bytes[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[63] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[62] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[61] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[60] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[39] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[38] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[31] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[30] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[29] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[28] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[27] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[26] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[25] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[24] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[23] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[22] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[21] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[20] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[19] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[18] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[17] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[16] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[15] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[14] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[13] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[12] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[11] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[10] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[9] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[8] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[7] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[6] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_recipe[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[63] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[62] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[61] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[60] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[59] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[58] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[57] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[56] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[47] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[46] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[45] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[44] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[43] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[42] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[41] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[40] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[39] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[38] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[37] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[36] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[35] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[34] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[33] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[32] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[31] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[30] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[29] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[28] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[27] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[26] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[25] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[24] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[23] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[22] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[21] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[20] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[19] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[18] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[17] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[16] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[15] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[14] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[13] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[12] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[11] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[10] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[9] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[8] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[7] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[6] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port request_step_recipe[0] in module recipe is either unconnected or has no load
+INFO: [Common 17-14] Message 'Synth 8-7129' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+---------------------------------------------------------------------------------
+Finished RTL Elaboration : Time (s): cpu = 00:00:04 ; elapsed = 00:00:05 . Memory (MB): peak = 2474.723 ; gain = 686.094 ; free physical = 65256 ; free virtual = 96401
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:04 ; elapsed = 00:00:05 . Memory (MB): peak = 2474.723 ; gain = 686.094 ; free physical = 65182 ; free virtual = 96351
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:04 ; elapsed = 00:00:05 . Memory (MB): peak = 2474.723 ; gain = 686.094 ; free physical = 65182 ; free virtual = 96351
+---------------------------------------------------------------------------------
+Netlist sorting complete. Time (s): cpu = 00:00:00.2 ; elapsed = 00:00:00.2 . Memory (MB): peak = 2474.723 ; gain = 0.000 ; free physical = 65105 ; free virtual = 96273
+INFO: [Project 1-570] Preparing netlist for logic optimization
+
+Processing XDC Constraints
+Initializing timing engine
+Parsing XDC File [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/scripts/clock.xdc]
+Finished Parsing XDC File [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/scripts/clock.xdc]
+Completed Processing XDC Constraints
+
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2664.344 ; gain = 0.000 ; free physical = 64997 ; free virtual = 96183
+INFO: [Project 1-111] Unisim Transformation Summary:
+No Unisim elements were transformed.
+
+Constraint Validation Runtime : Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.08 . Memory (MB): peak = 2664.379 ; gain = 0.000 ; free physical = 64958 ; free virtual = 96164
+---------------------------------------------------------------------------------
+Finished Constraint Validation : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2664.379 ; gain = 875.750 ; free physical = 64111 ; free virtual = 95621
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Loading Part and Timing Information
+---------------------------------------------------------------------------------
+Loading part: xc7a200tffg1156-3
+---------------------------------------------------------------------------------
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2672.348 ; gain = 883.719 ; free physical = 64111 ; free virtual = 95621
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying 'set_property' XDC Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:11 ; elapsed = 00:00:11 . Memory (MB): peak = 2672.348 ; gain = 883.719 ; free physical = 64111 ; free virtual = 95621
+---------------------------------------------------------------------------------
+INFO: [Synth 8-802] inferred FSM for state register 'state_reg' in module 'sequencer'
+WARNING: [Synth 8-3936] Found unconnected internal register 'emit_base_reg' and it is trimmed from '8' to '5' bits. [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/rtl/executor/executor.sv:1171]
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+                    IDLE |                              000 |                              000
+                   FETCH |                              001 |                              001
+                    LOAD |                              010 |                              010
+                   ISSUE |                              011 |                              011
+              WAIT_MACRO |                              100 |                              100
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'state_reg' using encoding 'sequential' in module 'sequencer'
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:15 ; elapsed = 00:00:15 . Memory (MB): peak = 2672.348 ; gain = 883.719 ; free physical = 64118 ; free virtual = 95498
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start RTL Component Statistics 
+---------------------------------------------------------------------------------
+Detailed RTL Component Info : 
++---Adders : 
+	   2 Input   33 Bit       Adders := 3     
+	   4 Input   32 Bit       Adders := 1     
+	   5 Input   32 Bit       Adders := 1     
+	   2 Input   32 Bit       Adders := 9     
+	   3 Input   32 Bit       Adders := 1     
+	   2 Input   21 Bit       Adders := 6     
+	   3 Input   21 Bit       Adders := 1     
+	   4 Input   21 Bit       Adders := 1     
+	   2 Input   20 Bit       Adders := 2     
+	   2 Input   13 Bit       Adders := 4     
+	   2 Input   12 Bit       Adders := 1     
+	   2 Input   11 Bit       Adders := 1     
+	   3 Input   11 Bit       Adders := 1     
+	   3 Input   10 Bit       Adders := 5     
+	   2 Input   10 Bit       Adders := 5     
+	   2 Input    9 Bit       Adders := 7     
+	   2 Input    8 Bit       Adders := 26    
+	   3 Input    8 Bit       Adders := 4     
+	   2 Input    7 Bit       Adders := 10    
+	   3 Input    7 Bit       Adders := 2     
+	   2 Input    6 Bit       Adders := 4     
+	   3 Input    6 Bit       Adders := 1     
+	   2 Input    5 Bit       Adders := 8     
+	   3 Input    5 Bit       Adders := 1     
+	   2 Input    4 Bit       Adders := 45    
+	   3 Input    4 Bit       Adders := 1     
+	   2 Input    2 Bit       Adders := 3     
+	   2 Input    1 Bit       Adders := 2     
+	   3 Input    1 Bit       Adders := 1     
++---XORs : 
+	   2 Input    256 Bit         XORs := 2     
+	   3 Input     64 Bit         XORs := 2     
+	   3 Input     32 Bit         XORs := 5     
+	   2 Input     32 Bit         XORs := 1     
+	   2 Input     21 Bit         XORs := 4     
+	   3 Input     16 Bit         XORs := 1     
+	   2 Input      8 Bit         XORs := 2     
++---Registers : 
+	              768 Bit    Registers := 1     
+	              696 Bit    Registers := 1     
+	              512 Bit    Registers := 1     
+	              392 Bit    Registers := 1     
+	              256 Bit    Registers := 13    
+	              136 Bit    Registers := 1     
+	               64 Bit    Registers := 9     
+	               32 Bit    Registers := 1     
+	               21 Bit    Registers := 6     
+	               20 Bit    Registers := 3     
+	               17 Bit    Registers := 1     
+	               16 Bit    Registers := 2     
+	               14 Bit    Registers := 1     
+	               13 Bit    Registers := 1     
+	               12 Bit    Registers := 1     
+	               11 Bit    Registers := 6     
+	               10 Bit    Registers := 1     
+	                9 Bit    Registers := 3     
+	                8 Bit    Registers := 16    
+	                7 Bit    Registers := 5     
+	                6 Bit    Registers := 7     
+	                5 Bit    Registers := 19    
+	                4 Bit    Registers := 10    
+	                3 Bit    Registers := 2     
+	                2 Bit    Registers := 8     
+	                1 Bit    Registers := 49    
++---Muxes : 
+	   2 Input  768 Bit        Muxes := 2     
+	   2 Input  696 Bit        Muxes := 2     
+	   2 Input  512 Bit        Muxes := 1     
+	   4 Input  512 Bit        Muxes := 1     
+	  60 Input  392 Bit        Muxes := 1     
+	   2 Input  392 Bit        Muxes := 1     
+	   2 Input  388 Bit        Muxes := 1     
+	   2 Input  256 Bit        Muxes := 37    
+	   8 Input  256 Bit        Muxes := 2     
+	   3 Input  256 Bit        Muxes := 1     
+	   8 Input  136 Bit        Muxes := 2     
+	   2 Input  136 Bit        Muxes := 3     
+	   2 Input   64 Bit        Muxes := 7     
+	   4 Input   64 Bit        Muxes := 2     
+	  22 Input   63 Bit        Muxes := 3     
+	   2 Input   32 Bit        Muxes := 4     
+	   2 Input   21 Bit        Muxes := 6     
+	   3 Input   21 Bit        Muxes := 2     
+	   2 Input   20 Bit        Muxes := 11    
+	   4 Input   16 Bit        Muxes := 4     
+	  22 Input   16 Bit        Muxes := 1     
+	   2 Input   16 Bit        Muxes := 2     
+	   2 Input   13 Bit        Muxes := 2     
+	   2 Input   11 Bit        Muxes := 4     
+	   5 Input   11 Bit        Muxes := 4     
+	   2 Input   10 Bit        Muxes := 5     
+	   3 Input   10 Bit        Muxes := 2     
+	   2 Input    9 Bit        Muxes := 103   
+	   4 Input    9 Bit        Muxes := 3     
+	   3 Input    8 Bit        Muxes := 20    
+	   2 Input    8 Bit        Muxes := 107   
+	   9 Input    8 Bit        Muxes := 4     
+	   2 Input    7 Bit        Muxes := 6     
+	   4 Input    7 Bit        Muxes := 1     
+	   6 Input    7 Bit        Muxes := 1     
+	   3 Input    6 Bit        Muxes := 6     
+	   4 Input    6 Bit        Muxes := 2     
+	   2 Input    6 Bit        Muxes := 11    
+	   5 Input    6 Bit        Muxes := 1     
+	   2 Input    5 Bit        Muxes := 33    
+	   8 Input    5 Bit        Muxes := 1     
+	   4 Input    5 Bit        Muxes := 4     
+	   2 Input    4 Bit        Muxes := 26    
+	   5 Input    4 Bit        Muxes := 3     
+	   8 Input    4 Bit        Muxes := 1     
+	   4 Input    4 Bit        Muxes := 6     
+	   3 Input    4 Bit        Muxes := 1     
+	   2 Input    3 Bit        Muxes := 8     
+	   5 Input    3 Bit        Muxes := 5     
+	   4 Input    3 Bit        Muxes := 1     
+	   3 Input    3 Bit        Muxes := 3     
+	   8 Input    3 Bit        Muxes := 1     
+	   2 Input    2 Bit        Muxes := 7     
+	   3 Input    2 Bit        Muxes := 5     
+	   4 Input    2 Bit        Muxes := 3     
+	   5 Input    2 Bit        Muxes := 1     
+	   2 Input    1 Bit        Muxes := 138   
+	   8 Input    1 Bit        Muxes := 4     
+	   4 Input    1 Bit        Muxes := 7     
+	   6 Input    1 Bit        Muxes := 8     
+	   3 Input    1 Bit        Muxes := 7     
+	   5 Input    1 Bit        Muxes := 13    
+	   7 Input    1 Bit        Muxes := 8     
+---------------------------------------------------------------------------------
+Finished RTL Component Statistics 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Part Resource Summary
+---------------------------------------------------------------------------------
+Part Resources:
+DSPs: 740 (col length:100)
+BRAMs: 730 (col length: RAMB18 100 RAMB36 50)
+---------------------------------------------------------------------------------
+Finished Part Resource Summary
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Cross Boundary and Area Optimization
+---------------------------------------------------------------------------------
+INFO: [Synth 8-5544] ROM "p_1_out1" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "p_1_out1" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5546] ROM "key_pad" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "key_pad" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "key_pad" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-3886] merging instance 'format_address_reg[236]' (FDE) to 'format_address_reg[239]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[237]' (FDE) to 'format_address_reg[239]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[238]' (FDE) to 'format_address_reg[239]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[239]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[224]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[225]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[226]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[227]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[228]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[229]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3886] merging instance 'format_address_reg[230]' (FDE) to 'format_address_reg[231]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\format_address_reg[231] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (block_buffer1)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (2) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (2) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "payload_control0" won't be mapped to Block RAM because address size (4) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (2) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (2) smaller than threshold (5)
+INFO: [Synth 8-5544] ROM "execution.(null)[0].source" won't be mapped to Block RAM because address size (3) smaller than threshold (5)
+INFO: [Synth 8-3886] merging instance 'schedule_cursor_reg[0]' (FDRE) to 'format_tag_reg[0]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\format_tag_reg[0] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\held_tag_reg[0] )
+INFO: [Synth 8-5546] ROM "fors_level" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "parent_id" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "fors_target_prefetch" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "done" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "pipe_seed_domain" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "fors_digest_offset" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "fors_level" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "parent_id" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "fors_target_prefetch" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "done" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "pipe_seed_domain" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-5546] ROM "fors_digest_offset" won't be mapped to RAM because it is too sparse
+INFO: [Synth 8-3886] merging instance 'stateful_height_reg[3]' (FDSE) to 'stateful_height_reg[1]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\macro_op_reg[3] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\task_capture_after_reg[4] )
+INFO: [Synth 8-3886] merging instance 'pipe_pair_reg[0]' (FDRE) to 'fors_total_reg[0]'
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[0]' (FDE) to 'pipe_seed_domain_reg[1]'
+INFO: [Synth 8-3333] propagating constant 1 across sequential element (\pipe_seed_domain_reg[1] )
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[2]' (FDE) to 'pipe_seed_domain_reg[7]'
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[3]' (FDE) to 'pipe_seed_domain_reg[7]'
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[4]' (FDE) to 'pipe_seed_domain_reg[7]'
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[5]' (FDE) to 'pipe_seed_domain_reg[7]'
+INFO: [Synth 8-3886] merging instance 'pipe_seed_domain_reg[6]' (FDE) to 'pipe_seed_domain_reg[7]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\pipe_seed_domain_reg[7] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\batch_digit_prefetch_reg[4] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\roll_slot_reg[0] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\pipe_issue_slot_reg[0] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_rolling_reg)
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[0]' (FDRE) to 'fors_total_reg[0]'
+INFO: [Synth 8-3886] merging instance 'fors_total_reg[0]' (FDRE) to 'fors_total_reg[1]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[1]' (FDRE) to 'fors_total_reg[1]'
+INFO: [Synth 8-3886] merging instance 'fors_total_reg[1]' (FDRE) to 'fors_total_reg[2]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[2]' (FDRE) to 'fors_total_reg[2]'
+INFO: [Synth 8-3886] merging instance 'fors_total_reg[2]' (FDRE) to 'fors_total_reg[3]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[3]' (FDRE) to 'fors_total_reg[3]'
+INFO: [Synth 8-3886] merging instance 'fors_total_reg[3]' (FDRE) to 'fors_total_reg[4]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[4]' (FDRE) to 'fors_total_reg[4]'
+INFO: [Synth 8-3886] merging instance 'fors_total_reg[4]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[5]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[6]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[7]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[8]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[9]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[10]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[11]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[12]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[13]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[14]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[15]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[16]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[17]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[18]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3886] merging instance 'fors_base_reg[19]' (FDRE) to 'fors_base_reg[20]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\fors_base_reg[20] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\target_reg[20] )
+INFO: [Synth 8-3886] merging instance 'node_bytes_reg[0]' (FDRE) to 'node_bytes_reg[1]'
+INFO: [Synth 8-3886] merging instance 'node_bytes_reg[1]' (FDRE) to 'node_bytes_reg[2]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\node_bytes_reg[2] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_response_accept_reg)
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\target_at_level_reg[20] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[0] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[1] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[2] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[3] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[4] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[5] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[6] )
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (pipe_completed0_inferred/\pipe_completed_reg[7] )
+INFO: [Synth 8-3886] merging instance 'pipe_issue_slot_reg[0]' (FDRE) to 'pipe_expected_mask_reg[0]'
+INFO: [Synth 8-3333] propagating constant 0 across sequential element (\pipe_expected_mask_reg[0] )
+---------------------------------------------------------------------------------
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:00:31 ; elapsed = 00:00:43 . Memory (MB): peak = 2700.281 ; gain = 911.652 ; free physical = 62841 ; free virtual = 93854
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+ROM: Preliminary Mapping Report
++------------+---------------+---------------+----------------+
+|Module Name | RTL Object    | Depth x Width | Implemented As | 
++------------+---------------+---------------+----------------+
+|sha256      | constant_word | 64x32         | LUT            | 
++------------+---------------+---------------+----------------+
+
+
+Distributed RAM: Preliminary Mapping Report (see note below)
++------------+----------------------------+----------------+----------------------+--------------+
+|Module Name | RTL Object                 | Inference      | Size (Depth x Width) | Primitives   | 
++------------+----------------------------+----------------+----------------------+--------------+
+|endpoints   | banks[0].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
+|endpoints   | banks[1].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
++------------+----------------------------+----------------+----------------------+--------------+
+
+Note: The table above is a preliminary report that shows the Distributed RAMs at the current stage of the synthesis flow. Some Distributed RAMs may be reimplemented as non Distributed RAM primitives later in the synthesis flow. Multiple instantiated RAMs are reported only once.
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying XDC Timing Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:00:34 ; elapsed = 00:00:46 . Memory (MB): peak = 2700.281 ; gain = 911.652 ; free physical = 62199 ; free virtual = 93243
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Timing Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Timing Optimization : Time (s): cpu = 00:00:39 ; elapsed = 00:00:51 . Memory (MB): peak = 2825.320 ; gain = 1036.691 ; free physical = 62614 ; free virtual = 93467
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+Distributed RAM: Final Mapping Report
++------------+----------------------------+----------------+----------------------+--------------+
+|Module Name | RTL Object                 | Inference      | Size (Depth x Width) | Primitives   | 
++------------+----------------------------+----------------+----------------------+--------------+
+|endpoints   | banks[0].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
+|endpoints   | banks[1].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
++------------+----------------------------+----------------+----------------------+--------------+
+
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Technology Mapping
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Technology Mapping : Time (s): cpu = 00:00:41 ; elapsed = 00:00:58 . Memory (MB): peak = 2837.246 ; gain = 1048.617 ; free physical = 62613 ; free virtual = 93247
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished IO Insertion : Time (s): cpu = 00:00:45 ; elapsed = 00:01:02 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61629 ; free virtual = 92617
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Instances
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Instances : Time (s): cpu = 00:00:45 ; elapsed = 00:01:02 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61609 ; free virtual = 92611
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Rebuilding User Hierarchy
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:00:46 ; elapsed = 00:01:03 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61653 ; free virtual = 92535
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Ports
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Ports : Time (s): cpu = 00:00:46 ; elapsed = 00:01:03 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61649 ; free virtual = 92537
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:46 ; elapsed = 00:01:04 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61476 ; free virtual = 92516
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Nets
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Nets : Time (s): cpu = 00:00:46 ; elapsed = 00:01:04 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61468 ; free virtual = 92516
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Writing Synthesis Report
+---------------------------------------------------------------------------------
+
+Report BlackBoxes: 
++-+--------------+----------+
+| |BlackBox name |Instances |
++-+--------------+----------+
++-+--------------+----------+
+
+Report Cell Usage: 
++------+---------+------+
+|      |Cell     |Count |
++------+---------+------+
+|1     |CARRY4   |   233|
+|2     |LUT1     |    29|
+|3     |LUT2     |  1019|
+|4     |LUT3     |  3946|
+|5     |LUT4     |  1832|
+|6     |LUT5     |  2358|
+|7     |LUT6     |  8604|
+|8     |MUXF7    |   576|
+|9     |MUXF8    |    67|
+|10    |RAM64M   |   170|
+|11    |RAM64X1D |     2|
+|12    |FDRE     |  6817|
+|13    |FDSE     |   140|
++------+---------+------+
+---------------------------------------------------------------------------------
+Finished Writing Synthesis Report : Time (s): cpu = 00:00:46 ; elapsed = 00:01:04 . Memory (MB): peak = 2870.137 ; gain = 1081.508 ; free physical = 61468 ; free virtual = 92516
+---------------------------------------------------------------------------------
+Synthesis finished with 0 errors, 0 critical warnings and 51 warnings.
+Synthesis Optimization Runtime : Time (s): cpu = 00:00:45 ; elapsed = 00:01:01 . Memory (MB): peak = 2874.051 ; gain = 895.766 ; free physical = 65074 ; free virtual = 95949
+Synthesis Optimization Complete : Time (s): cpu = 00:00:48 ; elapsed = 00:01:04 . Memory (MB): peak = 2874.051 ; gain = 1085.422 ; free physical = 65083 ; free virtual = 95951
+INFO: [Project 1-571] Translating synthesized netlist
+Netlist sorting complete. Time (s): cpu = 00:00:00.11 ; elapsed = 00:00:00.11 . Memory (MB): peak = 2874.051 ; gain = 0.000 ; free physical = 64961 ; free virtual = 95963
+INFO: [Netlist 29-17] Analyzing 1048 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Parsing XDC File [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/scripts/clock.xdc]
+Finished Parsing XDC File [/tmp/mhbs-image-chain-tree/docs/manifests/experiments/synth_P1U1_generic_sha2_20261021_163742_010648/source/scripts/clock.xdc]
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00 . Memory (MB): peak = 2877.074 ; gain = 0.000 ; free physical = 64761 ; free virtual = 95849
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 172 instances were transformed.
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+Synth Design complete | Checksum: 74637fd1
+INFO: [Common 17-83] Releasing license: Synthesis
+141 Infos, 146 Warnings, 0 Critical Warnings and 0 Errors encountered.
+synth_design completed successfully
+synth_design: Time (s): cpu = 00:00:53 ; elapsed = 00:01:10 . Memory (MB): peak = 2877.109 ; gain = 1291.676 ; free physical = 64702 ; free virtual = 95858
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 5490.190; main = 1920.046; forked = 3715.646
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 9366.332; main = 2877.078; forked = 6533.004
+# report_utilization -file [file join $out core_utilization.rpt]
+# report_utilization -hierarchical -file [file join $out core_hierarchical.rpt]
+# report_timing_summary -file [file join $out core_timing.rpt]
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 2 CPUs
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+report_timing_summary: Time (s): cpu = 00:00:08 ; elapsed = 00:00:06 . Memory (MB): peak = 2893.074 ; gain = 15.965 ; free physical = 65334 ; free virtual = 96414
+# source [file join $source_root scripts audit_debug.tcl]
+## proc mhbs_audit_debug {{report_file ""}} {
+##     set debug_name {(^|/)([a-zA-Z0-9_]*error_code|([a-zA-Z0-9_]*_)?(cycles|hash_count|permutation_count|hash_base|permutation_base)|batch_hashes|batch_permutations|diagnostic_[a-zA-Z0-9_]+|(lane|pipe|total)_(hashes|permutations))(\[|_|$)}
+##     set bad_ports {}
+##     foreach port [get_ports -quiet] {
+##         if {[regexp $debug_name [get_property NAME $port]]} {lappend bad_ports $port}
+##     }
+##     set bad_registers {}
+##     foreach cell [get_cells -quiet -hier -filter {IS_PRIMITIVE == 1 && REF_NAME =~ FD*}] {
+##         if {[regexp $debug_name [get_property NAME $cell]]} {lappend bad_registers $cell}
+##     }
+##     if {[llength $bad_ports] || [llength $bad_registers]} {
+##         error "Diagnostic resources remain: ports=$bad_ports registers=$bad_registers"
+##     }
+##     if {$report_file ne ""} {
+##         set handle [open $report_file w]
+##         puts $handle "{\"passed\": true, \"diagnostic_ports\": 0, \"diagnostic_registers\": 0, \"functional_error_present\": [expr {[llength [get_ports -quiet error]] > 0}], \"scope\": \"synthesized design\"}"
+##         close $handle
+##     }
+##     puts "MHBS_DEBUG_AUDIT_PASS diagnostic_ports=0 diagnostic_registers=0"
+## }
+# mhbs_audit_debug [file join $out debug_audit.json]
+MHBS_DEBUG_AUDIT_PASS diagnostic_ports=0 diagnostic_registers=0
+# puts "MHBS_SYNTH_PASS P${p}U${u} SYNTHESIS=1"
+MHBS_SYNTH_PASS P1U1 SYNTHESIS=1
+# exec python3 [file join $package_root scripts experiment_archive.py] --finish-synthesis $archive --results $out
