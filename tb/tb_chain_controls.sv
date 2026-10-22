@@ -41,11 +41,12 @@ module tb_chain_controls;
     task automatic tick;
         @(posedge clk);#1;
     endtask
-    integer outputs=0,hash_requests=0,cases=0,rejections=0;
+    integer outputs=0,hash_requests=0,cases=0,rejections=0,commands=0;
     always @(posedge clk) begin
-        if(rst) begin outputs=0;hash_requests=0;end
+        if(rst) begin outputs=0;hash_requests=0;commands=0;end
         else begin
             if(dut.core.state==6 && dut.core.lane_ready) hash_requests++;
+            if(dut.core.cmd_valid && dut.core.state==3) commands++;
             if(out_valid) begin
                 if(out_bytes!=16 || out_data[127:0]!==PUBLIC_ROOT[127:0])
                     $fatal(1,"Control output mismatch");
@@ -148,6 +149,25 @@ module tb_chain_controls;
         initialize();dm[1]=BACKEND^64'h20;run_case("backend_mismatch",1,0);
         initialize();pm[0]=64'he000000000000000;run_case("unknown_control",1,0);
         initialize();pm[0]=ctl(`CTRL_SET,`CTX_A,0,0,3,0,0)|1;run_case("reserved_control_bits",1,0);
+        // RUN and both LOOP levels remain independent of the CALL stack.
+        initialize();tm[0]=64'd4|(64'd2<<3);dm[2]=(64'd2<<56)|(64'd1<<40);
+        pm[0]=(64'd1<<62)|(64'd2<<41);
+        run_case("run_three_templates",0,0);
+        if(commands!=3)$fatal(1,"RUN repetition count");
+        initialize();pm[0]=ctl(`CTRL_INC,`CTX_A,0,0,0,0,0);
+        pm[1]=(64'd2<<62)|(64'd2<<51);
+        run_case("counted_loop",0,0);
+        if(dut.core.task_a!=3)$fatal(1,"LOOP repetition count");
+        initialize();pm[0]=ctl(`CTRL_INC,`CTX_A,0,0,0,0,0);
+        pm[1]=(64'd2<<62)|(64'd1<<51);
+        pm[2]=(64'd2<<62)|(64'd1<<57)|(64'd1<<51);
+        run_case("nested_counted_loop",0,0);
+        if(dut.core.task_a!=4)$fatal(1,"Nested LOOP repetition count");
+        initialize();pm[0]=ctl(`CTRL_INC,`CTX_A,0,0,0,0,0);
+        pm[1]=(64'd2<<62)|(64'd1<<51);
+        pm[2]=(64'd2<<62)|(64'd1<<57)|(64'd1<<51);
+        pm[3]=(64'd2<<62)|(64'd2<<57)|(64'd1<<51);
+        run_case("loop_depth3_overflow",1,0);
         $display("CHAIN_CONTROLS_PASS cases=%0d accepted=%0d rejected=%0d hash_requests=0",cases,cases-rejections,rejections);
         $finish;
     end

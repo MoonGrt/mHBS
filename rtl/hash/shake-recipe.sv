@@ -432,95 +432,43 @@ module recipe #(
                     be32(compound), be32(b), be32(a), be32(leaf), be32(domain), 96'd0
                 };
             end
-            // Select shared frame fields before alignment. This avoids replicating
-            // every seed/value/key/mask selector for all three node lengths.
-            logic [255:0] frame0, frame1, frame2, frame3;
-            logic [183:0] frame_prefix;
-            logic [7:0] frame_domain;
-            logic frame_two;
-            logic [2:0] frame_layout;
-            always @* begin
-                frame0 = 0;
-                frame1 = 0;
-                frame2 = 0;
-                frame3 = 0;
-                frame_prefix = 0;
-                frame_domain = 0;
-                frame_two = 0;
-                frame_layout = 7;
-                (* parallel_case *) case (1'b1)
-                    shapes[ADDRESS_SEED], shapes[ADDRESS_VALUE]:
-                    if (RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
-                        frame_layout = 0;
-                        frame0 = public_seed;
-                        frame1 = address;
-                        frame2 = chain_feedback_valid ? finish_digest[N*8-1:0] :
-                            shapes[ADDRESS_SEED] ? secret_seed : left_value;
-                        frame_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
-                        frame3 = frame_two ? request_right : 256'd0;
-                    end
-                    shapes[INDEX_PRF]:
-                    if (RECIPE_MASK[INDEX_PRF]) begin
-                        frame_layout = 1;
-                        frame_domain = 3;
-                        frame1 = secret_prf;
-                        frame2 = {be32(leaf), 224'd0};
-                    end
-                    shapes[MASKED_SEED]:
-                    if (RECIPE_MASK[MASKED_SEED]) begin
-                        frame_layout = 2;
-                        frame_domain = 4;
-                        frame1 = secret_seed;
-                        frame2 = public_seed;
-                        frame3 = masked_address;
-                    end
-                    shapes[MASKED_VALUE]:
-                    if (MASKED_ENABLE) begin
-                        if (compound < arity + 1) begin
-                            frame_layout = 1;
-                            frame_domain = 3;
-                            frame1 = public_seed;
-                            frame2 = masked_address;
-                        end else begin
-                            frame_layout = 3;
-                            frame_domain = arity - 1'b1;
-                            frame1 = temporary_key;
-                            // MASK0 already masked the retained left value in place.
-                            frame2 = chain_value;
-                            frame_two = arity == 2;
-                            // MASK1 is the retained sponge digest until this FINAL launch.
-                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
-                        end
-                    end
-                    shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
-                    if (RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
-                        frame_layout = 4;
-                        frame_prefix = {
-                            shapes[PREFIX_SEED] ? 8'hff : b[7:0],
-                            8'(request_a),
-                            8'd0,
-                            be32(leaf),
-                            identifier
-                        };
-                        frame1 = shapes[PREFIX_SEED] ? secret_seed : left_value;
-                    end
-                    shapes[PREFIX_LEAF], shapes[PREFIX_PARENT]:
-                    if (RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
-                        frame_layout = 5;
-                        frame_prefix = {
-                            8'd0,
-                            shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,
-                            be32(request_b),
-                            identifier
-                        };
-                        frame1 = left_value;
-                        frame_two = shapes[PREFIX_PARENT];
-                        frame2 = frame_two ? request_right : 256'd0;
-                    end
-                    default: begin
-                    end
-                endcase
-            end
+            // The request shape is already one-hot. Keep it one-hot through
+            // fixed-block assembly rather than encoding a layout and decoding
+            // it again at every payload bit.
+            wire mask_prf = shapes[MASKED_VALUE] && compound < arity + 1;
+            wire mask_final = shapes[MASKED_VALUE] && !mask_prf;
+            wire address_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
+            wire [255:0] address_value = chain_feedback_valid ? finish_digest[N*8-1:0] :
+                shapes[ADDRESS_SEED] ? secret_seed : left_value;
+            wire [183:0] chain_prefix = {
+                shapes[PREFIX_SEED] ? 8'hff : b[7:0], 8'(request_a),
+                8'd0, be32(leaf), identifier};
+            wire [175:0] tree_prefix = {
+                shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383, be32(request_b), identifier};
+            wire [1087:0] address_frame = {64'd0,
+                (address_two ? request_right : 256'd31), address_value, address, public_seed};
+            wire [1087:0] index_frame = {64'd0, 256'd31,
+                be32(leaf), 224'd0, secret_prf, 8'd3, 248'd0};
+            wire [1087:0] seed_frame = {64'd0, masked_address, public_seed,
+                secret_seed, 8'd4, 248'd0};
+            wire [1087:0] mask_frame = {64'd0, 256'd31, masked_address,
+                public_seed, 8'd3, 248'd0};
+            wire [1087:0] final_frame = {64'd0,
+                (arity == 2 ? request_right ^ digest[N*8-1:0] : 256'd31),
+                chain_value, temporary_key, 8'(arity - 1'b1), 248'd0};
+            wire [1087:0] chain_frame = {640'd0, 8'h1f,
+                (shapes[PREFIX_SEED] ? secret_seed : left_value), chain_prefix};
+            wire [1087:0] leaf_frame = {648'd0, 8'h1f, left_value, tree_prefix};
+            wire [1087:0] parent_frame = {392'd0, 8'h1f, request_right, left_value, tree_prefix};
+            wire [1087:0] fixed_frame =
+                (address_frame & {1088{shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]}}) |
+                (index_frame & {1088{shapes[INDEX_PRF]}}) |
+                (seed_frame & {1088{shapes[MASKED_SEED]}}) |
+                (mask_frame & {1088{mask_prf}}) |
+                (final_frame & {1088{mask_final}}) |
+                (chain_frame & {1088{shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]}}) |
+                (leaf_frame & {1088{shapes[PREFIX_LEAF]}}) |
+                (parent_frame & {1088{shapes[PREFIX_PARENT]}});
             always @* begin
                 fast_block = 0;
                 case (node_bytes)
@@ -544,52 +492,12 @@ module recipe #(
                             fast_block[832+:8]   = 8'h1f;
                         end else fast_block[640+:8] = 8'h1f;
                     end
-                    32:
-                    case (frame_layout)
-                        0: begin
-                            fast_block[0+:256]   = frame0[255:0];
-                            fast_block[256+:256] = frame1;
-                            fast_block[512+:256] = frame2[255:0];
-                            fast_block[768+:256] = frame3[255:0];
-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
-                            else fast_block[768+:8] = 8'h1f;
-                        end
-                        1: begin
-                            fast_block[248+:8]   = frame_domain;
-                            fast_block[256+:256] = frame1[255:0];
-                            fast_block[512+:256] = frame2;
-                            fast_block[768+:8]   = 8'h1f;
-                        end
-                        2: begin
-                            fast_block[248+:8]   = frame_domain;
-                            fast_block[256+:256] = frame1[255:0];
-                            fast_block[512+:256] = frame2[255:0];
-                            fast_block[768+:256] = frame3;
-                            fast_block[1024+:8]  = 8'h1f;
-                        end
-                        3: begin
-                            fast_block[248+:8]   = frame_domain;
-                            fast_block[256+:256] = frame1[255:0];
-                            fast_block[512+:256] = frame2[255:0];
-                            fast_block[768+:256] = frame3[255:0];
-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
-                            else fast_block[768+:8] = 8'h1f;
-                        end
-                        4: begin
-                            fast_block[183:0] = frame_prefix;
-                            fast_block[184+:256] = frame1[255:0];
-                            fast_block[440+:8] = 8'h1f;
-                        end
-                        5: begin
-                            fast_block[175:0] = frame_prefix[175:0];
-                            fast_block[176+:256] = frame1[255:0];
-                            fast_block[432+:256] = frame2[255:0];
-                            if (frame_two) fast_block[688+:8] = 8'h1f;
-                            else fast_block[432+:8] = 8'h1f;
-                        end
-                        default: begin
-                        end
-                    endcase
+                    32: begin
+                        fast_block = fixed_frame;
+                        if ((shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]) && address_two ||
+                            shapes[MASKED_SEED] || mask_final && arity == 2)
+                            fast_block[1024+:8] = 8'h1f;
+                    end
                     default: begin
                     end
                 endcase

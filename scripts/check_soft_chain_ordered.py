@@ -20,9 +20,10 @@ def main():
   for folder in ('rtl','tb','model','scripts'):shutil.copytree(old/folder,clone/folder,ignore=shutil.ignore_patterns('__pycache__'))
   shutil.copy2(old/'sources.txt',clone/'sources.txt')
   cpp=clone/'tb/fast_main.cpp';s=cpp.read_text()
-  s=s.replace('bool collect_trace=false;','bool collect_trace=false,collect_ordered=false;')
-  s=s.replace('if(path.empty())throw','for(int i=1;i<argc;i++)if(std::string(argv[i])=="+HASH_ORDERED=1"){collect_ordered=true;collect_trace=true;}\n    if(path.empty())throw')
-  s=s.replace('trace_hashes++;task_blocks=0;','if(collect_ordered)std::cout<<"HASH_TASK_TRACE "<<trace_hashes<<" "<<hex_bytes(item,32)<<std::endl;\n                        trace_hashes++;task_blocks=0;')
+  if 'HASH_TASK_TRACE ' not in s:
+   s=s.replace('bool collect_trace=false;','bool collect_trace=false,collect_ordered=false;')
+   s=s.replace('if(path.empty())throw','for(int i=1;i<argc;i++)if(std::string(argv[i])=="+HASH_ORDERED=1"){collect_ordered=true;collect_trace=true;}\n    if(path.empty())throw')
+   s=s.replace('trace_hashes++;task_blocks=0;','if(collect_ordered)std::cout<<"HASH_TASK_TRACE "<<trace_hashes<<" "<<hex_bytes(item,32)<<std::endl;\n                        trace_hashes++;task_blocks=0;')
   cpp.write_text(s)
  inputs=[x.strip() for x in (old/'sources.txt').read_text().splitlines() if x.strip()]+['rtl/executor/instructions.svh','tb/tb_fast.sv']
  assert all(sha(old/n)==sha(clone/n) for n in inputs),'C1 production or monitor changed'

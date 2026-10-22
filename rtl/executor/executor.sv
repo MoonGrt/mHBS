@@ -91,7 +91,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         .done(seq_done),.error(seq_error),.program_address,.program_data,.template_address,.template_data,
         .command_valid(cmd_valid),.command_ready(state==FETCH),.command_done(seq_complete),.command(cmd),
         .command_keep_coordinates,.control_valid,.control,.control_ready(state==FETCH),
-        .control_done(control_complete),.control_condition);
+        .control_done(control_complete || immediate_control_complete),.control_condition);
     // verilog_format: on
     wire [4:0] hash_recipe_id=state==EMIT ? 5'(emit_base+emit_cursor) : macro_desc;
     assign descriptor_addresses={macro_route,hash_recipe_id};
@@ -341,6 +341,11 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             default:wide_read=0;
         endcase
     endfunction
+    // Storage, input and register moves share one write-data selector.
+    wire [255:0] control_wide_data =
+        (endpoint_value0 & {256{state==CONTROL_LOAD}}) |
+        (verify_data & {256{state==CONTROL_INPUT}}) |
+        (wide_read(control[51:47]) & {256{state==FETCH}});
     task automatic wide_write(input [4:0] selector,input [255:0] data);
         begin
             case(selector)
@@ -359,9 +364,18 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     wire [4:0] control_src=control[51:47],control_aux=control[46:42];
     wire [20:0] control_immediate=control[41:21];
     wire [3:0] control_cond=control[12:9];
-    wire [20:0] control_dst_value=narrow_read(control_dst);
-    wire [20:0] control_src_value=narrow_read(control_src);
-    wire [20:0] control_aux_value=narrow_read(control_aux);
+    wire immediate_control_complete=state==FETCH && control_valid &&
+        ((control_op>=`CTRL_SET && control_op<=`CTRL_RET) ||
+         control_op==`CTRL_WMOV || control_op==`CTRL_SHL);
+
+    // At most two narrow sources are live in any instruction. MOV/ADD
+    // read SRC on port 0; all other instructions read DST there.
+    wire source_on_port0=control_op==`CTRL_MOV || control_op==`CTRL_ADD;
+    wire [20:0] control_read0=narrow_read(source_on_port0 ? control_src : control_dst);
+    wire [20:0] control_read1=narrow_read(control_op==`CTRL_ADD ? control_aux : control_src);
+    wire [20:0] control_dst_value=control_read0;
+    wire [20:0] control_src_value=control_read0;
+    wire [20:0] control_aux_value=control_read1;
     logic [40:0] control_alu;
     always_comb begin
         case(control_op)
@@ -375,8 +389,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             default:control_alu=0;
         endcase
     end
-    wire [20:0] branch_left=narrow_read(control[56:52]);
-    wire [20:0] branch_right=control[46:42]==1 ? control[41:21] : narrow_read(control[51:47]);
+    wire [20:0] branch_left=control_read0;
+    wire [20:0] branch_right=control[46:42]==1 ? control[41:21] : control_read1;
     logic branch_taken;
     always_comb begin
         case(control[12:9])
@@ -394,7 +408,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         endcase
     end
     assign control_condition=branch_taken;
-    wire [21:0] control_load_address={1'b0,control_src_value}+{1'b0,control_immediate};
+    wire [21:0] control_load_address={1'b0,control_read1}+{1'b0,control_immediate};
     wire [21:0] control_store_address={1'b0,control_dst_value}+{1'b0,control_immediate};
     wire [63:0] emit_descriptor=descriptor_data[63:0];
     logic [255:0] emit_source;
@@ -427,7 +441,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         begin seq_complete<=1;state<=FETCH;end
     endtask
     task automatic complete_control;
-        begin control_complete<=1;state<=FETCH;end
+        begin
+            if(state!=FETCH) control_complete<=1;
+            state<=FETCH;
+        end
     endtask
     task automatic route_result(input [1:0] source);
         begin route_source<=source;state<=ROUTE;end
@@ -479,7 +496,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                         end
                         `CTRL_WMOV:begin
                             if(control_dst>6 || control_src>7) fail();
-                            else begin wide_write(control_dst,wide_read(control_src));complete_control();end
+                            else begin wide_write(control_dst,control_wide_data);complete_control();end
                         end
                         default:fail();
                     endcase
@@ -630,9 +647,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 VERIFY_INPUT:if(verify_valid) begin emit_value<=verify_data;state<=continuation;end
                 VERIFY_RANDOM:route_result(ROUTE_EMIT);
                 OUTPUT_CHUNK:state<=continuation;
-                CONTROL_LOAD:begin wide_write(control_dst,endpoint_value0);complete_control();end
+                CONTROL_LOAD:begin wide_write(control_dst,control_wide_data);complete_control();end
                 CONTROL_STORE:complete_control();
-                CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,verify_data);complete_control();end
+                CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,control_wide_data);complete_control();end
                 CONTROL_OUTPUT:complete_control();
                 DRAIN:state<=FINISH;
                 FINISH:begin done<=1;state<=IDLE;end

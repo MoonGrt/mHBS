@@ -50,6 +50,25 @@ module sequencer (
             else begin pc<=pc+1'b1;state<=FETCH;end
         end
     endtask
+    // Pure software controls retire on their execution edge. Storage and I/O
+    // retain WAIT_CONTROL until the executor reports their actual completion.
+    task automatic retire_control;
+        begin
+            if(control_op==7 && control_condition) begin pc<=token[20:13];state<=FETCH;end
+            else if(control_op==8) begin
+                if(return_depth==2 || pc==8'd255) fault();
+                else begin
+                    return_pc[return_depth[0]]<=pc+1'b1;return_depth<=return_depth+1'b1;
+                    pc<=token[20:13];state<=FETCH;
+                end
+            end else if(control_op==9) begin
+                if(return_depth==0) fault();
+                else begin
+                    pc<=return_pc[!return_depth[0]];return_depth<=return_depth-1'b1;state<=FETCH;
+                end
+            end else advance();
+        end
+    endtask
     integer i;
     always_ff @(posedge clk) begin
         if(rst) begin
@@ -72,7 +91,9 @@ module sequencer (
                             if(token[56:0]!=0 || return_depth!=0 || sp!=0) fault();
                             else begin done<=1;state<=IDLE;end
                         end else if(control_op>15 || token[8:0]!=0) fault();
-                        else if(control_ready) state<=WAIT_CONTROL;
+                        else if(control_ready) begin
+                            if(control_done) retire_control();else state<=WAIT_CONTROL;
+                        end
                     end else if(kind==2) begin
                         if(token[39:0]!=0 || back_count>pc) fault();
                         else if(sp!=0 && loop_pc[sp-1]==pc) begin
@@ -103,21 +124,7 @@ module sequencer (
                         remaining<=remaining-1'b1;coordinate<=coordinate+stride;state<=ISSUE;
                     end else advance();
                 end
-                WAIT_CONTROL:if(control_done) begin
-                    if(control_op==7 && control_condition) begin pc<=token[20:13];state<=FETCH;end
-                    else if(control_op==8) begin
-                        if(return_depth==2 || pc==8'd255) fault();
-                        else begin
-                            return_pc[return_depth[0]]<=pc+1'b1;return_depth<=return_depth+1'b1;
-                            pc<=token[20:13];state<=FETCH;
-                        end
-                    end else if(control_op==9) begin
-                        if(return_depth==0) fault();
-                        else begin
-                            pc<=return_pc[!return_depth[0]];return_depth<=return_depth-1'b1;state<=FETCH;
-                        end
-                    end else advance();
-                end
+                WAIT_CONTROL:if(control_done) retire_control();
                 default:fault();
             endcase
         end
