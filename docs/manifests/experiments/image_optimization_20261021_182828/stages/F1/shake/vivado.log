@@ -1,0 +1,633 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Wed Oct 21 18:24:47 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source /tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/scripts/diagnose_timing.tcl
+# set hash_backend shake
+# if {[info exists ::env(HASH_BACKEND)]} {set hash_backend $::env(HASH_BACKEND)}
+# if {$hash_backend ni {shake sha2}} {error "HASH_BACKEND must be shake or sha2"}
+# if {[llength $argv] != 5} {error "Usage: source_root P U output period_ns"}
+# lassign $argv root p u out period
+# if {![string is integer -strict $p] || ![string is integer -strict $u] ||
+#     $p < 1 || $u < 1 || $p*$u > 24 || 24%($p*$u) != 0} {error "Invalid P/U"}
+# if {![string is double -strict $period] || $period <= 0} {error "Invalid clock period"}
+# set root [file normalize $root]
+# set out [file normalize $out]
+# file mkdir $out
+# set part xc7a200tffg1156-3
+# set_param general.maxThreads 2
+# create_project -in_memory -part $part
+# set defines [list SYNTHESIS]
+# if {$hash_backend eq "sha2"} {lappend defines MHBS_SHA2}
+# set_property verilog_define $defines [current_fileset]
+# set_property include_dirs [list $root] [current_fileset]
+# set handle [open [file join $root sources.txt] r]
+# set sources [split [string trim [read $handle]] \n]
+# close $handle
+# foreach source $sources {read_verilog -sv [file join $root $source]}
+# set clock_file [file join $out diagnostic_clock.xdc]
+# set handle [open $clock_file w]
+# puts $handle "create_clock -name clk -period $period \[get_ports clk\]"
+# close $handle
+# read_xdc $clock_file
+# set handle [open [file join $out settings.txt] w]
+# puts $handle "diagnostic_only=1\ntop=common\nPIPELINE=$p\nUNROLL=$u\nperiod_ns=$period\nhash_backend=$hash_backend\npart=$part\nthreads=2\nmode=out_of_context\nkeccak=generic\ntiming_driven=default\nnew_timing_exceptions=none\nvivado=[version -short]"
+# close $handle
+# synth_design -top common -part $part -mode out_of_context -flatten_hierarchy rebuilt \
+#     -max_dsp 0 -generic PIPELINE=$p -generic UNROLL=$u
+Command: synth_design -top common -part xc7a200tffg1156-3 -mode out_of_context -flatten_hierarchy rebuilt -max_dsp 0 -generic PIPELINE=1 -generic UNROLL=1
+Starting synth_design
+Attempting to get a license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Common 17-349] Got license for feature 'Synthesis' and/or device 'xc7a200t'
+INFO: [Vivado_Tcl 4-287] User specified maximum number of block DSP allowed in design is 0
+INFO: [Device 21-403] Loading part xc7a200tffg1156-3
+INFO: [Synth 8-7079] Multithreading enabled for synth_design using a maximum of 2 processes.
+INFO: [Synth 8-7078] Launching helper process for spawning children vivado processes
+INFO: [Synth 8-7075] Helper process launched with PID 1704514
+---------------------------------------------------------------------------------
+Starting RTL Elaboration : Time (s): cpu = 00:00:03 ; elapsed = 00:00:04 . Memory (MB): peak = 2273.184 ; gain = 483.875 ; free physical = 45204 ; free virtual = 87854
+---------------------------------------------------------------------------------
+WARNING: [Synth 8-6901] identifier 'digest' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:266]
+WARNING: [Synth 8-6901] identifier 'bridge_response' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:968]
+WARNING: [Synth 8-6901] identifier 'published_digest' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:969]
+WARNING: [Synth 8-6901] identifier 'bridge_response' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:970]
+WARNING: [Synth 8-6901] identifier 'published_capture' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:970]
+WARNING: [Synth 8-6901] identifier 'engine_capture' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:971]
+WARNING: [Synth 8-6901] identifier 'scalar_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:995]
+WARNING: [Synth 8-6901] identifier 'scalar_capacity' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:996]
+WARNING: [Synth 8-6901] identifier 'engine_valid' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:997]
+WARNING: [Synth 8-6901] identifier 'scalar_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1132]
+WARNING: [Synth 8-6901] identifier 'stage_valid' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1302]
+WARNING: [Synth 8-6901] identifier 'stage_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1302]
+WARNING: [Synth 8-6901] identifier 'stage_base' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1303]
+WARNING: [Synth 8-6901] identifier 'ROUNDS' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1303]
+WARNING: [Synth 8-6901] identifier 'stage_tag' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1304]
+WARNING: [Synth 8-6901] identifier 'recycle' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1306]
+WARNING: [Synth 8-6901] identifier 'launch_valid' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1306]
+WARNING: [Synth 8-6901] identifier 'recycle' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1307]
+WARNING: [Synth 8-6901] identifier 'stage_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1307]
+WARNING: [Synth 8-6901] identifier 'launch_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1307]
+WARNING: [Synth 8-6901] identifier 'recycle' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1308]
+WARNING: [Synth 8-6901] identifier 'stage_base' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1309]
+WARNING: [Synth 8-6901] identifier 'ROUNDS' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1309]
+WARNING: [Synth 8-6901] identifier 'ROUNDS' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1311]
+WARNING: [Synth 8-6901] identifier 'recycle' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1312]
+WARNING: [Synth 8-6901] identifier 'stage_tag' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1312]
+WARNING: [Synth 8-6901] identifier 'launch_tag' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1312]
+WARNING: [Synth 8-6901] identifier 'stage_valid' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1314]
+WARNING: [Synth 8-6901] identifier 'stage_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1315]
+WARNING: [Synth 8-6901] identifier 'stage_base' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1315]
+WARNING: [Synth 8-6901] identifier 'ROUNDS' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1315]
+WARNING: [Synth 8-6901] identifier 'stage_valid' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1522]
+WARNING: [Synth 8-6901] identifier 'stage_fixed' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1523]
+WARNING: [Synth 8-6901] identifier 'recycle' is used before its declaration [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:1523]
+Linter Recording Failure, recording already started!
+INFO: [Synth 8-6157] synthesizing module 'common' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/top/common.sv:6]
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'executor' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/executor/executor.sv:7]
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+INFO: [Synth 8-6157] synthesizing module 'sequencer' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/executor/sequencer.sv:6]
+INFO: [Synth 8-6155] done synthesizing module 'sequencer' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/executor/sequencer.sv:6]
+INFO: [Synth 8-6157] synthesizing module 'value' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/memory/value.sv:6]
+	Parameter WIDTH bound to: 256 - type: integer 
+	Parameter DEPTH bound to: 128 - type: integer 
+	Parameter ADDRESS_BITS bound to: 8 - type: integer 
+INFO: [Synth 8-6155] done synthesizing module 'value' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/memory/value.sv:6]
+INFO: [Synth 8-6157] synthesizing module 'recipe' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:7]
+	Parameter N bound to: 32 - type: integer 
+	Parameter DIGEST_BYTES bound to: 49 - type: integer 
+	Parameter INDEX_BITS bound to: 8 - type: integer 
+	Parameter UNROLL bound to: 1 - type: integer 
+	Parameter PIPELINE bound to: 1 - type: integer 
+	Parameter MAX_MESSAGE_BYTES bound to: 87 - type: integer 
+	Parameter RECIPE_MASK bound to: 16'b1111111111111110 
+	Parameter SHARED_STATE bound to: 1'b1 
+INFO: [Synth 8-6157] synthesizing module 'keccak' [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/keccak.sv:7]
+INFO: [Synth 8-6155] done synthesizing module 'keccak' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/keccak.sv:7]
+INFO: [Synth 8-6155] done synthesizing module 'recipe' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:7]
+INFO: [Synth 8-6155] done synthesizing module 'executor' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/executor/executor.sv:7]
+INFO: [Synth 8-6155] done synthesizing module 'common' (0#1) [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/top/common.sv:6]
+WARNING: [Synth 8-3936] Found unconnected internal register 'scalar_execution.stream_data_reg' and it is trimmed from '128' to '64' bits. [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:604]
+WARNING: [Synth 8-3936] Found unconnected internal register 'scalar_execution.stream_payload_reg' and it is trimmed from '128' to '64' bits. [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:417]
+WARNING: [Synth 8-3936] Found unconnected internal register 'scalar_execution.source_window_reg' and it is trimmed from '128' to '80' bits. [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:413]
+WARNING: [Synth 8-3936] Found unconnected internal register 'scalar_execution.list_word_window_reg' and it is trimmed from '144' to '80' bits. [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:401]
+WARNING: [Synth 8-3936] Found unconnected internal register 'scalar_execution.list_pair_reg' and it is trimmed from '512' to '336' bits. [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/source/rtl/hash/shake-recipe.sv:395]
+WARNING: [Synth 8-7129] Port batch_mode in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_request_valid in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_request_tag[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_steps[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_steps[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_steps[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_steps[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_steps[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_after[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_after[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_after[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_after[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_after[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_capture_enable in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[19] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[18] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[17] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[16] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[15] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[14] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[13] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[12] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[11] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[10] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[9] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[8] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[7] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[6] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_leaf[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[7] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[6] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_a[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[31] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[30] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[29] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[28] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[27] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[26] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[25] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[24] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[23] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[22] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[21] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[20] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[19] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[18] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[17] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[16] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[15] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[14] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[13] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[12] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[11] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[10] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[9] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[8] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[7] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[6] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[5] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[4] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_b[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_family[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_family[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_no_seed in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_start[3] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_start[2] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_start[1] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_start[0] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[255] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[254] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[253] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[252] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[251] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[250] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[249] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[248] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[247] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[246] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[245] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[244] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[243] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[242] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[241] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[240] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[239] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[238] in module recipe is either unconnected or has no load
+WARNING: [Synth 8-7129] Port batch_initial_value[237] in module recipe is either unconnected or has no load
+INFO: [Common 17-14] Message 'Synth 8-7129' appears 100 times and further instances of the messages will be disabled. Use the Tcl command set_msg_config to change the current settings.
+---------------------------------------------------------------------------------
+Finished RTL Elaboration : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 2441.121 ; gain = 651.812 ; free physical = 43923 ; free virtual = 86595
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 2444.090 ; gain = 654.781 ; free physical = 43907 ; free virtual = 86565
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 1 : Time (s): cpu = 00:00:05 ; elapsed = 00:00:06 . Memory (MB): peak = 2444.090 ; gain = 654.781 ; free physical = 43907 ; free virtual = 86565
+---------------------------------------------------------------------------------
+Netlist sorting complete. Time (s): cpu = 00:00:00.21 ; elapsed = 00:00:00.21 . Memory (MB): peak = 2444.090 ; gain = 0.000 ; free physical = 43710 ; free virtual = 86394
+INFO: [Project 1-570] Preparing netlist for logic optimization
+
+Processing XDC Constraints
+Initializing timing engine
+Parsing XDC File [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/shake/diagnostic_clock.xdc]
+Finished Parsing XDC File [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/shake/diagnostic_clock.xdc]
+Completed Processing XDC Constraints
+
+Netlist sorting complete. Time (s): cpu = 00:00:00 ; elapsed = 00:00:00 . Memory (MB): peak = 2595.531 ; gain = 0.000 ; free physical = 43700 ; free virtual = 86365
+INFO: [Project 1-111] Unisim Transformation Summary:
+No Unisim elements were transformed.
+
+Constraint Validation Runtime : Time (s): cpu = 00:00:00.1 ; elapsed = 00:00:00.11 . Memory (MB): peak = 2595.566 ; gain = 0.000 ; free physical = 43684 ; free virtual = 86348
+---------------------------------------------------------------------------------
+Finished Constraint Validation : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2595.566 ; gain = 806.258 ; free physical = 43795 ; free virtual = 86464
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Loading Part and Timing Information
+---------------------------------------------------------------------------------
+Loading part: xc7a200tffg1156-3
+---------------------------------------------------------------------------------
+Finished Loading Part and Timing Information : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2603.535 ; gain = 814.227 ; free physical = 43795 ; free virtual = 86464
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying 'set_property' XDC Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished applying 'set_property' XDC Constraints : Time (s): cpu = 00:00:14 ; elapsed = 00:00:14 . Memory (MB): peak = 2603.535 ; gain = 814.227 ; free physical = 43794 ; free virtual = 86464
+---------------------------------------------------------------------------------
+INFO: [Synth 8-802] inferred FSM for state register 'state_reg' in module 'sequencer'
+INFO: [Synth 8-802] inferred FSM for state register 'scalar_execution.hash_state_reg' in module 'recipe'
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+                    IDLE |                              000 |                              000
+                   FETCH |                              001 |                              001
+                    LOAD |                              010 |                              010
+            WAIT_CONTROL |                              011 |                              101
+                   ISSUE |                              100 |                              011
+              WAIT_MACRO |                              101 |                              100
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'state_reg' using encoding 'sequential' in module 'sequencer'
+---------------------------------------------------------------------------------------------------
+                   State |                     New Encoding |                Previous Encoding 
+---------------------------------------------------------------------------------------------------
+               HASH_IDLE |                              001 |                               00
+         HASH_WAIT_BLOCK |                              100 |                               01
+                HASH_RUN |                              010 |                               10
+---------------------------------------------------------------------------------------------------
+INFO: [Synth 8-3354] encoded FSM with state register 'scalar_execution.hash_state_reg' using encoding 'one-hot' in module 'recipe'
+---------------------------------------------------------------------------------
+Finished RTL Optimization Phase 2 : Time (s): cpu = 00:00:21 ; elapsed = 00:00:22 . Memory (MB): peak = 2825.535 ; gain = 1036.227 ; free physical = 42754 ; free virtual = 85442
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start RTL Component Statistics 
+---------------------------------------------------------------------------------
+Detailed RTL Component Info : 
++---Adders : 
+	   2 Input   22 Bit       Adders := 4     
+	   2 Input   20 Bit       Adders := 1     
+	   3 Input   14 Bit       Adders := 1     
+	   3 Input   13 Bit       Adders := 4     
+	   2 Input   13 Bit       Adders := 5     
+	   2 Input   12 Bit       Adders := 1     
+	   2 Input   11 Bit       Adders := 1     
+	   3 Input   11 Bit       Adders := 1     
+	   3 Input   10 Bit       Adders := 2     
+	   2 Input   10 Bit       Adders := 2     
+	   2 Input    9 Bit       Adders := 3     
+	   3 Input    8 Bit       Adders := 3     
+	   2 Input    8 Bit       Adders := 6     
+	   2 Input    7 Bit       Adders := 3     
+	   3 Input    7 Bit       Adders := 1     
+	   2 Input    6 Bit       Adders := 16    
+	   3 Input    6 Bit       Adders := 7     
+	   2 Input    5 Bit       Adders := 8     
+	   2 Input    4 Bit       Adders := 4     
+	   2 Input    2 Bit       Adders := 3     
++---XORs : 
+	   2 Input    256 Bit         XORs := 2     
+	   2 Input    128 Bit         XORs := 1     
+	   5 Input     64 Bit         XORs := 5     
+	   2 Input     64 Bit         XORs := 54    
+	   3 Input     64 Bit         XORs := 1     
+	   2 Input     41 Bit         XORs := 1     
+	   2 Input     21 Bit         XORs := 1     
++---Registers : 
+	              696 Bit    Registers := 1     
+	              392 Bit    Registers := 1     
+	              256 Bit    Registers := 9     
+	              128 Bit    Registers := 1     
+	               64 Bit    Registers := 32    
+	               21 Bit    Registers := 7     
+	               20 Bit    Registers := 2     
+	               17 Bit    Registers := 1     
+	               16 Bit    Registers := 2     
+	               13 Bit    Registers := 5     
+	               12 Bit    Registers := 1     
+	               11 Bit    Registers := 6     
+	                8 Bit    Registers := 12    
+	                7 Bit    Registers := 2     
+	                6 Bit    Registers := 7     
+	                5 Bit    Registers := 16    
+	                4 Bit    Registers := 8     
+	                3 Bit    Registers := 5     
+	                2 Bit    Registers := 7     
+	                1 Bit    Registers := 28    
++---Muxes : 
+	   2 Input 1088 Bit        Muxes := 5     
+	   2 Input  696 Bit        Muxes := 3     
+	  25 Input  696 Bit        Muxes := 1     
+	   2 Input  392 Bit        Muxes := 2     
+	   9 Input  392 Bit        Muxes := 1     
+	   2 Input  388 Bit        Muxes := 1     
+	   2 Input  336 Bit        Muxes := 1     
+	   6 Input  256 Bit        Muxes := 1     
+	   2 Input  256 Bit        Muxes := 20    
+	   7 Input  256 Bit        Muxes := 4     
+	   2 Input  192 Bit        Muxes := 2     
+	   7 Input  184 Bit        Muxes := 1     
+	   2 Input  128 Bit        Muxes := 6     
+	   6 Input  128 Bit        Muxes := 1     
+	   4 Input   80 Bit        Muxes := 1     
+	   2 Input   64 Bit        Muxes := 13    
+	   4 Input   64 Bit        Muxes := 6     
+	   2 Input   56 Bit        Muxes := 1     
+	   2 Input   41 Bit        Muxes := 1     
+	   2 Input   32 Bit        Muxes := 6     
+	  25 Input   21 Bit        Muxes := 1     
+	   8 Input   21 Bit        Muxes := 1     
+	   2 Input   20 Bit        Muxes := 1     
+	   2 Input   16 Bit        Muxes := 5     
+	   4 Input   16 Bit        Muxes := 6     
+	   2 Input   13 Bit        Muxes := 5     
+	   6 Input   13 Bit        Muxes := 1     
+	   4 Input   13 Bit        Muxes := 1     
+	  25 Input   12 Bit        Muxes := 1     
+	   2 Input   11 Bit        Muxes := 4     
+	   6 Input   11 Bit        Muxes := 4     
+	   2 Input   10 Bit        Muxes := 3     
+	   6 Input    8 Bit        Muxes := 2     
+	   2 Input    8 Bit        Muxes := 32    
+	   7 Input    8 Bit        Muxes := 1     
+	  25 Input    8 Bit        Muxes := 2     
+	   3 Input    8 Bit        Muxes := 1     
+	   2 Input    7 Bit        Muxes := 1     
+	  25 Input    7 Bit        Muxes := 1     
+	   3 Input    7 Bit        Muxes := 1     
+	   6 Input    6 Bit        Muxes := 2     
+	   2 Input    6 Bit        Muxes := 23    
+	   7 Input    6 Bit        Muxes := 3     
+	  25 Input    6 Bit        Muxes := 1     
+	   4 Input    6 Bit        Muxes := 1     
+	   6 Input    5 Bit        Muxes := 2     
+	   2 Input    5 Bit        Muxes := 19    
+	   3 Input    5 Bit        Muxes := 5     
+	  25 Input    5 Bit        Muxes := 1     
+	   4 Input    5 Bit        Muxes := 1     
+	   6 Input    4 Bit        Muxes := 1     
+	   2 Input    4 Bit        Muxes := 10    
+	   3 Input    4 Bit        Muxes := 2     
+	   5 Input    4 Bit        Muxes := 1     
+	   4 Input    4 Bit        Muxes := 1     
+	  25 Input    4 Bit        Muxes := 1     
+	   2 Input    3 Bit        Muxes := 9     
+	   3 Input    3 Bit        Muxes := 6     
+	   4 Input    3 Bit        Muxes := 3     
+	   7 Input    3 Bit        Muxes := 5     
+	  28 Input    3 Bit        Muxes := 1     
+	   8 Input    3 Bit        Muxes := 1     
+	   2 Input    2 Bit        Muxes := 6     
+	   6 Input    2 Bit        Muxes := 3     
+	   7 Input    2 Bit        Muxes := 1     
+	   6 Input    1 Bit        Muxes := 35    
+	   2 Input    1 Bit        Muxes := 162   
+	   3 Input    1 Bit        Muxes := 18    
+	   4 Input    1 Bit        Muxes := 7     
+	   7 Input    1 Bit        Muxes := 9     
+	  25 Input    1 Bit        Muxes := 25    
+	   9 Input    1 Bit        Muxes := 27    
+	  20 Input    1 Bit        Muxes := 19    
+	   8 Input    1 Bit        Muxes := 13    
+---------------------------------------------------------------------------------
+Finished RTL Component Statistics 
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Part Resource Summary
+---------------------------------------------------------------------------------
+Part Resources:
+DSPs: 740 (col length:100)
+BRAMs: 730 (col length: RAMB18 100 RAMB36 50)
+---------------------------------------------------------------------------------
+Finished Part Resource Summary
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Cross Boundary and Area Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Cross Boundary and Area Optimization : Time (s): cpu = 00:01:52 ; elapsed = 00:01:59 . Memory (MB): peak = 3327.441 ; gain = 1538.133 ; free physical = 38314 ; free virtual = 81092
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+Distributed RAM: Preliminary Mapping Report (see note below)
++------------------+----------------------------+----------------+----------------------+--------------+
+|Module Name       | RTL Object                 | Inference      | Size (Depth x Width) | Primitives   | 
++------------------+----------------------------+----------------+----------------------+--------------+
+|corei_4/endpoints | banks[0].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
+|corei_4/endpoints | banks[1].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
++------------------+----------------------------+----------------+----------------------+--------------+
+
+Note: The table above is a preliminary report that shows the Distributed RAMs at the current stage of the synthesis flow. Some Distributed RAMs may be reimplemented as non Distributed RAM primitives later in the synthesis flow. Multiple instantiated RAMs are reported only once.
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Applying XDC Timing Constraints
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Applying XDC Timing Constraints : Time (s): cpu = 00:01:56 ; elapsed = 00:02:03 . Memory (MB): peak = 3327.441 ; gain = 1538.133 ; free physical = 38476 ; free virtual = 81262
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Timing Optimization
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Timing Optimization : Time (s): cpu = 00:03:09 ; elapsed = 00:03:17 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 47958 ; free virtual = 90777
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+
+Distributed RAM: Final Mapping Report
++------------------+----------------------------+----------------+----------------------+--------------+
+|Module Name       | RTL Object                 | Inference      | Size (Depth x Width) | Primitives   | 
++------------------+----------------------------+----------------+----------------------+--------------+
+|corei_4/endpoints | banks[0].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
+|corei_4/endpoints | banks[1].regular.words_reg | User Attribute | 64 x 256             | RAM64M x 86  | 
++------------------+----------------------------+----------------+----------------------+--------------+
+
+---------------------------------------------------------------------------------
+Finished ROM, RAM, DSP, Shift Register and Retiming Reporting
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Technology Mapping
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Technology Mapping : Time (s): cpu = 00:03:18 ; elapsed = 00:03:27 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 48130 ; free virtual = 90946
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Flattening Before IO Insertion
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Final Netlist Cleanup
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished IO Insertion : Time (s): cpu = 00:03:23 ; elapsed = 00:03:32 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 48132 ; free virtual = 90949
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Instances
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Instances : Time (s): cpu = 00:03:23 ; elapsed = 00:03:32 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 48132 ; free virtual = 90949
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Rebuilding User Hierarchy
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Rebuilding User Hierarchy : Time (s): cpu = 00:03:25 ; elapsed = 00:03:34 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 47445 ; free virtual = 90282
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Ports
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Ports : Time (s): cpu = 00:03:25 ; elapsed = 00:03:34 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 47327 ; free virtual = 90163
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Handling Custom Attributes
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Handling Custom Attributes : Time (s): cpu = 00:03:26 ; elapsed = 00:03:35 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 45811 ; free virtual = 88659
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Renaming Generated Nets
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Finished Renaming Generated Nets : Time (s): cpu = 00:03:26 ; elapsed = 00:03:35 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 45714 ; free virtual = 88563
+---------------------------------------------------------------------------------
+---------------------------------------------------------------------------------
+Start Writing Synthesis Report
+---------------------------------------------------------------------------------
+
+Report BlackBoxes: 
++-+--------------+----------+
+| |BlackBox name |Instances |
++-+--------------+----------+
++-+--------------+----------+
+
+Report Cell Usage: 
++------+---------+------+
+|      |Cell     |Count |
++------+---------+------+
+|1     |CARRY4   |   120|
+|2     |LUT1     |    59|
+|3     |LUT2     |   634|
+|4     |LUT3     |  2257|
+|5     |LUT4     |  3207|
+|6     |LUT5     |  3460|
+|7     |LUT6     |  8848|
+|8     |MUXF7    |   758|
+|9     |MUXF8    |    48|
+|10    |RAM64M   |   170|
+|11    |RAM64X1D |     2|
+|12    |FDRE     |  5883|
+|13    |FDSE     |     6|
++------+---------+------+
+---------------------------------------------------------------------------------
+Finished Writing Synthesis Report : Time (s): cpu = 00:03:26 ; elapsed = 00:03:36 . Memory (MB): peak = 3489.137 ; gain = 1699.828 ; free physical = 45708 ; free virtual = 88556
+---------------------------------------------------------------------------------
+Synthesis finished with 0 errors, 0 critical warnings and 59 warnings.
+Synthesis Optimization Runtime : Time (s): cpu = 00:03:22 ; elapsed = 00:03:32 . Memory (MB): peak = 3489.137 ; gain = 1548.352 ; free physical = 45672 ; free virtual = 88522
+Synthesis Optimization Complete : Time (s): cpu = 00:03:26 ; elapsed = 00:03:36 . Memory (MB): peak = 3489.145 ; gain = 1699.828 ; free physical = 45661 ; free virtual = 88512
+INFO: [Project 1-571] Translating synthesized netlist
+Netlist sorting complete. Time (s): cpu = 00:00:00.19 ; elapsed = 00:00:00.21 . Memory (MB): peak = 3489.145 ; gain = 0.000 ; free physical = 45383 ; free virtual = 88234
+INFO: [Netlist 29-17] Analyzing 1098 Unisim elements for replacement
+INFO: [Netlist 29-28] Unisim Transformation completed in 0 CPU seconds
+INFO: [Project 1-570] Preparing netlist for logic optimization
+Parsing XDC File [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/shake/diagnostic_clock.xdc]
+Finished Parsing XDC File [/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/shake/diagnostic_clock.xdc]
+INFO: [Opt 31-138] Pushed 0 inverter(s) to 0 load pin(s).
+Netlist sorting complete. Time (s): cpu = 00:00:00.01 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3497.141 ; gain = 0.000 ; free physical = 44083 ; free virtual = 86961
+INFO: [Project 1-111] Unisim Transformation Summary:
+  A total of 172 instances were transformed.
+  RAM64M => RAM64M (RAMD64E(x4)): 170 instances
+  RAM64X1D => RAM64X1D (RAMD64E(x2)): 2 instances
+
+Synth Design complete | Checksum: e00a7c5
+INFO: [Common 17-83] Releasing license: Synthesis
+32 Infos, 139 Warnings, 0 Critical Warnings and 0 Errors encountered.
+synth_design completed successfully
+synth_design: Time (s): cpu = 00:03:36 ; elapsed = 00:03:45 . Memory (MB): peak = 3497.176 ; gain = 1911.062 ; free physical = 44216 ; free virtual = 87067
+INFO: [Common 17-2834] synth_design peak Physical Memory [PSS] (MB): overall = 2859.561; main = 2577.597; forked = 281.964
+INFO: [Common 17-2834] synth_design peak Virtual Memory [VSS] (MB): overall = 4483.406; main = 3497.145; forked = 994.266
+# report_utilization -file [file join $out utilization.rpt]
+# report_utilization -hierarchical -file [file join $out hierarchical.rpt]
+# report_timing_summary -max_paths 10 -file [file join $out timing.rpt]
+INFO: [Timing 38-35] Done setting XDC timing constraints.
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: min_max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 2 CPUs
+WARNING: [Timing 38-242] The property HD.CLK_SRC of clock port "clk" is not set. In out-of-context mode, this prevents timing estimation for clock delay/skew
+Resolution: Set the HD.CLK_SRC property of the out-of-context port to the location of the clock buffer instance in the top-level design
+report_timing_summary: Time (s): cpu = 00:00:09 ; elapsed = 00:00:09 . Memory (MB): peak = 3497.176 ; gain = 0.000 ; free physical = 45910 ; free virtual = 88789
+# report_timing -delay_type max -max_paths 20 -nworst 2 -sort_by group -input_pins -nets \
+#     -file [file join $out critical_paths.rpt]
+CRITICAL WARNING: [Vivado 12-1569] report_timing: The -nets option to is deprecated. The default behavior is to display net names if the timing path format allows it.
+INFO: [Timing 38-91] UpdateTimingParams: Speed grade: -3, Delay Type: max.
+INFO: [Timing 38-191] Multithreading enabled for timing update using a maximum of 2 CPUs
+INFO: [Timing 38-78] ReportTimingParams: -max_paths 20 -nworst 2 -delay_type max -sort_by group.
+# source [file join $root scripts audit_debug.tcl]
+## proc mhbs_audit_debug {{report_file ""}} {
+##     set debug_name {(^|/)([a-zA-Z0-9_]*error_code|([a-zA-Z0-9_]*_)?(cycles|hash_count|permutation_count|hash_base|permutation_base)|batch_hashes|batch_permutations|diagnostic_[a-zA-Z0-9_]+|(lane|pipe|total)_(hashes|permutations))(\[|_|$)}
+##     set bad_ports {}
+##     foreach port [get_ports -quiet] {
+##         if {[regexp $debug_name [get_property NAME $port]]} {lappend bad_ports $port}
+##     }
+##     set bad_registers {}
+##     foreach cell [get_cells -quiet -hier -filter {IS_PRIMITIVE == 1 && REF_NAME =~ FD*}] {
+##         if {[regexp $debug_name [get_property NAME $cell]]} {lappend bad_registers $cell}
+##     }
+##     if {[llength $bad_ports] || [llength $bad_registers]} {
+##         error "Diagnostic resources remain: ports=$bad_ports registers=$bad_registers"
+##     }
+##     if {$report_file ne ""} {
+##         set handle [open $report_file w]
+##         puts $handle "{\"passed\": true, \"diagnostic_ports\": 0, \"diagnostic_registers\": 0, \"functional_error_present\": [expr {[llength [get_ports -quiet error]] > 0}], \"scope\": \"synthesized design\"}"
+##         close $handle
+##     }
+##     puts "MHBS_DEBUG_AUDIT_PASS diagnostic_ports=0 diagnostic_registers=0"
+## }
+# mhbs_audit_debug [file join $out debug_audit.json]
+MHBS_DEBUG_AUDIT_PASS diagnostic_ports=0 diagnostic_registers=0
+# write_checkpoint -force [file join $out synthesized.dcp]
+INFO: [Timing 38-480] Writing timing data to binary archive.
+Write ShapeDB Complete: Time (s): cpu = 00:00:00.06 ; elapsed = 00:00:00.02 . Memory (MB): peak = 3529.156 ; gain = 0.000 ; free physical = 45661 ; free virtual = 88542
+INFO: [Common 17-1381] The checkpoint '/tmp/mhbs-image-soft-chain/build/image_area_candidates/F1/shake/synthesized.dcp' has been generated.
+# puts "MHBS_TIMING_DIAGNOSTIC_PASS P${p}U${u} period_ns=$period"
+MHBS_TIMING_DIAGNOSTIC_PASS P1U1 period_ns=10.0
+# exit
+INFO: [Common 17-206] Exiting Vivado at Wed Oct 21 18:28:49 2026...

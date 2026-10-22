@@ -163,3 +163,5 @@
 | 20261021_164834 | image-chain / image-chain-tree 面积周期联合优化 | [报告](macro_atp_restart_20261021_164834/reports/Macro_ATP_Restart.md) | 两后端三目标均降低ATP；88整核＋24补充Sign通过；不布线 |
 
 | 20261021_173641 | image-soft-chain software CHAIN | [报告](soft_chain_20261021_173641/reports/Analysis.md) | 56项整核＋55项附加检查通过；双后端综合完成；不布线 |
+
+| 20261021_182828 | image F4 | [报告](image_optimization_20261021_182828/reports/Analysis.md) | 56项整核＋55项附加检查通过；六项目标ATP下降；双后端综合完成；不布线 |
