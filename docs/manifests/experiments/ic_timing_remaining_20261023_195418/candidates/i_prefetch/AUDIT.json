@@ -1,0 +1,197 @@
+{
+  "schema": "mhbs.i_prefetch.implementation_audit.v1",
+  "updated_at": "2026-10-23T19:57:41+08:00",
+  "candidate": "i_prefetch",
+  "configuration": "P1U1",
+  "candidate_frozen_source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source",
+  "files": {
+    "rtl/i/executor/executor.sv": {
+      "baseline_sha256": "75c39929d1908ee84c760c62441d8920b9cc7ff599b1ea37e759155cd30b3e90",
+      "candidate_sha256": "d5b3ceb59cd39f37a9a3aa2873f106453285c2a1f1c10d5c8a8b0a6285783f3b",
+      "frozen_candidate_sha256": "d5b3ceb59cd39f37a9a3aa2873f106453285c2a1f1c10d5c8a8b0a6285783f3b",
+      "matches_frozen": true
+    },
+    "rtl/i/executor/sequencer.sv": {
+      "baseline_sha256": "de56b9f149cc54851943fc5a7f6a8ff9bd640b4230efa4fdee20e712464fe135",
+      "candidate_sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9",
+      "frozen_candidate_sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9",
+      "matches_frozen": true
+    }
+  },
+  "production_rtl_modified": false,
+  "rom_or_isa_changed": false,
+  "hash_authorization": "One explicit HASH command authorizes at most one recipe request; request_chain=0,batch_mode=0; no CHAIN/TREE hardware macros or autonomous software-loop fusion. Original i testbench budget assertions remain applicable.",
+  "changes": [
+    {
+      "name": "Successor instruction lookahead",
+      "behavior": "Existing token register loads the successor on retirement. Static NE/unconditional branches predict taken; other conditions predict fallthrough. Correct prediction and deterministic CALL/RET/LOOP avoid FETCH. A mismatch redirects through FETCH before executing the target.",
+      "timing_boundary": "The predicted ROM address depends on registered token/PC/return/loop metadata, never on the late context ALU/branch result. Conditional resolution still gates retirement and selected PC state."
+    },
+    {
+      "name": "FORS operand staging",
+      "behavior": "A control instruction reading CTX_FORS_TARGET snapshots both narrow operands in a dedicated CONTROL_OPERANDS state and retires after actual execution. Other controls retain immediate retirement.",
+      "timing_boundary": "Introduces42bits of operand registers before arithmetic/branch/legality/writeback. Actual mapped STA must verify whether the fast/live selector leaves a structural path through the old lookup; no frequency claim is made."
+    },
+    {
+      "name": "Descriptor capture and decode",
+      "behavior": "LOAD_DESCRIPTOR captures descriptor_data and decodes macro on the same edge; task_recipe remains registered before HASH_ISSUE. Verification R/C special handling and TRANSFORM/EMIT decode rules retained.",
+      "expected_cycles": "Removes the old DECODE bubble per template without ROM-to-hash combinational bypass."
+    },
+    {
+      "name": "HASH retirement",
+      "behavior": "HASH_WAIT captures lane_value into result. Identity route completes the macro there; nonidentity routes enter ROUTE using the newly registered result.",
+      "expected_cycles": "Removes HASH_RESULT on all completed HASH requests and removes identity ROUTE. Nonidentity data parsing/output retain the result-register boundary."
+    }
+  ],
+  "legal_rom_audit": [
+    "PC255 overflow still faults on fallthrough; taken branch at255 remains legal.",
+    "CALL depth2 and RET empty checks retained; two-level LOOP bounds/reserved encoding checks retained.",
+    "Existing command/template legality, restricted HASH/TRANSFORM/EMIT opcodes and coordinate calculations retained.",
+    "Registered operand reads do not authorize a second instruction or Hash while the sequencer waits.",
+    "No P/U/profile/algorithm-specific execution branch was added.",
+    "All original executor state numeric values retained; CONTROL_OPERANDS appended at24."
+  ],
+  "baseline_33B_KAT": {
+    "shake": {
+      "total": 5827283,
+      "hash": 2536104,
+      "remaining": 3291179,
+      "sloth_remaining": 2036877
+    },
+    "sha2": {
+      "total": 10633293,
+      "hash": 6923410,
+      "remaining": 3709883,
+      "sloth_remaining": 1784934
+    }
+  },
+  "measurement_status": "Candidate cycle/area/100MHz route results pending root-controlled measurements; theoretical bubble removals are not substituted for measured totals.",
+  "checks": {
+    "lint": [
+      {
+        "backend": "shake",
+        "returncode": 0,
+        "command": [
+          "verilator",
+          "--lint-only",
+          "-Wno-fatal",
+          "--top-module",
+          "common",
+          "-GPIPELINE=1",
+          "-GUNROLL=1",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/keccak.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/shake-recipe.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/sha256.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/sha2-recipe.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/memory/value.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/memory/signature.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i/rtl/i/executor/sequencer.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i/rtl/i/executor/executor.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/top/top.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/top/common.sv"
+        ]
+      },
+      {
+        "backend": "sha2",
+        "returncode": 0,
+        "command": [
+          "verilator",
+          "--lint-only",
+          "-Wno-fatal",
+          "--top-module",
+          "common",
+          "-GPIPELINE=1",
+          "-GUNROLL=1",
+          "-DMHBS_SHA2",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/keccak.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/shake-recipe.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/sha256.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/sha2-recipe.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/memory/value.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/memory/signature.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i/rtl/i/executor/sequencer.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i/rtl/i/executor/executor.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/top/top.sv",
+          "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/top/common.sv"
+        ]
+      }
+    ],
+    "directed_controls": {
+      "status": "passed",
+      "source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source",
+      "command": [
+        "MHBS_DESIGN=i",
+        "python3",
+        "scripts/check_chain_controls.py",
+        "--jobs",
+        "2"
+      ],
+      "expected_views": [
+        "shake normal",
+        "shake SYNTHESIS",
+        "sha2 normal",
+        "sha2 SYNTHESIS"
+      ],
+      "summary_path": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source/build/ablation/i/chain_controls/VALIDATION.json",
+      "passed": 4,
+      "total": 4,
+      "source_unchanged": true,
+      "summary_sha256": "5b930f998851a1cdd9007796ad897ad38363d969d24ab63b67fd9a958d55be90",
+      "results": [
+        {
+          "backend": "shake",
+          "synthesis": false,
+          "passed": true,
+          "counts": {
+            "cases": 32,
+            "accepted": 7,
+            "rejected": 25
+          },
+          "elapsed_seconds": 8.09275243198499,
+          "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source/build/ablation/i/chain_controls/shake_synthesis0/run.log"
+        },
+        {
+          "backend": "shake",
+          "synthesis": true,
+          "passed": true,
+          "counts": {
+            "cases": 32,
+            "accepted": 7,
+            "rejected": 25
+          },
+          "elapsed_seconds": 8.462926155887544,
+          "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source/build/ablation/i/chain_controls/shake_synthesis1/run.log"
+        },
+        {
+          "backend": "sha2",
+          "synthesis": false,
+          "passed": true,
+          "counts": {
+            "cases": 32,
+            "accepted": 7,
+            "rejected": 25
+          },
+          "elapsed_seconds": 13.479069270659238,
+          "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source/build/ablation/i/chain_controls/sha2_synthesis0/run.log"
+        },
+        {
+          "backend": "sha2",
+          "synthesis": true,
+          "passed": true,
+          "counts": {
+            "cases": 32,
+            "accepted": 7,
+            "rejected": 25
+          },
+          "elapsed_seconds": 13.415253811050206,
+          "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/i_prefetch/source/build/ablation/i/chain_controls/sha2_synthesis1/run.log"
+        }
+      ]
+    }
+  },
+  "not_started_by_this_agent": [
+    "synthesis",
+    "place_route",
+    "h20 Keygen/Sign"
+  ]
+}

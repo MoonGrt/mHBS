@@ -1,0 +1,65 @@
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/recipe/source/rtl/c/hash/sha2-recipe.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 12:13:35.893424261 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/recipe/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 13:31:10.502313903 +0800
+@@ -345,36 +345,34 @@
+     endfunction
+     wire [703:0] padded_message=704'(message_buffer);
+     function automatic [63:0] source_word(input [8:0] selected);
+-        reg [255:0] value;
+-        reg [63:0] literal;
+-        reg [63:0] key_pad;
+         begin
+-            value=0; literal=0; key_pad=0;
++            // Slice each source before selecting it. The formatter consumes
++            // one 64-bit word, so it does not need a 256-bit source mux followed
++            // by a word mux. Literal and HMAC-pad sources use that same select.
+             case(source_t'(selected[8:4]))
+-                SRC_SECRET: value=256'(secret_seed);
+-                SRC_PRF: value=256'(secret_prf);
+-                SRC_PUBLIC: value=256'(public_seed);
+-                SRC_ROOT: value=256'(root);
+-                SRC_RANDOM: value=256'(randomizer);
+-                SRC_VALUE: value=digest[format_tag];
+-                SRC_KEY: value=key_value[format_tag];
+-                SRC_RIGHT: value=captured[format_tag];
+-                SRC_ADDRESS: value=format_address;
+-                SRC_LIST0: value=256'(list_data0);
+-                SRC_LIST1: value=256'(list_data1);
+-                SRC_IPAD_KEY: begin value=256'(secret_prf); key_pad=64'h3636363636363636; end
+-                SRC_OPAD_KEY: begin value=256'(secret_prf); key_pad=64'h5c5c5c5c5c5c5c5c; end
+-                SRC_MESSAGE: literal=selected[3:0]<11 ? padded_message[selected[3:0]*64+:64] : 64'd0;
+-                SRC_TWO: literal=64'h0200000000000000;
+-                SRC_THREE: literal=64'h0300000000000000;
+-                SRC_FOUR: literal=64'h0400000000000000;
+-                SRC_PAIR: literal={7'd0,paired[format_tag],56'd0};
+-                SRC_COUNTER: literal=64'h0000000001000000;
+-                SRC_IPAD: literal=64'h3636363636363636;
+-                SRC_OPAD: literal=64'h5c5c5c5c5c5c5c5c;
+-                default: value=0;
++                SRC_SECRET: source_word=node_word(256'(secret_seed),selected[1:0]);
++                SRC_PRF: source_word=node_word(256'(secret_prf),selected[1:0]);
++                SRC_PUBLIC: source_word=node_word(256'(public_seed),selected[1:0]);
++                SRC_ROOT: source_word=node_word(256'(root),selected[1:0]);
++                SRC_RANDOM: source_word=node_word(256'(randomizer),selected[1:0]);
++                SRC_VALUE: source_word=node_word(digest[format_tag],selected[1:0]);
++                SRC_KEY: source_word=node_word(key_value[format_tag],selected[1:0]);
++                SRC_RIGHT: source_word=node_word(captured[format_tag],selected[1:0]);
++                SRC_ADDRESS: source_word=node_word(format_address,selected[1:0]);
++                SRC_LIST0: source_word=node_word(256'(list_data0),selected[1:0]);
++                SRC_LIST1: source_word=node_word(256'(list_data1),selected[1:0]);
++                SRC_IPAD_KEY: source_word=node_word(256'(secret_prf),selected[1:0]) ^ 64'h3636363636363636;
++                SRC_OPAD_KEY: source_word=node_word(256'(secret_prf),selected[1:0]) ^ 64'h5c5c5c5c5c5c5c5c;
++                SRC_MESSAGE: source_word=selected[3:0]<11 ? padded_message[selected[3:0]*64+:64] : 64'd0;
++                SRC_TWO: source_word=64'h0200000000000000;
++                SRC_THREE: source_word=64'h0300000000000000;
++                SRC_FOUR: source_word=64'h0400000000000000;
++                SRC_PAIR: source_word={7'd0,paired[format_tag],56'd0};
++                SRC_COUNTER: source_word=64'h0000000001000000;
++                SRC_IPAD: source_word=64'h3636363636363636;
++                SRC_OPAD: source_word=64'h5c5c5c5c5c5c5c5c;
++                default: source_word=0;
+             endcase
+-            source_word=node_word(value,selected[1:0]) ^ key_pad ^ literal;
+         end
+     endfunction
+     wire [191:0] source_window={source_word(word_control[2]),source_word(word_control[1]),source_word(word_control[0])};

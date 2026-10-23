@@ -75,13 +75,17 @@ module tb_fast #(parameter integer PIPELINE=1,UNROLL=1)(
  assign hash_event=dut.core.lane.hash_complete_event;
  assign permutation_event=dut.core.lane.compression_complete_event;
  assign batch_event=0;
- assign trace_block_event=dut.core.lane.formatter==2 && dut.core.lane.compression_ready;
+ // Count the compressor input handshake, including the direct replay path.
+ wire [511:0] trace_sha2_block=dut.core.lane.block_ready ?
+     dut.core.lane.block_buffer : dut.core.lane.replay_block;
+ assign trace_block_event=!execution_reset &&
+     (dut.core.lane.block_ready || dut.core.lane.replay_take) && dut.core.lane.compression_ready;
  assign trace_block_bytes=64;
  assign trace_result_event=dut.core.lane.hash_complete_event;
  assign trace_result_bytes=32;
  assign trace_result_data={136'd0,dut.core.lane.returned};
  for(genvar b=0;b<64;b++)begin: trace_sha2_bytes
-  assign trace_block_data[b*8+:8]=dut.core.lane.block_buffer[511-b*8-:8];
+  assign trace_block_data[b*8+:8]=trace_sha2_block[511-b*8-:8];
  end
  assign trace_block_data[1087:512]=0;
 `else

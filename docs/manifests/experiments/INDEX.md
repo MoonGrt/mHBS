@@ -180,3 +180,11 @@
 | 20261021_184757 | i/c/t relocation | [报告](ablation_layout_20261021_184757/reports/Analysis.md) | 原样迁移、60组静态镜像及18项 Verify；无综合或布线 |
 | 20261021_184904 | i/c/t relocation | [报告](ablation_layout_20261021_184904/reports/Analysis.md) | 原样迁移、60组静态镜像及18项 Verify；无综合或布线 |
 | 20261021_191254 | ablation 组件目录整理 | [报告](ablation_component_layout_20261021_191254/reports/Analysis.md) | 60组镜像、18项Verify、6项Sign缓存及配方/控制通过；无综合或布线 |
+| 20261023_121549 | c_atp_optimization_20261023_121549（临时工作区历史证据迁入） | [报告](c_atp_optimization_20261023_121549/reports/C_Area_Optimization_20261023.md) | [证据](c_atp_optimization_20261023_121549/ARTIFACTS.json) |
+| 20261023_132949 | c_sha_area_optimization_20261023_132949（临时工作区历史证据迁入） | [报告](c_sha_area_optimization_20261023_132949/reports/C_SHA_Area_Optimization_20261023.md) | [证据](c_sha_area_optimization_20261023_132949/ARTIFACTS.json) |
+| 20261023_182056 | main SHA2行为修正同步i／c／t | [报告](sync_sha2_main_20261023_182056/reports/SHA2_Main_Sync_20261023.md) | 36项隔离整核及当前c补验通过；未综合布线 |
+| 20261023_190751 | i/c/t SHAKE/SHA2 P1U1 100MHz布线 | [报告](ablation_route_20261023_190751/reports/Ablation_Route_20261023_190751.md) | [证据](ablation_route_20261023_190751/ARTIFACTS.json) |
+| 20261023_191653 | c临时优化思路迁移与i/t通用Hash复用 | [报告](c_idea_migration_20261023_191653/reports/Idea_Migration_20261023_191653.md) | [证据](c_idea_migration_20261023_191653/ARTIFACTS.json) |
+| 20261023_195418 | i/c 时序与 i Remaining 优化 | [报告](ic_timing_remaining_20261023_195418/reports/IC_Timing_Remaining_Final_20261023_195418.md) · [进度](ic_timing_remaining_20261023_195418/reports/IC_Timing_Remaining_20261023_195418.md) | [证据](ic_timing_remaining_20261023_195418/ARTIFACTS.json) |
+| 20261023_205100 | 软件链优化与控制粒度分层对照、最新堆叠图 | [报告](control_granularity_20261023_205100/reports/Control_Granularity_20261023_205100.md) | [证据](control_granularity_20261023_205100/ARTIFACTS.json) |
+| 20261023_205328 | 生产采用i-generic，保留通用RTL时序修复 | [报告](i_generic_production_20261023_205328/reports/Production_i_Generic_20261023_205328.md) | [证据](i_generic_production_20261023_205328/ARTIFACTS.json) |

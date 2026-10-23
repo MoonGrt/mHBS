@@ -1,0 +1,31 @@
+{
+  "schema": "mhbs.c_timing_selective_fors_operands.v1",
+  "source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/candidates/c_control_pipeline/source",
+  "files": {
+    "rtl/c/executor/executor.sv": {
+      "original_sha256": "378a53cbcf40e97fdb659cc2afa7e8d01362d065013b0ca6508919ddb294c790",
+      "candidate_sha256": "1b91cc00d519386cde3ab5a775dddaadc6f15e6d9026a50f03e4f43cdca4a7de"
+    },
+    "rtl/c/executor/sequencer.sv": {
+      "original_sha256": "3469b5c6e75befe8c96ebd93728a54c1c30346d0fdb0bad78058de700fa55a17",
+      "candidate_sha256": "3469b5c6e75befe8c96ebd93728a54c1c30346d0fdb0bad78058de700fa55a17"
+    }
+  },
+  "production_changed": false,
+  "sequencer_byte_identical": true,
+  "purpose": "Retain registered FORS-target control path for timing, restore original latency for controls not actually consuming that read-only source.",
+  "fast_narrow_read_contains_fors_lookup": false,
+  "slow_selection": {
+    "MOV_LOAD": "SRC",
+    "INC_SHR_XOR1_SHL_STORE": "DST",
+    "ADD": "SRC and AUX",
+    "BR": "DST unless ALWAYS; register SRC only for comparison conditions EQ/NE/LT/GE/SIBLING/SAME_PARENT with register RHS(aux=0)",
+    "SET_CALL_RET_WMOV_INPUT_OUTPUT": "No narrow FORS operand"
+  },
+  "timing_boundaries": "FORS extraction ends at staged_control_{dst,src,aux}. ALU/address compute ends at control_result/control_address. Checked arithmetic/memory commit uses those registers. Slow BR ends at control_branch_result before completion handshake.",
+  "branch_handshake": "slow_control is selected at control acceptance and retained through WAIT_CONTROL consumption; selecting slow condition does not depend on executor remaining in CONTROL_EXEC. Next accepted instruction chooses its own path. Fast BR completes as original with live operands, consumed by unchanged c sequencer WAIT_CONTROL one clock later.",
+  "load_store": "Fast LOAD registers the live checked-range address in FETCH; slow LOAD registers its retained address in CONTROL_COMMIT. Both write output context only in CONTROL_LOAD after checks. STORE only enables endpoint writes after execute_control checks and entry to CONTROL_STORE; address mux retains live fast vs registered slow address.",
+  "side_effect_checks": "Arithmetic bounds/masks/overflow, RAM address, selector, input/output and branch legality guards remain in execute_control. Slow BR retains its identical guards in CONTROL_EXEC.",
+  "reset": "Staged banks/address/result/branch flag all reset in original core reset branch. Invalid controls cannot reach architectural write states before checks.",
+  "validation": "Static read-through/interface/macro/hash checks only; no simulation/synthesis/route started. Root must freeze and validate before adoption."
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "static_source_review_only",
+  "simulation_performed": false,
+  "shift": {
+    "proof": "After BUILD i=0..3, shift register contains {b0,b1,b2,b3}, equal to original descending128-bit indexed writes. SHA256 only accepts in SEND; reset causes next job to overwrite all four beats.",
+    "preserved": [
+      "four BUILD cycles",
+      "big-endian block order",
+      "payload and padding bytes",
+      "list prefetch",
+      "SEND stalls",
+      "tag metadata"
+    ],
+    "tradeoff": "More FF transitions during BUILD; power not measured."
+  },
+  "recipe": {
+    "proof": "Mux of256-bit sources followed byword extraction is replaced with mux of each source word. Literal and pad XOR cases retain their exact64-bit values and index semantics.",
+    "preserved": [
+      "all supported formats",
+      "all low2-bit node word selectors",
+      "message low4-bit selector",
+      "HMAC pads",
+      "all raw read ports",
+      "all registers and scheduling"
+    ]
+  },
+  "compressor": {
+    "proof": "P1 initialCV/tag remain constant throughout recirculation. Capture on input handshake produces the same value seen by the separate output feed-forward edge, including acceptance coincident with previous completion. P>1 transfers retain original update predicate."
+  },
+  "control": {
+    "proof": "Register-only controls execute and retire on one edge; storage/I/O completion pulses remain registered. Prior pulse is consumed before next token is loaded.",
+    "unmeasured_cycle_saving": "one cycle per legal register-only control instruction",
+    "diagnostic_caveat": "Illegal arithmetic at PC127 can change debug error_code priority when executor parameter fault and sequencer PC-overflow coincide. Functional error/abort preserved. Not selected unless independently justified."
+  },
+  "comparison_scope": "This experiment optimizes c implementation, not a uniform i/c/t backend replacement. Attribute any comparison gain to both implementation changes and control architecture until applicable backend changes are propagated and remeasured."
+}

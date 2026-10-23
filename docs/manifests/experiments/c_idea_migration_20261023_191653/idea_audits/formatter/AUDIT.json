@@ -1,0 +1,224 @@
+{
+  "schema": "mhbs.shake.formatter.migration.v1",
+  "source": "/tmp/mhbs-ablation-c-atp-20261023/rtl/c/hash/shake-recipe.sv",
+  "source_sha256": "bc86e9ccfbae76cf9fc93e77ed7007473e98aab4598ef80568cb438da6566805",
+  "designs": {
+    "i": {
+      "original": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/i/hash/shake-recipe.sv",
+      "original_sha256": "719addd549865a615adbf92da9bb7e6953bad48f401253e0e38ecc4968017ee5",
+      "candidate": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/rtl/i/hash/shake-recipe.sv",
+      "candidate_sha256": "214477eadcee3ab93181854b752e39a9ffc2238d2eb65400b65f80e2a6d64c51",
+      "formatter_only": true,
+      "stream_absorption_unchanged": true,
+      "sha2_unchanged_sha256": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0"
+    },
+    "c": {
+      "original": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/c/hash/shake-recipe.sv",
+      "original_sha256": "04422c2e5fea88053540d4cdf331cff9a296dfc590da562533b2eefa8f2ef1b7",
+      "candidate": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/rtl/c/hash/shake-recipe.sv",
+      "candidate_sha256": "214477eadcee3ab93181854b752e39a9ffc2238d2eb65400b65f80e2a6d64c51",
+      "formatter_only": true,
+      "stream_absorption_unchanged": true,
+      "sha2_unchanged_sha256": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0"
+    },
+    "t": {
+      "original": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/rtl/t/hash/shake-recipe.sv",
+      "original_sha256": "39060d0ce8065a656da30810bef6c4cb57c58e49bb7a132de1a9acddda0bdc0d",
+      "candidate": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/rtl/t/hash/shake-recipe.sv",
+      "candidate_sha256": "629fc47e5120e7bf0fa047662fb3a193d6c4d215207334416631d747a62327be",
+      "formatter_only": true,
+      "stream_absorption_unchanged": true,
+      "sha2_unchanged_sha256": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0"
+    }
+  },
+  "rationale": "Keep existing one-hot recipe shapes through fixed N32 block assembly; remove layout encode/decode. No state or cycle changes.",
+  "masks": "seed_shapes/step_shapes are already ANDed with RECIPE_MASK before selection; mask_prf/final further partition the single MASKED_VALUE shape.",
+  "node_lengths": "N16/N24 runtime formatting branches are unchanged. All N32 frame node fields now have explicit unsigned 256-bit casts, matching old frame-register zero extension even with structural N<32.",
+  "fixed_recipes": [
+    "ADDRESS_SEED",
+    "ADDRESS_VALUE unary/binary",
+    "INDEX_PRF",
+    "MASKED_SEED",
+    "MASKED_VALUE KEY/MASK0/MASK1/FINAL",
+    "PREFIX_SEED",
+    "PREFIX_VALUE",
+    "PREFIX_LEAF",
+    "PREFIX_PARENT"
+  ],
+  "generic": "Same pure formatter applies to i/c/t. i already used this one-hot topology; i candidate adds explicit widths only. Each variant header, parameter defaults, controls, and stream absorb logic remain unchanged.",
+  "source_edits": "Only candidate and validation artifacts under build/c_idea_migration_staging/formatter; no production RTL/TB edits.",
+  "validation": {
+    "status": "passed",
+    "results": [
+      {
+        "design": "c",
+        "label": "full",
+        "passed": true,
+        "seconds": 5.403578023891896,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/c_full.log",
+        "cases": 459,
+        "recipe_mask": "0xffff",
+        "synthesis": false,
+        "rate_boundary_cases": {
+          "135": 7,
+          "136": 5,
+          "137": 5
+        },
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/c/recipe_check/P1U1/coverage.json"
+      },
+      {
+        "design": "c",
+        "label": "synthesis",
+        "passed": true,
+        "seconds": 5.391596454195678,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1",
+          "--synthesis"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/c_synthesis.log",
+        "cases": 459,
+        "recipe_mask": "0xffff",
+        "synthesis": true,
+        "rate_boundary_cases": {
+          "135": 7,
+          "136": 5,
+          "137": 5
+        },
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/c/recipe_check/P1U1_synthesis/coverage.json"
+      },
+      {
+        "design": "c",
+        "label": "masked_only",
+        "passed": true,
+        "seconds": 3.1965901190415025,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1",
+          "--recipe-mask",
+          "0x0100"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/c_masked_only.log",
+        "cases": 16,
+        "recipe_mask": "0x0100",
+        "synthesis": false,
+        "rate_boundary_cases": {},
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/c/recipe_check/P1U1_mask0100/coverage.json"
+      },
+      {
+        "design": "c",
+        "label": "slh_only",
+        "passed": true,
+        "seconds": 5.417425898835063,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1",
+          "--recipe-mask",
+          "0x101e"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/c_slh_only.log",
+        "cases": 186,
+        "recipe_mask": "0x101e",
+        "synthesis": false,
+        "rate_boundary_cases": {
+          "135": 5,
+          "136": 3,
+          "137": 3
+        },
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/c/recipe_check/P1U1_mask101e/coverage.json"
+      },
+      {
+        "design": "i",
+        "label": "full",
+        "passed": true,
+        "seconds": 5.445788911078125,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/i_full.log",
+        "cases": 459,
+        "recipe_mask": "0xffff",
+        "synthesis": false,
+        "rate_boundary_cases": {
+          "135": 7,
+          "136": 5,
+          "137": 5
+        },
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/i/recipe_check/P1U1/coverage.json"
+      },
+      {
+        "design": "t",
+        "label": "full",
+        "passed": true,
+        "seconds": 5.645156593061984,
+        "command": [
+          "python3",
+          "scripts/check_recipes.py",
+          "--hash",
+          "shake",
+          "--pipeline",
+          "1",
+          "--unroll",
+          "1"
+        ],
+        "cwd": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation",
+        "log": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/t_full.log",
+        "cases": 459,
+        "recipe_mask": "0xffff",
+        "synthesis": false,
+        "rate_boundary_cases": {
+          "135": 7,
+          "136": 5,
+          "137": 5
+        },
+        "coverage": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/formatter/validation/build/ablation/t/recipe_check/P1U1/coverage.json"
+      }
+    ],
+    "covered_node_bytes": [
+      16,
+      24,
+      32
+    ],
+    "scope": "Scalar P1U1 fixed/stream recipes, independent hashlib oracle; compile-time mask and SYNTHESIS coverage as listed. P>1 RTL branch unchanged."
+  }
+}

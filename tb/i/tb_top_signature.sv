@@ -36,6 +36,7 @@ module tb_top_signature;
     integer cursor = 0;
     integer observed_cycles = 0;
     longint unsigned observed_hashes = 0, observed_permutations = 0;
+    longint unsigned expected_compressions;
     logic message_sent = 0;
     string vector_directory;
 
@@ -94,11 +95,19 @@ module tb_top_signature;
         $readmemh({vector_directory, "/expected.mem"}, expected);
         $readmemh({vector_directory, "/message.mem"}, message);
         $readmemh({vector_directory, "/meta.mem"}, metadata);
+        expected_compressions=metadata[2];
+`ifdef MHBS_SHA2
+        // This fixture is SLH-SHA2-128f Sign: five non-address Hashes,
+        // and one physical cold public-prefix compression after reset.
+        if(metadata[1]<5 || metadata[2]<metadata[1]-5)
+            $fatal(1,"top SHA2 vector hash structure");
+        expected_compressions=metadata[2]-(metadata[1]-5)+1;
+`endif
         repeat (5) tick();
         rst = 0;
         while (!done && !error) tick();
         if (error || cursor != metadata[0] || result_kind != 1) $fatal(1, "top result");
-        if (observed_hashes != metadata[1] || observed_permutations != metadata[2])
+        if (observed_hashes != metadata[1] || observed_permutations != expected_compressions)
             $fatal(1, "top functional event counts");
 `ifndef SYNTHESIS
         if (hash_count != observed_hashes || permutation_count != observed_permutations)

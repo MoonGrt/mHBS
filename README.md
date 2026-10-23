@@ -49,4 +49,8 @@ python3 scripts/check_ablation.py
 
 也可设置 `MHBS_DESIGN=i|c|t` 后直接使用共用脚本或 Python 模型，默认 i。Python 使用 `--hash shake|sha2`，Shell 使用 `HASH_BACKEND=shake|sha2`。仿真自动把规范镜像与输入向量组合到 `build/ablation/<设计>/`，不改写源镜像。
 
-高树 h16/h15/h20 不自动启动完整 Keygen／Sign；h20 完整树保持停止。本次仅整理目录并验证功能，未新增综合或布线。历史证据及本次检查见[实验索引](docs/manifests/experiments/INDEX.md)。
+高树 h16/h15/h20 不自动启动完整 Keygen／Sign；h20 完整树保持停止。历史证据见[实验索引](docs/manifests/experiments/INDEX.md)。
+
+生产 i 采用 **i-generic**：通用软件链循环，保留指令预取、Hash边界压缩和时序修复，逐次显式HASH授权。四路径软件链优化版 i-opt 保留在提交 `f9887f5b` 及历史冻结包中作为独立对照。c 保留控制操作数、算术和检查写回分级；t 保持原实现。
+
+i/c 的相同 P1U1 common RTL 已在 SHAKE、SHA2 两后端通过100MHz布线，证据不覆盖外部ROM所在top。相同33字节KAT下，生产 i-generic 的总周期为SHAKE 4,441,035、SHA2 9,247,544，Remaining分别为1,904,931和2,324,134。i-generic→c降幅为30.38%／18.66%，c→t为15.41%／6.33%；SHA2 i-generic的Remaining高于SLotH，不能沿用i-opt的“双后端均低于SLotH”结论。两种软件策略的实测对照见[报告](docs/manifests/experiments/control_granularity_20261023_205100/reports/Control_Granularity_20261023_205100.md)，原时序候选及验证见[历史报告](docs/manifests/experiments/ic_timing_remaining_20261023_195418/reports/IC_Timing_Remaining_Final_20261023_195418.md)。

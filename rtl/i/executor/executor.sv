@@ -42,7 +42,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     typedef enum logic [4:0] {
         IDLE,MESSAGE,LAUNCH,FETCH,LOAD_DESCRIPTOR,DECODE,HASH_ISSUE,HASH_WAIT,HASH_RESULT,
         ROUTE,TRANSFORM,EMIT,EMIT_NEXT,OUTPUT_CHUNK,DRAIN,FINISH,VERIFY_INPUT,VERIFY_RANDOM,
-        FAILED,SF_RANDOM,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT
+        FAILED,SF_RANDOM,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT,CONTROL_OPERANDS
     } state_t;
     state_t state,continuation;
     logic abort_execution;
@@ -255,41 +255,48 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         end
     endfunction
 
-    function automatic [20:0] narrow_read(input [4:0] selector);
+    function automatic [20:0] narrow_register_read(input [4:0] selector);
         begin
             case(selector)
-                `CTX_LEAF:narrow_read={1'b0,task_leaf};
-                `CTX_A:narrow_read={13'd0,task_a};
-                `CTX_B:narrow_read=task_b;
-                `CTX_CURSOR:narrow_read=leaf_cursor;
-                `CTX_INDEX:narrow_read=node_index;
-                `CTX_LEVEL:narrow_read={16'd0,node_level};
-                `CTX_TARGET:narrow_read=target;
-                `CTX_PATH:narrow_read=target_at_level;
-                `CTX_BASE:narrow_read=control_base;
-                `CTX_HEIGHT:narrow_read={16'd0,tree_height};
-                `CTX_LIMIT:narrow_read=control_limit;
-                `CTX_LAYER:narrow_read={16'd0,layer};
-                `CTX_GROUP:narrow_read={15'd0,group_index};
-                `CTX_AUTH_LEVEL:narrow_read={16'd0,auth_level};
-                `CTX_FLAGS:narrow_read={17'd0,control_flags};
-                `CTX_MODE:narrow_read={19'd0,indexing};
-                `CTX_Q:narrow_read={1'b0,job_index[19:0]};
-                `CTX_SCALAR_LEAF:narrow_read={1'b0,scalar_leaf};
-                `CTX_FORS_TARGET:narrow_read={7'd0,fors_target(fors_group_offset(group_index))};
-                `CTX_PROFILE_HEIGHT:narrow_read={16'd0,stateful_height};
-                `CTX_ZERO:narrow_read=0;
-                `CTX_ONE:narrow_read=1;
-                `CTX_OPERATION:narrow_read={19'd0,operation};
-                `CTX_XMSS:narrow_read={20'd0,xmss};
-                `CTX_STATEFUL:narrow_read={20'd0,stateful};
-                `CTX_DIGIT:narrow_read={16'd0,digit(task_a)};
-                `CTX_LT_COUNT:narrow_read={13'd0,lt_count};
-                `CTX_LT_CURSOR:narrow_read={13'd0,lt_cursor};
-                `CTX_LT_LEVEL:narrow_read={17'd0,lt_level};
-                default:narrow_read=0;
+                `CTX_LEAF:narrow_register_read={1'b0,task_leaf};
+                `CTX_A:narrow_register_read={13'd0,task_a};
+                `CTX_B:narrow_register_read=task_b;
+                `CTX_CURSOR:narrow_register_read=leaf_cursor;
+                `CTX_INDEX:narrow_register_read=node_index;
+                `CTX_LEVEL:narrow_register_read={16'd0,node_level};
+                `CTX_TARGET:narrow_register_read=target;
+                `CTX_PATH:narrow_register_read=target_at_level;
+                `CTX_BASE:narrow_register_read=control_base;
+                `CTX_HEIGHT:narrow_register_read={16'd0,tree_height};
+                `CTX_LIMIT:narrow_register_read=control_limit;
+                `CTX_LAYER:narrow_register_read={16'd0,layer};
+                `CTX_GROUP:narrow_register_read={15'd0,group_index};
+                `CTX_AUTH_LEVEL:narrow_register_read={16'd0,auth_level};
+                `CTX_FLAGS:narrow_register_read={17'd0,control_flags};
+                `CTX_MODE:narrow_register_read={19'd0,indexing};
+                `CTX_Q:narrow_register_read={1'b0,job_index[19:0]};
+                `CTX_SCALAR_LEAF:narrow_register_read={1'b0,scalar_leaf};
+                `CTX_PROFILE_HEIGHT:narrow_register_read={16'd0,stateful_height};
+                `CTX_ZERO:narrow_register_read=0;
+                `CTX_ONE:narrow_register_read=1;
+                `CTX_OPERATION:narrow_register_read={19'd0,operation};
+                `CTX_XMSS:narrow_register_read={20'd0,xmss};
+                `CTX_STATEFUL:narrow_register_read={20'd0,stateful};
+                `CTX_LT_COUNT:narrow_register_read={13'd0,lt_count};
+                `CTX_LT_CURSOR:narrow_register_read={13'd0,lt_cursor};
+                `CTX_LT_LEVEL:narrow_register_read={17'd0,lt_level};
+                default:narrow_register_read=0;
             endcase
         end
+    endfunction
+    // Only the slow capture port can observe FORS extraction or the WOTS digit lookup.
+    // It is deliberately absent from narrow_register_read, so no combinational
+    // digest/group lookup can reach arithmetic or a context write-enable.
+    function automatic [20:0] narrow_read(input [4:0] selector);
+        if(selector==`CTX_FORS_TARGET)
+            narrow_read={7'd0,fors_target(fors_group_offset(group_index))};
+        else if(selector==`CTX_DIGIT) narrow_read={16'd0,digit(task_a)};
+        else narrow_read=narrow_register_read(selector);
     endfunction
     function automatic [20:0] narrow_mask(input [4:0] selector);
         case(selector)
@@ -364,15 +371,26 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     wire [4:0] control_src=control[51:47],control_aux=control[46:42];
     wire [20:0] control_immediate=control[41:21];
     wire [3:0] control_cond=control[12:9];
-    wire immediate_control_complete=state==FETCH && control_valid &&
-        ((control_op>=`CTRL_SET && control_op<=`CTRL_RET) ||
-         control_op==`CTRL_WMOV || control_op==`CTRL_SHL);
+    wire pure_control=(control_op>=`CTRL_SET && control_op<=`CTRL_RET) ||
+        control_op==`CTRL_WMOV || control_op==`CTRL_SHL;
+    wire immediate_control_complete=pure_control &&
+        ((state==FETCH && control_valid && !register_control_operands) || state==CONTROL_OPERANDS);
 
     // At most two narrow sources are live in any instruction. MOV/ADD
     // read SRC on port 0; all other instructions read DST there.
     wire source_on_port0=control_op==`CTRL_MOV || control_op==`CTRL_ADD;
-    wire [20:0] control_read0=narrow_read(source_on_port0 ? control_src : control_dst);
-    wire [20:0] control_read1=narrow_read(control_op==`CTRL_ADD ? control_aux : control_src);
+    wire [4:0] control_selector0=source_on_port0 ? control_src : control_dst;
+    wire [4:0] control_selector1=control_op==`CTRL_ADD ? control_aux : control_src;
+    wire [20:0] live_control_read0=narrow_read(control_selector0);
+    wire [20:0] live_control_read1=narrow_read(control_selector1);
+    // FORS digest extraction is a wide dynamic lookup. Register it before
+    // arithmetic/condition/legality/writeback, rather than extending the
+    // group-index path through the complete software execution cone.
+    wire register_control_operands=control_selector0==`CTX_FORS_TARGET ||
+        control_selector1==`CTX_FORS_TARGET || control_selector0==`CTX_DIGIT || control_selector1==`CTX_DIGIT;
+    logic [20:0] staged_control_read0,staged_control_read1;
+    wire [20:0] control_read0=state==CONTROL_OPERANDS ? staged_control_read0 : narrow_register_read(control_selector0);
+    wire [20:0] control_read1=state==CONTROL_OPERANDS ? staged_control_read1 : narrow_register_read(control_selector1);
     wire [20:0] control_dst_value=control_read0;
     wire [20:0] control_src_value=control_read0;
     wire [20:0] control_aux_value=control_read1;
@@ -407,6 +425,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             default:branch_taken=0;
         endcase
     end
+    logic [7:0] control_store_slot;
+    // Both fast and registered-operand branches retire on their execution
+    // edge, so the condition always corresponds to the currently read data.
     assign control_condition=branch_taken;
     wire [21:0] control_load_address={1'b0,control_read1}+{1'b0,control_immediate};
     wire [21:0] control_store_address={1'b0,control_dst_value}+{1'b0,control_immediate};
@@ -428,7 +449,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     always_comb begin
         endpoint_write=0;endpoint_address=0;endpoint_data=0;
         if(state==CONTROL_STORE) begin
-            endpoint_write=1;endpoint_address=control_store_address[7:0];
+            endpoint_write=1;endpoint_address=control_store_slot;
             endpoint_data=wide_read(control_src);
         end else if(state==ROUTE && macro_route!=0 && route_descriptor[53]) begin
             endpoint_write=1;endpoint_address={2'd0,group_index};endpoint_data=route_value[255:0];
@@ -442,7 +463,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     endtask
     task automatic complete_control;
         begin
-            if(state!=FETCH) control_complete<=1;
+            if(state!=FETCH && state!=CONTROL_OPERANDS) control_complete<=1;
             state<=FETCH;
         end
     endtask
@@ -475,7 +496,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                         `CTRL_BR:begin
                             if(control_cond>9 || control_aux>1 || control_dst>28 || control_src>28 ||
                                 ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
-                            else complete_control();
+                            else begin
+                                complete_control();
+                            end
                         end
                         `CTRL_CALL,`CTRL_RET:complete_control();
                         `CTRL_LOAD:begin
@@ -484,7 +507,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                         end
                         `CTRL_STORE:begin
                             if(control_src>7 || control_dst>28 || control_store_address>=108) fail();
-                            else state<=CONTROL_STORE;
+                            else begin
+                                control_store_slot<=control_store_address[7:0];
+                                state<=CONTROL_STORE;
+                            end
                         end
                         `CTRL_INPUT:begin
                             if(!verifying || control_dst>6) fail();else state<=CONTROL_INPUT;
@@ -507,7 +533,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         else begin
             case(state)
                 HASH_ISSUE,HASH_WAIT:endpoint_read_address<=lane_list_next;
-                FETCH:if(control_valid && control_op==`CTRL_LOAD && control_load_address<108)
+                CONTROL_OPERANDS:if(control_op==`CTRL_LOAD && control_load_address<108)
+                    endpoint_read_address<=control_load_address[7:0];
+                FETCH:if(control_valid && !register_control_operands && control_op==`CTRL_LOAD && control_load_address<108)
                     endpoint_read_address<=control_load_address[7:0];
                 default:begin end
             endcase
@@ -556,6 +584,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             saved_descriptor<=0;task_recipe<=0;task_leaf<=0;task_a<=0;task_b<=0;
             lt_count<=0;lt_cursor<=0;lt_level<=0;checksum<=0;transform_index<=0;
             route_source<=0;emit_length<=0;emit_base<=0;emit_count<=0;emit_cursor<=0;
+            control_store_slot<=0;
         end else begin
             done<=0;seq_start<=0;seq_complete<=0;control_complete<=0;abort_execution<=0;
             if(seq_error && state!=IDLE && state!=FAILED) fail();
@@ -586,26 +615,37 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                             (node_bytes==16 || value[2][191:128]==job_public_root[191:128]) &&
                             (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
                         state<=DRAIN;
-                    end else if(control_valid) execute_control();
+                    end else if(control_valid) begin
+                        if(register_control_operands) begin
+                            staged_control_read0<=live_control_read0;
+                            staged_control_read1<=live_control_read1;
+                            state<=CONTROL_OPERANDS;
+                        end else execute_control();
+                    end
                     else if(cmd_valid) begin
                         macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];
                         if(!command_keep_coordinates) begin layer<=cmd[23:19];group_index<=cmd[18:13];end
                         state<=LOAD_DESCRIPTOR;
                     end
                 end
-                LOAD_DESCRIPTOR:begin saved_descriptor<=descriptor_data[63:0];state<=DECODE;end
-                DECODE:case(macro_op)
+                // The descriptor address was registered on command acceptance.
+                // Decode on its capture edge; task_recipe remains registered
+                // before the lane handshake, so no ROM-to-Keccak bypass exists.
+                LOAD_DESCRIPTOR:begin
+                    saved_descriptor<=descriptor_data[63:0];
+                    case(macro_op)
                     1:begin
-                        if(verifying && stateful && (saved_descriptor[59:56]==5 || saved_descriptor[59:56]==11))
+                        if(verifying && stateful && (descriptor_data[59:56]==5 || descriptor_data[59:56]==11))
                             read_verify_node(SF_RANDOM);
-                        else if(verifying && saved_descriptor[59:56]==3) read_verify_node(VERIFY_RANDOM);
-                        else start_hash(saved_descriptor,HASH_RESULT);
+                        else if(verifying && descriptor_data[59:56]==3) read_verify_node(VERIFY_RANDOM);
+                        else start_hash(descriptor_data[63:0],HASH_RESULT);
                     end
                     4:begin checksum<=0;transform_index<=0;state<=TRANSFORM;end
                     5:if(verifying && stateful) complete_macro();
-                    else begin emit_base<=descriptor[59:52];emit_count<=descriptor[51:48];emit_cursor<=0;state<=EMIT;end
+                    else begin emit_base<=descriptor_data[59:52];emit_count<=descriptor_data[51:48];emit_cursor<=0;state<=EMIT;end
                     default:fail();
-                endcase
+                    endcase
+                end
                 SF_RANDOM:begin
                     value[0]<=emit_value;
                     if(xmss) complete_macro();
@@ -614,7 +654,14 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 HASH_ISSUE:if(lane_ready) state<=HASH_WAIT;
                 HASH_WAIT:if(lane_valid) begin
                     result<=lane_value;
-                    if(lane_error) fail();else state<=continuation;
+                    if(lane_error) fail();
+                    else if(continuation==HASH_RESULT) begin
+                        // result is captured on this edge. Plain HASH with an
+                        // identity route needs no extra result/route bubbles.
+                        // Nonidentity routes retain the result register boundary.
+                        route_source<=ROUTE_HASH;
+                        if(macro_route==0) complete_macro();else state<=ROUTE;
+                    end else state<=continuation;
                 end
                 HASH_RESULT:route_result(ROUTE_HASH);
                 ROUTE:begin
@@ -647,6 +694,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                 VERIFY_INPUT:if(verify_valid) begin emit_value<=verify_data;state<=continuation;end
                 VERIFY_RANDOM:route_result(ROUTE_EMIT);
                 OUTPUT_CHUNK:state<=continuation;
+                CONTROL_OPERANDS:execute_control();
                 CONTROL_LOAD:begin wide_write(control_dst,control_wide_data);complete_control();end
                 CONTROL_STORE:complete_control();
                 CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,control_wide_data);complete_control();end

@@ -46,6 +46,8 @@ module tb;
  longint unsigned cycles=0,compute=0;
  integer cursor=0,sent=0,accepted=0,stall=0,replays=1,interrupt_run=0,invalid=0,tamper=0,fault=0,cut=0,invalid_profile=-1;
  longint unsigned hashes[0:1],perms[0:1];longint unsigned computed,elapsed,hcount,pcount;
+ longint unsigned expected_compressions,non_address_hashes;
+ longint unsigned xmss_leaves,xmss_seeded,xmss_binary,xmss_message_hashes,xmss_public_prfs;
  logic override_q_valid=0;logic [31:0] override_q=0;
  longint unsigned timeout_cycles=64'd100000000000;
  reg [31:0] rng=32'h51c0ffee;string vector;
@@ -143,6 +145,27 @@ module tb;
   $readmemh({vector,"/program.mem"},pm);$readmemh({vector,"/template.mem"},tm);$readmemh({vector,"/descriptor.mem"},dm);
   $readmemh({vector,"/job.mem"},cfg);$readmemh({vector,"/meta.mem"},meta);$readmemh({vector,"/message.mem"},msg);
   $readmemh({vector,"/expected.mem"},expected);$readmemh({vector,"/nodes.mem"},nodes_mem);
+  // meta retains logical SHA256 blocks; the lane statistics count actual
+  // compressions after reusing one cold public-seed prefix per reset.
+  expected_compressions=meta[2];
+`ifdef MHBS_SHA2
+  if(dm[1][5] && (dm[1][4:0]==0 || dm[1][4:0]==4))begin
+   non_address_hashes=cfg[7]==0 ? 0 : (dm[1][4:0]==0 ? 3 : 2)+(cfg[7]==1 ? 2 : 0);
+   if(meta[1]<=non_address_hashes)$fatal(1,"SLH vector has no address hashes");
+   expected_compressions=meta[2]-(meta[1]-non_address_hashes)+1;
+  end else if(dm[1][5] && dm[1][4:0]>=5'h18 && dm[1][4:0]<=5'h1a)begin
+   // H=S+3*F+4*B+M, hence public PRFs=2*F+3*B.
+   xmss_leaves=64'd1<<(dm[1][4:0]==5'h18 ? 10 : dm[1][4:0]==5'h19 ? 16 : 20);
+   xmss_seeded=cfg[7]==2 ? 0 : 67*(xmss_leaves+(cfg[7]==1));
+   xmss_binary=cfg[7]==2 ? 66+(dm[1][4:0]==5'h18 ? 10 : dm[1][4:0]==5'h19 ? 16 : 20) : 67*xmss_leaves-1;
+   xmss_message_hashes=cfg[7]==0 ? 0 : cfg[7]==1 ? 2 : 1;
+   if(meta[1]<xmss_seeded+xmss_message_hashes+4*xmss_binary ||
+      (2*(meta[1]-xmss_seeded-xmss_message_hashes)+xmss_binary)%3)
+    $fatal(1,"XMSS vector hash structure");
+   xmss_public_prfs=(2*(meta[1]-xmss_seeded-xmss_message_hashes)+xmss_binary)/3;
+   expected_compressions=meta[2]-xmss_public_prfs+(xmss_public_prfs!=0);
+  end
+`endif
   if(override_q_valid)cfg[6]={224'd0,override_q};
   if(invalid_profile>=0)dm[1]=64'(invalid_profile);
   case(tamper)
@@ -196,7 +219,7 @@ module tb;
      if(accepted!=meta[3]||verify_pass!==(tamper==0))$fatal(1,"verify %0d nodes %0d",verify_pass,accepted);
     end
     if(!tamper)begin
-     if(hcount!=meta[1]||pcount!=meta[2])$fatal(1,"counts %0d/%0d expected %0d/%0d",hcount,pcount,meta[1],meta[2]);
+     if(hcount!=meta[1]||pcount!=expected_compressions)$fatal(1,"counts %0d/%0d expected %0d/%0d",hcount,pcount,meta[1],expected_compressions);
     end
     if(DEBUG_STATS)begin
      if(hash_count!=hcount||permutation_count!=pcount)$fatal(1,"statistics mismatch");

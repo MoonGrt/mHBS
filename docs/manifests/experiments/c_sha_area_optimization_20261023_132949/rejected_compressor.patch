@@ -1,0 +1,36 @@
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha256.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/compressor/source/rtl/c/hash/sha256.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha256.sv	2026-10-23 12:13:08.366814679 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/compressor/source/rtl/c/hash/sha256.sv	2026-10-23 13:31:03.429019179 +0800
+@@ -125,12 +125,30 @@
+                 valid[stage] <= source_valid;
+                 if (source_valid) begin
+                     state[stage] <= unrolled[UNROLL-1].result;
+-                    initial_cv[stage] <= source_cv;
+                     base[stage] <= source_base;
+-                    tag[stage] <= source_tag;
+                 end
+             end
+         end
++        if (PIPELINE == 1) begin : scalar_metadata
++            // One compression owns this lane until its final round. Retain
++            // its feed-forward CV and tag on acceptance instead of selecting
++            // the same metadata through the feedback mux on every round.
++            // The final output edge still reads the preceding accepted CV
++            // when a following block is accepted on that same edge.
++            always_ff @(posedge clk)
++                if (input_valid && input_ready) begin
++                    initial_cv[stage] <= input_cv;
++                    tag[stage] <= input_tag;
++                end
++        end else begin : pipelined_metadata
++            // Concurrent tags carry independent CVs through the physical
++            // stages, including each recirculation through stage zero.
++            always_ff @(posedge clk)
++                if (!rst && !stalled && source_valid) begin
++                    initial_cv[stage] <= source_cv;
++                    tag[stage] <= source_tag;
++                end
++        end
+     end
+ 
+     // Feed-forward is deliberately separate from the last round and its

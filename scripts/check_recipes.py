@@ -135,11 +135,29 @@ def main():
     if not cases:
         parser.error('--recipe-mask enables no tested recipe')
     values = []
-    coverage = {'cases':len(cases),'pipeline':args.pipeline,'unroll':args.unroll,
+    coverage = {'cases':len(cases),'design':DESIGN,'pipeline':args.pipeline,'unroll':args.unroll,
                 'hash_backend':args.hash_backend,'recipe_mask':f'0x{args.recipe_mask:04x}','synthesis':args.synthesis,
                 'frame_lengths':{},'shapes':{},'rate_boundary_cases':{}}
-    for n, shape, arity, length, leaf, output_bytes in cases:
+    cached_prefix = None
+    logical_permutations = physical_permutations = prefix_hits = prefix_fills = 0
+    for index, (n, shape, arity, length, leaf, output_bytes) in enumerate(cases):
         result, hashes, perms, frame_length = frame(n, shape, arity, length, leaf, output_bytes)
+        logical_permutations += perms
+        # tb_recipe resets before each even case and deliberately submits the
+        # following odd case without resetting the lane. Public seed is fixed.
+        if index % 2 == 0:
+            cached_prefix = None
+        if args.hash_backend == 'sha2' and shape in (1, 2, 8, 12):
+            # Cache identity is the exact complete-message first block. The
+            # full-message hashlib oracle remains independent of cached RTL.
+            prefix = pub[:n]+bytes(64-n) if shape != 8 else be(3,32)+pub
+            eligible_hashes = arity+1 if shape == 8 else 1
+            fills = int(cached_prefix != prefix)
+            perms -= eligible_hashes-fills
+            prefix_hits += eligible_hashes-fills
+            prefix_fills += fills
+            cached_prefix = prefix
+        physical_permutations += perms
         for key,value in (('frame_lengths',frame_length),('shapes',shape)):
             coverage[key][value] = coverage[key].get(value,0)+1
         if frame_length in (135,136,137):
@@ -159,6 +177,8 @@ def main():
     print(result.stdout, end='')
     result.check_returncode()
     coverage['passed'] = True
+    coverage.update(logical_permutations=logical_permutations, physical_permutations=physical_permutations,
+                    prefix_hits=prefix_hits, prefix_fills=prefix_fills)
     (work / 'coverage.json').write_text(json.dumps(coverage,indent=2)+'\n')
 
 if __name__ == '__main__':

@@ -1,0 +1,31 @@
+{
+  "upstream_commit": "a4a09e6f6ef901585e63aa8f37175b4931fad1cf",
+  "upstream_sources": {
+    "rtl/hash/sha2-recipe.sv": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0",
+    "rtl/hash/sha256.sv": "e7affefe71404930b739dd8d8ccab23a118628be75e8455a9cc4e932dd185e4f",
+    "scripts/check_sha2_prefix_cache.py": "5a86970d00a8995706969138876639292c4c37baad93db2cc67c1744b10a4a2b",
+    "tb/tb_sha2_prefix_cache.sv": "459fcfd842949e05f83b6c0bce2ddc6d7c1d8cfc620ad256c7fb258c5588d86d"
+  },
+  "target_branch": "codex/ablation-c-atp-20261023",
+  "synced_files": [
+    "rtl/i/hash/sha2-recipe.sv",
+    "rtl/i/hash/sha256.sv",
+    "rtl/c/hash/sha2-recipe.sv",
+    "rtl/c/hash/sha256.sv",
+    "rtl/t/hash/sha2-recipe.sv",
+    "rtl/t/hash/sha256.sv"
+  ],
+  "copy_policy": "Exact upstream SHA2 module pair shared by all i/c/t; no ISA, program, template, descriptor or executor change.",
+  "preserved": "All other RTL including pre-existing c executor register-sharing and SHAKE area changes preserved byte-for-byte.",
+  "superseded": "Old c SHA2 four-beat shift assembly and P1 CV feedback have been replaced by upstream coordinated cache/formatter architecture. Old area and ATP results remain historical.",
+  "behavior": [
+    "SLH low128-bit public seed raw prefix CV cache",
+    "XMSS full256-bit public PRF prefix CV cache, KEY/MASK only",
+    "kind and seed identity, cold fill admission barrier, reset invalidation",
+    "upstream registered admission, fixed-block assembly, chain replay and SHA256 carry-save datapath",
+    "logical vector counts retained; statistics count physical compressions"
+  ],
+  "validation_scope": "Shared backend prefix P4 test is standalone recipe coverage; full i/c/t cores remain K1U1.",
+  "area_status": "not remeasured; no synthesis or route requested/launched",
+  "main_worktree": "read only"
+}

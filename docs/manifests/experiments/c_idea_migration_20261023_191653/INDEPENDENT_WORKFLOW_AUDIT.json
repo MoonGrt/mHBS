@@ -1,0 +1,161 @@
+{
+  "audit_time": "2026-10-23T19:26:16+08:00",
+  "scope": "Read-only workflow review; no production or runner modifications, no jobs launched or stopped. This JSON is the sole audit output.",
+  "status": "review_complete_with_reported_edge_case",
+  "run": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration/20261023_191653",
+  "archive": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/c_idea_migration_20261023_191653",
+  "runner_sha256": {
+    "workspace": "5c2bbfb07bf0224eeaeb5cd0e4dfbdc69fcb58d0bebc0c2e6969a1eff842cd0a",
+    "frozen": "10efa34b37d67dd56b1675727a6f2236df9ae8da32c8ee0a96dd06c6513a1a65",
+    "equal": false
+  },
+  "findings": [
+    {
+      "id": "choose_missing_result_continues_to_ratios",
+      "severity": "medium",
+      "status": "reported_to_parent",
+      "path": "scripts/run_idea_migration.py",
+      "lines": [
+        201,
+        240
+      ],
+      "condition": "A route exits without result.json after writing route/utilization.rpt, while its functional validation passes; likewise a missing baseline result with an existing route report.",
+      "effect": "choose() appends an ineligibility reason but still computes ratios and accesses result[wns_ns] / old_route[wns_ns], causing TypeError and preventing final report/selection/cleanup.",
+      "minimal_fix": "Skip ratio computation for a backend immediately after recording missing/illegal routed comparison, while retaining the rejection reason.",
+      "observed_failure": false
+    }
+  ],
+  "selection_review": {
+    "cases_interface": "PASS: reads SUMMARY.cases, not supplementary tests, and extracts focus profile/sign cycles.",
+    "workload": "PASS: every normal case compares hashes and physical_blocks with a same-validator baseline.",
+    "legal_route": "PASS for candidates: requires exit 0, full routing, no route errors, DRC 0 and nonnegative hold before eligibility.",
+    "closed_baseline": "PASS: closed baseline must retain strict accepted_frequency at 100 MHz.",
+    "unclosed_baseline": "PASS: candidate WNS cannot worsen; routed-area x measured-cycle ratios are explicitly labeled hypothetical at assumed 100 MHz.",
+    "focus": "PASS: all three focus ratios in every affected backend must be <= 1 and at least one ratio must be < 1.",
+    "area_scope": "PASS: selection parses corresponding route/utilization.rpt with main matrix BRAM/DSP-weighted equivalent Slice formula; unused route_area helper points to synth reports but is not used in selection.",
+    "deployment": "PASS: selected production design RTL hashes are checked against original frozen source before any copies; external modification blocks deployment.",
+    "baseline_routes": {
+      "shake/i": {
+        "accepted_frequency": false,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": -2.949,
+        "whs_ns": 0.119
+      },
+      "shake/c": {
+        "accepted_frequency": false,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": -2.997,
+        "whs_ns": 0.13
+      },
+      "shake/t": {
+        "accepted_frequency": true,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": 0.244,
+        "whs_ns": 0.096
+      },
+      "sha2/i": {
+        "accepted_frequency": false,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": -3.176,
+        "whs_ns": 0.11
+      },
+      "sha2/c": {
+        "accepted_frequency": false,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": -2.776,
+        "whs_ns": 0.12
+      },
+      "sha2/t": {
+        "accepted_frequency": true,
+        "fully_routed": true,
+        "route_has_errors": false,
+        "drc_errors": 0,
+        "wns_ns": 0.178,
+        "whs_ns": 0.096
+      }
+    }
+  },
+  "freeze_review": {
+    "c_control": {
+      "backend": [
+        "shake",
+        "sha2"
+      ],
+      "checked_files": 13,
+      "svh_included": [
+        "rtl/c/executor/instructions.svh"
+      ],
+      "mismatches": []
+    },
+    "c_shared": {
+      "backend": [
+        "shake",
+        "sha2"
+      ],
+      "checked_files": 13,
+      "svh_included": [
+        "rtl/c/executor/instructions.svh"
+      ],
+      "mismatches": []
+    },
+    "i_shared": {
+      "backend": [
+        "shake"
+      ],
+      "checked_files": 13,
+      "svh_included": [
+        "rtl/i/executor/instructions.svh"
+      ],
+      "mismatches": []
+    },
+    "t_shared": {
+      "backend": [
+        "shake"
+      ],
+      "checked_files": 12,
+      "svh_included": [],
+      "mismatches": []
+    }
+  },
+  "cleanup_review": {
+    "authorization": "User explicitly authorized removal of the temporary worktree after verified preservation and measurement-based migration; git worktree remove --force is within that request.",
+    "preservation_status_actual": "preserved_verified",
+    "schema_matches_runner": true,
+    "preservation_tar_sha256_matches": true,
+    "git_status_exact_string_matches": true,
+    "git_status_trailing_newline_preserved": true,
+    "head_matches": true,
+    "source_manifests": {
+      "TRACKED_WORKING_FILES.json": {
+        "entries": 24,
+        "mismatches": []
+      },
+      "UNTRACKED_FILES.json": {
+        "entries": 225,
+        "mismatches": []
+      }
+    },
+    "active_guard": "PASS: checks /proc numeric entries for cwd in temporary root or command arguments containing its absolute path; any hit retains worktree. Conservative substring matches can safely defer cleanup.",
+    "review_note": "Guard covers explicit cwd/argument dependencies; it does not enumerate open file descriptors. Index hash is preserved in evidence but cleanup rechecks exact status, HEAD and working-file checksums rather than the index bytes. No current mismatch observed.",
+    "failed_preconditions": "PASS: unresolved preservation, changed status/HEAD/files or an active process retain the temporary worktree."
+  },
+  "lifecycle_review": {
+    "detached_controller": true,
+    "detached_vivado": true,
+    "refresh_seconds": 60,
+    "completion": "Normal completion chooses, cleans up, publishes complete=true, then exits with no persistent refresh loop.",
+    "robustness_note": "Unexpected worker/JSON exceptions can terminate the controller before final publish; normal command failures are handled and remain ineligible. Missing-result selection edge is separately reported."
+  },
+  "recommendation": "Keep measurements running. Correct the missing/illegal-result early-continue in future runner use. The current detached Python process already loaded its functions, so editing the file does not hot-update its choose() method. If the edge case occurs, finalize from preserved STATE/results with a corrected postprocessor without rerunning Vivado.",
+  "runner_difference": "Only prepare() archive ignore_patterns differs: workspace additionally omits validation directories and *.log; running measurement/selection/cleanup code is identical."
+}

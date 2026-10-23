@@ -1,0 +1,29 @@
+{
+  "schema": "mhbs.shake.stream.absorption.v1",
+  "designs": {
+    "i": {
+      "original_sha256": "719addd549865a615adbf92da9bb7e6953bad48f401253e0e38ecc4968017ee5",
+      "candidate_sha256": "bc86e9ccfbae76cf9fc93e77ed7007473e98aab4598ef80568cb438da6566805",
+      "candidate": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/stream/rtl/i/hash/shake-recipe.sv"
+    },
+    "c": {
+      "original_sha256": "04422c2e5fea88053540d4cdf331cff9a296dfc590da562533b2eefa8f2ef1b7",
+      "candidate_sha256": "fb46d2208b09dcb887ffface927878c9abc4ef7bfa37ddb6850f3ea6eaa19785",
+      "candidate": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/c_idea_migration_staging/stream/rtl/c/hash/shake-recipe.sv"
+    }
+  },
+  "t_existing": true,
+  "rationale": "Replace scalar-path nine-pair 128-bit state read mux with local XOR per selected 64-bit rate word. Original stream write enables, staging and FSM preserved; P>1 scheduled path untouched.",
+  "proof": "For selected rate word w, append_index=floor(w/2); selected old pair half equals sponge_state[w*64+:64]. Word16 uses staged_data low64. Capacity/unselected words remain masked off; clear_stream removes old state in both forms.",
+  "interface_ports_and_cycles_unchanged": true,
+  "validation": {
+    "status": "passed",
+    "source": "../formatter_stream/AUDIT.json",
+    "designs": [
+      "c",
+      "i"
+    ],
+    "cases_each": 459,
+    "stream_stall_cycles_each": 12627
+  }
+}

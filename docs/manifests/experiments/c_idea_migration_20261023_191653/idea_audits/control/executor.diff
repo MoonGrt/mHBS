@@ -1,0 +1,111 @@
+--- current/rtl/c/executor/executor.sv
++++ candidate/rtl/c/executor/executor.sv
+@@ -66,7 +66,7 @@
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+     logic [11:0] checksum;
+-    logic [7:0] transform_index,chain_cursor,endpoint_count,lt_count,lt_cursor;
++    logic [7:0] transform_index,chain_cursor,lt_count,lt_cursor;
+     logic [3:0] lt_level;
+     logic [4:0] layer,node_level,tree_height,auth_level;
+     logic [5:0] group_index;
+@@ -75,17 +75,17 @@
+     logic [1:0] indexing;
+     logic [3:0] macro_op,macro_flags;
+     logic [4:0] macro_desc,macro_route;
+-    logic [63:0] saved_descriptor,saved_chain_descriptor;
+-    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_chain_descriptor;
++    logic [63:0] saved_descriptor;
++    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_descriptor;
+     wire [63:0] route_descriptor=descriptor_data[127:64];
+     wire sign_only=stateful && !verifying && macro_flags[2];
+-    logic [19:0] chain_leaf;
+-    logic [20:0] chain_address;
+     logic [255:0] node_value,emit_value;
+     logic [V-1:0] result;
+     logic [5:0] emit_length;
+-    logic [7:0] emit_base;
+-    logic [3:0] emit_count,emit_cursor;
++    wire [7:0] emit_base=descriptor[59:52];
++    wire [3:0] emit_count=descriptor[51:48];
++    wire [7:0] endpoint_count=descriptor[27:20];
++    logic [3:0] emit_cursor;
+     logic seq_start,seq_complete,control_complete;
+     wire seq_ready,seq_done,seq_error,cmd_valid,command_keep_coordinates,control_valid,control_condition;
+     wire [47:0] cmd;
+@@ -560,12 +560,12 @@
+             leaf_cursor<=0;node_index<=0;node_level<=0;target<=0;target_at_level<=0;
+             tree_height<=0;auth_level<=0;control_base<=0;control_limit<=0;control_flags<=0;indexing<=0;
+             macro_op<=0;macro_desc<=0;macro_route<=0;macro_flags<=0;
+-            saved_descriptor<=0;saved_chain_descriptor<=0;
++            saved_descriptor<=0;
+             task_recipe<=0;task_step<=0;task_chain<=0;task_capture<=0;
+             task_steps<=0;task_capture_after<=0;task_leaf<=0;task_a<=0;task_b<=0;
+-            chain_cursor<=0;endpoint_count<=0;chain_leaf<=0;chain_address<=0;
++            chain_cursor<=0;
+             lt_count<=0;lt_cursor<=0;lt_level<=0;checksum<=0;transform_index<=0;
+-            route_source<=0;emit_length<=0;emit_base<=0;emit_count<=0;emit_cursor<=0;
++            route_source<=0;emit_length<=0;emit_cursor<=0;
+         end else begin
+             done<=0;seq_start<=0;seq_complete<=0;control_complete<=0;abort_execution<=0;
+             if(seq_error && state!=IDLE && state!=FAILED) fail();
+@@ -612,26 +612,25 @@
+                         else start_hash(saved_descriptor,HASH_RESULT);
+                     end
+                     2:begin
+-                        chain_cursor<=0;endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor;
+-                        chain_leaf<=task_leaf;chain_address<=task_b;state<=CHAIN_SETUP;
++                        chain_cursor<=0;state<=CHAIN_SETUP;
+                     end
+                     4:begin checksum<=0;transform_index<=0;state<=TRANSFORM;end
+                     5:if(verifying && stateful) complete_macro();
+-                    else begin emit_base<=descriptor[59:52];emit_count<=descriptor[51:48];emit_cursor<=0;state<=EMIT;end
++                    else begin emit_cursor<=0;state<=EMIT;end
+                     default:fail();
+                 endcase
+                 CHAIN_SETUP:begin
+                     if(endpoint_count==0 || endpoint_count>67) fail();
+                     else if(verifying) begin
+                         task_chain<=0;task_capture<=0;task_step<=descriptor_data[127:64];task_steps<=0;
+-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+-                        task_b<=indexing==1 ? chain_address : 21'(digit(chain_cursor));
++                        task_a<=indexing==1 ? 0 : chain_cursor;
++                        if(indexing!=1) task_b<=21'(digit(chain_cursor));
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+                     end else begin
+                         task_chain<=1;task_step<=descriptor_data[127:64];
+                         task_capture<=leaf_cursor==target && macro_flags[0];
+-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+-                        task_b<=indexing==1 ? chain_address : 21'd0;
++                        task_a<=indexing==1 ? 0 : chain_cursor;
++                        if(indexing!=1) task_b<=21'd0;
+                         task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target)) ?
+                             digit(chain_cursor) : chain_descriptor[19:15];
+                         task_capture_after<=indexing==1 ? 0 : digit(chain_cursor);
+@@ -658,7 +657,7 @@
+                     else state<=REDUCE_SETUP;
+                 end
+                 REDUCE_SETUP:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;task_b<=0;
++                    task_chain<=0;task_capture<=0;task_steps<=0;task_a<=0;task_b<=0;
+                     start_hash(descriptor_data[63:0],stateful ? SF_LEAF : LEAF_SETUP);
+                 end
+                 LEAF_SETUP:begin
+@@ -670,7 +669,7 @@
+                     else state<=LT_SETUP;
+                 end
+                 LT_SETUP:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;
++                    task_chain<=0;task_capture<=0;task_steps<=0;
+                     task_a<={4'd0,lt_level};task_b<=21'(lt_cursor>>1);
+                     result<={{(V-W){1'b0}},endpoint_value0};node_value<=endpoint_value1;
+                     start_hash(descriptor_data[63:0],LT_STORE);
+@@ -688,7 +687,7 @@
+                     route_result(ROUTE_NODE);
+                 end
+                 SF_LEAF:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;
++                    task_chain<=0;task_capture<=0;task_steps<=0;task_a<=0;
+                     task_b<=(21'd1<<stateful_height)+leaf_cursor;
+                     start_hash(descriptor_data[63:0],SF_LEAF_DONE);
+                 end

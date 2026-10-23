@@ -1,0 +1,80 @@
+{
+  "schema": "mhbs.c_idea_migration.control_candidate.v1",
+  "created_at": "2026-10-23T19:14:39.222969",
+  "candidate": "executor.sv",
+  "candidate_sha256": "56aafea9916c84afbd3d9a12508da49549b97ef4bd0d60a9f93355d8919ac16a",
+  "current_sha256": "7eec16011179103a767969f40d5fdeca573dcb48933416a0f9f75832eed57c4d",
+  "temporary_source": "/tmp/mhbs-ablation-c-atp-20261023/rtl/c/executor/executor.sv",
+  "temporary_sha256": "9e74d96864ee0454e42bc2f08058508b4b1e54daecae522b7d84539bfa8aec1a",
+  "derived_from": "temporary lifetime reuse with original backend/profile decode restored",
+  "production_rtl_edited": false,
+  "sequencer_changed": false,
+  "port_and_instance_layout_preserved": true,
+  "sha2_recipe_and_primitive_changed": false,
+  "sha2_files": {
+    "rtl/c/hash/sha2-recipe.sv": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0",
+    "rtl/c/hash/sha256.sv": "e7affefe71404930b739dd8d8ccab23a118628be75e8455a9cc4e932dd185e4f"
+  },
+  "changes": [
+    {
+      "storage": "saved_chain_descriptor",
+      "replacement": "alias saved_descriptor",
+      "proof": "saved_descriptor is written only in LOAD_DESCRIPTOR. No CHAIN path re-enters LOAD_DESCRIPTOR before completing the macro; sequencer waits for completion.",
+      "declared_bits_removed": 64,
+      "estimated_used_bits": 27
+    },
+    {
+      "storage": "endpoint_count",
+      "replacement": "saved_descriptor[27:20]",
+      "proof": "Only CHAIN reads the count; it is initialized by DECODE from the same descriptor and remains constant through all chains/L-tree reductions.",
+      "declared_bits_removed": 8
+    },
+    {
+      "storage": "chain_leaf",
+      "replacement": "retain task_leaf",
+      "proof": "During a CHAIN every assignment to task_leaf was a copy of chain_leaf; software controls cannot execute during the outstanding macro.",
+      "declared_bits_removed": 20
+    },
+    {
+      "storage": "chain_address",
+      "replacement": "retain task_b in indexing==1; derive it normally otherwise",
+      "proof": "FORS mode performs one chain setup and keeps its initial B until setup; non-FORS paths never read chain_address. Later reduction B writes cannot lead back to a FORS CHAIN_SETUP.",
+      "declared_bits_removed": 21
+    },
+    {
+      "storage": "emit_base and emit_count",
+      "replacement": "saved_descriptor[59:52] and [51:48]",
+      "proof": "EMIT iterates while the same macro/descriptor remains outstanding; neither field changes before the last EMIT_NEXT.",
+      "declared_bits_removed": 12
+    }
+  ],
+  "expected_cycles": "unchanged; no state or transition changes",
+  "raw_declared_bits_removed": 125,
+  "estimated_live_ff_removed": 88,
+  "estimate_scope": "Only an estimate: exact FF/LUT/timing outcome must come from synthesis.",
+  "not_migrated": [
+    "Temporary SHA2-specific node_bytes simplification; preserved current decode even for invalid descriptors.",
+    "Temporary sequencer formatting changes.",
+    "Immediate control retirement, shared read/write muxes, cursor merging and CHAIN state fusion."
+  ],
+  "legal_rom_audit": {
+    "layout": "unchanged layout4",
+    "custom_rom": "Safe for arbitrary admitted macro/control streams, not merely canonical generated programs, because one macro is outstanding and no control interleaving is possible.",
+    "dynamic_descriptor_inputs": "CHAIN uses the latched saved_descriptor exactly as before; current external per-request recipe descriptors remain consumed at their original states."
+  },
+  "error_behavior": {
+    "decoder_and_bounds": "unchanged profile, q, arithmetic, RAM, endpoint-count and template rejection guards",
+    "reset_and_abort": "Source descriptor/task context retains original reset; removed private banks cannot affect active paths after reset or abort.",
+    "diagnostic_registers": "Removed private names are internal and not part of module/software ABI. Fault injection that directly writes these deleted private registers is not supported.",
+    "risk": "No new error-priority change expected: sequencer, states, completion handshake and original profile decode are unchanged."
+  },
+  "validation": {
+    "performed": "Read-only lifecycle/ISA audit and exact textual transformation checks only.",
+    "not_performed": "No new simulation/synthesis/route in this subtask.",
+    "recommended": [
+      "Run candidate-only i/c existing controls unit in both backends and normal/SYNTHESIS views.",
+      "Run c SHAKE/SHA2 h10 Verify and SLH128f Sign byte/count/cycle comparison against same frozen baseline.",
+      "Cover FORS four target positions, odd L-tree tail, reset/abort and custom descriptor endpoint count rejection."
+    ]
+  }
+}

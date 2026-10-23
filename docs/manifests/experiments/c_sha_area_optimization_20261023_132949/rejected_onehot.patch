@@ -1,0 +1,120 @@
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/combined/source/rtl/c/hash/sha2-recipe.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 12:13:35.893424261 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/combined/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 13:42:29.504124027 +0800
+@@ -148,6 +148,9 @@
+         SRC_TWO, SRC_THREE, SRC_FOUR, SRC_PAIR, SRC_COUNTER,
+         SRC_IPAD_KEY, SRC_OPAD_KEY, SRC_IPAD, SRC_OPAD
+     } source_t;
++    localparam integer SOURCE_COUNT=int'(SRC_OPAD)+1;
++    localparam integer WORD_CONTROL_BITS=SOURCE_COUNT+4;
++    typedef logic [WORD_CONTROL_BITS-1:0] word_control_t;
+     typedef enum logic [2:0] { ALIGNED, SHIFT_ONE, SHIFT_TWO, BRIDGE_SIX, BRIDGE_SEVEN } window_t;
+     formatter_t formatter;
+     format_t format_kind;
+@@ -156,7 +159,7 @@
+     logic [511:0] block_buffer;
+     logic [255:0] format_address;
+     logic [12:0] format_length;
+-    logic [8:0] word_control[0:2];
++    word_control_t word_control[0:2];
+     window_t window_control;
+     logic [15:0] payload_mask, delimiter_mask;
+     logic length_beat;
+@@ -220,10 +223,10 @@
+             endcase
+         end
+     endfunction
+-    function automatic [8:0] control(input source_t source,input [3:0] word_index);
+-        control={source,word_index};
++    function automatic word_control_t control(input source_t source,input [3:0] word_index);
++        control={SOURCE_COUNT'(1)<<source,word_index};
+     endfunction
+-    function automatic [8:0] payload_control(input format_t kind,input [9:0] word_index);
++    function automatic word_control_t payload_control(input format_t kind,input [9:0] word_index);
+         begin
+             payload_control=control(SRC_ZERO,0);
+             case(kind)
+@@ -255,7 +258,7 @@
+             endcase
+         end
+     endfunction
+-    function automatic [8:0] aligned_control(input format_t kind,input [9:0] w);
++    function automatic word_control_t aligned_control(input format_t kind,input [9:0] w);
+         begin
+             aligned_control=control(SRC_ZERO,0);
+             case(kind)
+@@ -344,36 +347,36 @@
+         endcase
+     endfunction
+     wire [703:0] padded_message=704'(message_buffer);
+-    function automatic [63:0] source_word(input [8:0] selected);
++    function automatic [63:0] source_word(input word_control_t selected);
++        reg [SOURCE_COUNT-1:0] sources;
+         reg [255:0] value;
+-        reg [63:0] literal;
++        reg [63:0] literal,message_word;
+         reg [63:0] key_pad;
+         begin
+-            value=0; literal=0; key_pad=0;
+-            case(source_t'(selected[8:4]))
+-                SRC_SECRET: value=256'(secret_seed);
+-                SRC_PRF: value=256'(secret_prf);
+-                SRC_PUBLIC: value=256'(public_seed);
+-                SRC_ROOT: value=256'(root);
+-                SRC_RANDOM: value=256'(randomizer);
+-                SRC_VALUE: value=digest[format_tag];
+-                SRC_KEY: value=key_value[format_tag];
+-                SRC_RIGHT: value=captured[format_tag];
+-                SRC_ADDRESS: value=format_address;
+-                SRC_LIST0: value=256'(list_data0);
+-                SRC_LIST1: value=256'(list_data1);
+-                SRC_IPAD_KEY: begin value=256'(secret_prf); key_pad=64'h3636363636363636; end
+-                SRC_OPAD_KEY: begin value=256'(secret_prf); key_pad=64'h5c5c5c5c5c5c5c5c; end
+-                SRC_MESSAGE: literal=selected[3:0]<11 ? padded_message[selected[3:0]*64+:64] : 64'd0;
+-                SRC_TWO: literal=64'h0200000000000000;
+-                SRC_THREE: literal=64'h0300000000000000;
+-                SRC_FOUR: literal=64'h0400000000000000;
+-                SRC_PAIR: literal={7'd0,paired[format_tag],56'd0};
+-                SRC_COUNTER: literal=64'h0000000001000000;
+-                SRC_IPAD: literal=64'h3636363636363636;
+-                SRC_OPAD: literal=64'h5c5c5c5c5c5c5c5c;
+-                default: value=0;
+-            endcase
++            // Register the source decode with the beat controls. Only the word
++            // index remains encoded after that boundary; node_word stays shared
++            // across all data banks. control() always selects one source.
++            sources=selected[WORD_CONTROL_BITS-1:4];
++            value=({256{sources[SRC_SECRET]}} & 256'(secret_seed)) |
++                ({256{sources[SRC_PRF] | sources[SRC_IPAD_KEY] | sources[SRC_OPAD_KEY]}} & 256'(secret_prf)) |
++                ({256{sources[SRC_PUBLIC]}} & 256'(public_seed)) |
++                ({256{sources[SRC_ROOT]}} & 256'(root)) |
++                ({256{sources[SRC_RANDOM]}} & 256'(randomizer)) |
++                ({256{sources[SRC_VALUE]}} & digest[format_tag]) |
++                ({256{sources[SRC_KEY]}} & key_value[format_tag]) |
++                ({256{sources[SRC_RIGHT]}} & captured[format_tag]) |
++                ({256{sources[SRC_ADDRESS]}} & format_address) |
++                ({256{sources[SRC_LIST0]}} & 256'(list_data0)) |
++                ({256{sources[SRC_LIST1]}} & 256'(list_data1));
++            message_word=selected[3:0]<11 ? padded_message[selected[3:0]*64+:64] : 64'd0;
++            literal=({64{sources[SRC_MESSAGE]}} & message_word) |
++                ({64{sources[SRC_TWO]}} & 64'h0200000000000000) |
++                ({64{sources[SRC_THREE]}} & 64'h0300000000000000) |
++                ({64{sources[SRC_FOUR]}} & 64'h0400000000000000) |
++                ({64{sources[SRC_PAIR]}} & {7'd0,paired[format_tag],56'd0}) |
++                ({64{sources[SRC_COUNTER]}} & 64'h0000000001000000);
++            key_pad=({64{sources[SRC_IPAD_KEY] | sources[SRC_IPAD]}} & 64'h3636363636363636) |
++                ({64{sources[SRC_OPAD_KEY] | sources[SRC_OPAD]}} & 64'h5c5c5c5c5c5c5c5c);
+             source_word=node_word(value,selected[1:0]) ^ key_pad ^ literal;
+         end
+     endfunction
+@@ -540,7 +543,9 @@
+             case(formatter)
+                 SELECT: if(candidate_valid) prepare_block(int'(candidate));
+                 BUILD: begin
+-                    block_buffer[511-int'(beat)*128-:128]<=formatted_beat;
++                    // Only SEND observes a complete block. Four shifts replace the
++                    // four independently enabled 128-bit write slices.
++                    block_buffer <= {block_buffer[383:0],formatted_beat};
+                     if(beat==3) formatter<=SEND;
+                     else begin
+                         beat<=beat+1'b1;

@@ -29,7 +29,16 @@ module sequencer (
     wire [5:0] back_count={1'b0,token[61:57]}+6'd1;
     wire [4:0] control_op=token[61:57];
     assign ready=state==IDLE;
-    assign program_address=pc;
+    // Read the likely successor while the current token executes. No
+    // context/ALU result feeds the ROM address: branch prediction is static.
+    // A misprediction redirects through FETCH before executing another token.
+    wire predict_branch=control[12:9]==0 || control[12:9]==2;
+    wire loop_back=kind==2 && !(sp!=0 && loop_pc[sp-1]==pc && loop_remaining[sp-1]<=1);
+    wire [7:0] lookahead_address=
+        kind==3 && (control_op==8 || control_op==7 && predict_branch) ? token[20:13] :
+        kind==3 && control_op==9 ? return_pc[!return_depth[0]] :
+        loop_back ? pc-back_count : pc+8'd1;
+    assign program_address=state==FETCH ? pc : lookahead_address;
     assign template_address={token[29],token[61:58]};
     assign command_valid=state==ISSUE;
     assign command_keep_coordinates=token[28];
@@ -47,24 +56,31 @@ module sequencer (
     task automatic advance;
         begin
             if(pc==8'd255) fault();
-            else begin pc<=pc+1'b1;state<=FETCH;end
+            else begin pc<=pc+1'b1;token<=program_data;state<=LOAD;end
         end
     endtask
     // Pure software controls retire on their execution edge. Storage and I/O
     // retain WAIT_CONTROL until the executor reports their actual completion.
     task automatic retire_control;
         begin
-            if(control_op==7 && control_condition) begin pc<=token[20:13];state<=FETCH;end
+            if(control_op==7) begin
+                if(!control_condition && pc==8'd255) fault();
+                else begin
+                    pc<=control_condition ? token[20:13] : pc+8'd1;
+                    if(control_condition==predict_branch) begin token<=program_data;state<=LOAD;end
+                    else state<=FETCH;
+                end
+            end
             else if(control_op==8) begin
                 if(return_depth==2 || pc==8'd255) fault();
                 else begin
                     return_pc[return_depth[0]]<=pc+1'b1;return_depth<=return_depth+1'b1;
-                    pc<=token[20:13];state<=FETCH;
+                    pc<=token[20:13];token<=program_data;state<=LOAD;
                 end
             end else if(control_op==9) begin
                 if(return_depth==0) fault();
                 else begin
-                    pc<=return_pc[!return_depth[0]];return_depth<=return_depth-1'b1;state<=FETCH;
+                    pc<=return_pc[!return_depth[0]];return_depth<=return_depth-1'b1;token<=program_data;state<=LOAD;
                 end
             end else advance();
         end
@@ -100,7 +116,7 @@ module sequencer (
                             if(loop_remaining[sp-1]>1) begin
                                 loop_remaining[sp-1]<=loop_remaining[sp-1]-1'b1;
                                 loop_bias[sp-1]<=loop_bias[sp-1]+loop_delta[sp-1];
-                                pc<=pc-back_count;state<=FETCH;
+                                pc<=pc-back_count;token<=program_data;state<=LOAD;
                             end else begin
                                 loop_bias[sp-1]<=0;sp<=sp-1'b1;advance();
                             end
@@ -108,7 +124,7 @@ module sequencer (
                         else begin
                             loop_pc[sp]<=pc;loop_remaining[sp]<=token[56:51];
                             loop_bias[sp]<=token[50:40];loop_delta[sp]<=token[50:40];
-                            sp<=sp+1'b1;pc<=pc-back_count;state<=FETCH;
+                            sp<=sp+1'b1;pc<=pc-back_count;token<=program_data;state<=LOAD;
                         end
                     end else if(token[27:0]!=0 || template_data[63:17]!=0 ||
                         !(template_data[2:0]==1 || template_data[2:0]==4 || template_data[2:0]==5)) fault();

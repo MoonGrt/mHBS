@@ -1,0 +1,92 @@
+{
+  "schema": "mhbs.i_operand_physical_cut.v2",
+  "candidate": "i_v2",
+  "updated_at": "2026-10-23T20:07:56.702528+08:00",
+  "rtl_finalized": true,
+  "production_rtl_modified": false,
+  "source_sha256": {
+    "executor.sv": {
+      "sha256": "38d056f917cebe3f2821719200a53b0f76bea2a989345dfa1c9bccf9bdedccdf",
+      "v1_sha256": "d5b3ceb59cd39f37a9a3aa2873f106453285c2a1f1c10d5c8a8b0a6285783f3b"
+    },
+    "sequencer.sv": {
+      "sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9",
+      "v1_sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9"
+    }
+  },
+  "basis": "i_prefetch with identical sequencer and descriptor/HASH bubble improvements. No ROM edit in these files; may be combined with independently validated i_rom candidate.",
+  "diagnosis": [
+    {
+      "backend": "shake",
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/routes/i_prefetch/shake/synth/critical_paths.rpt",
+      "report_sha256": "19593257451215b04d0434eb3784f797d12e4deb9ed8379546d7d55ba3885ebc",
+      "wns_ns": -5.071,
+      "logic_levels": 32,
+      "path": "group_index_reg[0]/C -> group_index_reg[0]/CE",
+      "old_fast_cone_still_present": true
+    },
+    {
+      "backend": "sha2",
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/routes/i_prefetch/sha2/synth/critical_paths.rpt",
+      "report_sha256": "834ca8c9e8b2198904a6969f67117fc949ed0f9fdf5dd3a46994c407f7d11042",
+      "wns_ns": -5.071,
+      "logic_levels": 32,
+      "path": "group_index_reg[0]/C -> group_index_reg[0]/CE",
+      "old_fast_cone_still_present": true
+    }
+  ],
+  "physical_cut": {
+    "fast_reader": "narrow_register_read has no FORS_TARGET or DIGIT data source; those selectors return default0 on that function.",
+    "slow_capture_reader": "narrow_read adds the derived FORS_TARGET/DIGIT lookups only for snapshotting both21bit operand registers.",
+    "execute_data": "CONTROL_OPERANDS uses registered operands; every other execution state uses only narrow_register_read.",
+    "pipeline": "No fast data mux input contains actual FORS/DIGIT derived data. This physically separates extraction/mux delay from ALU/legality/writeback; no timing exceptions.",
+    "retirement": "Pure slow controls signal completion in CONTROL_OPERANDS execution edge, suppress delayed control_complete pulse to avoid retiring a following instruction spuriously. Extraonecycle per slow instruction versus fast retirement.",
+    "branch_condition": "Resolved current staged operands feed sequencer on same execution/retirement edge, including correctly and incorrectly predicted branches.",
+    "load_address": "Slow LOAD registers readaddress in CONTROL_OPERANDS before CONTROL_LOAD consumes RAM; fast LOAD retains FETCH address setup.",
+    "store_address": "Accepted STORE registers8bit control_store_slot before CONTROL_STORE writesRAM, including slow selectors; rejected addresses never enter STORE."
+  },
+  "error_semantics": [
+    "Original ISA/encoding/read-only/overflow and RAM108+ rejection checks retained.",
+    "Read stages can update only internal operand/address registers; invalid stores must not assert endpoint_write.",
+    "Implicit/autonomous CHAIN/TREE never introduced; one explicitHASH authorizes each request as before.",
+    "No source/digest lifetime merging; original result/register bank boundaries retained."
+  ],
+  "static_checks": {
+    "fast_reader_excludes_both_derived_sources": true,
+    "staged_completion_pulse_suppressed": true,
+    "slow_load_address_registered": true,
+    "store_address_latched": true,
+    "both_backends_lint_passed": true
+  },
+  "directed_validation": {
+    "status": "passed",
+    "script": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i_v2/run_directed.py",
+    "summary": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i_v2/DIRECTED_VALIDATION.json",
+    "base_cases": 32,
+    "new_cases": 13,
+    "views": [
+      "shake normal",
+      "shake SYNTHESIS",
+      "sha2 normal",
+      "sha2 SYNTHESIS"
+    ],
+    "checks": [
+      "FORS MOV and group read-after-write",
+      "FORS EQ/NE taken and untaken redirects",
+      "FORS RAM slot4 STORE/LOAD plus108 rejection",
+      "DIGIT MOV and A read-after-write",
+      "DIGIT branch and RAM slot1 STORE/LOAD",
+      "two slow operands ADD",
+      "original CALL/RET/PC/LOOP/control fault tests"
+    ],
+    "passed_views": 4,
+    "total_views": 4,
+    "source_unchanged": true,
+    "summary_sha256": "2abc34cc206bfcd6c9e83393bb9804d7817045a8fada88224af1a0459072d47a",
+    "cases_per_view": 45,
+    "accepted_cases_per_view": 18,
+    "rejected_cases_per_view": 27,
+    "hash_requests_per_view": 0
+  },
+  "measurement_status": "No synthesis/route/performance measurements launched by this agent; root owns frozen candidate validation and100MHz implementation."
+}

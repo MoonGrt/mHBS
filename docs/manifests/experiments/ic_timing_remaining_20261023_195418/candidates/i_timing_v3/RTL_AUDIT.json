@@ -1,0 +1,92 @@
+{
+  "schema": "mhbs.i_control_arithmetic_cut.v3",
+  "candidate": "i_v3",
+  "updated_at": "2026-10-23T20:12:16.762628+08:00",
+  "rtl_finalized": true,
+  "production_rtl_modified": false,
+  "basis": "i_v2 executor plus identical prefetch sequencer; use independent i_rom unchanged",
+  "source_sha256": {
+    "executor.sv": {
+      "sha256": "d2152d66d14651087b309d74550ecae8757ca2521fb83a7994fd52ba00676363",
+      "v2_sha256": "38d056f917cebe3f2821719200a53b0f76bea2a989345dfa1c9bccf9bdedccdf"
+    },
+    "sequencer.sv": {
+      "sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9",
+      "v2_sha256": "a2ac8fb5d3472b89dd65dcba49268745bdc65f83a15ff11af47542e2b53072f9"
+    }
+  },
+  "diagnosis": {
+    "source": "i_software 100MHz synth critical_paths.rpt",
+    "sha2": {
+      "wns_ns": 0.27,
+      "logic_levels": 22,
+      "data_path_delay_ns": 9.689,
+      "path": "token[60] -> register read selection ->22bit LOAD address adder -> >=108 -> error/state"
+    },
+    "shake": {
+      "wns_ns": -0.115,
+      "logic_levels": 18,
+      "data_path_delay_ns": 9.897,
+      "path": "token[59] -> register read selection -> arithmetic/result legality -> context CE"
+    }
+  },
+  "physical_cut": {
+    "staged_opcodes": [
+      "ADD",
+      "SHR",
+      "SHL",
+      "LOAD",
+      "STORE"
+    ],
+    "data_source": "ADD and shifts use only staged_control_read0/1; memory address adders use only staged_control_read0/1. No live/fast mux on these operands.",
+    "fast_unary": "INC/XOR1 read DST directly through narrow_register_read rather than an opcode-dependent shared source selector.",
+    "retirement": "Existing CONTROL_OPERANDS executes pure operations and retires the sequencer on same edge. LOAD/STORE keep WAIT_CONTROL until actual RAM completion.",
+    "memory": "All LOADs register read address in CONTROL_OPERANDS before CONTROL_LOAD; all STORE addresses are validated then latched before writing.",
+    "other_slow_reads": "FORS_TARGET/DIGIT stay physically absent from fast register reader and are captured as in i_v2."
+  },
+  "invariants": [
+    "No state enumeration, ports, ROM format, ISA or software program changes",
+    "Each Hash still requires explicit HASH template; no hardware CHAIN/TREE added",
+    "No timing exceptions or P/U specializations",
+    "Existing legality checks and rejected STORE no-side-effect retained"
+  ],
+  "cycle_estimate": {
+    "status": "upper_bound_from_i_software_measured_33B_opcode_counts_not_v3_measurement",
+    "additional_cycles_at_most": 24519,
+    "count_source": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_remaining/20261023_195418/profiles/i_software/sha2/result.json",
+    "op_counts": {
+      "ADD": 4521,
+      "SHR": 6699,
+      "SHL": 2112,
+      "LOAD": 2497,
+      "STORE": 8690
+    },
+    "sha2_remaining_upper_bound": 1665191,
+    "sloth_sha2_remaining": 1784934,
+    "sha2_margin_lower_bound": 119743
+  },
+  "lint": {
+    "both_backends_passed": true,
+    "summary": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i_v3/LINT.json"
+  },
+  "directed_validation": {
+    "status": "passed",
+    "script": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i_v3/run_directed.py",
+    "summary": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/ic_timing_staging/i_v3/DIRECTED_VALIDATION.json",
+    "views": [
+      "shake normal",
+      "shake SYNTHESIS",
+      "sha2 normal",
+      "sha2 SYNTHESIS"
+    ],
+    "cases_per_view": 45,
+    "passed_views": 4,
+    "total_views": 4,
+    "source_unchanged": true,
+    "summary_sha256": "20f992a2cfbd95742b742ad24432c76057f4ac1263560b3fe57b4286b55f4945",
+    "accepted_cases_per_view": 18,
+    "rejected_cases_per_view": 27,
+    "hash_requests_per_view": 0
+  },
+  "measurement_status": "No synthesis/route/profile started by this agent; parent owns frozen candidate measurement."
+}

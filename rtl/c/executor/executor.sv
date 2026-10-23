@@ -43,7 +43,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         ROUTE,TRANSFORM,EMIT,EMIT_NEXT,OUTPUT_CHUNK,DRAIN,FINISH,VERIFY_INPUT,VERIFY_RANDOM,
         VERIFY_CHAIN_INPUT,VERIFY_CHAIN_RUN,VERIFY_CHAIN_ADVANCE,LT_INIT,LT_SETUP,LT_STORE,
         LT_COPY,LT_NEXT,FAILED,LT_FINISH,SF_LEAF,SF_LEAF_DONE,SF_RANDOM,
-        CONTROL,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT
+        CONTROL_EXEC,CONTROL_LOAD,CONTROL_STORE,CONTROL_INPUT,CONTROL_OUTPUT,CONTROL_COMMIT
     } state_t;
     state_t state,continuation;
     logic abort_execution;
@@ -372,9 +372,14 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     wire [4:0] control_src=control[51:47],control_aux=control[46:42];
     wire [20:0] control_immediate=control[41:21];
     wire [3:0] control_cond=control[13:10];
-    wire [20:0] control_dst_value=narrow_read(control_dst);
-    wire [20:0] control_src_value=narrow_read(control_src);
-    wire [20:0] control_aux_value=narrow_read(control_aux);
+    // A software control instruction owns the sequencer token until retirement.
+    // Read its context once, then separate arithmetic from checked writeback.
+    // In particular, the FORS target barrel selector cannot feed the ALU and
+    // register-enable validation network in the same cycle.
+    logic [20:0] control_dst_value,control_src_value,control_aux_value;
+    logic [40:0] control_result;
+    logic [21:0] control_address;
+    logic control_branch_result;
     logic [40:0] control_alu;
     always_comb begin
         case(control_op)
@@ -388,8 +393,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             default:control_alu=0;
         endcase
     end
-    wire [20:0] branch_left=narrow_read(control[56:52]);
-    wire [20:0] branch_right=control[46:42]==1 ? control[41:21] : narrow_read(control[51:47]);
+    wire [20:0] branch_left=control_dst_value;
+    wire [20:0] branch_right=control_aux==1 ? control_immediate : control_src_value;
     logic branch_taken;
     always_comb begin
         case(control[13:10])
@@ -406,9 +411,9 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
             default:branch_taken=0;
         endcase
     end
-    assign control_condition=branch_taken;
-    wire [21:0] control_load_address={1'b0,control_src_value}+{1'b0,control_immediate};
-    wire [21:0] control_store_address={1'b0,control_dst_value}+{1'b0,control_immediate};
+    assign control_condition=control_branch_result;
+    wire [21:0] control_load_address=control_address;
+    wire [21:0] control_store_address=control_address;
     wire [63:0] emit_descriptor=descriptor_data[63:0];
     logic [255:0] emit_source;
     always_comb begin
@@ -460,7 +465,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
     task automatic read_verify_node(input state_t ret);
         begin continuation<=ret;state<=VERIFY_INPUT;end
     endtask
-    task automatic execute_control;
+    task automatic execute_control(input [40:0] write_value);
         begin
                     case(control_op)
                         `CTRL_SET,`CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL:begin
@@ -468,10 +473,10 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                                 (control_op==`CTRL_ADD && (control_src>24 || control_aux>24)) ||
                                 ((control_op==`CTRL_SHR || control_op==`CTRL_SHL) &&
                                     (control_immediate==0 || control_immediate>20)) ||
-                                (|control_alu[40:21]) || (control_alu[20:0]&~narrow_mask(control_dst))!=0 ||
-                                ((control_dst==`CTX_HEIGHT || control_dst==`CTX_LEVEL || control_dst==`CTX_AUTH_LEVEL) && control_alu>20) ||
-                                (control_dst==`CTX_MODE && control_alu>2)) fail();
-                            else begin narrow_write(control_dst,control_alu[20:0]);complete_control();end
+                                (|write_value[40:21]) || (write_value[20:0]&~narrow_mask(control_dst))!=0 ||
+                                ((control_dst==`CTX_HEIGHT || control_dst==`CTX_LEVEL || control_dst==`CTX_AUTH_LEVEL) && write_value>20) ||
+                                (control_dst==`CTX_MODE && write_value>2)) fail();
+                            else begin narrow_write(control_dst,write_value[20:0]);complete_control();end
                         end
                         `CTRL_BR:begin
                             if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
@@ -514,7 +519,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                     if(lt_cursor+2<lt_count) endpoint_read_address<=lt_cursor+2;
                     else endpoint_read_address<=0;
                 end
-                FETCH:if(control_valid && control_op==`CTRL_LOAD && control_load_address<108)
+                CONTROL_COMMIT:if(control_op==`CTRL_LOAD && control_load_address<108)
                     endpoint_read_address<=control_load_address[7:0];
                 default:begin end
             endcase
@@ -554,6 +559,8 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
         if(rst) begin
             state<=IDLE;continuation<=IDLE;done<=0;error<=0;abort_execution<=0;
             seq_start<=0;seq_complete<=0;control_complete<=0;verify_pass<=0;
+            control_dst_value<=0;control_src_value<=0;control_aux_value<=0;
+            control_result<=0;control_address<=0;control_branch_result<=0;
             stateful<=0;xmss<=0;small_signature<=0;stateful_height<=10;
             profile_code<=0;node_bytes<=16;operation<=0;message_length<=0;message_received<=0;
             scalar_tree<=0;scalar_leaf<=0;layer<=0;group_index<=0;
@@ -596,7 +603,21 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                             (node_bytes==16 || value[2][191:128]==job_public_root[191:128]) &&
                             (node_bytes!=32 || value[2][255:192]==job_public_root[255:192]);
                         state<=DRAIN;
-                    end else if(control_valid) execute_control();
+                    end else if(control_valid) begin
+                        case(control_op)
+                            `CTRL_MOV,`CTRL_INC,`CTRL_SHR,`CTRL_XOR1,`CTRL_ADD,`CTRL_SHL,
+                            `CTRL_BR,`CTRL_LOAD,`CTRL_STORE:begin
+                                control_dst_value<=narrow_read(control_dst);
+                                control_src_value<=narrow_read(control_src);
+                                control_aux_value<=narrow_read(control_aux);
+                                state<=CONTROL_EXEC;
+                            end
+                            // SET has no register-read dependency. Wide moves,
+                            // I/O and sequencer-only operations retain their
+                            // original fast path and checked retirement.
+                            default:execute_control({20'd0,control_immediate});
+                        endcase
+                    end
                     else if(cmd_valid) begin
                         macro_op<=cmd[47:44];macro_desc<=cmd[40:36];macro_route<=cmd[32:28];macro_flags<=cmd[27:24];
                         if(!command_keep_coordinates) begin layer<=cmd[23:19];group_index<=cmd[18:13];end
@@ -746,6 +767,25 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
                     else start_hash(descriptor_data[63:0],VERIFY_CHAIN_ADVANCE);
                 VERIFY_CHAIN_ADVANCE:begin task_b<={17'd0,task_b[3:0]+4'd1};state<=VERIFY_CHAIN_RUN;end
                 OUTPUT_CHUNK:state<=continuation;
+                CONTROL_EXEC:begin
+                    case(control_op)
+                        `CTRL_BR:begin
+                            if(control_cond>9 || control_aux>1 || control_dst>24 || control_src>24 ||
+                                ((control_cond==`COND_SIBLING || control_cond==`COND_SAME_PARENT) && control_aux!=0)) fail();
+                            else begin control_branch_result<=branch_taken;complete_control();end
+                        end
+                        `CTRL_LOAD:begin
+                            control_address<={1'b0,control_src_value}+{1'b0,control_immediate};
+                            state<=CONTROL_COMMIT;
+                        end
+                        `CTRL_STORE:begin
+                            control_address<={1'b0,control_dst_value}+{1'b0,control_immediate};
+                            state<=CONTROL_COMMIT;
+                        end
+                        default:begin control_result<=control_alu;state<=CONTROL_COMMIT;end
+                    endcase
+                end
+                CONTROL_COMMIT:execute_control(control_result);
                 CONTROL_LOAD:begin wide_write(control_dst,endpoint_value0);complete_control();end
                 CONTROL_STORE:complete_control();
                 CONTROL_INPUT:if(verify_valid) begin wide_write(control_dst,verify_data);complete_control();end

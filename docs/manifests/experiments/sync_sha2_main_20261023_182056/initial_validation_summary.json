@@ -1,0 +1,832 @@
+{
+  "upstream_commit": "a4a09e6f6ef901585e63aa8f37175b4931fad1cf",
+  "updated_at": "2026-10-23T18:33:20.598312+08:00",
+  "complete": true,
+  "jobs": {
+    "primitive_c": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 1.6046080589294434,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/primitive_c.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_sha256.py",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "SHA256_PASS P=1 U=1 vectors=181 cycles=12858 stalls=1267 simultaneous=1 reset_replay=1",
+        "SHA256 validation 1/1; /tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/source/build/ablation/c/sha256_check/VALIDATION.json"
+      ]
+    },
+    "prefix_c_P1": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 8.90443754196167,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/prefix_c_P1.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_sha2_prefix_cache.py",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "SHA2_PREFIX_CACHE_PASS P1U1 scalar_cases=29 batch_groups=6 contexts=1 reset_replay=1"
+      ]
+    },
+    "prefix_c_P4": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 12.331099271774292,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/prefix_c_P4.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_sha2_prefix_cache.py",
+            "--pipeline",
+            "4",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "SHA2_PREFIX_CACHE_PASS P4U1 scalar_cases=29 batch_groups=6 contexts=4 reset_replay=1"
+      ]
+    },
+    "prefix_c_P1_synthesis": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 9.04403018951416,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/prefix_c_P1_synthesis.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_sha2_prefix_cache.py",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1",
+            "--synthesis"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "SHA2_PREFIX_CACHE_PASS P1U1 scalar_cases=29 batch_groups=6 contexts=1 reset_replay=1"
+      ]
+    },
+    "recipes_i": {
+      "status": "passed",
+      "design": "i",
+      "elapsed_s": 7.977463722229004,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/recipes_i.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_recipes.py",
+            "--hash",
+            "sha2",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "RECIPE_PASS cases=345 mask=ffff stream_stall_cycles=0"
+      ]
+    },
+    "core_i": {
+      "status": "passed",
+      "design": "i",
+      "elapsed_s": 452.8905863761902,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/core_i.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128s",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h20",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h20",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":4496,\"HASH\":4495,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":42880,\"recipe_requests\":4495,\"dynamic_instructions\":47376}",
+        "HASH_TRACE_METRICS {\"hashes\":4495,\"blocks\":4568,\"sum256\":\"48c7fc6caf0b50a99db29fcb28c2e1b9ac504d1a48f9ee19d039783317f1bc4f\",\"xor256\":\"62690beae8678ae30e2b0e9252815aac11c84b8a5a4c959a552a98a3214b279d\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=451415 total=451420 hashes=4495 permutations=4568 tamper=0 logical_permutations=9062 seconds=0.214263",
+        "MACRO_METRICS {\"commands\":104965,\"HASH\":104922,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":1047152,\"recipe_requests\":104922,\"dynamic_instructions\":1152117}",
+        "HASH_TRACE_METRICS {\"hashes\":104925,\"blocks\":106513,\"sum256\":\"30ca07f002046097038c40114ac4ce6a7c4f790fb8c7c6599c11667967a6e163\",\"xor256\":\"aadc2bbe8d8b69ebd3d6efad7ed781c837d7da19c977afd8b098e2d2f92d8c95\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=10633206 total=10633211 hashes=104925 permutations=106513 tamper=0 logical_permutations=211432 seconds=4.58255",
+        "MACRO_METRICS {\"commands\":6455,\"HASH\":6412,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":37388,\"recipe_requests\":6411,\"dynamic_instructions\":43843}",
+        "HASH_TRACE_METRICS {\"hashes\":6413,\"blocks\":6622,\"sum256\":\"1b2302679396692d1f7169b7707c01b9f3dc946fd82dfdc67eb86286b0311932\",\"xor256\":\"d1894f261c8e820c9443ae2627f0efd9f1ca34029a71aee15d3aa6df82eedca2\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=608100 total=608105 hashes=6413 permutations=6622 tamper=0 logical_permutations=13031 seconds=0.359322",
+        "MACRO_METRICS {\"commands\":1166336,\"HASH\":1166335,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":10674265,\"recipe_requests\":1166335,\"dynamic_instructions\":11840601}",
+        "HASH_TRACE_METRICS {\"hashes\":3430396,\"blocks\":4733947,\"sum256\":\"e77f31cace80d7e2a9840a833da28a4082f41711b7a4385f4b4fbccbaf250149\",\"xor256\":\"18a3884b5830226736a8d47d45777ae310713287b67538d57818eb976b1ba697\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=357822308 total=357822313 hashes=3430396 permutations=4733947 tamper=0 logical_permutations=6998007 seconds=154.69",
+        "MACRO_METRICS {\"commands\":1166901,\"HASH\":1166899,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":10681679,\"recipe_requests\":1166899,\"dynamic_instructions\":11848580}",
+        "HASH_TRACE_METRICS {\"hashes\":3431950,\"blocks\":4736133,\"sum256\":\"af7d41dfa58f8e3ff7dbc8dd7d00fadc2e7f0ef2e5581e9ec417cb6ca6ea8ac1\",\"xor256\":\"fdad686e8c650bcf7909f6ba715da76b0cad1b431c03350d5e734257010ac9b7\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=357993035 total=357993040 hashes=3431950 permutations=4736133 tamper=0 logical_permutations=7001183 seconds=175.403",
+        "MACRO_METRICS {\"commands\":590,\"HASH\":588,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":3493,\"recipe_requests\":587,\"dynamic_instructions\":4083}",
+        "HASH_TRACE_METRICS {\"hashes\":1835,\"blocks\":2500,\"sum256\":\"fe104f4e920c911d67918346a75bd8c5b6c4a53a14a99ab68dd9fcbf03548269\",\"xor256\":\"0e1c977cd17302294bcfc169e90712b491e43fa4747e3ccc52f05a6ed14a32f1\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=184838 total=184843 hashes=1835 permutations=2500 tamper=0 logical_permutations=3747 seconds=0.138509",
+        "MACRO_METRICS {\"commands\":1100800,\"HASH\":1100799,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":9924696,\"recipe_requests\":1100799,\"dynamic_instructions\":11025496}",
+        "HASH_TRACE_METRICS {\"hashes\":1100799,\"blocks\":1135614,\"sum256\":\"70c3c5d38b6ba718c9bfdb7efd16d6a9d36764771a639d1ce8f5af99a37fcfeb\",\"xor256\":\"24c9ee537bda406acb94c9cb4daacfcae3fbfbc28e2b37100ea580af67e53661\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=110629937 total=110629942 hashes=1100799 permutations=1135614 tamper=0 logical_permutations=1135614 seconds=52.7611",
+        "MACRO_METRICS {\"commands\":1101350,\"HASH\":1101347,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":9931969,\"recipe_requests\":1101347,\"dynamic_instructions\":11033319}",
+        "HASH_TRACE_METRICS {\"hashes\":1101347,\"blocks\":1136162,\"sum256\":\"542c1c0f201b3fbc6978a0a2b964743329e86fa34aee61d43dd587a31c1bd880\",\"xor256\":\"eefe5f7f519029c9b0a4383465b6718534a107b754c85b71b37ba7046739b50e\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=110688810 total=110688815 hashes=1101347 permutations=1136162 tamper=0 logical_permutations=1136162 seconds=52.7095",
+        "MACRO_METRICS {\"commands\":541,\"HASH\":538,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":2830,\"recipe_requests\":538,\"dynamic_instructions\":3371}",
+        "HASH_TRACE_METRICS {\"hashes\":538,\"blocks\":581,\"sum256\":\"e67da092afcc6ae3c0ba4bd4a3dc84e374848ca389f7948581726f6af672ade0\",\"xor256\":\"52ce814a72b3558482fb9f0f7d7e0626b8d6fd3898592e50d1f9b230ce26c3d8\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=52212 total=52217 hashes=538 permutations=581 tamper=0 logical_permutations=581 seconds=0.0419546",
+        "MACRO_METRICS {\"commands\":2203,\"HASH\":2190,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":13,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":14870,\"recipe_requests\":2189,\"dynamic_instructions\":17073}",
+        "HASH_TRACE_METRICS {\"hashes\":2190,\"blocks\":2258,\"sum256\":\"1b23b4d8dafe626f0fb49fd9f56bfa2903283834389ce916945990c52d1d622e\",\"xor256\":\"ad42c2536a91bf38e212306d6654e86fc5f345801b83bd5f47c5f5840a761b6e\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=211816 total=211821 hashes=2190 permutations=2258 tamper=0 logical_permutations=4445 seconds=0.143986",
+        "MACRO_METRICS {\"commands\":570,\"HASH\":568,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":3523,\"recipe_requests\":567,\"dynamic_instructions\":4093}",
+        "HASH_TRACE_METRICS {\"hashes\":1785,\"blocks\":2440,\"sum256\":\"261e075932c398e9d03745f757ba1f484440805cebbc72a6b0f55e56804eb725\",\"xor256\":\"93e6197d56e4b046c1f1ab2665c39100cf061999be1e106802189403ae6f7681\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=180598 total=180603 hashes=1785 permutations=2440 tamper=0 logical_permutations=3657 seconds=0.127585",
+        "MACRO_METRICS {\"commands\":551,\"HASH\":548,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":2990,\"recipe_requests\":548,\"dynamic_instructions\":3541}",
+        "HASH_TRACE_METRICS {\"hashes\":548,\"blocks\":601,\"sum256\":\"29e0a2ae61650990b52bc72cda25620057b5c6fd8206d54443b846dcacf76849\",\"xor256\":\"114e1c063cb9b725bf23e2e97ab1bf59922084fe4283a24ef7e893a6185029d7\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=54032 total=54037 hashes=548 permutations=601 tamper=0 logical_permutations=601 seconds=0.0424772"
+      ]
+    },
+    "shake_i": {
+      "status": "passed",
+      "design": "i",
+      "elapsed_s": 8.81432032585144,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/shake_i.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":104980,\"HASH\":104937,\"CHAIN\":0,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":1047352,\"recipe_requests\":104937,\"dynamic_instructions\":1152332}",
+        "HASH_TRACE_METRICS {\"hashes\":104937,\"blocks\":105641,\"sum256\":\"341e297bb901f6d9bbf5db96987a8c753a87dad5a9527b6adb54b7ecdffe08ef\",\"xor256\":\"7c50fdcfc634085b5bd5d1fb72436b160a7143a705e96d7b7cb4067cce468bb1\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=5825429 total=5825434 hashes=104937 permutations=105641 tamper=0 logical_permutations=105641 seconds=2.04365"
+      ]
+    },
+    "recipes_c": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 7.495959997177124,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/recipes_c.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_recipes.py",
+            "--hash",
+            "sha2",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "RECIPE_PASS cases=345 mask=ffff stream_stall_cycles=0"
+      ]
+    },
+    "core_c": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 383.5995717048645,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/core_c.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128s",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h20",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h20",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":16,\"HASH\":7,\"CHAIN\":8,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":340}",
+        "HASH_TRACE_METRICS {\"hashes\":4495,\"blocks\":4568,\"sum256\":\"48c7fc6caf0b50a99db29fcb28c2e1b9ac504d1a48f9ee19d039783317f1bc4f\",\"xor256\":\"62690beae8678ae30e2b0e9252815aac11c84b8a5a4c959a552a98a3214b279d\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=301709 total=301714 hashes=4495 permutations=4568 tamper=0 logical_permutations=9062 seconds=0.145594",
+        "MACRO_METRICS {\"commands\":4564,\"HASH\":2233,\"CHAIN\":2288,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":103213}",
+        "HASH_TRACE_METRICS {\"hashes\":104925,\"blocks\":106513,\"sum256\":\"30ca07f002046097038c40114ac4ce6a7c4f790fb8c7c6599c11667967a6e163\",\"xor256\":\"aadc2bbe8d8b69ebd3d6efad7ed781c837d7da19c977afd8b098e2d2f92d8c95\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=7390104 total=7390109 hashes=104925 permutations=106513 tamper=0 logical_permutations=211432 seconds=3.1913",
+        "MACRO_METRICS {\"commands\":365,\"HASH\":267,\"CHAIN\":55,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":6613}",
+        "HASH_TRACE_METRICS {\"hashes\":6413,\"blocks\":6622,\"sum256\":\"1b2302679396692d1f7169b7707c01b9f3dc946fd82dfdc67eb86286b0311932\",\"xor256\":\"d1894f261c8e820c9443ae2627f0efd9f1ca34029a71aee15d3aa6df82eedca2\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=517921 total=517926 hashes=6413 permutations=6622 tamper=0 logical_permutations=13031 seconds=0.305374",
+        "MACRO_METRICS {\"commands\":2048,\"HASH\":1023,\"CHAIN\":1024,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":30712}",
+        "HASH_TRACE_METRICS {\"hashes\":3430396,\"blocks\":4733947,\"sum256\":\"e77f31cace80d7e2a9840a833da28a4082f41711b7a4385f4b4fbccbaf250149\",\"xor256\":\"18a3884b5830226736a8d47d45777ae310713287b67538d57818eb976b1ba697\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=323059356 total=323059361 hashes=3430396 permutations=4733947 tamper=0 logical_permutations=6998007 seconds=138.013",
+        "MACRO_METRICS {\"commands\":2052,\"HASH\":1025,\"CHAIN\":1025,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":32800}",
+        "HASH_TRACE_METRICS {\"hashes\":3431950,\"blocks\":4736133,\"sum256\":\"af7d41dfa58f8e3ff7dbc8dd7d00fadc2e7f0ef2e5581e9ec417cb6ca6ea8ac1\",\"xor256\":\"fdad686e8c650bcf7909f6ba715da76b0cad1b431c03350d5e734257010ac9b7\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=323215019 total=323215024 hashes=3431950 permutations=4736133 tamper=0 logical_permutations=7001183 seconds=154.01",
+        "MACRO_METRICS {\"commands\":15,\"HASH\":12,\"CHAIN\":1,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":171}",
+        "HASH_TRACE_METRICS {\"hashes\":1835,\"blocks\":2500,\"sum256\":\"fe104f4e920c911d67918346a75bd8c5b6c4a53a14a99ab68dd9fcbf03548269\",\"xor256\":\"0e1c977cd17302294bcfc169e90712b491e43fa4747e3ccc52f05a6ed14a32f1\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=174770 total=174775 hashes=1835 permutations=2500 tamper=0 logical_permutations=3747 seconds=0.140741",
+        "MACRO_METRICS {\"commands\":2048,\"HASH\":1023,\"CHAIN\":1024,\"TREE\":0,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":31735}",
+        "HASH_TRACE_METRICS {\"hashes\":1100799,\"blocks\":1135614,\"sum256\":\"70c3c5d38b6ba718c9bfdb7efd16d6a9d36764771a639d1ce8f5af99a37fcfeb\",\"xor256\":\"24c9ee537bda406acb94c9cb4daacfcae3fbfbc28e2b37100ea580af67e53661\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=74950504 total=74950509 hashes=1100799 permutations=1135614 tamper=0 logical_permutations=1135614 seconds=37.8251",
+        "MACRO_METRICS {\"commands\":2052,\"HASH\":1024,\"CHAIN\":1025,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":33823}",
+        "HASH_TRACE_METRICS {\"hashes\":1101347,\"blocks\":1136162,\"sum256\":\"542c1c0f201b3fbc6978a0a2b964743329e86fa34aee61d43dd587a31c1bd880\",\"xor256\":\"eefe5f7f519029c9b0a4383465b6718534a107b754c85b71b37ba7046739b50e\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=74993335 total=74993340 hashes=1101347 permutations=1136162 tamper=0 logical_permutations=1136162 seconds=37.9588",
+        "MACRO_METRICS {\"commands\":15,\"HASH\":11,\"CHAIN\":1,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":181}",
+        "HASH_TRACE_METRICS {\"hashes\":538,\"blocks\":581,\"sum256\":\"e67da092afcc6ae3c0ba4bd4a3dc84e374848ca389f7948581726f6af672ade0\",\"xor256\":\"52ce814a72b3558482fb9f0f7d7e0626b8d6fd3898592e50d1f9b230ce26c3d8\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=44063 total=44068 hashes=538 permutations=581 tamper=0 logical_permutations=581 seconds=0.0354092",
+        "MACRO_METRICS {\"commands\":268,\"HASH\":234,\"CHAIN\":21,\"TREE\":0,\"TRANSFORM\":13,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":5070}",
+        "HASH_TRACE_METRICS {\"hashes\":2190,\"blocks\":2258,\"sum256\":\"1b23b4d8dafe626f0fb49fd9f56bfa2903283834389ce916945990c52d1d622e\",\"xor256\":\"ad42c2536a91bf38e212306d6654e86fc5f345801b83bd5f47c5f5840a761b6e\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=185942 total=185947 hashes=2190 permutations=2258 tamper=0 logical_permutations=4445 seconds=0.142723",
+        "MACRO_METRICS {\"commands\":25,\"HASH\":22,\"CHAIN\":1,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0,\"control_instructions\":321}",
+        "HASH_TRACE_METRICS {\"hashes\":1785,\"blocks\":2440,\"sum256\":\"261e075932c398e9d03745f757ba1f484440805cebbc72a6b0f55e56804eb725\",\"xor256\":\"93e6197d56e4b046c1f1ab2665c39100cf061999be1e106802189403ae6f7681\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=171090 total=171095 hashes=1785 permutations=2440 tamper=0 logical_permutations=3657 seconds=0.140619",
+        "MACRO_METRICS {\"commands\":25,\"HASH\":21,\"CHAIN\":1,\"TREE\":0,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0,\"control_instructions\":341}",
+        "HASH_TRACE_METRICS {\"hashes\":548,\"blocks\":601,\"sum256\":\"29e0a2ae61650990b52bc72cda25620057b5c6fd8206d54443b846dcacf76849\",\"xor256\":\"114e1c063cb9b725bf23e2e97ab1bf59922084fe4283a24ef7e893a6185029d7\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=46033 total=46038 hashes=548 permutations=601 tamper=0 logical_permutations=601 seconds=0.0366986"
+      ]
+    },
+    "shake_c": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 6.598170518875122,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/shake_c.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":4564,\"HASH\":2233,\"CHAIN\":2288,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":103213}",
+        "HASH_TRACE_METRICS {\"hashes\":104937,\"blocks\":105641,\"sum256\":\"341e297bb901f6d9bbf5db96987a8c753a87dad5a9527b6adb54b7ecdffe08ef\",\"xor256\":\"7c50fdcfc634085b5bd5d1fb72436b160a7143a705e96d7b7cb4067cce468bb1\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=2958730 total=2958735 hashes=104937 permutations=105641 tamper=0 logical_permutations=105641 seconds=1.05099"
+      ]
+    },
+    "recipes_t": {
+      "status": "passed",
+      "design": "t",
+      "elapsed_s": 7.0964109897613525,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/recipes_t.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_recipes.py",
+            "--hash",
+            "sha2",
+            "--pipeline",
+            "1",
+            "--unroll",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "RECIPE_PASS cases=345 mask=ffff stream_stall_cycles=0"
+      ]
+    },
+    "core_t": {
+      "status": "failed",
+      "design": "t",
+      "elapsed_s": 394.50569462776184,
+      "returncode": 1,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/core_t.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "keygen",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "lms_h10",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128s",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        },
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "xmss_h20",
+            "verify",
+            "1",
+            "1"
+          ],
+          "returncode": 1
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":2,\"HASH\":0,\"CHAIN\":0,\"TREE\":1,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":8}",
+        "HASH_TRACE_METRICS {\"hashes\":4495,\"blocks\":4568,\"sum256\":\"48c7fc6caf0b50a99db29fcb28c2e1b9ac504d1a48f9ee19d039783317f1bc4f\",\"xor256\":\"62690beae8678ae30e2b0e9252815aac11c84b8a5a4c959a552a98a3214b279d\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=300329 total=300334 hashes=4495 permutations=4568 tamper=0 logical_permutations=9062 seconds=0.139432",
+        "MACRO_METRICS {\"commands\":101,\"HASH\":3,\"CHAIN\":0,\"TREE\":55,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":2288}",
+        "HASH_TRACE_METRICS {\"hashes\":104925,\"blocks\":106513,\"sum256\":\"30ca07f002046097038c40114ac4ce6a7c4f790fb8c7c6599c11667967a6e163\",\"xor256\":\"aadc2bbe8d8b69ebd3d6efad7ed781c837d7da19c977afd8b098e2d2f92d8c95\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=7046000 total=7046005 hashes=104925 permutations=106513 tamper=0 logical_permutations=211432 seconds=3.11239",
+        "MACRO_METRICS {\"commands\":101,\"HASH\":3,\"CHAIN\":0,\"TREE\":55,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":55}",
+        "HASH_TRACE_METRICS {\"hashes\":6413,\"blocks\":6622,\"sum256\":\"1b2302679396692d1f7169b7707c01b9f3dc946fd82dfdc67eb86286b0311932\",\"xor256\":\"d1894f261c8e820c9443ae2627f0efd9f1ca34029a71aee15d3aa6df82eedca2\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=496124 total=496129 hashes=6413 permutations=6622 tamper=0 logical_permutations=13031 seconds=0.295636",
+        "MACRO_METRICS {\"commands\":2,\"HASH\":0,\"CHAIN\":0,\"TREE\":1,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":1024}",
+        "HASH_TRACE_METRICS {\"hashes\":3430396,\"blocks\":4733947,\"sum256\":\"e77f31cace80d7e2a9840a833da28a4082f41711b7a4385f4b4fbccbaf250149\",\"xor256\":\"18a3884b5830226736a8d47d45777ae310713287b67538d57818eb976b1ba697\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=322886340 total=322886345 hashes=3430396 permutations=4733947 tamper=0 logical_permutations=6998007 seconds=141.386",
+        "MACRO_METRICS {\"commands\":6,\"HASH\":2,\"CHAIN\":1,\"TREE\":1,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":1024}",
+        "HASH_TRACE_METRICS {\"hashes\":3431950,\"blocks\":4736133,\"sum256\":\"af7d41dfa58f8e3ff7dbc8dd7d00fadc2e7f0ef2e5581e9ec417cb6ca6ea8ac1\",\"xor256\":\"fdad686e8c650bcf7909f6ba715da76b0cad1b431c03350d5e734257010ac9b7\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=323035720 total=323035725 hashes=3431950 permutations=4736133 tamper=0 logical_permutations=7001183 seconds=162.104",
+        "MACRO_METRICS {\"commands\":6,\"HASH\":2,\"CHAIN\":1,\"TREE\":1,\"TRANSFORM\":1,\"EMIT\":1,\"TREE_child_CHAIN\":0}",
+        "HASH_TRACE_METRICS {\"hashes\":1835,\"blocks\":2500,\"sum256\":\"fe104f4e920c911d67918346a75bd8c5b6c4a53a14a99ab68dd9fcbf03548269\",\"xor256\":\"0e1c977cd17302294bcfc169e90712b491e43fa4747e3ccc52f05a6ed14a32f1\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=174150 total=174155 hashes=1835 permutations=2500 tamper=0 logical_permutations=3747 seconds=0.139626",
+        "MACRO_METRICS {\"commands\":2,\"HASH\":0,\"CHAIN\":0,\"TREE\":1,\"TRANSFORM\":0,\"EMIT\":1,\"TREE_child_CHAIN\":1024}",
+        "HASH_TRACE_METRICS {\"hashes\":1100799,\"blocks\":1135614,\"sum256\":\"70c3c5d38b6ba718c9bfdb7efd16d6a9d36764771a639d1ce8f5af99a37fcfeb\",\"xor256\":\"24c9ee537bda406acb94c9cb4daacfcae3fbfbc28e2b37100ea580af67e53661\"}",
+        "STATEFUL_PASS P1U1 op=0 cycles=74774419 total=74774424 hashes=1100799 permutations=1135614 tamper=0 logical_permutations=1135614 seconds=38.1264",
+        "MACRO_METRICS {\"commands\":6,\"HASH\":1,\"CHAIN\":1,\"TREE\":1,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":1024}",
+        "HASH_TRACE_METRICS {\"hashes\":1101347,\"blocks\":1136162,\"sum256\":\"542c1c0f201b3fbc6978a0a2b964743329e86fa34aee61d43dd587a31c1bd880\",\"xor256\":\"eefe5f7f519029c9b0a4383465b6718534a107b754c85b71b37ba7046739b50e\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=74810967 total=74810972 hashes=1101347 permutations=1136162 tamper=0 logical_permutations=1136162 seconds=38.1809",
+        "MACRO_METRICS {\"commands\":6,\"HASH\":1,\"CHAIN\":1,\"TREE\":1,\"TRANSFORM\":1,\"EMIT\":2,\"TREE_child_CHAIN\":0}",
+        "HASH_TRACE_METRICS {\"hashes\":538,\"blocks\":581,\"sum256\":\"e67da092afcc6ae3c0ba4bd4a3dc84e374848ca389f7948581726f6af672ade0\",\"xor256\":\"52ce814a72b3558482fb9f0f7d7e0626b8d6fd3898592e50d1f9b230ce26c3d8\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=43413 total=43418 hashes=538 permutations=581 tamper=0 logical_permutations=581 seconds=0.0350238",
+        "MACRO_METRICS {\"commands\":37,\"HASH\":3,\"CHAIN\":0,\"TREE\":21,\"TRANSFORM\":13,\"EMIT\":0,\"TREE_child_CHAIN\":21}",
+        "HASH_TRACE_METRICS {\"hashes\":2190,\"blocks\":2258,\"sum256\":\"1b23b4d8dafe626f0fb49fd9f56bfa2903283834389ce916945990c52d1d622e\",\"xor256\":\"ad42c2536a91bf38e212306d6654e86fc5f345801b83bd5f47c5f5840a761b6e\"}",
+        "STATEFUL_PASS P1U1 op=2 cycles=169374 total=169379 hashes=2190 permutations=2258 tamper=0 logical_permutations=4445 seconds=0.141262"
+      ]
+    },
+    "shake_t": {
+      "status": "passed",
+      "design": "t",
+      "elapsed_s": 7.539435625076294,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/shake_t.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":101,\"HASH\":3,\"CHAIN\":0,\"TREE\":55,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":2288}",
+        "HASH_TRACE_METRICS {\"hashes\":104937,\"blocks\":105641,\"sum256\":\"341e297bb901f6d9bbf5db96987a8c753a87dad5a9527b6adb54b7ecdffe08ef\",\"xor256\":\"7c50fdcfc634085b5bd5d1fb72436b160a7143a705e96d7b7cb4067cce468bb1\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=2614610 total=2614615 hashes=104937 permutations=105641 tamper=0 logical_permutations=105641 seconds=0.848121"
+      ]
+    },
+    "core_c_synthesis": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 14.077948808670044,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/core_c_synthesis.log",
+      "commands": [
+        {
+          "command": [
+            "bash",
+            "scripts/simulate_fast.sh",
+            "slh_128f",
+            "sign",
+            "1",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "MACRO_METRICS {\"commands\":4564,\"HASH\":2233,\"CHAIN\":2288,\"TREE\":0,\"TRANSFORM\":43,\"EMIT\":0,\"TREE_child_CHAIN\":0,\"control_instructions\":103213}",
+        "HASH_TRACE_METRICS {\"hashes\":104925,\"blocks\":106513,\"sum256\":\"30ca07f002046097038c40114ac4ce6a7c4f790fb8c7c6599c11667967a6e163\",\"xor256\":\"aadc2bbe8d8b69ebd3d6efad7ed781c837d7da19c977afd8b098e2d2f92d8c95\"}",
+        "STATEFUL_PASS P1U1 op=1 cycles=7390104 total=7390109 hashes=104925 permutations=106513 tamper=0 logical_permutations=211432 seconds=3.43825"
+      ]
+    },
+    "top_c_synthesis_signature": {
+      "status": "passed",
+      "design": "c",
+      "elapsed_s": 16.631027460098267,
+      "returncode": 0,
+      "log": "/tmp/mhbs-ablation-c-atp-20261023/build/sync_sha2_main/20261023_182056/logs/top_c_synthesis_signature.log",
+      "commands": [
+        {
+          "command": [
+            "python3",
+            "-B",
+            "scripts/check_top_signature.py",
+            "--hash",
+            "sha2",
+            "--synthesis",
+            "1",
+            "--signature",
+            "1"
+          ],
+          "returncode": 0
+        }
+      ],
+      "markers": [
+        "SYNTHESIS=1 MHBS_SIGNATURE_STORE=1 TOP_SIGNATURE_PASS bytes=17088 hashes=104925 permutations=106513"
+      ]
+    }
+  },
+  "synthesis_started": false,
+  "routing_started": false,
+  "scope": "i/c/t shared SHA2 backend migration"
+}

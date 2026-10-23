@@ -1,0 +1,456 @@
+diff --git a/DESIGNS.json b/DESIGNS.json
+index 7dcdfa2d..7e58c3ee 100644
+--- a/DESIGNS.json
++++ b/DESIGNS.json
+@@ -104,13 +104,13 @@
+       "fixtures": "tb/vectors/c",
+       "build": "build/ablation/c",
+       "sha256": {
+-        "rtl/c/executor/executor.sv": "7eec16011179103a767969f40d5fdeca573dcb48933416a0f9f75832eed57c4d",
++        "rtl/c/executor/executor.sv": "9e74d96864ee0454e42bc2f08058508b4b1e54daecae522b7d84539bfa8aec1a",
+         "rtl/c/executor/instructions.svh": "d869832ea07b0994b6d91851b1880b67f098cb09e17b895cbfeb8e15c86d220c",
+         "rtl/c/executor/sequencer.sv": "3469b5c6e75befe8c96ebd93728a54c1c30346d0fdb0bad78058de700fa55a17",
+         "rtl/c/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+-        "rtl/c/hash/sha2-recipe.sv": "798454974b2eb7ce98cafba2838e54f4f0961b8cfb9f2546c19216ac14874f81",
++        "rtl/c/hash/sha2-recipe.sv": "1bdfce52058432358036cfc17d9018ea405f24d6df46ba4d2c5b2c71b50652e4",
+         "rtl/c/hash/sha256.sv": "611775b5ff93a5ab3f2785c77cc38f5f604b9153f65d1e81a00e14ea349a7b0a",
+-        "rtl/c/hash/shake-recipe.sv": "04422c2e5fea88053540d4cdf331cff9a296dfc590da562533b2eefa8f2ef1b7",
++        "rtl/c/hash/shake-recipe.sv": "bc86e9ccfbae76cf9fc93e77ed7007473e98aab4598ef80568cb438da6566805",
+         "rtl/c/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+         "rtl/c/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+         "rtl/c/sources.txt": "9562ad2e0fc21630152028275c42a09ad784649a3cf15d1f84286bd6291822a7",
+@@ -176,6 +176,18 @@
+         "image/c/shake/xmss_h20/descriptor.mem": "4815340dabcd5180a50e3dd68db61bdff9370d202331318dea56da891c8d511f",
+         "image/c/shake/xmss_h20/program.mem": "65262265980053e73bdba40db9f47d607a477f9d10e3afd5bb6bf88cc68e2265",
+         "image/c/shake/xmss_h20/template.mem": "7d802d95e211907d78e4e17a7f183afd6d4bf3afb8836e1c91c0ce556902a1bf"
++      },
++      "optimization": {
++        "experiment": "docs/manifests/experiments/c_atp_optimization_20261023_121549",
++        "selected_stage": "area_legal_bytes",
++        "branch": "codex/ablation-c-atp-20261023",
++        "base_commit": "240ee5677253a8817dae8e9df303efd751c55afd",
++        "changed_from_import_sha256": {
++          "rtl/c/executor/executor.sv": "7eec16011179103a767969f40d5fdeca573dcb48933416a0f9f75832eed57c4d",
++          "rtl/c/hash/sha2-recipe.sv": "798454974b2eb7ce98cafba2838e54f4f0961b8cfb9f2546c19216ac14874f81",
++          "rtl/c/hash/shake-recipe.sv": "04422c2e5fea88053540d4cdf331cff9a296dfc590da562533b2eefa8f2ef1b7"
++        },
++        "scope": "area-only synthesis; no routed-frequency or final functional-regression claim"
+       }
+     },
+     "t": {
+diff --git a/rtl/c/executor/executor.sv b/rtl/c/executor/executor.sv
+index 80106f5a..1fc4df4c 100644
+--- a/rtl/c/executor/executor.sv
++++ b/rtl/c/executor/executor.sv
+@@ -66,7 +66,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+     logic [63:0] scalar_tree;
+     logic [19:0] scalar_leaf;
+     logic [11:0] checksum;
+-    logic [7:0] transform_index,chain_cursor,endpoint_count,lt_count,lt_cursor;
++    logic [7:0] transform_index,chain_cursor,lt_count,lt_cursor;
+     logic [3:0] lt_level;
+     logic [4:0] layer,node_level,tree_height,auth_level;
+     logic [5:0] group_index;
+@@ -75,17 +75,17 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+     logic [1:0] indexing;
+     logic [3:0] macro_op,macro_flags;
+     logic [4:0] macro_desc,macro_route;
+-    logic [63:0] saved_descriptor,saved_chain_descriptor;
+-    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_chain_descriptor;
++    logic [63:0] saved_descriptor;
++    wire [63:0] descriptor=saved_descriptor,chain_descriptor=saved_descriptor;
+     wire [63:0] route_descriptor=descriptor_data[127:64];
+     wire sign_only=stateful && !verifying && macro_flags[2];
+-    logic [19:0] chain_leaf;
+-    logic [20:0] chain_address;
+     logic [255:0] node_value,emit_value;
+     logic [V-1:0] result;
+     logic [5:0] emit_length;
+-    logic [7:0] emit_base;
+-    logic [3:0] emit_count,emit_cursor;
++    wire [7:0] emit_base=descriptor[59:52];
++    wire [3:0] emit_count=descriptor[51:48];
++    wire [7:0] endpoint_count=descriptor[27:20];
++    logic [3:0] emit_cursor;
+     logic seq_start,seq_complete,control_complete;
+     wire seq_ready,seq_done,seq_error,cmd_valid,command_keep_coordinates,control_valid,control_condition;
+     wire [47:0] cmd;
+@@ -560,12 +560,12 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+             leaf_cursor<=0;node_index<=0;node_level<=0;target<=0;target_at_level<=0;
+             tree_height<=0;auth_level<=0;control_base<=0;control_limit<=0;control_flags<=0;indexing<=0;
+             macro_op<=0;macro_desc<=0;macro_route<=0;macro_flags<=0;
+-            saved_descriptor<=0;saved_chain_descriptor<=0;
++            saved_descriptor<=0;
+             task_recipe<=0;task_step<=0;task_chain<=0;task_capture<=0;
+             task_steps<=0;task_capture_after<=0;task_leaf<=0;task_a<=0;task_b<=0;
+-            chain_cursor<=0;endpoint_count<=0;chain_leaf<=0;chain_address<=0;
++            chain_cursor<=0;
+             lt_count<=0;lt_cursor<=0;lt_level<=0;checksum<=0;transform_index<=0;
+-            route_source<=0;emit_length<=0;emit_base<=0;emit_count<=0;emit_cursor<=0;
++            route_source<=0;emit_length<=0;emit_cursor<=0;
+         end else begin
+             done<=0;seq_start<=0;seq_complete<=0;control_complete<=0;abort_execution<=0;
+             if(seq_error && state!=IDLE && state!=FAILED) fail();
+@@ -573,8 +573,16 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                 IDLE:if(job_valid) begin
+                     error<=0;operation<=job_operation;stateful<=decoded_stateful;xmss<=decoded_xmss;
+                     stateful_height<=decoded_height;small_signature<=!decoded_stateful && config_code[2];
++`ifdef MHBS_SHA2
++                    // SHA2 admits SLH128f/s and N32 stateful profiles only.
++                    // Keep that existing admission invariant explicit in the
++                    // formatter context; invalid descriptors still fault below.
++                    profile_code<=config_code[1:0];
++                    node_bytes<=decoded_stateful ? 6'd32 : 6'd16;
++`else
+                     profile_code<=config_code[1:0];
+                     node_bytes<=decoded_stateful ? 6'd32 : config_code[1:0]==0 ? 6'd16 : config_code[1:0]==1 ? 6'd24 : 6'd32;
++`endif
+                     verify_pass<=0;message_length<=job_message_length;message_received<=0;
+                     scalar_tree<=0;scalar_leaf<=decoded_stateful ? job_index[19:0] : 0;
+                     layer<=0;group_index<=0;value[3]<=job_public_root;
+@@ -612,26 +620,25 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                         else start_hash(saved_descriptor,HASH_RESULT);
+                     end
+                     2:begin
+-                        chain_cursor<=0;endpoint_count<=descriptor[27:20];saved_chain_descriptor<=descriptor;
+-                        chain_leaf<=task_leaf;chain_address<=task_b;state<=CHAIN_SETUP;
++                        chain_cursor<=0;state<=CHAIN_SETUP;
+                     end
+                     4:begin checksum<=0;transform_index<=0;state<=TRANSFORM;end
+                     5:if(verifying && stateful) complete_macro();
+-                    else begin emit_base<=descriptor[59:52];emit_count<=descriptor[51:48];emit_cursor<=0;state<=EMIT;end
++                    else begin emit_cursor<=0;state<=EMIT;end
+                     default:fail();
+                 endcase
+                 CHAIN_SETUP:begin
+                     if(endpoint_count==0 || endpoint_count>67) fail();
+                     else if(verifying) begin
+                         task_chain<=0;task_capture<=0;task_step<=descriptor_data[127:64];task_steps<=0;
+-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+-                        task_b<=indexing==1 ? chain_address : 21'(digit(chain_cursor));
++                        task_a<=indexing==1 ? 0 : chain_cursor;
++                        if(indexing!=1) task_b<=21'(digit(chain_cursor));
+                         read_verify_node(VERIFY_CHAIN_INPUT);
+                     end else begin
+                         task_chain<=1;task_step<=descriptor_data[127:64];
+                         task_capture<=leaf_cursor==target && macro_flags[0];
+-                        task_leaf<=chain_leaf;task_a<=indexing==1 ? 0 : chain_cursor;
+-                        task_b<=indexing==1 ? chain_address : 21'd0;
++                        task_a<=indexing==1 ? 0 : chain_cursor;
++                        if(indexing!=1) task_b<=21'd0;
+                         task_steps<=(sign_only || (macro_flags[3] && leaf_cursor==target)) ?
+                             digit(chain_cursor) : chain_descriptor[19:15];
+                         task_capture_after<=indexing==1 ? 0 : digit(chain_cursor);
+@@ -658,7 +665,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                     else state<=REDUCE_SETUP;
+                 end
+                 REDUCE_SETUP:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;task_b<=0;
++                    task_chain<=0;task_capture<=0;task_steps<=0;task_a<=0;task_b<=0;
+                     start_hash(descriptor_data[63:0],stateful ? SF_LEAF : LEAF_SETUP);
+                 end
+                 LEAF_SETUP:begin
+@@ -670,7 +677,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                     else state<=LT_SETUP;
+                 end
+                 LT_SETUP:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;
++                    task_chain<=0;task_capture<=0;task_steps<=0;
+                     task_a<={4'd0,lt_level};task_b<=21'(lt_cursor>>1);
+                     result<={{(V-W){1'b0}},endpoint_value0};node_value<=endpoint_value1;
+                     start_hash(descriptor_data[63:0],LT_STORE);
+@@ -688,7 +695,7 @@ module executor #(parameter integer UNROLL=1,PIPELINE=1)(
+                     route_result(ROUTE_NODE);
+                 end
+                 SF_LEAF:begin
+-                    task_chain<=0;task_capture<=0;task_steps<=0;task_leaf<=chain_leaf;task_a<=0;
++                    task_chain<=0;task_capture<=0;task_steps<=0;task_a<=0;
+                     task_b<=(21'd1<<stateful_height)+leaf_cursor;
+                     start_hash(descriptor_data[63:0],SF_LEAF_DONE);
+                 end
+diff --git a/rtl/c/hash/sha2-recipe.sv b/rtl/c/hash/sha2-recipe.sv
+index ff049a70..937fe416 100644
+--- a/rtl/c/hash/sha2-recipe.sv
++++ b/rtl/c/hash/sha2-recipe.sv
+@@ -64,7 +64,19 @@ module recipe #(
+     logic [7:0] arity[0:PIPELINE-1];
+     logic [5:0] output_bytes[0:PIPELINE-1];
+     logic [6:0] block_index[0:PIPELINE-1];
+-    logic [255:0] cv[0:PIPELINE-1], digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
++    wire [255:0] cv[0:PIPELINE-1];
++    logic [255:0] retained_cv[0:PIPELINE-1];
++    logic [255:0] digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
++    // The compressor keeps its last completed CV until the next block returns.
++    // A single live context can consume that register directly between blocks;
++    // the first block of each complete Hash still starts from IV. Concurrent
++    // contexts retain independent CVs while another tag uses the compressor.
++    if (PIPELINE == 1) begin : single_context_cv
++        assign cv[0] = block_index[0] == 0 ? IV : compression_cv;
++    end else begin : independent_context_cv
++        for (genvar slot=0; slot<PIPELINE; slot++)
++            assign cv[slot] = retained_cv[slot];
++    end
+     logic [DIGEST_BYTES*8-1:0] scalar_result;
+ 
+     function automatic [255:0] reverse_bytes(input [255:0] data);
+@@ -481,7 +493,7 @@ module recipe #(
+     // A full SHA256 call starts from IV. Intermediate compression returns only
+     // update CV/offset; only a full call can change a recipe or chain phase.
+     task automatic next_hash(input integer t,input phase_t next_phase);
+-        begin phase[t]<=next_phase; cv[t]<=IV; block_index[t]<=0; need_block[t]<=1; end
++        begin phase[t]<=next_phase; if(PIPELINE>1) retained_cv[t]<=IV; block_index[t]<=0; need_block[t]<=1; end
+     endtask
+     task automatic finish_node(input integer t,input [255:0] value);
+         reg [255:0] node;
+@@ -544,7 +556,8 @@ module recipe #(
+             if(compression_complete_event) begin
+                 t=int'(compression_tag);
+                 if(!hash_complete_event) begin
+-                    cv[t]<=compression_cv; block_index[t]<=block_index[t]+7'd1; need_block[t]<=1;
++                    if(PIPELINE>1) retained_cv[t]<=compression_cv;
++                    block_index[t]<=block_index[t]+7'd1; need_block[t]<=1;
+                 end else case(phase[t])
+                     KEY: begin key_value[t]<=returned; next_hash(t,MASK0); end
+                     MASK0: begin digest[t]<=digest[t]^returned; next_hash(t,paired[t] ? MASK1 : FINAL); end
+@@ -572,7 +585,8 @@ module recipe #(
+                 busy_slot[t]<=1; complete[t]<=0; need_block[t]<=1; scalar_slot[t]<=scalar_accept;
+                 shape[t]<=incoming_shape; family[t]<=incoming_family; paired[t]<=incoming_pair;
+                 phase[t]<=initial_phase(incoming_shape,incoming_family,incoming_no_seed);
+-                cv[t]<=IV; block_index[t]<=0; digest[t]<=node_result(incoming_value,incoming_family);
++                if(PIPELINE>1) retained_cv[t]<=IV;
++                block_index[t]<=0; digest[t]<=node_result(incoming_value,incoming_family);
+                 captured[t]<=incoming_pair ? (scalar_accept ? 256'(request_right) : batch_right) : 256'd0;
+                 leaf[t]<=scalar_accept ? request_leaf : batch_leaf;
+                 address_a[t]<=scalar_accept ? 8'(request_a) : batch_a;
+diff --git a/rtl/c/hash/shake-recipe.sv b/rtl/c/hash/shake-recipe.sv
+index 70383d47..53f1fb47 100644
+--- a/rtl/c/hash/shake-recipe.sv
++++ b/rtl/c/hash/shake-recipe.sv
+@@ -432,95 +432,43 @@ module recipe #(
+                     be32(compound), be32(b), be32(a), be32(leaf), be32(domain), 96'd0
+                 };
+             end
+-            // Select shared frame fields before alignment. This avoids replicating
+-            // every seed/value/key/mask selector for all three node lengths.
+-            logic [255:0] frame0, frame1, frame2, frame3;
+-            logic [183:0] frame_prefix;
+-            logic [7:0] frame_domain;
+-            logic frame_two;
+-            logic [2:0] frame_layout;
+-            always @* begin
+-                frame0 = 0;
+-                frame1 = 0;
+-                frame2 = 0;
+-                frame3 = 0;
+-                frame_prefix = 0;
+-                frame_domain = 0;
+-                frame_two = 0;
+-                frame_layout = 7;
+-                (* parallel_case *) case (1'b1)
+-                    shapes[ADDRESS_SEED], shapes[ADDRESS_VALUE]:
+-                    if (RECIPE_MASK[ADDRESS_SEED] || RECIPE_MASK[ADDRESS_VALUE]) begin
+-                        frame_layout = 0;
+-                        frame0 = public_seed;
+-                        frame1 = address;
+-                        frame2 = chain_feedback_valid ? finish_digest[N*8-1:0] :
+-                            shapes[ADDRESS_SEED] ? secret_seed : left_value;
+-                        frame_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
+-                        frame3 = frame_two ? request_right : 256'd0;
+-                    end
+-                    shapes[INDEX_PRF]:
+-                    if (RECIPE_MASK[INDEX_PRF]) begin
+-                        frame_layout = 1;
+-                        frame_domain = 3;
+-                        frame1 = secret_prf;
+-                        frame2 = {be32(leaf), 224'd0};
+-                    end
+-                    shapes[MASKED_SEED]:
+-                    if (RECIPE_MASK[MASKED_SEED]) begin
+-                        frame_layout = 2;
+-                        frame_domain = 4;
+-                        frame1 = secret_seed;
+-                        frame2 = public_seed;
+-                        frame3 = masked_address;
+-                    end
+-                    shapes[MASKED_VALUE]:
+-                    if (MASKED_ENABLE) begin
+-                        if (compound < arity + 1) begin
+-                            frame_layout = 1;
+-                            frame_domain = 3;
+-                            frame1 = public_seed;
+-                            frame2 = masked_address;
+-                        end else begin
+-                            frame_layout = 3;
+-                            frame_domain = arity - 1'b1;
+-                            frame1 = temporary_key;
+-                            // MASK0 already masked the retained left value in place.
+-                            frame2 = chain_value;
+-                            frame_two = arity == 2;
+-                            // MASK1 is the retained sponge digest until this FINAL launch.
+-                            frame3 = frame_two ? request_right ^ digest[N*8-1:0] : 256'd0;
+-                        end
+-                    end
+-                    shapes[PREFIX_SEED], shapes[PREFIX_VALUE]:
+-                    if (RECIPE_MASK[PREFIX_SEED] || RECIPE_MASK[PREFIX_VALUE]) begin
+-                        frame_layout = 4;
+-                        frame_prefix = {
+-                            shapes[PREFIX_SEED] ? 8'hff : b[7:0],
+-                            8'(request_a),
+-                            8'd0,
+-                            be32(leaf),
+-                            identifier
+-                        };
+-                        frame1 = shapes[PREFIX_SEED] ? secret_seed : left_value;
+-                    end
+-                    shapes[PREFIX_LEAF], shapes[PREFIX_PARENT]:
+-                    if (RECIPE_MASK[PREFIX_LEAF] || RECIPE_MASK[PREFIX_PARENT]) begin
+-                        frame_layout = 5;
+-                        frame_prefix = {
+-                            8'd0,
+-                            shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383,
+-                            be32(request_b),
+-                            identifier
+-                        };
+-                        frame1 = left_value;
+-                        frame_two = shapes[PREFIX_PARENT];
+-                        frame2 = frame_two ? request_right : 256'd0;
+-                    end
+-                    default: begin
+-                    end
+-                endcase
+-            end
++            // The request shape is already one-hot. Keep it one-hot through
++            // fixed-block assembly rather than encoding a layout and decoding
++            // it again at every payload bit.
++            wire mask_prf = shapes[MASKED_VALUE] && compound < arity + 1;
++            wire mask_final = shapes[MASKED_VALUE] && !mask_prf;
++            wire address_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
++            wire [255:0] address_value = chain_feedback_valid ? finish_digest[N*8-1:0] :
++                shapes[ADDRESS_SEED] ? secret_seed : left_value;
++            wire [183:0] chain_prefix = {
++                shapes[PREFIX_SEED] ? 8'hff : b[7:0], 8'(request_a),
++                8'd0, be32(leaf), identifier};
++            wire [175:0] tree_prefix = {
++                shapes[PREFIX_LEAF] ? 16'h8282 : 16'h8383, be32(request_b), identifier};
++            wire [1087:0] address_frame = {64'd0,
++                (address_two ? request_right : 256'd31), address_value, address, public_seed};
++            wire [1087:0] index_frame = {64'd0, 256'd31,
++                be32(leaf), 224'd0, secret_prf, 8'd3, 248'd0};
++            wire [1087:0] seed_frame = {64'd0, masked_address, public_seed,
++                secret_seed, 8'd4, 248'd0};
++            wire [1087:0] mask_frame = {64'd0, 256'd31, masked_address,
++                public_seed, 8'd3, 248'd0};
++            wire [1087:0] final_frame = {64'd0,
++                (arity == 2 ? request_right ^ digest[N*8-1:0] : 256'd31),
++                chain_value, temporary_key, 8'(arity - 1'b1), 248'd0};
++            wire [1087:0] chain_frame = {640'd0, 8'h1f,
++                (shapes[PREFIX_SEED] ? secret_seed : left_value), chain_prefix};
++            wire [1087:0] leaf_frame = {648'd0, 8'h1f, left_value, tree_prefix};
++            wire [1087:0] parent_frame = {392'd0, 8'h1f, request_right, left_value, tree_prefix};
++            wire [1087:0] fixed_frame =
++                (address_frame & {1088{shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]}}) |
++                (index_frame & {1088{shapes[INDEX_PRF]}}) |
++                (seed_frame & {1088{shapes[MASKED_SEED]}}) |
++                (mask_frame & {1088{mask_prf}}) |
++                (final_frame & {1088{mask_final}}) |
++                (chain_frame & {1088{shapes[PREFIX_SEED] || shapes[PREFIX_VALUE]}}) |
++                (leaf_frame & {1088{shapes[PREFIX_LEAF]}}) |
++                (parent_frame & {1088{shapes[PREFIX_PARENT]}});
+             always @* begin
+                 fast_block = 0;
+                 case (node_bytes)
+@@ -544,52 +492,12 @@ module recipe #(
+                             fast_block[832+:8]   = 8'h1f;
+                         end else fast_block[640+:8] = 8'h1f;
+                     end
+-                    32:
+-                    case (frame_layout)
+-                        0: begin
+-                            fast_block[0+:256]   = frame0[255:0];
+-                            fast_block[256+:256] = frame1;
+-                            fast_block[512+:256] = frame2[255:0];
+-                            fast_block[768+:256] = frame3[255:0];
+-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
+-                            else fast_block[768+:8] = 8'h1f;
+-                        end
+-                        1: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+-                            fast_block[512+:256] = frame2;
+-                            fast_block[768+:8]   = 8'h1f;
+-                        end
+-                        2: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+-                            fast_block[512+:256] = frame2[255:0];
+-                            fast_block[768+:256] = frame3;
+-                            fast_block[1024+:8]  = 8'h1f;
+-                        end
+-                        3: begin
+-                            fast_block[248+:8]   = frame_domain;
+-                            fast_block[256+:256] = frame1[255:0];
+-                            fast_block[512+:256] = frame2[255:0];
+-                            fast_block[768+:256] = frame3[255:0];
+-                            if (frame_two) fast_block[1024+:8] = 8'h1f;
+-                            else fast_block[768+:8] = 8'h1f;
+-                        end
+-                        4: begin
+-                            fast_block[183:0] = frame_prefix;
+-                            fast_block[184+:256] = frame1[255:0];
+-                            fast_block[440+:8] = 8'h1f;
+-                        end
+-                        5: begin
+-                            fast_block[175:0] = frame_prefix[175:0];
+-                            fast_block[176+:256] = frame1[255:0];
+-                            fast_block[432+:256] = frame2[255:0];
+-                            if (frame_two) fast_block[688+:8] = 8'h1f;
+-                            else fast_block[432+:8] = 8'h1f;
+-                        end
+-                        default: begin
+-                        end
+-                    endcase
++                    32: begin
++                        fast_block = fixed_frame;
++                        if ((shapes[ADDRESS_SEED] || shapes[ADDRESS_VALUE]) && address_two ||
++                            shapes[MASKED_SEED] || mask_final && arity == 2)
++                            fast_block[1024+:8] = 8'h1f;
++                    end
+                     default: begin
+                     end
+                 endcase
+@@ -672,28 +580,18 @@ module recipe #(
+             wire take_feedback = permutation_complete && saved_chain_enable && chains_remaining > 1;
+             assign chain_feedback_valid   = take_feedback;
+             assign chain_feedback_counter = transition_counter;
+-            logic [127:0] previous_rate;
+-            always_comb begin
+-                case (append_index)
+-                    0: previous_rate = sponge_state[0+:128];
+-                    1: previous_rate = sponge_state[128+:128];
+-                    2: previous_rate = sponge_state[256+:128];
+-                    3: previous_rate = sponge_state[384+:128];
+-                    4: previous_rate = sponge_state[512+:128];
+-                    5: previous_rate = sponge_state[640+:128];
+-                    6: previous_rate = sponge_state[768+:128];
+-                    7: previous_rate = sponge_state[896+:128];
+-                    default: previous_rate = {64'd0, sponge_state[1024+:64]};
+-                endcase
+-            end
+-            wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
+             for (genvar w = 0; w < 25; w = w + 1) begin : state_words
+                 wire select_stream = w < 17 && take_stream && append_index == w / 2;
+                 wire [63:0] fast_word;
+                 if (w < 17) assign fast_word = fast_block[w*64+:64];
+                 else assign fast_word = 64'd0;
+-                wire [63:0]
+-                    absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
++                // Each rate word owns its absorb XOR. The old shared 128-bit
++                // state read mux selected one of nine pairs, then fanned that
++                // result back to all words. Local feedback folds into the
++                // write mux and leaves only the narrow append-index decode.
++                wire [63:0] staged_word = w % 2 == 0 ? staged_data[63:0] : staged_data[127:64];
++                wire [63:0] absorb_word = staged_word ^
++                    (sponge_state[w*64+:64] & {64{!clear_stream}});
+                 // These sources are disjoint in the hash FSM. Initialization
+                 // clears unselected words by enabling a write with no source.
+                 wire [63:0] next_word =

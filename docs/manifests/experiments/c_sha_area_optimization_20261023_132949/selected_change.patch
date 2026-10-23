@@ -1,0 +1,14 @@
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/shift/source/rtl/c/hash/sha2-recipe.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 12:13:35.893424261 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/shift/source/rtl/c/hash/sha2-recipe.sv	2026-10-23 13:30:34.713022990 +0800
+@@ -540,7 +540,9 @@
+             case(formatter)
+                 SELECT: if(candidate_valid) prepare_block(int'(candidate));
+                 BUILD: begin
+-                    block_buffer[511-int'(beat)*128-:128]<=formatted_beat;
++                    // Only SEND observes a complete block. Four shifts replace the
++                    // four independently enabled 128-bit write slices.
++                    block_buffer <= {block_buffer[383:0],formatted_beat};
+                     if(beat==3) formatter<=SEND;
+                     else begin
+                         beat<=beat+1'b1;

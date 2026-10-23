@@ -1,0 +1,90 @@
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/executor/executor.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/control/source/rtl/c/executor/executor.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/executor/executor.sv	2026-10-23 12:29:34.643094087 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/control/source/rtl/c/executor/executor.sv	2026-10-23 13:30:51.126506968 +0800
+@@ -95,7 +95,7 @@
+         .done(seq_done),.error(seq_error),.program_address,.program_data,.template_address,.template_data,
+         .command_valid(cmd_valid),.command_ready(state==FETCH),.command_done(seq_complete),.command(cmd),
+         .command_keep_coordinates,.control_valid,.control,.control_ready(state==FETCH),
+-        .control_done(control_complete),.control_condition);
++        .control_done(control_complete || immediate_control_complete),.control_condition);
+     // verilog_format: on
+     logic [4:0] hash_recipe_id;
+     assign descriptor_addresses={state==CHAIN_SETUP ? chain_descriptor[48:44] : macro_route,hash_recipe_id};
+@@ -372,6 +372,11 @@
+     wire [4:0] control_src=control[51:47],control_aux=control[46:42];
+     wire [20:0] control_immediate=control[41:21];
+     wire [3:0] control_cond=control[13:10];
++    // Register-only controls finish on the execution edge. RAM and I/O keep
++    // their registered completion after the actual access or transfer.
++    wire immediate_control_complete=state==FETCH && control_valid &&
++        ((control_op>=`CTRL_SET && control_op<=`CTRL_RET) ||
++         control_op==`CTRL_WMOV || control_op==`CTRL_SHL);
+     wire [20:0] control_dst_value=narrow_read(control_dst);
+     wire [20:0] control_src_value=narrow_read(control_src);
+     wire [20:0] control_aux_value=narrow_read(control_aux);
+@@ -446,7 +451,10 @@
+         begin seq_complete<=1;state<=FETCH;end
+     endtask
+     task automatic complete_control;
+-        begin control_complete<=1;state<=FETCH;end
++        begin
++            if(state!=FETCH) control_complete<=1;
++            state<=FETCH;
++        end
+     endtask
+     task automatic route_result(input [1:0] source);
+         begin route_source<=source;state<=ROUTE;end
+diff -ruN /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/executor/sequencer.sv /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/control/source/rtl/c/executor/sequencer.sv
+--- /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/baseline/source/rtl/c/executor/sequencer.sv	2026-10-23 13:24:37.326535588 +0800
++++ /tmp/mhbs-ablation-c-atp-20261023/build/c_sha_area_optimization/20261023_132949/stages/control/source/rtl/c/executor/sequencer.sv	2026-10-23 13:30:51.127507009 +0800
+@@ -50,6 +50,20 @@
+             else begin pc<=pc+1'b1;state<=FETCH;end
+         end
+     endtask
++    // Both immediate controls and completed storage/I/O controls retire through
++    // the same layout-4 PC, branch and single-return state updates.
++    task automatic retire_control;
++        begin
++            if(control_op==7 && control_condition) begin pc<=token[20:14];state<=FETCH;end
++            else if(control_op==8) begin
++                if(return_valid || pc==127) fault();
++                else begin return_pc<=pc+1'b1;return_valid<=1;pc<=token[20:14];state<=FETCH;end
++            end else if(control_op==9) begin
++                if(!return_valid) fault();
++                else begin pc<=return_pc;return_valid<=0;state<=FETCH;end
++            end else advance();
++        end
++    endtask
+     integer i;
+     always_ff @(posedge clk) begin
+         if(rst) begin
+@@ -72,7 +86,10 @@
+                             if(token[56:0]!=0 || return_valid || sp!=0) fault();
+                             else begin done<=1;state<=IDLE;end
+                         end else if(control_op>15 || token[9:0]!=0) fault();
+-                        else if(control_ready) state<=WAIT_CONTROL;
++                        else if(control_ready) begin
++                            if(control_done) retire_control();
++                            else state<=WAIT_CONTROL;
++                        end
+                     end else if(kind==2) begin
+                         if(token[39:0]!=0 || back_count>pc) fault();
+                         else if(sp!=0 && loop_pc[sp-1]==pc) begin
+@@ -103,16 +120,7 @@
+                         remaining<=remaining-1'b1;coordinate<=coordinate+stride;state<=ISSUE;
+                     end else advance();
+                 end
+-                WAIT_CONTROL:if(control_done) begin
+-                    if(control_op==7 && control_condition) begin pc<=token[20:14];state<=FETCH;end
+-                    else if(control_op==8) begin
+-                        if(return_valid || pc==127) fault();
+-                        else begin return_pc<=pc+1'b1;return_valid<=1;pc<=token[20:14];state<=FETCH;end
+-                    end else if(control_op==9) begin
+-                        if(!return_valid) fault();
+-                        else begin pc<=return_pc;return_valid<=0;state<=FETCH;end
+-                    end else advance();
+-                end
++                WAIT_CONTROL:if(control_done) retire_control();
+                 default:fault();
+             endcase
+         end
