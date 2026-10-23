@@ -489,11 +489,11 @@ def main():
     parser.add_argument('--run-root', type=Path, default=ROOT / 'build/shake_timing_optimization')
     parser.add_argument('--output-prefix', type=Path)
     parser.add_argument('--watch', action='store_true')
-    parser.add_argument('--interval', type=float, default=30,
-                        help='Watcher refresh seconds, positive and no greater than 30')
+    parser.add_argument('--interval', type=float, default=60,
+                        help='Watcher refresh seconds, positive and no greater than 60')
     args = parser.parse_args()
-    if not 0 < args.interval <= 30:
-        parser.error('--interval must be positive and no greater than 30')
+    if not 0 < args.interval <= 60:
+        parser.error('--interval must be positive and no greater than 60')
     root = args.run_root.resolve()
     latest = read(root / run_specs(root)[-1][0] / 'SOURCE.json')
     if not latest.get('archive_directory'):

@@ -120,8 +120,18 @@ module keccak (
                     // verilog_format: on
                 end
 `else
-                assign chi = (rotated_a[I] ^ rotated_d[I]) ^ (
-                    (~(rotated_a[NEXT] ^ rotated_d[NEXT])) & (rotated_a[NEXT2] ^ rotated_d[NEXT2]));
+                // Keep the six-input word function local. Without this small
+                // boundary synthesis can absorb shared Theta parities into
+                // several output words, spreading each parity cone across the
+                // round and increasing the routing demand between columns.
+                // This remains ordinary RTL: no device primitive or extra
+                // register is needed, and every P/U uses the same round.
+                // verilog_format: off
+                (* keep_hierarchy="yes" *) keccak_theta_chi_word nonlinear_word(
+                    .a0(rotated_a[I]),.d0(rotated_d[I]),
+                    .a1(rotated_a[NEXT]),.d1(rotated_d[NEXT]),
+                    .a2(rotated_a[NEXT2]),.d2(rotated_d[NEXT2]),.result(chi));
+                // verilog_format: on
 `endif
                 assign state_out[64*I+:64] = chi ^ (I == 0 ? rc : 64'd0);
             end
@@ -131,6 +141,17 @@ module keccak (
             assign d[x] = c[(x+4)%5] ^ rotl64(c[(x+1)%5], 1);
         end
     endgenerate
+endmodule
+
+// A round's shared Theta deltas feed at most three inputs in each word. This
+// boundary preserves their sharing while letting each 64-bit nonlinear word
+// be packed independently from the other words and adjacent unrolled rounds.
+// verilog_format: off
+module keccak_theta_chi_word(
+    input wire [63:0] a0,d0,a1,d1,a2,d2, output wire [63:0] result
+);
+// verilog_format: on
+    assign result = (a0 ^ d0) ^ ((~(a1 ^ d1)) & (a2 ^ d2));
 endmodule
 
 `ifdef MHBS_XILINX_LUT6

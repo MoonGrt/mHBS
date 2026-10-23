@@ -1,0 +1,324 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha2-recipe.sv	2026-10-21 21:40:38.904240948 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/sha2-recipe.sv	2026-10-21 21:45:04.925252688 +0800
+@@ -54,6 +54,7 @@
+     // Only requests own contexts; completed results stay live until consumed.
+     // P=1 reduces these banks and selectors to a single scalar execution slot.
+     logic [PIPELINE-1:0] busy_slot, complete, need_block, scalar_slot, capture_enable, paired;
++    logic [PIPELINE-1:0] final_compression;
+     phase_t phase[0:PIPELINE-1];
+     logic [3:0] shape[0:PIPELINE-1];
+     logic [1:0] family[0:PIPELINE-1];
+@@ -66,6 +67,10 @@
+     logic [6:0] block_index[0:PIPELINE-1];
+     logic [255:0] cv[0:PIPELINE-1], digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
+     logic [DIGEST_BYTES*8-1:0] scalar_result;
++    // Scalar jobs drain all batch contexts before allocation. Their randomizer
++    // remains live through HMAC/H_msg/MGF, independently of digest/key/capture.
++    // Capture the executor's source selection once, outside the beat datapath.
++    logic [N*8-1:0] scalar_randomizer;
+ 
+     function automatic [255:0] reverse_bytes(input [255:0] data);
+         for (integer k=0;k<32;k=k+1) reverse_bytes[k*8+:8]=data[255-k*8-:8];
+@@ -348,7 +353,7 @@
+                 SRC_PRF: value=256'(secret_prf);
+                 SRC_PUBLIC: value=256'(public_seed);
+                 SRC_ROOT: value=256'(root);
+-                SRC_RANDOM: value=256'(randomizer);
++                SRC_RANDOM: value=256'(scalar_randomizer);
+                 SRC_VALUE: value=digest[format_tag];
+                 SRC_KEY: value=key_value[format_tag];
+                 SRC_RIGHT: value=captured[format_tag];
+@@ -402,6 +407,7 @@
+     task automatic prepare_block(input integer t);
+         begin
+             format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD; list_words_valid<=0;
++            final_compression[t]<=block_index[t]==last_block(t);
+             format_kind<=selected_format(t); format_length<=input_length(t);
+             format_address<=packed_address(t,selected_format(t));
+             prepare_beat(selected_format(t),{block_index[t],2'd0},input_length(t));
+@@ -430,7 +436,9 @@
+         .output_valid(compression_valid),.output_ready(1'b1),.output_cv(compression_cv),.output_tag(compression_tag)
+     );
+     wire compression_complete_event=compression_valid && !rst;
+-    wire hash_complete_event=compression_complete_event && block_index[compression_tag]==last_block(int'(compression_tag));
++    // Completion metadata travels with the outstanding block. Avoid decoding
++    // phase, message length and arity again behind the compression return tag.
++    wire hash_complete_event=compression_complete_event && final_compression[compression_tag];
+     wire [255:0] returned=reverse_bytes(compression_cv);
+ 
+     logic response_held;
+@@ -512,6 +520,7 @@
+         integer t;
+         if(rst) begin
+             busy_slot<=0; complete<=0; need_block<=0; scalar_slot<=0;
++            final_compression<=0;
+             capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
+             scalar_result<=0;
+@@ -586,6 +595,7 @@
+             // Allocation is last so a retiring tag can be refilled on this edge.
+             if(accept) begin
+                 t=int'(incoming_tag);
++                if(scalar_accept) scalar_randomizer<=randomizer;
+                 busy_slot[t]<=1; complete[t]<=0; need_block[t]<=1; scalar_slot[t]<=scalar_accept;
+                 shape[t]<=incoming_shape; family[t]<=incoming_family; paired[t]<=incoming_pair;
+                 phase[t]<=initial_phase(incoming_shape,incoming_family,incoming_no_seed);
+@@ -617,6 +627,12 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin : debug_prepared_completion
++        if(!rst && compression_complete_event && int'(compression_tag)<PIPELINE &&
++            final_compression[compression_tag] !==
++                (block_index[compression_tag]==last_block(int'(compression_tag))))
++            $fatal(1,"SHA2 prepared completion metadata differs from recipe length");
++    end
+     logic [63:0] counted_batch_hashes,counted_batch_permutations;
+     assign batch_hashes=counted_batch_hashes;
+     assign batch_permutations=counted_batch_permutations;
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha256.sv	2026-10-21 21:40:38.904361710 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/sha256.sv	2026-10-21 21:45:04.925395548 +0800
+@@ -117,8 +117,10 @@
+     logic [TRAVERSAL_BITS-1:0] traversal[0:PIPELINE-1];
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
++    logic [31:0] next_constant[0:PIPELINE-1][0:UNROLL-1];
++    logic more_rounds;
+     wire stalled = output_valid && !output_ready;
+-    wire recycle = valid[PIPELINE-1] && traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1);
++    wire recycle = valid[PIPELINE-1] && more_rounds;
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
+ 
+@@ -144,17 +146,21 @@
+         for (genvar r=0; r<UNROLL; r=r+1) begin : unrolled
+             localparam integer ROUND_OFFSET = stage * UNROLL + r;
+ 
+-            // This physical round only sees one constant per traversal.
+-            // Elaborating the comparison table here removes the full 64-word
+-            // ROM and the base-plus-offset adder from every round datapath.
+-            function automatic [31:0] traversal_constant(
++            localparam integer NEXT_OFFSET = ((stage + 1) % PIPELINE) * UNROLL + r;
++            localparam integer NEXT_TRAVERSAL = stage == PIPELINE-1 ? 1 : 0;
++
++            // Decode the constants for the next physical stage in parallel
++            // with this stage's arithmetic. At the ring boundary, the same
++            // token advances to its next traversal before consuming them.
++            function automatic [31:0] following_constant(
+                 input [TRAVERSAL_BITS-1:0] index);
+                 integer visit;
+                 begin
+-                    traversal_constant = 32'd0;
++                    following_constant = 32'd0;
+                     for (visit=0; visit<TRAVERSALS; visit=visit+1)
+                         if (index == TRAVERSAL_BITS'(visit))
+-                            traversal_constant = constant_word(7'(visit * ROUNDS + ROUND_OFFSET));
++                            following_constant = constant_word(
++                                7'((visit + NEXT_TRAVERSAL) * ROUNDS + NEXT_OFFSET));
+                 end
+             endfunction
+ 
+@@ -164,7 +170,24 @@
+             end else begin : partial_tail
+                 assign round_active = source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
+             end
+-            wire [31:0] round_constant = traversal_constant(source_traversal);
++            wire [31:0] round_constant;
++            if (stage == 0) begin : entering_constant
++                assign round_constant = recycle ? next_constant[PIPELINE-1][r] :
++                    constant_word(7'(r));
++            end else begin : advancing_constant
++                assign round_constant = next_constant[stage-1][r];
++            end
++            always_ff @(posedge clk) begin
++                if (!rst && !stalled && source_valid)
++                    next_constant[stage][r] <= following_constant(source_traversal);
++            end
++`ifndef SYNTHESIS
++            always_ff @(posedge clk) begin
++                if (!rst && !stalled && source_valid &&
++                    round_constant !== constant_word(7'(int'(source_traversal) * ROUNDS + ROUND_OFFSET)))
++                    $fatal(1, "SHA256 lookahead constant lost token alignment");
++            end
++`endif
+             wire [767:0] result;
+             if (r == 0) begin : first_round
+                 assign result = advance_round(source_state, round_constant, round_active);
+@@ -173,6 +196,16 @@
+                     round_constant, round_active);
+             end
+         end
++        if (stage == PIPELINE-1) begin : returning_control
++            // This flag belongs to the same last-stage token as state and tag.
++            // Its register cuts the traversal comparator out of the wide ring
++            // input selection; stalls hold all of them together.
++            always_ff @(posedge clk) begin
++                if (rst) more_rounds <= 1'b0;
++                else if (!stalled && source_valid)
++                    more_rounds <= source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
++            end
++        end
+         always_ff @(posedge clk) begin
+             if (rst) valid[stage] <= 0;
+             else if (!stalled) begin
+@@ -204,6 +237,11 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin
++        if (!rst && valid[PIPELINE-1] &&
++            more_rounds !== (traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1)))
++            $fatal(1, "SHA256 registered recycle flag lost token alignment");
++    end
+     initial begin
+         if (PIPELINE < 1 || PIPELINE > 24 || UNROLL < 1 || ROUNDS > 24 ||
+             24 % ROUNDS != 0 || TAG_BITS < 1)
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/shake-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/shake-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/shake-recipe.sv	2026-10-21 21:40:38.904589888 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_214504/source/rtl/hash/shake-recipe.sv	2026-10-21 21:45:04.925644985 +0800
+@@ -356,6 +356,10 @@
+             // the current beat. START provides the first selectors; backpressure
+             // holds both selectors and position without another data stage.
+             logic [12:0] source_control[0:1];
++            localparam [2:0] PAYLOAD_SOURCE = 0, PAYLOAD_MESSAGE = 1,
++                PAYLOAD_ID_LO = 2, PAYLOAD_ID_HI = 3, PAYLOAD_MESSAGE_PREFIX = 4,
++                PAYLOAD_LIST_PREFIX = 5, PAYLOAD_LIST_BODY = 6;
++            logic [2:0] stream_payload_mode;
+             logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
+             function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+@@ -372,15 +376,35 @@
+                     stream_byte_controls = {pad_bytes, live_bytes};
+                 end
+             endfunction
++            function automatic [2:0] stream_source_mode(input [12:0] next_position);
++                begin
++                    stream_source_mode = PAYLOAD_SOURCE;
++                    if (shapes[PREFIX_MESSAGE]) begin
++                        case (next_position)
++                            0: stream_source_mode = PAYLOAD_ID_LO;
++                            8: stream_source_mode = PAYLOAD_ID_HI;
++                            16: stream_source_mode = PAYLOAD_MESSAGE_PREFIX;
++                            default: stream_source_mode = PAYLOAD_MESSAGE;
++                        endcase
++                    end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                                 next_position >= prefix_bytes)
++                        stream_source_mode = PAYLOAD_LIST_BODY;
++                    else if (shapes[PREFIX_LIST] && next_position == 16)
++                        stream_source_mode = PAYLOAD_LIST_PREFIX;
++                end
++            endfunction
+             // Prepare byte enables with the source selectors, before the endpoint
+             // RAM read. Returned node data then sees one mask gate; padding does
+             // not add a comparator/priority mux behind the memory and list muxes.
+             always_ff @(posedge clk)
+                 if (!rst) begin
+-                    if (state == START && hash_ready)
++                    if (state == START && hash_ready) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(0);
+-                    else if (state == STREAM && stream_accept)
++                        stream_payload_mode <= stream_source_mode(0);
++                    end else if (state == STREAM && stream_accept) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(following_position);
++                        stream_payload_mode <= stream_source_mode(following_position);
++                    end
+                 end
+             for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                 always_ff @(posedge clk)
+@@ -407,9 +431,11 @@
+                 reg [63:0] literal;
+                 begin
+                     selected_index = control[5:0];
+-                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+-                    // Source-range decoding bounds live node reads to four words;
+-                    // ADDRESS_LIST body beats use list_window instead.
++                    // Endpoint data has two live uses: the LMS prefix's first
++                    // sixteen bits, and the list body. Both bypass this general
++                    // seed/message/address mux below. Source 7 and the remaining
++                    // literal node words are never observed by a scalar stream.
++                    literal = source_literal(control[12:9], leaf, identifier, '0);
+                     case (control[8:6])
+                         1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                         2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+@@ -417,7 +443,7 @@
+                         4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+                         6: source_word = node_word_indexed(address, selected_index[1:0]);
+-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        7: source_word = 0;
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -446,16 +472,62 @@
+                     source_word(source_control[1]),
+                     source_word(source_control[0])
+                 };
+-                stream_payload = {64'd0, source_window[63:0]};
++                stream_payload = 0;
++                case (stream_payload_mode)
++                    PAYLOAD_ID_LO: stream_payload[63:0] = identifier[63:0];
++                    PAYLOAD_ID_HI: stream_payload[63:0] = identifier[127:64];
++                    PAYLOAD_MESSAGE: stream_payload[63:0] = source_window[79:16];
++                    PAYLOAD_MESSAGE_PREFIX: begin
++                        stream_payload[63:0] = source_window[79:16];
++                        stream_payload[47:0] = {16'h8181, be32(leaf)};
++                    end
++                    PAYLOAD_LIST_PREFIX:
++                        stream_payload[63:0] = {list_data0[15:0], 16'h8080, be32(leaf)};
++                    PAYLOAD_LIST_BODY: stream_payload = list_window;
++                    default: stream_payload[63:0] = source_window[63:0];
++                endcase
++            end
++`ifndef SYNTHESIS
++            function automatic [63:0] reference_source_word(input [12:0] control);
++                reg [5:0] selected_index;
++                reg [63:0] literal;
++                begin
++                    selected_index = control[5:0];
++                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
++                    case (control[8:6])
++                        1: reference_source_word = node_word_indexed(secret_prf, selected_index[1:0]);
++                        2: reference_source_word = node_word_indexed(randomizer, selected_index[1:0]);
++                        3: reference_source_word = node_word_indexed(public_seed, selected_index[1:0]);
++                        4: reference_source_word = node_word_indexed(root, selected_index[1:0]);
++                        5: reference_source_word = message_word(selected_index);
++                        6: reference_source_word = node_word_indexed(address, selected_index[1:0]);
++                        7: reference_source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        default: reference_source_word = literal;
++                    endcase
++                end
++            endfunction
++            logic [127:0] reference_source_window, reference_stream_payload;
++            always_comb begin
++                reference_source_window = {reference_source_word(source_control[1]),
++                                          reference_source_word(source_control[0])};
++                reference_stream_payload = {64'd0, reference_source_window[63:0]};
+                 if (shapes[PREFIX_MESSAGE]) begin
+-                    stream_payload = {64'd0, source_window[79:16]};
+-                    if (position == 0) stream_payload = {64'd0, identifier[63:0]};
+-                    else if (position == 8) stream_payload[63:0] = identifier[127:64];
+-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+-                end else
+-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+-                    stream_payload = list_window;
++                    reference_stream_payload = {64'd0, reference_source_window[79:16]};
++                    if (position == 0) reference_stream_payload = {64'd0, identifier[63:0]};
++                    else if (position == 8) reference_stream_payload[63:0] = identifier[127:64];
++                    else if (position == 16) reference_stream_payload[47:0] = {16'h8181, be32(leaf)};
++                end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
++                    reference_stream_payload = list_window;
+             end
++            always @(posedge clk) begin : debug_scalar_payload_sources
++                if (!rst && STREAM_ENABLE && state == STREAM) begin
++                    if (stream_payload_mode !== stream_source_mode(position))
++                        $fatal(1, "scalar source mode lost stream position");
++                    if (stream_payload !== reference_stream_payload)
++                        $fatal(1, "scalar endpoint bypass differs from generic source mux");
++                end
++            end
++`endif
+ 
+             integer i;
+             always @* begin

@@ -1,0 +1,147 @@
+--- a/rtl/hash/shake-recipe.sv
++++ b/rtl/hash/shake-recipe.sv
+@@ -356,6 +356,10 @@
+             // the current beat. START provides the first selectors; backpressure
+             // holds both selectors and position without another data stage.
+             logic [12:0] source_control[0:1];
++            localparam [2:0] PAYLOAD_SOURCE = 0, PAYLOAD_MESSAGE = 1,
++                PAYLOAD_ID_LO = 2, PAYLOAD_ID_HI = 3, PAYLOAD_MESSAGE_PREFIX = 4,
++                PAYLOAD_LIST_PREFIX = 5, PAYLOAD_LIST_BODY = 6;
++            logic [2:0] stream_payload_mode;
+             logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
+             function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+@@ -372,15 +376,35 @@
+                     stream_byte_controls = {pad_bytes, live_bytes};
+                 end
+             endfunction
++            function automatic [2:0] stream_source_mode(input [12:0] next_position);
++                begin
++                    stream_source_mode = PAYLOAD_SOURCE;
++                    if (shapes[PREFIX_MESSAGE]) begin
++                        case (next_position)
++                            0: stream_source_mode = PAYLOAD_ID_LO;
++                            8: stream_source_mode = PAYLOAD_ID_HI;
++                            16: stream_source_mode = PAYLOAD_MESSAGE_PREFIX;
++                            default: stream_source_mode = PAYLOAD_MESSAGE;
++                        endcase
++                    end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                                 next_position >= prefix_bytes)
++                        stream_source_mode = PAYLOAD_LIST_BODY;
++                    else if (shapes[PREFIX_LIST] && next_position == 16)
++                        stream_source_mode = PAYLOAD_LIST_PREFIX;
++                end
++            endfunction
+             // Prepare byte enables with the source selectors, before the endpoint
+             // RAM read. Returned node data then sees one mask gate; padding does
+             // not add a comparator/priority mux behind the memory and list muxes.
+             always_ff @(posedge clk)
+                 if (!rst) begin
+-                    if (state == START && hash_ready)
++                    if (state == START && hash_ready) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(0);
+-                    else if (state == STREAM && stream_accept)
++                        stream_payload_mode <= stream_source_mode(0);
++                    end else if (state == STREAM && stream_accept) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(following_position);
++                        stream_payload_mode <= stream_source_mode(following_position);
++                    end
+                 end
+             for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                 always_ff @(posedge clk)
+@@ -407,9 +431,11 @@
+                 reg [63:0] literal;
+                 begin
+                     selected_index = control[5:0];
+-                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+-                    // Source-range decoding bounds live node reads to four words;
+-                    // ADDRESS_LIST body beats use list_window instead.
++                    // Endpoint data has two live uses: the LMS prefix's first
++                    // sixteen bits, and the list body. Both bypass this general
++                    // seed/message/address mux below. Source 7 and the remaining
++                    // literal node words are never observed by a scalar stream.
++                    literal = source_literal(control[12:9], leaf, identifier, '0);
+                     case (control[8:6])
+                         1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                         2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+@@ -417,7 +443,7 @@
+                         4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+                         6: source_word = node_word_indexed(address, selected_index[1:0]);
+-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        7: source_word = 0;
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -446,16 +472,62 @@
+                     source_word(source_control[1]),
+                     source_word(source_control[0])
+                 };
+-                stream_payload = {64'd0, source_window[63:0]};
++                stream_payload = 0;
++                case (stream_payload_mode)
++                    PAYLOAD_ID_LO: stream_payload[63:0] = identifier[63:0];
++                    PAYLOAD_ID_HI: stream_payload[63:0] = identifier[127:64];
++                    PAYLOAD_MESSAGE: stream_payload[63:0] = source_window[79:16];
++                    PAYLOAD_MESSAGE_PREFIX: begin
++                        stream_payload[63:0] = source_window[79:16];
++                        stream_payload[47:0] = {16'h8181, be32(leaf)};
++                    end
++                    PAYLOAD_LIST_PREFIX:
++                        stream_payload[63:0] = {list_data0[15:0], 16'h8080, be32(leaf)};
++                    PAYLOAD_LIST_BODY: stream_payload = list_window;
++                    default: stream_payload[63:0] = source_window[63:0];
++                endcase
++            end
++`ifndef SYNTHESIS
++            function automatic [63:0] reference_source_word(input [12:0] control);
++                reg [5:0] selected_index;
++                reg [63:0] literal;
++                begin
++                    selected_index = control[5:0];
++                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
++                    case (control[8:6])
++                        1: reference_source_word = node_word_indexed(secret_prf, selected_index[1:0]);
++                        2: reference_source_word = node_word_indexed(randomizer, selected_index[1:0]);
++                        3: reference_source_word = node_word_indexed(public_seed, selected_index[1:0]);
++                        4: reference_source_word = node_word_indexed(root, selected_index[1:0]);
++                        5: reference_source_word = message_word(selected_index);
++                        6: reference_source_word = node_word_indexed(address, selected_index[1:0]);
++                        7: reference_source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        default: reference_source_word = literal;
++                    endcase
++                end
++            endfunction
++            logic [127:0] reference_source_window, reference_stream_payload;
++            always_comb begin
++                reference_source_window = {reference_source_word(source_control[1]),
++                                          reference_source_word(source_control[0])};
++                reference_stream_payload = {64'd0, reference_source_window[63:0]};
+                 if (shapes[PREFIX_MESSAGE]) begin
+-                    stream_payload = {64'd0, source_window[79:16]};
+-                    if (position == 0) stream_payload = {64'd0, identifier[63:0]};
+-                    else if (position == 8) stream_payload[63:0] = identifier[127:64];
+-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+-                end else
+-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+-                    stream_payload = list_window;
+-            end
++                    reference_stream_payload = {64'd0, reference_source_window[79:16]};
++                    if (position == 0) reference_stream_payload = {64'd0, identifier[63:0]};
++                    else if (position == 8) reference_stream_payload[63:0] = identifier[127:64];
++                    else if (position == 16) reference_stream_payload[47:0] = {16'h8181, be32(leaf)};
++                end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
++                    reference_stream_payload = list_window;
++            end
++            always @(posedge clk) begin : debug_scalar_payload_sources
++                if (!rst && STREAM_ENABLE && state == STREAM) begin
++                    if (stream_payload_mode !== stream_source_mode(position))
++                        $fatal(1, "scalar source mode lost stream position");
++                    if (stream_payload !== reference_stream_payload)
++                        $fatal(1, "scalar endpoint bypass differs from generic source mux");
++                end
++            end
++`endif
+ 
+             integer i;
+             always @* begin

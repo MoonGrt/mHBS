@@ -1,0 +1,1287 @@
+Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2025.2 (lin64) Build 6299465 Fri Nov 14 12:34:56 MST 2025
+| Date         : Thu Oct 22 21:30:02 2026
+| Host         : user-Z890-EAGLE-WIFI7 running 64-bit Ubuntu 24.04.4 LTS
+| Command      : report_timing -delay_type max -max_paths 20 -nworst 2 -input_pins -nets -file /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/dual_pu_route_matrix/20261022_211258/jobs/shake/P2U1/route/critical_paths.rpt
+| Design       : common
+| Device       : 7a200t-ffg1156
+| Speed File   : -3  PRODUCTION 1.23 2018-06-13
+| Design State : Routed
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+Timing Report
+
+Slack (MET) :             0.084ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.269ns  (logic 0.923ns (14.723%)  route 5.346ns (85.277%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.541     1.586    core/endpoints/read0[0]
+    SLICE_X87Y131                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_6/I1
+    SLICE_X87Y131        LUT3 (Prop_lut3_I1_O)        0.097     1.683 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, routed)         1.243     2.926    core/endpoints/banks[0].regular.words_reg_0_63_102_104/ADDRA1
+    SLICE_X88Y126                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/RADR1
+    SLICE_X88Y126        RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     3.023 r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/O
+                         net (fo=2, routed)           0.818     3.841    core/endpoints/bank_value[0][102]
+    SLICE_X85Y139                                                     r  core/endpoints/value0[102]_INST_0/I1
+    SLICE_X85Y139        LUT3 (Prop_lut3_I1_O)        0.097     3.938 r  core/endpoints/value0[102]_INST_0/O
+                         net (fo=8, routed)           0.890     4.828    core/lane/value0[102]
+    SLICE_X73Y146                                                     r  core/lane/endpoints_i_723/I2
+    SLICE_X73Y146        LUT4 (Prop_lut4_I2_O)        0.097     4.925 r  core/lane/endpoints_i_723/O
+                         net (fo=1, routed)           0.270     5.195    core/lane/endpoints_i_723_n_0
+    SLICE_X73Y146                                                     r  core/lane/endpoints_i_444/I4
+    SLICE_X73Y146        LUT5 (Prop_lut5_I4_O)        0.097     5.292 r  core/lane/endpoints_i_444/O
+                         net (fo=1, routed)           0.645     5.937    core/lane/endpoints_i_444_n_0
+    SLICE_X80Y141                                                     r  core/lane/endpoints_i_163/I2
+    SLICE_X80Y141        LUT3 (Prop_lut3_I2_O)        0.097     6.034 r  core/lane/endpoints_i_163/O
+                         net (fo=2, routed)           0.939     6.973    core/endpoints/banks[0].regular.words_reg_0_63_102_104/DIA
+    SLICE_X88Y126        RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[0].regular.words_reg_0_63_102_104/WCLK
+    SLICE_X88Y126        RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X88Y126        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.242     7.057    core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA
+  -------------------------------------------------------------------
+                         required time                          7.057    
+                         arrival time                          -6.973    
+  -------------------------------------------------------------------
+                         slack                                  0.084    
+
+Slack (MET) :             0.084ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.269ns  (logic 0.923ns (14.723%)  route 5.346ns (85.277%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.541     1.586    core/endpoints/read0[0]
+    SLICE_X87Y131                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_6/I1
+    SLICE_X87Y131        LUT3 (Prop_lut3_I1_O)        0.097     1.683 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_6/O
+                         net (fo=256, routed)         1.243     2.926    core/endpoints/banks[0].regular.words_reg_0_63_102_104/ADDRA1
+    SLICE_X88Y126                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/RADR1
+    SLICE_X88Y126        RAMD64E (Prop_ramd64e_RADR1_O)
+                                                      0.097     3.023 r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/O
+                         net (fo=2, routed)           0.818     3.841    core/endpoints/bank_value[0][102]
+    SLICE_X85Y139                                                     r  core/endpoints/value0[102]_INST_0/I1
+    SLICE_X85Y139        LUT3 (Prop_lut3_I1_O)        0.097     3.938 r  core/endpoints/value0[102]_INST_0/O
+                         net (fo=8, routed)           0.890     4.828    core/lane/value0[102]
+    SLICE_X73Y146                                                     r  core/lane/endpoints_i_723/I2
+    SLICE_X73Y146        LUT4 (Prop_lut4_I2_O)        0.097     4.925 r  core/lane/endpoints_i_723/O
+                         net (fo=1, routed)           0.270     5.195    core/lane/endpoints_i_723_n_0
+    SLICE_X73Y146                                                     r  core/lane/endpoints_i_444/I4
+    SLICE_X73Y146        LUT5 (Prop_lut5_I4_O)        0.097     5.292 r  core/lane/endpoints_i_444/O
+                         net (fo=1, routed)           0.645     5.937    core/lane/endpoints_i_444_n_0
+    SLICE_X80Y141                                                     r  core/lane/endpoints_i_163/I2
+    SLICE_X80Y141        LUT3 (Prop_lut3_I2_O)        0.097     6.034 r  core/lane/endpoints_i_163/O
+                         net (fo=2, routed)           0.939     6.973    core/endpoints/banks[0].regular.words_reg_0_63_102_104/DIA
+    SLICE_X88Y126        RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[0].regular.words_reg_0_63_102_104/WCLK
+    SLICE_X88Y126        RAMD64E                                      r  core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X88Y126        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.242     7.057    core/endpoints/banks[0].regular.words_reg_0_63_102_104/RAMA
+  -------------------------------------------------------------------
+                         required time                          7.057    
+                         arrival time                          -6.973    
+  -------------------------------------------------------------------
+                         slack                                  0.084    
+
+Slack (MET) :             0.151ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.045ns  (logic 0.931ns (15.401%)  route 5.114ns (84.599%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.592     1.637    core/endpoints/read0[0]
+    SLICE_X89Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_7/I1
+    SLICE_X89Y129        LUT3 (Prop_lut3_I1_O)        0.097     1.734 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_7/O
+                         net (fo=256, routed)         1.585     3.320    core/endpoints/banks[0].regular.words_reg_0_63_168_170/ADDRB0
+    SLICE_X88Y149                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_168_170/RAMB/RADR0
+    SLICE_X88Y149        RAMD64E (Prop_ramd64e_RADR0_O)
+                                                      0.097     3.417 r  core/endpoints/banks[0].regular.words_reg_0_63_168_170/RAMB/O
+                         net (fo=2, routed)           0.543     3.960    core/endpoints/bank_value[0][169]
+    SLICE_X87Y147                                                     r  core/endpoints/value0[169]_INST_0/I1
+    SLICE_X87Y147        LUT3 (Prop_lut3_I1_O)        0.097     4.057 r  core/endpoints/value0[169]_INST_0/O
+                         net (fo=7, routed)           0.643     4.700    core/lane/value0[169]
+    SLICE_X75Y150                                                     r  core/lane/endpoints_i_656/I2
+    SLICE_X75Y150        LUT4 (Prop_lut4_I2_O)        0.097     4.797 r  core/lane/endpoints_i_656/O
+                         net (fo=1, routed)           0.274     5.071    core/lane/endpoints_i_656_n_0
+    SLICE_X75Y150                                                     r  core/lane/endpoints_i_377/I4
+    SLICE_X75Y150        LUT5 (Prop_lut5_I4_O)        0.097     5.168 r  core/lane/endpoints_i_377/O
+                         net (fo=1, routed)           0.408     5.577    core/lane/endpoints_i_377_n_0
+    SLICE_X75Y149                                                     r  core/lane/endpoints_i_96/I2
+    SLICE_X75Y149        LUT3 (Prop_lut3_I2_O)        0.105     5.682 r  core/lane/endpoints_i_96/O
+                         net (fo=2, routed)           1.067     6.749    core/endpoints/banks[1].regular.words_reg_0_63_168_170/DIB
+    SLICE_X90Y145        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_168_170/WCLK
+    SLICE_X90Y145        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y145        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.400     6.899    core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.899    
+                         arrival time                          -6.749    
+  -------------------------------------------------------------------
+                         slack                                  0.151    
+
+Slack (MET) :             0.151ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.045ns  (logic 0.931ns (15.401%)  route 5.114ns (84.599%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.592     1.637    core/endpoints/read0[0]
+    SLICE_X89Y129                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_7/I1
+    SLICE_X89Y129        LUT3 (Prop_lut3_I1_O)        0.097     1.734 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_7/O
+                         net (fo=256, routed)         1.585     3.320    core/endpoints/banks[0].regular.words_reg_0_63_168_170/ADDRB0
+    SLICE_X88Y149                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_168_170/RAMB/RADR0
+    SLICE_X88Y149        RAMD64E (Prop_ramd64e_RADR0_O)
+                                                      0.097     3.417 r  core/endpoints/banks[0].regular.words_reg_0_63_168_170/RAMB/O
+                         net (fo=2, routed)           0.543     3.960    core/endpoints/bank_value[0][169]
+    SLICE_X87Y147                                                     r  core/endpoints/value0[169]_INST_0/I1
+    SLICE_X87Y147        LUT3 (Prop_lut3_I1_O)        0.097     4.057 r  core/endpoints/value0[169]_INST_0/O
+                         net (fo=7, routed)           0.643     4.700    core/lane/value0[169]
+    SLICE_X75Y150                                                     r  core/lane/endpoints_i_656/I2
+    SLICE_X75Y150        LUT4 (Prop_lut4_I2_O)        0.097     4.797 r  core/lane/endpoints_i_656/O
+                         net (fo=1, routed)           0.274     5.071    core/lane/endpoints_i_656_n_0
+    SLICE_X75Y150                                                     r  core/lane/endpoints_i_377/I4
+    SLICE_X75Y150        LUT5 (Prop_lut5_I4_O)        0.097     5.168 r  core/lane/endpoints_i_377/O
+                         net (fo=1, routed)           0.408     5.577    core/lane/endpoints_i_377_n_0
+    SLICE_X75Y149                                                     r  core/lane/endpoints_i_96/I2
+    SLICE_X75Y149        LUT3 (Prop_lut3_I2_O)        0.105     5.682 r  core/lane/endpoints_i_96/O
+                         net (fo=2, routed)           1.067     6.749    core/endpoints/banks[1].regular.words_reg_0_63_168_170/DIB
+    SLICE_X90Y145        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_168_170/WCLK
+    SLICE_X90Y145        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y145        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.400     6.899    core/endpoints/banks[1].regular.words_reg_0_63_168_170/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.899    
+                         arrival time                          -6.749    
+  -------------------------------------------------------------------
+                         slack                                  0.151    
+
+Slack (MET) :             0.159ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.044ns  (logic 1.093ns (18.084%)  route 4.951ns (81.916%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.397     3.227    core/endpoints/banks[0].regular.words_reg_0_63_246_248/ADDRB3
+    SLICE_X90Y150                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/RADR3
+    SLICE_X90Y150        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.472 r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/O
+                         net (fo=2, routed)           0.589     4.061    core/endpoints/bank_value[0][247]
+    SLICE_X86Y147                                                     r  core/endpoints/value0[247]_INST_0/I1
+    SLICE_X86Y147        LUT3 (Prop_lut3_I1_O)        0.097     4.158 r  core/endpoints/value0[247]_INST_0/O
+                         net (fo=7, routed)           0.600     4.758    core/lane/value0[247]
+    SLICE_X85Y153                                                     r  core/lane/endpoints_i_577/I2
+    SLICE_X85Y153        LUT4 (Prop_lut4_I2_O)        0.097     4.855 r  core/lane/endpoints_i_577/O
+                         net (fo=1, routed)           0.319     5.174    core/lane/endpoints_i_577_n_0
+    SLICE_X85Y151                                                     r  core/lane/endpoints_i_299/I4
+    SLICE_X85Y151        LUT5 (Prop_lut5_I4_O)        0.097     5.271 r  core/lane/endpoints_i_299/O
+                         net (fo=1, routed)           0.468     5.738    core/lane/endpoints_i_299_n_0
+    SLICE_X85Y149                                                     r  core/lane/endpoints_i_18/I2
+    SLICE_X85Y149        LUT3 (Prop_lut3_I2_O)        0.105     5.843 r  core/lane/endpoints_i_18/O
+                         net (fo=2, routed)           0.905     6.748    core/endpoints/banks[1].regular.words_reg_0_63_246_248/DIB
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_246_248/WCLK
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y135        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.392     6.907    core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.907    
+                         arrival time                          -6.748    
+  -------------------------------------------------------------------
+                         slack                                  0.159    
+
+Slack (MET) :             0.159ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.044ns  (logic 1.093ns (18.084%)  route 4.951ns (81.916%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.397     3.227    core/endpoints/banks[0].regular.words_reg_0_63_246_248/ADDRB3
+    SLICE_X90Y150                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/RADR3
+    SLICE_X90Y150        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.472 r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMB/O
+                         net (fo=2, routed)           0.589     4.061    core/endpoints/bank_value[0][247]
+    SLICE_X86Y147                                                     r  core/endpoints/value0[247]_INST_0/I1
+    SLICE_X86Y147        LUT3 (Prop_lut3_I1_O)        0.097     4.158 r  core/endpoints/value0[247]_INST_0/O
+                         net (fo=7, routed)           0.600     4.758    core/lane/value0[247]
+    SLICE_X85Y153                                                     r  core/lane/endpoints_i_577/I2
+    SLICE_X85Y153        LUT4 (Prop_lut4_I2_O)        0.097     4.855 r  core/lane/endpoints_i_577/O
+                         net (fo=1, routed)           0.319     5.174    core/lane/endpoints_i_577_n_0
+    SLICE_X85Y151                                                     r  core/lane/endpoints_i_299/I4
+    SLICE_X85Y151        LUT5 (Prop_lut5_I4_O)        0.097     5.271 r  core/lane/endpoints_i_299/O
+                         net (fo=1, routed)           0.468     5.738    core/lane/endpoints_i_299_n_0
+    SLICE_X85Y149                                                     r  core/lane/endpoints_i_18/I2
+    SLICE_X85Y149        LUT3 (Prop_lut3_I2_O)        0.105     5.843 r  core/lane/endpoints_i_18/O
+                         net (fo=2, routed)           0.905     6.748    core/endpoints/banks[1].regular.words_reg_0_63_246_248/DIB
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_246_248/WCLK
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y135        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.392     6.907    core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.907    
+                         arrival time                          -6.748    
+  -------------------------------------------------------------------
+                         slack                                  0.159    
+
+Slack (MET) :             0.162ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.047ns  (logic 1.100ns (18.192%)  route 4.947ns (81.808%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.187     3.017    core/endpoints/banks[0].regular.words_reg_0_63_54_56/ADDRB3
+    SLICE_X80Y134                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_54_56/RAMB/RADR3
+    SLICE_X80Y134        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.262 r  core/endpoints/banks[0].regular.words_reg_0_63_54_56/RAMB/O
+                         net (fo=2, routed)           0.400     3.662    core/endpoints/bank_value[0][55]
+    SLICE_X81Y135                                                     r  core/endpoints/value0[55]_INST_0/I1
+    SLICE_X81Y135        LUT3 (Prop_lut3_I1_O)        0.097     3.759 r  core/endpoints/value0[55]_INST_0/O
+                         net (fo=11, routed)          0.758     4.517    core/lane/value0[55]
+    SLICE_X66Y138                                                     r  core/lane/endpoints_i_770/I2
+    SLICE_X66Y138        LUT4 (Prop_lut4_I2_O)        0.097     4.614 r  core/lane/endpoints_i_770/O
+                         net (fo=1, routed)           0.294     4.908    core/lane/endpoints_i_770_n_0
+    SLICE_X67Y138                                                     r  core/lane/endpoints_i_491/I4
+    SLICE_X67Y138        LUT5 (Prop_lut5_I4_O)        0.097     5.005 r  core/lane/endpoints_i_491/O
+                         net (fo=1, routed)           0.532     5.536    core/lane/endpoints_i_491_n_0
+    SLICE_X70Y137                                                     r  core/lane/endpoints_i_210/I2
+    SLICE_X70Y137        LUT3 (Prop_lut3_I2_O)        0.112     5.648 r  core/lane/endpoints_i_210/O
+                         net (fo=2, routed)           1.102     6.751    core/endpoints/banks[1].regular.words_reg_0_63_54_56/DIB
+    SLICE_X88Y132        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_54_56/WCLK
+    SLICE_X88Y132        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X88Y132        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.387     6.912    core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.912    
+                         arrival time                          -6.751    
+  -------------------------------------------------------------------
+                         slack                                  0.162    
+
+Slack (MET) :             0.162ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.047ns  (logic 1.100ns (18.192%)  route 4.947ns (81.808%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.187     3.017    core/endpoints/banks[0].regular.words_reg_0_63_54_56/ADDRB3
+    SLICE_X80Y134                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_54_56/RAMB/RADR3
+    SLICE_X80Y134        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.262 r  core/endpoints/banks[0].regular.words_reg_0_63_54_56/RAMB/O
+                         net (fo=2, routed)           0.400     3.662    core/endpoints/bank_value[0][55]
+    SLICE_X81Y135                                                     r  core/endpoints/value0[55]_INST_0/I1
+    SLICE_X81Y135        LUT3 (Prop_lut3_I1_O)        0.097     3.759 r  core/endpoints/value0[55]_INST_0/O
+                         net (fo=11, routed)          0.758     4.517    core/lane/value0[55]
+    SLICE_X66Y138                                                     r  core/lane/endpoints_i_770/I2
+    SLICE_X66Y138        LUT4 (Prop_lut4_I2_O)        0.097     4.614 r  core/lane/endpoints_i_770/O
+                         net (fo=1, routed)           0.294     4.908    core/lane/endpoints_i_770_n_0
+    SLICE_X67Y138                                                     r  core/lane/endpoints_i_491/I4
+    SLICE_X67Y138        LUT5 (Prop_lut5_I4_O)        0.097     5.005 r  core/lane/endpoints_i_491/O
+                         net (fo=1, routed)           0.532     5.536    core/lane/endpoints_i_491_n_0
+    SLICE_X70Y137                                                     r  core/lane/endpoints_i_210/I2
+    SLICE_X70Y137        LUT3 (Prop_lut3_I2_O)        0.112     5.648 r  core/lane/endpoints_i_210/O
+                         net (fo=2, routed)           1.102     6.751    core/endpoints/banks[1].regular.words_reg_0_63_54_56/DIB
+    SLICE_X88Y132        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_54_56/WCLK
+    SLICE_X88Y132        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X88Y132        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.387     6.912    core/endpoints/banks[1].regular.words_reg_0_63_54_56/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.912    
+                         arrival time                          -6.751    
+  -------------------------------------------------------------------
+                         slack                                  0.162    
+
+Slack (MET) :             0.172ns  (required time - arrival time)
+  Source:                 core/lane/scheduled_execution.recycle_reg_rep__11/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/lane/scheduled_execution.launch_state_reg[702]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.374ns  (logic 1.218ns (19.109%)  route 5.156ns (80.891%))
+  Logic Levels:           7  (LUT2=1 LUT3=2 LUT4=2 LUT5=1 LUT6=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/lane/clk
+    SLICE_X92Y161        FDRE                                         r  core/lane/scheduled_execution.recycle_reg_rep__11/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X92Y161        FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/lane/scheduled_execution.recycle_reg_rep__11/Q
+                         net (fo=28, routed)          0.480     1.577    core/lane/scheduled_execution.recycle_reg_rep__11_n_0
+    SLICE_X95Y161                                                     f  core/lane/scheduled_execution.launch_state[1028]_i_11/I0
+    SLICE_X95Y161        LUT4 (Prop_lut4_I0_O)        0.097     1.674 r  core/lane/scheduled_execution.launch_state[1028]_i_11/O
+                         net (fo=123, routed)         0.643     2.317    core/lane/scheduled_execution.launch_state[1028]_i_11_n_0
+    SLICE_X95Y160                                                     r  core/lane/scheduled_execution.launch_state[167]_i_4/I1
+    SLICE_X95Y160        LUT3 (Prop_lut3_I1_O)        0.097     2.414 f  core/lane/scheduled_execution.launch_state[167]_i_4/O
+                         net (fo=15, routed)          0.773     3.187    core/lane/scheduled_execution.fixed_context.block_shape[2]
+    SLICE_X97Y164                                                     f  core/lane/scheduled_execution.launch_state[687]_i_6/I3
+    SLICE_X97Y164        LUT4 (Prop_lut4_I3_O)        0.095     3.282 f  core/lane/scheduled_execution.launch_state[687]_i_6/O
+                         net (fo=27, routed)          0.469     3.751    core/lane/scheduled_execution.launch_state[687]_i_6_n_0
+    SLICE_X96Y166                                                     f  core/lane/scheduled_execution.launch_state[735]_i_7/I1
+    SLICE_X96Y166        LUT2 (Prop_lut2_I1_O)        0.245     3.996 f  core/lane/scheduled_execution.launch_state[735]_i_7/O
+                         net (fo=43, routed)          1.043     5.038    core/lane/scheduled_execution.launch_state[735]_i_7_n_0
+    SLICE_X86Y178                                                     f  core/lane/scheduled_execution.launch_state[702]_i_3/I5
+    SLICE_X86Y178        LUT6 (Prop_lut6_I5_O)        0.097     5.135 r  core/lane/scheduled_execution.launch_state[702]_i_3/O
+                         net (fo=1, routed)           0.494     5.630    core/lane/scheduled_execution.launch_state[702]_i_3_n_0
+    SLICE_X86Y178                                                     r  core/lane/scheduled_execution.launch_state[702]_i_2/I0
+    SLICE_X86Y178        LUT5 (Prop_lut5_I0_O)        0.097     5.727 r  core/lane/scheduled_execution.launch_state[702]_i_2/O
+                         net (fo=1, routed)           0.834     6.561    core/lane/scheduled_execution.fixed_context.unified_state[702]
+    SLICE_X86Y196                                                     r  core/lane/scheduled_execution.launch_state[702]_i_1/I2
+    SLICE_X86Y196        LUT3 (Prop_lut3_I2_O)        0.097     6.658 r  core/lane/scheduled_execution.launch_state[702]_i_1/O
+                         net (fo=1, routed)           0.420     7.078    core/lane/scheduled_execution.issue_state[702]
+    SLICE_X86Y196        FDRE                                         r  core/lane/scheduled_execution.launch_state_reg[702]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/lane/clk
+    SLICE_X86Y196        FDRE                                         r  core/lane/scheduled_execution.launch_state_reg[702]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X86Y196        FDRE (Setup_fdre_C_D)       -0.049     7.250    core/lane/scheduled_execution.launch_state_reg[702]
+  -------------------------------------------------------------------
+                         required time                          7.250    
+                         arrival time                          -7.078    
+  -------------------------------------------------------------------
+                         slack                                  0.172    
+
+Slack (MET) :             0.172ns  (required time - arrival time)
+  Source:                 core/lane/scheduled_execution.recycle_reg_rep__11/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/lane/scheduled_execution.launch_state_reg[702]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.374ns  (logic 1.218ns (19.109%)  route 5.156ns (80.891%))
+  Logic Levels:           7  (LUT2=1 LUT3=2 LUT4=2 LUT5=1 LUT6=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/lane/clk
+    SLICE_X92Y161        FDRE                                         r  core/lane/scheduled_execution.recycle_reg_rep__11/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X92Y161        FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/lane/scheduled_execution.recycle_reg_rep__11/Q
+                         net (fo=28, routed)          0.480     1.577    core/lane/scheduled_execution.recycle_reg_rep__11_n_0
+    SLICE_X95Y161                                                     r  core/lane/scheduled_execution.launch_state[1028]_i_11/I0
+    SLICE_X95Y161        LUT4 (Prop_lut4_I0_O)        0.097     1.674 f  core/lane/scheduled_execution.launch_state[1028]_i_11/O
+                         net (fo=123, routed)         0.643     2.317    core/lane/scheduled_execution.launch_state[1028]_i_11_n_0
+    SLICE_X95Y160                                                     f  core/lane/scheduled_execution.launch_state[167]_i_4/I1
+    SLICE_X95Y160        LUT3 (Prop_lut3_I1_O)        0.097     2.414 f  core/lane/scheduled_execution.launch_state[167]_i_4/O
+                         net (fo=15, routed)          0.773     3.187    core/lane/scheduled_execution.fixed_context.block_shape[2]
+    SLICE_X97Y164                                                     f  core/lane/scheduled_execution.launch_state[687]_i_6/I3
+    SLICE_X97Y164        LUT4 (Prop_lut4_I3_O)        0.095     3.282 f  core/lane/scheduled_execution.launch_state[687]_i_6/O
+                         net (fo=27, routed)          0.469     3.751    core/lane/scheduled_execution.launch_state[687]_i_6_n_0
+    SLICE_X96Y166                                                     f  core/lane/scheduled_execution.launch_state[735]_i_7/I1
+    SLICE_X96Y166        LUT2 (Prop_lut2_I1_O)        0.245     3.996 f  core/lane/scheduled_execution.launch_state[735]_i_7/O
+                         net (fo=43, routed)          1.043     5.038    core/lane/scheduled_execution.launch_state[735]_i_7_n_0
+    SLICE_X86Y178                                                     f  core/lane/scheduled_execution.launch_state[702]_i_3/I5
+    SLICE_X86Y178        LUT6 (Prop_lut6_I5_O)        0.097     5.135 r  core/lane/scheduled_execution.launch_state[702]_i_3/O
+                         net (fo=1, routed)           0.494     5.630    core/lane/scheduled_execution.launch_state[702]_i_3_n_0
+    SLICE_X86Y178                                                     r  core/lane/scheduled_execution.launch_state[702]_i_2/I0
+    SLICE_X86Y178        LUT5 (Prop_lut5_I0_O)        0.097     5.727 r  core/lane/scheduled_execution.launch_state[702]_i_2/O
+                         net (fo=1, routed)           0.834     6.561    core/lane/scheduled_execution.fixed_context.unified_state[702]
+    SLICE_X86Y196                                                     r  core/lane/scheduled_execution.launch_state[702]_i_1/I2
+    SLICE_X86Y196        LUT3 (Prop_lut3_I2_O)        0.097     6.658 r  core/lane/scheduled_execution.launch_state[702]_i_1/O
+                         net (fo=1, routed)           0.420     7.078    core/lane/scheduled_execution.issue_state[702]
+    SLICE_X86Y196        FDRE                                         r  core/lane/scheduled_execution.launch_state_reg[702]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/lane/clk
+    SLICE_X86Y196        FDRE                                         r  core/lane/scheduled_execution.launch_state_reg[702]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X86Y196        FDRE (Setup_fdre_C_D)       -0.049     7.250    core/lane/scheduled_execution.launch_state_reg[702]
+  -------------------------------------------------------------------
+                         required time                          7.250    
+                         arrival time                          -7.078    
+  -------------------------------------------------------------------
+                         slack                                  0.172    
+
+Slack (MET) :             0.186ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.009ns  (logic 1.101ns (18.321%)  route 4.908ns (81.679%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.037     2.868    core/endpoints/banks[0].regular.words_reg_0_63_123_125/ADDRB3
+    SLICE_X90Y139                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_123_125/RAMB/RADR3
+    SLICE_X90Y139        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.113 r  core/endpoints/banks[0].regular.words_reg_0_63_123_125/RAMB/O
+                         net (fo=2, routed)           0.616     3.729    core/endpoints/bank_value[0][124]
+    SLICE_X85Y139                                                     r  core/endpoints/value0[124]_INST_0/I1
+    SLICE_X85Y139        LUT3 (Prop_lut3_I1_O)        0.097     3.826 r  core/endpoints/value0[124]_INST_0/O
+                         net (fo=8, routed)           0.860     4.686    core/lane/value0[124]
+    SLICE_X72Y145                                                     r  core/lane/endpoints_i_701/I2
+    SLICE_X72Y145        LUT4 (Prop_lut4_I2_O)        0.097     4.783 r  core/lane/endpoints_i_701/O
+                         net (fo=1, routed)           0.307     5.090    core/lane/endpoints_i_701_n_0
+    SLICE_X68Y145                                                     r  core/lane/endpoints_i_422/I4
+    SLICE_X68Y145        LUT5 (Prop_lut5_I4_O)        0.097     5.187 r  core/lane/endpoints_i_422/O
+                         net (fo=1, routed)           0.409     5.596    core/lane/endpoints_i_422_n_0
+    SLICE_X71Y145                                                     r  core/lane/endpoints_i_141/I2
+    SLICE_X71Y145        LUT3 (Prop_lut3_I2_O)        0.113     5.709 r  core/lane/endpoints_i_141/O
+                         net (fo=2, routed)           1.004     6.713    core/endpoints/banks[1].regular.words_reg_0_63_123_125/DIB
+    SLICE_X92Y139        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_123_125/WCLK
+    SLICE_X92Y139        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X92Y139        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.400     6.899    core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.899    
+                         arrival time                          -6.713    
+  -------------------------------------------------------------------
+                         slack                                  0.186    
+
+Slack (MET) :             0.186ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.009ns  (logic 1.101ns (18.321%)  route 4.908ns (81.679%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 f  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.037     2.868    core/endpoints/banks[0].regular.words_reg_0_63_123_125/ADDRB3
+    SLICE_X90Y139                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_123_125/RAMB/RADR3
+    SLICE_X90Y139        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.113 r  core/endpoints/banks[0].regular.words_reg_0_63_123_125/RAMB/O
+                         net (fo=2, routed)           0.616     3.729    core/endpoints/bank_value[0][124]
+    SLICE_X85Y139                                                     r  core/endpoints/value0[124]_INST_0/I1
+    SLICE_X85Y139        LUT3 (Prop_lut3_I1_O)        0.097     3.826 r  core/endpoints/value0[124]_INST_0/O
+                         net (fo=8, routed)           0.860     4.686    core/lane/value0[124]
+    SLICE_X72Y145                                                     r  core/lane/endpoints_i_701/I2
+    SLICE_X72Y145        LUT4 (Prop_lut4_I2_O)        0.097     4.783 r  core/lane/endpoints_i_701/O
+                         net (fo=1, routed)           0.307     5.090    core/lane/endpoints_i_701_n_0
+    SLICE_X68Y145                                                     r  core/lane/endpoints_i_422/I4
+    SLICE_X68Y145        LUT5 (Prop_lut5_I4_O)        0.097     5.187 r  core/lane/endpoints_i_422/O
+                         net (fo=1, routed)           0.409     5.596    core/lane/endpoints_i_422_n_0
+    SLICE_X71Y145                                                     r  core/lane/endpoints_i_141/I2
+    SLICE_X71Y145        LUT3 (Prop_lut3_I2_O)        0.113     5.709 r  core/lane/endpoints_i_141/O
+                         net (fo=2, routed)           1.004     6.713    core/endpoints/banks[1].regular.words_reg_0_63_123_125/DIB
+    SLICE_X92Y139        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_123_125/WCLK
+    SLICE_X92Y139        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X92Y139        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.400     6.899    core/endpoints/banks[1].regular.words_reg_0_63_123_125/RAMB
+  -------------------------------------------------------------------
+                         required time                          6.899    
+                         arrival time                          -6.713    
+  -------------------------------------------------------------------
+                         slack                                  0.186    
+
+Slack (MET) :             0.188ns  (required time - arrival time)
+  Source:                 core/state_reg[2]_rep__4/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/emit_value_reg[144]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.441ns  (logic 1.230ns (19.097%)  route 5.211ns (80.903%))
+  Logic Levels:           7  (LUT2=1 LUT3=1 LUT5=1 LUT6=4)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X66Y123        FDRE                                         r  core/state_reg[2]_rep__4/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X66Y123        FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/state_reg[2]_rep__4/Q
+                         net (fo=112, routed)         0.443     1.540    core/state_reg[2]_rep__4_n_0
+    SLICE_X66Y124                                                     f  core/task_steps[4]_i_3/I1
+    SLICE_X66Y124        LUT2 (Prop_lut2_I1_O)        0.097     1.637 r  core/task_steps[4]_i_3/O
+                         net (fo=6, routed)           0.492     2.129    core/task_steps[4]_i_3_n_0
+    SLICE_X69Y131                                                     r  core/emit_value[255]_i_28/I3
+    SLICE_X69Y131        LUT6 (Prop_lut6_I3_O)        0.097     2.226 r  core/emit_value[255]_i_28/O
+                         net (fo=7, routed)           0.977     3.203    core/lane/emit_value[3]_i_4_1
+    SLICE_X82Y143                                                     r  core/lane/emit_value[255]_i_23/I3
+    SLICE_X82Y143        LUT6 (Prop_lut6_I3_O)        0.097     3.300 r  core/lane/emit_value[255]_i_23/O
+                         net (fo=102, routed)         0.420     3.720    core/lane/emit_value[255]_i_23_n_0
+    SLICE_X85Y145                                                     r  core/lane/emit_value[255]_i_21/I1
+    SLICE_X85Y145        LUT3 (Prop_lut3_I1_O)        0.105     3.825 r  core/lane/emit_value[255]_i_21/O
+                         net (fo=256, routed)         1.977     5.802    core/lane/emit_value[255]_i_21_n_0
+    SLICE_X130Y151                                                    r  core/lane/emit_value[144]_i_4/I1
+    SLICE_X130Y151       LUT6 (Prop_lut6_I1_O)        0.247     6.049 r  core/lane/emit_value[144]_i_4/O
+                         net (fo=2, routed)           0.314     6.363    core/lane/pipe_read_capture[144]
+    SLICE_X130Y148                                                    r  core/lane/emit_value[144]_i_3/I5
+    SLICE_X130Y148       LUT6 (Prop_lut6_I5_O)        0.097     6.460 r  core/lane/emit_value[144]_i_3/O
+                         net (fo=1, routed)           0.588     7.048    core/lane/emit_value[144]_i_3_n_0
+    SLICE_X113Y143                                                    r  core/lane/emit_value[144]_i_1/I2
+    SLICE_X113Y143       LUT5 (Prop_lut5_I2_O)        0.097     7.145 r  core/lane/emit_value[144]_i_1/O
+                         net (fo=1, routed)           0.000     7.145    core/emit_value[144]
+    SLICE_X113Y143       FDRE                                         r  core/emit_value_reg[144]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/clk
+    SLICE_X113Y143       FDRE                                         r  core/emit_value_reg[144]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X113Y143       FDRE (Setup_fdre_C_D)        0.033     7.332    core/emit_value_reg[144]
+  -------------------------------------------------------------------
+                         required time                          7.332    
+                         arrival time                          -7.145    
+  -------------------------------------------------------------------
+                         slack                                  0.188    
+
+Slack (MET) :             0.188ns  (required time - arrival time)
+  Source:                 core/state_reg[2]_rep__4/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/emit_value_reg[144]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.441ns  (logic 1.230ns (19.097%)  route 5.211ns (80.903%))
+  Logic Levels:           7  (LUT2=1 LUT3=1 LUT5=1 LUT6=4)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X66Y123        FDRE                                         r  core/state_reg[2]_rep__4/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X66Y123        FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/state_reg[2]_rep__4/Q
+                         net (fo=112, routed)         0.443     1.540    core/state_reg[2]_rep__4_n_0
+    SLICE_X66Y124                                                     f  core/task_steps[4]_i_3/I1
+    SLICE_X66Y124        LUT2 (Prop_lut2_I1_O)        0.097     1.637 r  core/task_steps[4]_i_3/O
+                         net (fo=6, routed)           0.492     2.129    core/task_steps[4]_i_3_n_0
+    SLICE_X69Y131                                                     r  core/emit_value[255]_i_28/I3
+    SLICE_X69Y131        LUT6 (Prop_lut6_I3_O)        0.097     2.226 r  core/emit_value[255]_i_28/O
+                         net (fo=7, routed)           0.977     3.203    core/lane/emit_value[3]_i_4_1
+    SLICE_X82Y143                                                     r  core/lane/emit_value[255]_i_23/I3
+    SLICE_X82Y143        LUT6 (Prop_lut6_I3_O)        0.097     3.300 r  core/lane/emit_value[255]_i_23/O
+                         net (fo=102, routed)         0.420     3.720    core/lane/emit_value[255]_i_23_n_0
+    SLICE_X85Y145                                                     r  core/lane/emit_value[255]_i_21/I1
+    SLICE_X85Y145        LUT3 (Prop_lut3_I1_O)        0.105     3.825 f  core/lane/emit_value[255]_i_21/O
+                         net (fo=256, routed)         1.977     5.802    core/lane/emit_value[255]_i_21_n_0
+    SLICE_X130Y151                                                    f  core/lane/emit_value[144]_i_4/I1
+    SLICE_X130Y151       LUT6 (Prop_lut6_I1_O)        0.247     6.049 r  core/lane/emit_value[144]_i_4/O
+                         net (fo=2, routed)           0.314     6.363    core/lane/pipe_read_capture[144]
+    SLICE_X130Y148                                                    r  core/lane/emit_value[144]_i_3/I5
+    SLICE_X130Y148       LUT6 (Prop_lut6_I5_O)        0.097     6.460 r  core/lane/emit_value[144]_i_3/O
+                         net (fo=1, routed)           0.588     7.048    core/lane/emit_value[144]_i_3_n_0
+    SLICE_X113Y143                                                    r  core/lane/emit_value[144]_i_1/I2
+    SLICE_X113Y143       LUT5 (Prop_lut5_I2_O)        0.097     7.145 r  core/lane/emit_value[144]_i_1/O
+                         net (fo=1, routed)           0.000     7.145    core/emit_value[144]
+    SLICE_X113Y143       FDRE                                         r  core/emit_value_reg[144]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/clk
+    SLICE_X113Y143       FDRE                                         r  core/emit_value_reg[144]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X113Y143       FDRE (Setup_fdre_C_D)        0.033     7.332    core/emit_value_reg[144]
+  -------------------------------------------------------------------
+                         required time                          7.332    
+                         arrival time                          -7.145    
+  -------------------------------------------------------------------
+                         slack                                  0.188    
+
+Slack (MET) :             0.191ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.021ns  (logic 1.101ns (18.287%)  route 4.920ns (81.712%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.288     3.118    core/endpoints/banks[0].regular.words_reg_0_63_240_242/ADDRA3
+    SLICE_X84Y143                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_240_242/RAMA/RADR3
+    SLICE_X84Y143        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.363 r  core/endpoints/banks[0].regular.words_reg_0_63_240_242/RAMA/O
+                         net (fo=2, routed)           0.400     3.764    core/endpoints/bank_value[0][240]
+    SLICE_X80Y143                                                     r  core/endpoints/value0[240]_INST_0/I1
+    SLICE_X80Y143        LUT3 (Prop_lut3_I1_O)        0.097     3.861 r  core/endpoints/value0[240]_INST_0/O
+                         net (fo=7, routed)           0.716     4.577    core/lane/value0[240]
+    SLICE_X75Y152                                                     r  core/lane/endpoints_i_584/I2
+    SLICE_X75Y152        LUT4 (Prop_lut4_I2_O)        0.097     4.674 r  core/lane/endpoints_i_584/O
+                         net (fo=1, routed)           0.360     5.034    core/lane/endpoints_i_584_n_0
+    SLICE_X74Y152                                                     r  core/lane/endpoints_i_306/I4
+    SLICE_X74Y152        LUT5 (Prop_lut5_I4_O)        0.097     5.131 r  core/lane/endpoints_i_306/O
+                         net (fo=1, routed)           0.699     5.830    core/lane/endpoints_i_306_n_0
+    SLICE_X78Y150                                                     r  core/lane/endpoints_i_25/I2
+    SLICE_X78Y150        LUT3 (Prop_lut3_I2_O)        0.113     5.943 r  core/lane/endpoints_i_25/O
+                         net (fo=2, routed)           0.782     6.725    core/endpoints/banks[1].regular.words_reg_0_63_240_242/DIA
+    SLICE_X80Y138        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_240_242/WCLK
+    SLICE_X80Y138        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X80Y138        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.384     6.915    core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA
+  -------------------------------------------------------------------
+                         required time                          6.915    
+                         arrival time                          -6.725    
+  -------------------------------------------------------------------
+                         slack                                  0.191    
+
+Slack (MET) :             0.191ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.021ns  (logic 1.101ns (18.287%)  route 4.920ns (81.712%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.288     3.118    core/endpoints/banks[0].regular.words_reg_0_63_240_242/ADDRA3
+    SLICE_X84Y143                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_240_242/RAMA/RADR3
+    SLICE_X84Y143        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.363 r  core/endpoints/banks[0].regular.words_reg_0_63_240_242/RAMA/O
+                         net (fo=2, routed)           0.400     3.764    core/endpoints/bank_value[0][240]
+    SLICE_X80Y143                                                     r  core/endpoints/value0[240]_INST_0/I1
+    SLICE_X80Y143        LUT3 (Prop_lut3_I1_O)        0.097     3.861 r  core/endpoints/value0[240]_INST_0/O
+                         net (fo=7, routed)           0.716     4.577    core/lane/value0[240]
+    SLICE_X75Y152                                                     r  core/lane/endpoints_i_584/I2
+    SLICE_X75Y152        LUT4 (Prop_lut4_I2_O)        0.097     4.674 r  core/lane/endpoints_i_584/O
+                         net (fo=1, routed)           0.360     5.034    core/lane/endpoints_i_584_n_0
+    SLICE_X74Y152                                                     r  core/lane/endpoints_i_306/I4
+    SLICE_X74Y152        LUT5 (Prop_lut5_I4_O)        0.097     5.131 r  core/lane/endpoints_i_306/O
+                         net (fo=1, routed)           0.699     5.830    core/lane/endpoints_i_306_n_0
+    SLICE_X78Y150                                                     r  core/lane/endpoints_i_25/I2
+    SLICE_X78Y150        LUT3 (Prop_lut3_I2_O)        0.113     5.943 r  core/lane/endpoints_i_25/O
+                         net (fo=2, routed)           0.782     6.725    core/endpoints/banks[1].regular.words_reg_0_63_240_242/DIA
+    SLICE_X80Y138        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_240_242/WCLK
+    SLICE_X80Y138        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X80Y138        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.384     6.915    core/endpoints/banks[1].regular.words_reg_0_63_240_242/RAMA
+  -------------------------------------------------------------------
+                         required time                          6.915    
+                         arrival time                          -6.725    
+  -------------------------------------------------------------------
+                         slack                                  0.191    
+
+Slack (MET) :             0.200ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.150ns  (logic 1.085ns (17.643%)  route 5.065ns (82.357%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.397     3.227    core/endpoints/banks[0].regular.words_reg_0_63_246_248/ADDRC3
+    SLICE_X90Y150                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMC/RADR3
+    SLICE_X90Y150        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.472 r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMC/O
+                         net (fo=2, routed)           0.638     4.110    core/endpoints/bank_value[0][248]
+    SLICE_X85Y146                                                     r  core/endpoints/value0[248]_INST_0/I1
+    SLICE_X85Y146        LUT3 (Prop_lut3_I1_O)        0.097     4.207 r  core/endpoints/value0[248]_INST_0/O
+                         net (fo=7, routed)           0.581     4.789    core/lane/value0[248]
+    SLICE_X85Y141                                                     r  core/lane/endpoints_i_576/I2
+    SLICE_X85Y141        LUT4 (Prop_lut4_I2_O)        0.097     4.886 r  core/lane/endpoints_i_576/O
+                         net (fo=1, routed)           0.585     5.471    core/lane/endpoints_i_576_n_0
+    SLICE_X85Y154                                                     r  core/lane/endpoints_i_298/I4
+    SLICE_X85Y154        LUT5 (Prop_lut5_I4_O)        0.097     5.568 r  core/lane/endpoints_i_298/O
+                         net (fo=1, routed)           0.510     6.078    core/lane/endpoints_i_298_n_0
+    SLICE_X89Y150                                                     r  core/lane/endpoints_i_17/I2
+    SLICE_X89Y150        LUT3 (Prop_lut3_I2_O)        0.097     6.175 r  core/lane/endpoints_i_17/O
+                         net (fo=2, routed)           0.679     6.854    core/endpoints/banks[1].regular.words_reg_0_63_246_248/DIC
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_246_248/WCLK
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y135        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246     7.053    core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC
+  -------------------------------------------------------------------
+                         required time                          7.053    
+                         arrival time                          -6.854    
+  -------------------------------------------------------------------
+                         slack                                  0.200    
+
+Slack (MET) :             0.200ns  (required time - arrival time)
+  Source:                 core/read_addresses.address_reg[0]/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/I
+                            (rising edge-triggered cell RAMD64E clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.150ns  (logic 1.085ns (17.643%)  route 5.065ns (82.357%))
+  Logic Levels:           6  (LUT3=3 LUT4=1 LUT5=1 RAMD64E=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X87Y129        FDRE                                         r  core/read_addresses.address_reg[0]/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X87Y129        FDRE (Prop_fdre_C_Q)         0.341     1.045 r  core/read_addresses.address_reg[0]/Q
+                         net (fo=524, routed)         0.674     1.719    core/endpoints/read0[0]
+    SLICE_X91Y129                                                     r  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/I1
+    SLICE_X91Y129        LUT3 (Prop_lut3_I1_O)        0.111     1.830 f  core/endpoints/banks[0].regular.words_reg_0_63_0_2_i_4/O
+                         net (fo=256, routed)         1.397     3.227    core/endpoints/banks[0].regular.words_reg_0_63_246_248/ADDRC3
+    SLICE_X90Y150                                                     f  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMC/RADR3
+    SLICE_X90Y150        RAMD64E (Prop_ramd64e_RADR3_O)
+                                                      0.245     3.472 r  core/endpoints/banks[0].regular.words_reg_0_63_246_248/RAMC/O
+                         net (fo=2, routed)           0.638     4.110    core/endpoints/bank_value[0][248]
+    SLICE_X85Y146                                                     r  core/endpoints/value0[248]_INST_0/I1
+    SLICE_X85Y146        LUT3 (Prop_lut3_I1_O)        0.097     4.207 r  core/endpoints/value0[248]_INST_0/O
+                         net (fo=7, routed)           0.581     4.789    core/lane/value0[248]
+    SLICE_X85Y141                                                     r  core/lane/endpoints_i_576/I2
+    SLICE_X85Y141        LUT4 (Prop_lut4_I2_O)        0.097     4.886 r  core/lane/endpoints_i_576/O
+                         net (fo=1, routed)           0.585     5.471    core/lane/endpoints_i_576_n_0
+    SLICE_X85Y154                                                     r  core/lane/endpoints_i_298/I4
+    SLICE_X85Y154        LUT5 (Prop_lut5_I4_O)        0.097     5.568 r  core/lane/endpoints_i_298/O
+                         net (fo=1, routed)           0.510     6.078    core/lane/endpoints_i_298_n_0
+    SLICE_X89Y150                                                     r  core/lane/endpoints_i_17/I2
+    SLICE_X89Y150        LUT3 (Prop_lut3_I2_O)        0.097     6.175 r  core/lane/endpoints_i_17/O
+                         net (fo=2, routed)           0.679     6.854    core/endpoints/banks[1].regular.words_reg_0_63_246_248/DIC
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/I
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/endpoints/banks[1].regular.words_reg_0_63_246_248/WCLK
+    SLICE_X90Y135        RAMD64E                                      r  core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC/CLK
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X90Y135        RAMD64E (Setup_ramd64e_CLK_I)
+                                                     -0.246     7.053    core/endpoints/banks[1].regular.words_reg_0_63_246_248/RAMC
+  -------------------------------------------------------------------
+                         required time                          7.053    
+                         arrival time                          -6.854    
+  -------------------------------------------------------------------
+                         slack                                  0.200    
+
+Slack (MET) :             0.202ns  (required time - arrival time)
+  Source:                 core/state_reg[2]_rep__2/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/result_reg[140]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.463ns  (logic 0.490ns (7.582%)  route 5.973ns (92.418%))
+  Logic Levels:           1  (LUT5=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X60Y121        FDRE                                         r  core/state_reg[2]_rep__2/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X60Y121        FDRE (Prop_fdre_C_Q)         0.393     1.097 r  core/state_reg[2]_rep__2/Q
+                         net (fo=111, routed)         5.973     7.070    core/lane/result_reg[125]
+    SLICE_X124Y148                                                    r  core/lane/result[140]_i_1/I1
+    SLICE_X124Y148       LUT5 (Prop_lut5_I1_O)        0.097     7.167 r  core/lane/result[140]_i_1/O
+                         net (fo=1, routed)           0.000     7.167    core/result0_out[140]
+    SLICE_X124Y148       FDRE                                         r  core/result_reg[140]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/clk
+    SLICE_X124Y148       FDRE                                         r  core/result_reg[140]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X124Y148       FDRE (Setup_fdre_C_D)        0.070     7.369    core/result_reg[140]
+  -------------------------------------------------------------------
+                         required time                          7.369    
+                         arrival time                          -7.167    
+  -------------------------------------------------------------------
+                         slack                                  0.202    
+
+Slack (MET) :             0.202ns  (required time - arrival time)
+  Source:                 core/state_reg[2]_rep__2/C
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Destination:            core/result_reg[140]/D
+                            (rising edge-triggered cell FDRE clocked by clk  {rise@0.000ns fall@3.333ns period=6.666ns})
+  Path Group:             clk
+  Path Type:              Setup (Max at Slow Process Corner)
+  Requirement:            6.666ns  (clk rise@6.666ns - clk rise@0.000ns)
+  Data Path Delay:        6.463ns  (logic 0.490ns (7.582%)  route 5.973ns (92.418%))
+  Logic Levels:           1  (LUT5=1)
+  Clock Path Skew:        -0.035ns (DCD - SCD + CPR)
+    Destination Clock Delay (DCD):    0.669ns = ( 7.335 - 6.666 ) 
+    Source Clock Delay      (SCD):    0.704ns
+    Clock Pessimism Removal (CPR):    0.000ns
+  Clock Uncertainty:      0.035ns  ((TSJ^2 + TIJ^2)^1/2 + DJ) / 2 + PE
+    Total System Jitter     (TSJ):    0.071ns
+    Total Input Jitter      (TIJ):    0.000ns
+    Discrete Jitter          (DJ):    0.000ns
+    Phase Error              (PE):    0.000ns
+
+    Location             Delay type                Incr(ns)  Path(ns)    Netlist Resource(s)
+  -------------------------------------------------------------------    -------------------
+                         (clock clk rise edge)        0.000     0.000 r  
+                                                      0.000     0.000 r  clk (IN)
+                         net (fo=13101, unset)        0.704     0.704    core/clk
+    SLICE_X60Y121        FDRE                                         r  core/state_reg[2]_rep__2/C
+  -------------------------------------------------------------------    -------------------
+    SLICE_X60Y121        FDRE (Prop_fdre_C_Q)         0.393     1.097 f  core/state_reg[2]_rep__2/Q
+                         net (fo=111, routed)         5.973     7.070    core/lane/result_reg[125]
+    SLICE_X124Y148                                                    f  core/lane/result[140]_i_1/I1
+    SLICE_X124Y148       LUT5 (Prop_lut5_I1_O)        0.097     7.167 r  core/lane/result[140]_i_1/O
+                         net (fo=1, routed)           0.000     7.167    core/result0_out[140]
+    SLICE_X124Y148       FDRE                                         r  core/result_reg[140]/D
+  -------------------------------------------------------------------    -------------------
+
+                         (clock clk rise edge)        6.666     6.666 r  
+                                                      0.000     6.666 r  clk (IN)
+                         net (fo=13101, unset)        0.669     7.335    core/clk
+    SLICE_X124Y148       FDRE                                         r  core/result_reg[140]/C
+                         clock pessimism              0.000     7.335    
+                         clock uncertainty           -0.035     7.299    
+    SLICE_X124Y148       FDRE (Setup_fdre_C_D)        0.070     7.369    core/result_reg[140]
+  -------------------------------------------------------------------
+                         required time                          7.369    
+                         arrival time                          -7.167    
+  -------------------------------------------------------------------
+                         slack                                  0.202    
+
+
+
+

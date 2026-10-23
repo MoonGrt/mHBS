@@ -1,0 +1,101 @@
+{
+  "schema": "mhbs.sha2_f1.architecture.v1",
+  "candidate_source_manifest_sha256": "17b7146ad416e368697118c14a5730978a8a3e302d82322817d79af638baed4e",
+  "baseline_source_manifest_sha256": "6361eeed6936b3714835aade83b7b8e04ce9140c679b455bf1893d25f30d9c7d",
+  "scope": "Generic SHA2 only, P/U legal conditions and one compression lane unchanged",
+  "changed_rtl": {
+    "rtl/hash/sha2-recipe.sv": "06abf13cf3466b37f231ff8e1180a95100da94a67be8b002e30c662b568aac6a",
+    "rtl/hash/sha256.sv": "7eda2026b1cc8578dd31b1de156eb53424c9b9875dc66b198f88539dcc9fd125"
+  },
+  "baseline_routed_critical_paths": [
+    {
+      "config": "P2U1",
+      "wns_ns": -0.399,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P2U1/route/critical_paths.rpt",
+      "report_sha256": "47a343c0651e0e4e95d30a8337cb20ef20a5b6e19ae48361eeff5e018e959bae",
+      "source": "core/lane/need_block_reg[0]/C",
+      "destination": "core/lane/payload_mask_reg[6]/D",
+      "data_path_delay_ns": 7.027,
+      "logic_levels": 11
+    },
+    {
+      "config": "P3U1",
+      "wns_ns": -0.797,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P3U1/route/critical_paths.rpt",
+      "report_sha256": "7d2405c35e0e9ca6ba58717643ed59017f09ead25bad0dc9f93a542fd031a62e",
+      "source": "core/leaf_cursor_reg[0]/C",
+      "destination": "core/lane/captured_reg[1][21]/D",
+      "data_path_delay_ns": 7.426,
+      "logic_levels": 14
+    },
+    {
+      "config": "P4U1",
+      "wns_ns": -0.936,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P4U1/route/critical_paths.rpt",
+      "report_sha256": "1fec4ba4e65e18d2590567ca4f616235e3470e6e4ee22a025b909c9ff8f4ef0a",
+      "source": "core/lane/format_tag_reg[1]_rep__1_replica_4/C",
+      "destination": "core/lane/block_words[3].data_reg[5]/D",
+      "data_path_delay_ns": 7.365,
+      "logic_levels": 9
+    },
+    {
+      "config": "P8U1",
+      "wns_ns": -1.84,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P8U1/route/critical_paths.rpt",
+      "report_sha256": "85e9d03f7019b2f1245f4b2ca106c1c03ba056f6682b830f1fba18302b1f3443",
+      "source": "core/lane/schedule_cursor_reg[2]/C",
+      "destination": "core/lane/block_words[3].data_reg[4]/D",
+      "data_path_delay_ns": 8.507,
+      "logic_levels": 12
+    },
+    {
+      "config": "P12U1",
+      "wns_ns": -2.683,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P12U1/route/critical_paths.rpt",
+      "report_sha256": "d30e6f518c46c8a5a00e1dad08c28ee192e24da1b81e67c42aa416430b5b6f53",
+      "source": "core/lane/schedule_cursor_reg[1]/C",
+      "destination": "core/lane/payload_mask_reg[0]/D",
+      "data_path_delay_ns": 9.349,
+      "logic_levels": 15
+    },
+    {
+      "config": "P2U2",
+      "wns_ns": -0.122,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P2U2/route/critical_paths.rpt",
+      "report_sha256": "e7a5ddd240b725838074276eb907dbf17fa3d6d475da5615c09cee0a5f6f78e5",
+      "source": "core/lane/compression/stages[1].state_reg[1][589]/C",
+      "destination": "core/lane/compression/stages[0].state_reg[0][766]/D",
+      "data_path_delay_ns": 10.146,
+      "logic_levels": 21
+    },
+    {
+      "config": "P3U2",
+      "wns_ns": -0.322,
+      "report": "build/dual_pu_route_matrix/20261022_093744/jobs/sha2/P3U2/route/critical_paths.rpt",
+      "report_sha256": "87252f722e61e6e090be07e67bfd61688a11909acffcb86bb98120c3ce08b243",
+      "source": "core/lane/schedule_cursor_reg[1]/C",
+      "destination": "core/lane/compression/stages[0].state_reg[0][766]/D",
+      "data_path_delay_ns": 10.345,
+      "logic_levels": 23
+    }
+  ],
+  "candidate_measured_frequency": "pending; never inferred from synthesis path or negative WNS",
+  "changes": [
+    "Registered scheduler tag, descriptor and first-beat control boundaries",
+    "192-bit selected source window and delayed byte controls, final beat drain",
+    "Registered one-time initial capture tag; pending result visibility gated",
+    "H+K+W lookahead replaces K registers for first min(U,4) rounds, no primitive cycle growth"
+  ],
+  "component_expected_added_cycles_per_block": {
+    "fixed_first_prefix": 2,
+    "ordinary_block": 3
+  },
+  "risks": [
+    "Extra formatter cycles and beat/descriptor registers require measured ATP check",
+    "Fresh input CV/buffer to SHA256 pre-addition can become the new critical path",
+    "DESCRIBE still selects phase/length/address from a context bank"
+  ],
+  "production_inputs_frozen": true,
+  "other_8_rtl_files_same_as_baseline": true,
+  "h20_full_keygen_sign_run": false
+}

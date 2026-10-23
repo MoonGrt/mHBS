@@ -1,0 +1,383 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/executor/executor.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/executor/executor.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/executor/executor.sv	2026-10-22 12:05:53.419290785 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/executor/executor.sv	2026-10-22 13:27:49.475925955 +0800
+@@ -72,6 +72,8 @@
+     state_t state, continuation;
+     logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
+     logic direct_writeback_phase;
++    logic node_pipe_first_phase, node_scalar_first_phase;
++    logic node_tree_leaf_phase, node_terminal_chain_phase;
+     task automatic enter_state(input state_t next_state);
+         begin
+             state <= next_state;
+@@ -102,6 +104,19 @@
+             direct_writeback_phase <= PIPELINE > 1 && pipe_direct &&
+                 (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
+                  next_state == PIPE_VERIFY_INPUT);
++            // The standalone/tree decision is immutable through each result
++            // phase. Resolve it on the existing transition edge, close to
++            // node writeback, rather than distributing the macro flag across
++            // every bit of its shared data-selection network.
++            node_pipe_first_phase <= PIPELINE > 1 && standalone_chain && pipe_direct &&
++                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
++                 next_state == PIPE_VERIFY_INPUT);
++            node_scalar_first_phase <= next_state == CHAIN_STORE &&
++                standalone_chain && chain_cursor == 0;
++            node_tree_leaf_phase <= next_state == LEAF_SETUP && !standalone_chain;
++            node_terminal_chain_phase <= next_state == CHAIN_NEXT && !sign_only &&
++                !(stateful && chain_descriptor[13:12] == 2) &&
++                !(standalone_chain && chain_descriptor[13:12] == 0);
+         end
+     endtask
+     // Abort outstanding execution on an error. The autonomous wrapper halts
+@@ -873,6 +888,17 @@
+                  state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
+                  state == FORS_ISSUE || state == FORS_WAIT)))
+                 $fatal(1, "registered batch mode differs from execution state");
++            if (node_pipe_first_phase !== (direct_writeback_phase && standalone_chain))
++                $fatal(1, "prepared pipeline node ownership differs from macro");
++            if (node_scalar_first_phase !== (state == CHAIN_STORE &&
++                standalone_chain && chain_cursor == 0))
++                $fatal(1, "prepared scalar node ownership differs from macro");
++            if (node_tree_leaf_phase !== (state == LEAF_SETUP && !standalone_chain))
++                $fatal(1, "prepared tree-leaf node ownership differs from macro");
++            if (node_terminal_chain_phase !== (state == CHAIN_NEXT && !sign_only &&
++                !(stateful && chain_descriptor[13:12] == 2) &&
++                !(standalone_chain && chain_descriptor[13:12] == 0)))
++                $fatal(1, "prepared terminal-chain node ownership differs from macro");
+         end
+     end
+     always @(posedge clk) begin : rolling_allocator_equivalence
+@@ -1057,10 +1083,23 @@
+             if (pipe_mode) begin
+                 if(pipe_valid && pipe_response_accept)begin
+                     pipe_done_mask[pipe_tag] <= 1;
+-                    if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
++                    if(node_pipe_first_phase &&
++                        (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0))
+                         node_value <= pipe_response_result;
+                 end
+             end
++            // These write causes are independent of the continuation branch.
++            // Data is read on the original result-consumption edge, so no
++            // node-sized staging register or extra controller cycle is needed.
++            if (node_scalar_first_phase || node_tree_leaf_phase)
++                node_value <= result[W-1:0];
++            if (node_terminal_chain_phase &&
++                !(indexing != 1 && chain_cursor + 1 < endpoint_count)) begin
++                if (!verifying && macro_flags[3] && leaf_cursor == target)
++                    node_value <= 0;
++                else if (chain_descriptor[13:12] == 0)
++                    node_value <= result[W-1:0];
++            end
+             case (state)
+                 IDLE:
+                 if (job_valid) begin
+@@ -1417,7 +1456,6 @@
+                     enter_state(CHAIN_STORE);
+                 end
+                 CHAIN_STORE: begin
+-                    if (standalone_chain && chain_cursor == 0) node_value <= result[W-1:0];
+                     task_chain <= 0;
+                     if (sign_only || (!verifying && macro_flags[0] && leaf_cursor == target))
+                         enter_state(CHAIN_OUTPUT0);
+@@ -1438,7 +1476,6 @@
+                     end else if (standalone_chain && chain_descriptor[13:12] == 0)
+                         route_result(ROUTE_NODE);
+                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
+-                        node_value <= 0;
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1447,7 +1484,6 @@
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+                     end else if (chain_descriptor[13:12] == 0) begin
+-                        node_value <= result[W-1:0];
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1579,7 +1615,6 @@
+                 LEAF_SETUP:
+                 if (standalone_chain) route_result(ROUTE_HASH);
+                 else begin
+-                    node_value <= result[W-1:0];
+                     node_level <= 0;
+                     target_at_level <= target;
+                     auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/hash/sha2-recipe.sv	2026-10-22 12:05:53.419729851 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/hash/sha2-recipe.sv	2026-10-22 13:27:49.476385646 +0800
+@@ -49,7 +49,7 @@
+     localparam [255:0] IV = 256'h6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd19;
+     typedef enum logic [3:0] { DIRECT, SEED, KEY, MASK0, MASK1, FINAL,
+         HMAC_IN, HMAC_OUT, HMSG_IN, MGF0, MGF1 } phase_t;
+-    typedef enum logic [2:0] { SELECT, DESCRIBE, PREPARE, BUILD, DRAIN, SEND } formatter_t;
++    typedef enum logic [2:0] { SELECT, DESCRIBE, PREPARE, BUILD, DRAIN } formatter_t;
+ 
+     // Only requests own contexts; completed results stay live until consumed.
+     // P=1 reduces these banks and selectors to a single scalar execution slot.
+@@ -163,6 +163,11 @@
+     formatter_t formatter;
+     format_t format_kind;
+     logic [TAG_BITS-1:0] format_tag;
++    // The completed block may be accepted while the next descriptor is read.
++    // Its tag is the only descriptor field that changes before that edge;
++    // format_cv and the block words remain held until compression accepts.
++    logic block_ready;
++    logic [TAG_BITS-1:0] block_tag;
+     logic [1:0] beat;
+     wire [511:0] block_buffer;
+     logic [255:0] format_address;
+@@ -181,7 +186,7 @@
+     logic [12:0] format_length;
+     logic [6:0] format_block;
+     logic [INDEX_BITS-1:0] format_first_index;
+-    logic [8:0] word_control[0:2];
++    logic [8:0] word_control[0:2], following_word_control[0:2];
+     window_t window_control;
+     logic [15:0] payload_mask, delimiter_mask;
+     logic [63:0] list_words[0:2];
+@@ -189,6 +194,9 @@
+     wire list_beat = word_control[0][8:4] == SRC_LIST0 || word_control[0][8:4] == SRC_LIST1 ||
+         word_control[1][8:4] == SRC_LIST0 || word_control[1][8:4] == SRC_LIST1 ||
+         word_control[2][8:4] == SRC_LIST0 || word_control[2][8:4] == SRC_LIST1;
++    wire following_list_beat = following_word_control[0][8:4] == SRC_LIST0 || following_word_control[0][8:4] == SRC_LIST1 ||
++        following_word_control[1][8:4] == SRC_LIST0 || following_word_control[1][8:4] == SRC_LIST1 ||
++        following_word_control[2][8:4] == SRC_LIST0 || following_word_control[2][8:4] == SRC_LIST1;
+     logic length_beat;
+     wire [8:0] global_beat={format_block,beat};
+ 
+@@ -360,9 +368,7 @@
+             endcase
+         end
+     endfunction
+-    // Compute next-beat controls while the current beat traverses the source
+-    // mux. Prefixes with 6/7 trailing bytes use fixed wiring, not barrel shifts.
+-    task automatic prepare_beat(input format_t kind,input [8:0] pos,input [12:0] length);
++    function automatic [8:0] beat_word_control(input format_t kind,input [8:0] pos,input integer k);
+         reg slh_prefix,lms_prefix,unaligned;
+         reg [9:0] first_word;
+         begin
+@@ -371,20 +377,34 @@
+                 kind==LMS_LIST || kind==LMS_LEAF || kind==LMS_PARENT;
+             unaligned=(slh_prefix && pos>=5) || (lms_prefix && pos>=1);
+             first_word={pos,1'b0};
+-            window_control<=ALIGNED;
+             if(unaligned && ((slh_prefix && pos==5) || (lms_prefix && pos==1))) begin
+-                window_control<=kind==LMS_SEED || kind==LMS_CHAIN ? BRIDGE_SEVEN : BRIDGE_SIX;
+-                word_control[0]<=control(SRC_ADDRESS,4'd2);
+-                word_control[1]<=payload_control(kind,10'd0);
+-                word_control[2]<=payload_control(kind,10'd1);
++                beat_word_control=k==0 ? control(SRC_ADDRESS,4'd2) : payload_control(kind,10'(k-1));
+             end else if(unaligned) begin
+-                window_control<=kind==LMS_SEED || kind==LMS_CHAIN ? SHIFT_ONE : SHIFT_TWO;
+                 if(kind==SLH_LIST) first_word=10'd1;
+                 else if(kind==LMS_LIST) first_word=pos[0] ? 10'd3 : 10'd1;
+                 else first_word=first_word-(slh_prefix ? 10'd11 : 10'd3);
+-                for(integer k=0;k<3;k=k+1) word_control[k]<=payload_control(kind,first_word+10'(k));
+-            end else begin
+-                for(integer k=0;k<3;k=k+1) word_control[k]<=aligned_control(kind,first_word+10'(k));
++                beat_word_control=payload_control(kind,first_word+10'(k));
++            end else beat_word_control=aligned_control(kind,first_word+10'(k));
++        end
++    endfunction
++    // Register current and following word selections together. Endpoint words
++    // for the following beat can then be fetched while the current beat enters
++    // source_window; neither RAM selection nor byte alignment loses a stage.
++    task automatic prepare_beat(input format_t kind,input [8:0] pos,input [12:0] length);
++        reg slh_prefix,lms_prefix,unaligned;
++        begin
++            slh_prefix=kind==SLH_SEED || kind==SLH_VALUE || kind==SLH_LIST;
++            lms_prefix=kind==LMS_SEED || kind==LMS_CHAIN || kind==LMS_MESSAGE ||
++                kind==LMS_LIST || kind==LMS_LEAF || kind==LMS_PARENT;
++            unaligned=(slh_prefix && pos>=5) || (lms_prefix && pos>=1);
++            window_control<=ALIGNED;
++            if(unaligned && ((slh_prefix && pos==5) || (lms_prefix && pos==1)))
++                window_control<=kind==LMS_SEED || kind==LMS_CHAIN ? BRIDGE_SEVEN : BRIDGE_SIX;
++            else if(unaligned)
++                window_control<=kind==LMS_SEED || kind==LMS_CHAIN ? SHIFT_ONE : SHIFT_TWO;
++            for(integer k=0;k<3;k=k+1) begin
++                word_control[k]<=beat_word_control(kind,pos,k);
++                following_word_control[k]<=beat_word_control(kind,pos+9'd1,k);
+             end
+             for(integer k=0;k<16;k=k+1) begin
+                 payload_mask[k]<=pos<length[12:4] || (pos==length[12:4] && 4'(k)<length[3:0]);
+@@ -456,7 +476,10 @@
+             default: list_address=0;
+         endcase
+     endfunction
+-    assign list_index0=list_address(format_kind,global_beat);
++    // Combinational endpoint adapters follow the beat being fetched, which
++    // can be one beat ahead of the retained words entering source_window.
++    assign list_index0=list_address(format_kind,global_beat+
++        ((formatter==BUILD && (!list_beat || list_words_valid)) ? 9'd1 : 9'd0));
+     assign list_index1=list_index0+1'b1;
+     function automatic [INDEX_BITS-1:0] first_list_address(input [3:0] recipe_shape,input [6:0] block_number);
+         // List recipes remain in DIRECT for their entire multi-block hash.
+@@ -471,8 +494,9 @@
+     // The endpoint workspace registers this address in PREPARE, one clock
+     // before BUILD can fetch its first list words. Context selection and the
+     // first-index arithmetic terminate at this local descriptor register.
++    wire source_beat_ready=!list_beat || list_words_valid;
+     assign list_next_index0=formatter==PREPARE ? format_first_index :
+-        list_address(format_kind,{format_block,formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
++        list_address(format_kind,global_beat+(formatter==BUILD ? (source_beat_ready ? 9'd2 : 9'd1) : 9'd0));
+     function automatic logic prefix_block(input format_t kind);
+         case(kind)
+             SLH_SEED,SLH_VALUE,SLH_LIST,XMSS_INDEX,XMSS_MESSAGE,
+@@ -548,8 +572,8 @@
+     wire [255:0] compression_cv;
+     wire [TAG_BITS-1:0] compression_tag;
+     sha256 #(.PIPELINE(PIPELINE),.UNROLL(UNROLL),.TAG_BITS(TAG_BITS)) compression (
+-        .clk,.rst,.input_valid(formatter==SEND),.input_ready(compression_ready),
+-        .input_cv(format_cv),.input_block(block_buffer),.input_tag(format_tag),
++        .clk,.rst,.input_valid(block_ready),.input_ready(compression_ready),
++        .input_cv(format_cv),.input_block(block_buffer),.input_tag(block_tag),
+         .output_valid(compression_valid),.output_ready(1'b1),.output_cv(compression_cv),.output_tag(compression_tag)
+     );
+     wire compression_complete_event=compression_valid && !rst;
+@@ -618,7 +642,7 @@
+     // Return decode ends at a one-hot bank event. All phase/length/capture
+     // decisions below read a constant slot, independently of the return tag.
+     wire reserve_format=candidate_valid &&
+-        (formatter==SELECT || (formatter==SEND && compression_ready));
++        (formatter==SELECT || (formatter==PREPARE && write_prefix) || formatter==DRAIN);
+     for(genvar slot=0;slot<PIPELINE;slot=slot+1) begin : contexts
+         wire allocate=allocation_pending[slot];
+         wire reserve=accept && incoming_tag==TAG_BITS'(slot);
+@@ -767,9 +791,11 @@
+             formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
+             beat_pending<=0;
++            block_ready<=0; block_tag<=0;
+             ingress_pending<=0;
+         end else begin
+             beat_pending<=0;
++            if(compression_ready) block_ready<=0;
+             ingress_pending<=0;
+             if(ingress_pending && admission.invalid) error<=1;
+             // Match the common executor's idle-tag contract: after draining a
+@@ -779,7 +805,7 @@
+             end
+             case(formatter)
+                 SELECT: if(candidate_valid) reserve_block(int'(candidate));
+-                DESCRIBE: begin
++                DESCRIBE: if(!block_ready || compression_ready) begin
+                     format_kind<=selected_format(int'(format_tag));
+                     format_length<=input_length(int'(format_tag));
+                     address_fields.leaf<=leaf[format_tag];
+@@ -801,7 +827,11 @@
+                     format_address<=staged_address(address_fields,format_kind);
+                     // Decode byte controls only from registered descriptors.
+                     // Fixed first blocks still use one full 512-bit write.
+-                    if(write_prefix) formatter<=SEND;
++                    if(write_prefix) begin
++                        block_ready<=1; block_tag<=format_tag;
++                        if(candidate_valid) reserve_block(int'(candidate));
++                        else formatter<=SELECT;
++                    end
+                     else begin
+                         prepare_beat(format_kind,{format_block,2'd0},format_length);
+                         formatter<=BUILD;
+@@ -825,7 +855,15 @@
+                         staged_delimiter_mask<=delimiter_mask;
+                         staged_length_beat<=length_beat;
+                         staged_beat<=beat; beat_pending<=1;
+-                        list_words_valid<=0;
++                        // The endpoint RAM has already presented the next
++                        // pair. Capture just its required words while the
++                        // retained current words enter the source stage.
++                        list_words_valid<=beat!=3 && following_list_beat;
++                        if(beat!=3 && following_list_beat)
++                            for(integer k=0;k<3;k=k+1)
++                                list_words[k]<=following_word_control[k][8:4]==SRC_LIST0 ?
++                                    node_word(256'(list_data0),following_word_control[k][1:0]) :
++                                    node_word(256'(list_data1),following_word_control[k][1:0]);
+                         if(beat==3) formatter<=DRAIN;
+                         else begin
+                             beat<=beat+1'b1;
+@@ -834,9 +872,10 @@
+                     end
+                 end
+                 // Commit the last registered beat before compression samples
+-                // the complete block on its SEND handshake.
+-                DRAIN: formatter<=SEND;
+-                SEND: if(compression_ready) begin
++                // the complete block. Descriptor reads for the next context
++                // can overlap that handshake without duplicating block data.
++                DRAIN: begin
++                    block_ready<=1; block_tag<=format_tag;
+                     if(candidate_valid) reserve_block(int'(candidate));
+                     else formatter<=SELECT;
+                 end
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/source/rtl/hash/sha256.sv	2026-10-22 12:05:53.419880534 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/atp_j/candidate_20261022_132749/source/rtl/hash/sha256.sv	2026-10-22 13:27:49.476549608 +0800
+@@ -125,7 +125,13 @@
+     endfunction
+ 
+     logic [767:0] state[0:PIPELINE-1];
+-    logic [255:0] initial_cv[0:PIPELINE-1];
++    // Feed-forward CVs do not change during a compression. Store them once
++    // per accepted token, rather than shifting 256 bits through every stage.
++    // Allocation follows token order and is independent of external tag values.
++    localparam integer CV_SLOT_BITS = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
++    (* ram_style = "distributed" *) logic [255:0] initial_cv[0:PIPELINE-1];
++    logic [CV_SLOT_BITS-1:0] cv_slot[0:PIPELINE-1];
++    logic [CV_SLOT_BITS-1:0] cv_write_slot;
+     logic [TRAVERSAL_BITS-1:0] traversal[0:PIPELINE-1];
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
+@@ -137,22 +143,30 @@
+     wire recycle = return_pending;
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
++    always_ff @(posedge clk) begin
++        if (rst) cv_write_slot <= '0;
++        else if (input_valid && input_ready) begin
++            initial_cv[cv_write_slot] <= input_cv;
++            cv_write_slot <= cv_write_slot == CV_SLOT_BITS'(PIPELINE-1) ?
++                CV_SLOT_BITS'(0) : cv_write_slot + 1'b1;
++        end
++    end
+ 
+     for (genvar stage=0; stage<PIPELINE; stage=stage+1) begin : stages
+         wire [767:0] source_state;
+-        wire [255:0] source_cv;
++        wire [CV_SLOT_BITS-1:0] source_cv_slot;
+         wire [TRAVERSAL_BITS-1:0] source_traversal;
+         wire [TAG_BITS-1:0] source_tag;
+         wire source_valid;
+         if (stage == 0) begin : first
+             assign source_state = recycle ? state[PIPELINE-1] : {input_cv,input_block};
+-            assign source_cv = recycle ? initial_cv[PIPELINE-1] : input_cv;
++            assign source_cv_slot = recycle ? cv_slot[PIPELINE-1] : cv_write_slot;
+             assign source_traversal = recycle ? traversal[PIPELINE-1] + 1'b1 : '0;
+             assign source_tag = recycle ? tag[PIPELINE-1] : input_tag;
+             assign source_valid = recycle || (input_valid && input_ready);
+         end else begin : following
+             assign source_state = state[stage-1];
+-            assign source_cv = initial_cv[stage-1];
++            assign source_cv_slot = cv_slot[stage-1];
+             assign source_traversal = traversal[stage-1];
+             assign source_tag = tag[stage-1];
+             assign source_valid = valid[stage-1];
+@@ -259,7 +273,7 @@
+                 valid[stage] <= source_valid;
+                 if (source_valid) begin
+                     state[stage] <= unrolled[UNROLL-1].result;
+-                    initial_cv[stage] <= source_cv;
++                    cv_slot[stage] <= source_cv_slot;
+                     traversal[stage] <= source_traversal;
+                     tag[stage] <= source_tag;
+                 end
+@@ -278,7 +292,7 @@
+                 for (integer word_index=0; word_index<8; word_index=word_index+1)
+                     output_cv[32*word_index+:32] <=
+                         state[PIPELINE-1][512+32*word_index+:32] +
+-                        initial_cv[PIPELINE-1][32*word_index+:32];
++                        initial_cv[cv_slot[PIPELINE-1]][32*word_index+:32];
+             end
+         end
+     end

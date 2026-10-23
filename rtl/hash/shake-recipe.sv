@@ -356,7 +356,95 @@ module recipe #(
             // the current beat. START provides the first selectors; backpressure
             // holds both selectors and position without another data stage.
             logic [12:0] source_control[0:1];
+            localparam [2:0] PAYLOAD_SOURCE = 0, PAYLOAD_MESSAGE = 1,
+                PAYLOAD_ID_LO = 2, PAYLOAD_ID_HI = 3, PAYLOAD_MESSAGE_PREFIX = 4,
+                PAYLOAD_LIST_PREFIX = 5, PAYLOAD_LIST_BODY = 6;
+            logic [2:0] stream_payload_mode;
+            logic [7:0] stream_live_bytes, stream_pad_bytes;
             wire [12:0] following_position = position + 13'(stream_advance);
+            wire [5:0] following_list_remainder = position < prefix_bytes ?
+                (following_position >= prefix_bytes ? 6'(following_position - prefix_bytes) :
+                 list_remainder) : next_remainder >= stream_node_bytes ?
+                6'(next_remainder - stream_node_bytes) : next_remainder[5:0];
+            function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+                reg [12:0] remaining;
+                reg [7:0] live_bytes, pad_bytes;
+                begin
+                    remaining = input_length - next_position;
+                    for (integer byte_index = 0; byte_index < 8; byte_index++) begin
+                        live_bytes[byte_index] = next_position <= input_length &&
+                            remaining > 13'(byte_index);
+                        pad_bytes[byte_index] = next_position <= input_length &&
+                            remaining == 13'(byte_index);
+                    end
+                    stream_byte_controls = {pad_bytes, live_bytes};
+                end
+            endfunction
+            function automatic [2:0] stream_source_mode(input [12:0] next_position);
+                begin
+                    stream_source_mode = PAYLOAD_SOURCE;
+                    if (shapes[PREFIX_MESSAGE]) begin
+                        case (next_position)
+                            0: stream_source_mode = PAYLOAD_ID_LO;
+                            8: stream_source_mode = PAYLOAD_ID_HI;
+                            16: stream_source_mode = PAYLOAD_MESSAGE_PREFIX;
+                            default: stream_source_mode = PAYLOAD_MESSAGE;
+                        endcase
+                    end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
+                                 next_position >= prefix_bytes)
+                        stream_source_mode = PAYLOAD_LIST_BODY;
+                    else if (shapes[PREFIX_LIST] && next_position == 16)
+                        stream_source_mode = PAYLOAD_LIST_PREFIX;
+                end
+            endfunction
+            // Decode the endpoint word and offset before the RAM read. Four
+            // aligned-word enables serve every byte; shifted words share separate
+            // low-six-byte and high-two-byte enables across node boundaries.
+            // Padding uses the existing byte masks after this fixed-slice selection.
+            logic [13:0] endpoint_controls;
+            function automatic [13:0] stream_endpoint_controls(
+                input [12:0] next_position, input [5:0] next_list_remainder);
+                reg [13:0] controls;
+                reg [2:0] payload_mode;
+                begin
+                    controls = 0;
+                    payload_mode = stream_source_mode(next_position);
+                    if (payload_mode == PAYLOAD_LIST_BODY) begin
+                        for (integer word_index = 0; word_index < 4; word_index++) begin
+                            if (next_list_remainder[4:3] == 2'(word_index)) begin
+                                if (!next_list_remainder[1]) controls[word_index] = 1'b1;
+                                else begin
+                                    controls[4 + word_index] = 1'b1;
+                                    if (word_index + 1 < node_words)
+                                        controls[8 + word_index] = 1'b1;
+                                    else controls[12] = 1'b1;
+                                end
+                            end
+                        end
+                    end else if (payload_mode == PAYLOAD_LIST_PREFIX) controls[13] = 1'b1;
+                    stream_endpoint_controls = controls;
+                end
+            endfunction
+            always_ff @(posedge clk)
+                if (!rst) begin
+                    if (state == START && hash_ready)
+                        endpoint_controls <= stream_endpoint_controls(0, 0);
+                    else if (state == STREAM && stream_accept)
+                        endpoint_controls <= stream_endpoint_controls(
+                            following_position, following_list_remainder);
+                end
+            // Prepare byte enables with the source selectors, before the endpoint
+            // RAM read. Non-endpoint sources use the same registered byte masks.
+            always_ff @(posedge clk)
+                if (!rst) begin
+                    if (state == START && hash_ready) begin
+                        {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(0);
+                        stream_payload_mode <= stream_source_mode(0);
+                    end else if (state == STREAM && stream_accept) begin
+                        {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(following_position);
+                        stream_payload_mode <= stream_source_mode(following_position);
+                    end
+                end
             for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
                 always_ff @(posedge clk)
                     if (!rst) begin
@@ -370,14 +458,23 @@ module recipe #(
                             );
                     end
             end
+`ifndef SYNTHESIS
+            always @(posedge clk) begin : debug_scalar_stream_controls
+                if (!rst && STREAM_ENABLE && state == STREAM &&
+                    {stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
+                    $fatal(1, "scalar byte controls lost stream position");
+            end
+`endif
             function automatic [63:0] source_word(input [12:0] control);
                 reg [5:0] selected_index;
                 reg [63:0] literal;
                 begin
                     selected_index = control[5:0];
-                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
-                    // Source-range decoding bounds live node reads to four words;
-                    // ADDRESS_LIST body beats use list_window instead.
+                    // Endpoint data has two live uses: the LMS prefix's first
+                    // sixteen bits, and the list body. Both bypass this general
+                    // seed/message/address mux below. Source 7 and the remaining
+                    // literal node words are never observed by a scalar stream.
+                    literal = source_literal(control[12:9], leaf, identifier, '0);
                     case (control[8:6])
                         1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
                         2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
@@ -385,11 +482,64 @@ module recipe #(
                         4: source_word = node_word_indexed(root, selected_index[1:0]);
                         5: source_word = message_word(selected_index);
                         6: source_word = node_word_indexed(address, selected_index[1:0]);
-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
+                        7: source_word = 0;
                         default: source_word = literal;
                     endcase
                 end
             endfunction
+            logic [63:0] nonendpoint_payload;
+            wire [63:0] endpoint_payload;
+            // Fixed slices let synthesis build a parallel selection tree, rather
+            // than first concatenating differently sized nodes and shifting them.
+            for (genvar byte_index = 0; byte_index < 8; byte_index++) begin : endpoint_bytes
+                wire [7:0] choices[0:7];
+                for (genvar word_index = 0; word_index < 4; word_index++) begin : words
+                    assign choices[word_index] = list_data0[word_index * 64 + byte_index * 8 +: 8] &
+                        {8{endpoint_controls[word_index]}};
+                    if (byte_index < 6 || word_index < 3)
+                        assign choices[4 + word_index] =
+                            list_data0[word_index * 64 + (byte_index + 2) * 8 +: 8] &
+                            {8{byte_index < 6 ? endpoint_controls[4 + word_index] :
+                               endpoint_controls[8 + word_index]}};
+                    else assign choices[4 + word_index] = 0;
+                end
+                wire [7:0] adjacent_byte, prefix_byte;
+                if (byte_index >= 6) begin
+                    assign adjacent_byte = list_data1[(byte_index - 6) * 8 +: 8] &
+                        {8{endpoint_controls[12]}};
+                    assign prefix_byte = list_data0[(byte_index - 6) * 8 +: 8] &
+                        {8{endpoint_controls[13]}};
+                end else begin
+                    assign adjacent_byte = 0;
+                    assign prefix_byte = 0;
+                end
+                assign endpoint_payload[byte_index * 8 +: 8] =
+                    choices[0] | choices[1] | choices[2] | choices[3] |
+                    choices[4] | choices[5] | choices[6] | choices[7] |
+                    adjacent_byte | prefix_byte;
+            end
+            logic [127:0] source_window;
+            always_comb begin
+                source_window = {
+                    source_word(source_control[1]),
+                    source_word(source_control[0])
+                };
+                nonendpoint_payload = 0;
+                case (stream_payload_mode)
+                    PAYLOAD_ID_LO: nonendpoint_payload = identifier[63:0];
+                    PAYLOAD_ID_HI: nonendpoint_payload = identifier[127:64];
+                    PAYLOAD_MESSAGE: nonendpoint_payload = source_window[79:16];
+                    PAYLOAD_MESSAGE_PREFIX: begin
+                        nonendpoint_payload = source_window[79:16];
+                        nonendpoint_payload[47:0] = {16'h8181, be32(leaf)};
+                    end
+                    PAYLOAD_LIST_PREFIX:
+                        nonendpoint_payload = {16'd0, 16'h8080, be32(leaf)};
+                    PAYLOAD_LIST_BODY: begin end
+                    default: nonendpoint_payload = source_window[63:0];
+                endcase
+            end
+`ifndef SYNTHESIS
             logic [511:0] list_pair;
             always @* begin
                 list_pair = list_nodes(stream_node_bytes, list_data0, list_data1);
@@ -408,22 +558,63 @@ module recipe #(
                 list_data0, {4'd0, list_remainder[4:3]}
             )};
             logic [127:0] stream_payload;
-            logic [127:0] source_window;
+            // Original serial formatter is an independent simulation oracle.
             always_comb begin
-                source_window = {
-                    source_word(source_control[1]),
-                    source_word(source_control[0])
-                };
-                stream_payload = {64'd0, source_window[63:0]};
-                if (shapes[PREFIX_MESSAGE]) begin
-                    stream_payload = {64'd0, source_window[79:16]};
-                    if (position == 0) stream_payload = {64'd0, identifier[63:0]};
-                    else if (position == 8) stream_payload[63:0] = identifier[127:64];
-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
-                end else
-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
-                    stream_payload = list_window;
+                stream_payload = 0;
+                case (stream_payload_mode)
+                    PAYLOAD_ID_LO: stream_payload[63:0] = identifier[63:0];
+                    PAYLOAD_ID_HI: stream_payload[63:0] = identifier[127:64];
+                    PAYLOAD_MESSAGE: stream_payload[63:0] = source_window[79:16];
+                    PAYLOAD_MESSAGE_PREFIX: begin
+                        stream_payload[63:0] = source_window[79:16];
+                        stream_payload[47:0] = {16'h8181, be32(leaf)};
+                    end
+                    PAYLOAD_LIST_PREFIX:
+                        stream_payload[63:0] = {list_data0[15:0], 16'h8080, be32(leaf)};
+                    PAYLOAD_LIST_BODY: stream_payload = list_window;
+                    default: stream_payload[63:0] = source_window[63:0];
+                endcase
             end
+            function automatic [63:0] reference_source_word(input [12:0] control);
+                reg [5:0] selected_index;
+                reg [63:0] literal;
+                begin
+                    selected_index = control[5:0];
+                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+                    case (control[8:6])
+                        1: reference_source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                        2: reference_source_word = node_word_indexed(randomizer, selected_index[1:0]);
+                        3: reference_source_word = node_word_indexed(public_seed, selected_index[1:0]);
+                        4: reference_source_word = node_word_indexed(root, selected_index[1:0]);
+                        5: reference_source_word = message_word(selected_index);
+                        6: reference_source_word = node_word_indexed(address, selected_index[1:0]);
+                        7: reference_source_word = node_word_indexed(list_data0, selected_index[1:0]);
+                        default: reference_source_word = literal;
+                    endcase
+                end
+            endfunction
+            logic [127:0] reference_source_window, reference_stream_payload;
+            always_comb begin
+                reference_source_window = {reference_source_word(source_control[1]),
+                                          reference_source_word(source_control[0])};
+                reference_stream_payload = {64'd0, reference_source_window[63:0]};
+                if (shapes[PREFIX_MESSAGE]) begin
+                    reference_stream_payload = {64'd0, reference_source_window[79:16]};
+                    if (position == 0) reference_stream_payload = {64'd0, identifier[63:0]};
+                    else if (position == 8) reference_stream_payload[63:0] = identifier[127:64];
+                    else if (position == 16) reference_stream_payload[47:0] = {16'h8181, be32(leaf)};
+                end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+                    reference_stream_payload = list_window;
+            end
+            always @(posedge clk) begin : debug_scalar_payload_sources
+                if (!rst && STREAM_ENABLE && state == STREAM) begin
+                    if (stream_payload_mode !== stream_source_mode(position))
+                        $fatal(1, "scalar source mode lost stream position");
+                    if (stream_payload !== reference_stream_payload)
+                        $fatal(1, "scalar endpoint bypass differs from generic source mux");
+                end
+            end
+`endif
 
             integer i;
             always @* begin
@@ -454,8 +645,7 @@ module recipe #(
                         frame_layout = 0;
                         frame0 = public_seed;
                         frame1 = address;
-                        frame2 = chain_feedback_valid ? finish_digest[N*8-1:0] :
-                            shapes[ADDRESS_SEED] ? secret_seed : left_value;
+                        frame2 = shapes[ADDRESS_SEED] ? secret_seed : left_value;
                         frame_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
                         frame3 = frame_two ? request_right : 256'd0;
                     end
@@ -527,8 +717,7 @@ module recipe #(
                     16: begin
                         fast_block[0+:128] = public_seed[127:0];
                         fast_block[128+:256] = address;
-                        fast_block[384+:128] = chain_feedback_valid ? finish_digest[127:0] :
-                            shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+                        fast_block[384+:128] = shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
                         if (shapes[ADDRESS_VALUE] && arity == 2) begin
                             fast_block[512+:128] = request_right[127:0];
                             fast_block[640+:8]   = 8'h1f;
@@ -537,8 +726,7 @@ module recipe #(
                     24: begin
                         fast_block[0+:192] = public_seed[191:0];
                         fast_block[192+:256] = address;
-                        fast_block[448+:192] = chain_feedback_valid ? finish_digest[191:0] :
-                            shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+                        fast_block[448+:192] = shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
                         if (shapes[ADDRESS_VALUE] && arity == 2) begin
                             fast_block[640+:192] = request_right[191:0];
                             fast_block[832+:8]   = 8'h1f;
@@ -595,22 +783,34 @@ module recipe #(
                 endcase
                 fast_block[1087] = 1'b1;
             end
-            // Share one remaining-length subtraction across the eight output
-            // bytes instead of adding position to each byte's comparison index.
-            wire [12:0] remaining_bytes = input_length - position;
-            wire padding_reached = position > input_length;
-            wire partial_beat = remaining_bytes < 8;
             always_comb begin
-                stream_data = {64'd0, stream_payload[63:0]};
+                stream_data = 0;
                 for (i = 0; i < 8; i = i + 1) begin
-                    if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
-                        stream_data[i*8+:8] = 0;
-                    if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
-                        stream_data[i*8+:8] = 8'h1f;
+                    stream_data[i*8+:8] =
+                        ((nonendpoint_payload[i*8+:8] | endpoint_payload[i*8+:8]) &
+                         {8{stream_live_bytes[i]}}) | (8'h1f & {8{stream_pad_bytes[i]}});
                     if (beat == 8 && stream_last && i == 7)
                         stream_data[i*8+7] = 1'b1;
                 end
             end
+
+`ifndef SYNTHESIS
+            logic [63:0] reference_stream_data;
+            always_comb begin
+                for (integer byte_index = 0; byte_index < 8; byte_index++) begin
+                    reference_stream_data[byte_index*8+:8] =
+                        (stream_payload[byte_index*8+:8] & {8{stream_live_bytes[byte_index]}}) |
+                        (8'h1f & {8{stream_pad_bytes[byte_index]}});
+                    if (beat == 8 && stream_last && byte_index == 7)
+                        reference_stream_data[byte_index*8+7] = 1'b1;
+                end
+            end
+            always @(posedge clk) begin : debug_scalar_endpoint_decode
+                if (!rst && STREAM_ENABLE && state == STREAM &&
+                    stream_data[63:0] !== reference_stream_data)
+                    $fatal(1, "scalar predecoded endpoint byte selection differs from reference");
+            end
+`endif
 
             assign batch_request_ready = 1'b0;
             assign batch_response_valid = 1'b0;
@@ -687,6 +887,18 @@ module recipe #(
                 endcase
             end
             wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
+`ifndef SYNTHESIS
+            logic [1087:0] feedback_block_reference;
+            always_comb begin
+                feedback_block_reference = fast_block;
+                case (node_bytes)
+                    16: feedback_block_reference[384+:128] = advanced_state[127:0];
+                    24: feedback_block_reference[448+:192] = advanced_state[191:0];
+                    32: feedback_block_reference[512+:256] = advanced_state[255:0];
+                    default: begin end
+                endcase
+            end
+`endif
             for (genvar w = 0; w < 25; w = w + 1) begin : state_words
                 wire select_stream = w < 17 && take_stream && append_index == w / 2;
                 wire [63:0] fast_word;
@@ -694,15 +906,47 @@ module recipe #(
                 else assign fast_word = 64'd0;
                 wire [63:0]
                     absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
+                // A compact SLH chain reuses this state on the final-round edge.
+                // Its digest has a fixed word offset for each node length. Route
+                // those words directly, so the final Keccak round does not feed
+                // the recipe/frame/layout mux before reaching the state register.
+                wire feedback_word16 = node_bytes == 16 && w >= 6 && w < 8;
+                wire feedback_word24 = node_bytes == 24 && w >= 7 && w < 10;
+                wire feedback_word32 = node_bytes == 32 && w >= 8 && w < 12;
+                wire feedback_word = feedback_word16 || feedback_word24 || feedback_word32;
+                wire [63:0] feedback_value16, feedback_value24, feedback_value32;
+                if (w >= 6 && w < 8)
+                    assign feedback_value16 = advanced_state[(w-6)*64+:64];
+                else assign feedback_value16 = 0;
+                if (w >= 7 && w < 10)
+                    assign feedback_value24 = advanced_state[(w-7)*64+:64];
+                else assign feedback_value24 = 0;
+                if (w >= 8 && w < 12)
+                    assign feedback_value32 = advanced_state[(w-8)*64+:64];
+                else assign feedback_value32 = 0;
+                wire [63:0] feedback_value =
+                    (feedback_value16 & {64{feedback_word16}}) |
+                    (feedback_value24 & {64{feedback_word24}}) |
+                    (feedback_value32 & {64{feedback_word32}});
                 // These sources are disjoint in the hash FSM. Initialization
                 // clears unselected words by enabling a write with no source.
                 wire [63:0] next_word =
-                    (fast_word & {64{take_fast || take_feedback}}) |
+                    (fast_word & {64{take_fast || (take_feedback && !feedback_word)}}) |
+                    (feedback_value & {64{take_feedback}}) |
                     (absorb_word & {64{select_stream}}) |
                     (advanced_state[w*64+:64] & {64{round_update && !take_feedback}});
                 always_ff @(posedge clk)
                     if (!rst && (round_update || take_fast || select_stream || clear_stream))
                         sponge_state[w*64+:64] <= next_word;
+`ifndef SYNTHESIS
+                wire [63:0] feedback_reference_word;
+                if (w < 17)
+                    assign feedback_reference_word = feedback_block_reference[w*64+:64];
+                else assign feedback_reference_word = 0;
+                always @(posedge clk)
+                    if (!rst && take_feedback && next_word !== feedback_reference_word)
+                        $fatal(1, "scalar compact-chain direct feedback mismatch word=%0d", w);
+`endif
             end
 
             always_ff @(posedge clk) begin
@@ -1296,7 +1540,12 @@ module recipe #(
                 // Position the context read address near its operand banks.
                 // Its last-traversal enable differs from the generic round tag,
                 // so synthesis keeps this register independent of that tag.
-                logic [TAG_BITS-1:0] prefetch_tag;
+                // Each tag addresses several physical replicas of the three
+                // operand banks. Let synthesis replicate this small driver
+                // after RAM inference rather than splitting the memory RTL:
+                // independent preserved read/write tags prevent distributed
+                // RAM inference and turn the context storage into flip-flops.
+                (* max_fanout = 64 *) logic [TAG_BITS-1:0] prefetch_tag;
                 if (PIPELINE > 2) begin : local_read_address
                     always_ff @(posedge clk)
                         if (stage_valid[PIPELINE-3] && stage_fixed[PIPELINE-3] &&
@@ -1905,7 +2154,9 @@ module recipe #(
             logic [1599:0] state_reg[0:PIPELINE-1];
             logic [PIPELINE-1:0] stage_valid, stage_fixed;
             logic [4:0] stage_base[0:PIPELINE-1];
-            logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
+            // The returning tag also drives context write addresses. Bound
+            // address fanout while retaining the single wide inferred banks.
+            (* max_fanout = 64 *) logic [TAG_BITS-1:0] stage_tag[0:PIPELINE-1];
             logic sent;
             // The penultimate stage already knows whether this traversal is the
             // last. Register that decision alongside the final stage's metadata,

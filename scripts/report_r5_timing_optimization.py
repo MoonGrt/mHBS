@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Aggregate frozen R5-based timing candidates; never launch hardware or edit RTL.
 
-    python3 scripts/report_r5_timing_optimization.py --watch --interval 30
+    python3 scripts/report_r5_timing_optimization.py --watch --interval 60
 
 The default output stays in the S1 archive as later candidates appear. Reports
 remain volatile until at least two candidates and their validations finish.
@@ -249,15 +249,15 @@ def main():
     parser.add_argument('--run-root', type=Path, default=RUN_ROOT)
     parser.add_argument('--output-prefix', type=Path, default=S1_ARCHIVE / 'reports/R5_Timing_Progress_20261020')
     parser.add_argument('--watch', action='store_true')
-    parser.add_argument('--interval', type=float, default=30)
+    parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--minimum-candidates', type=int, default=2)
     parser.add_argument('--self-test', action='store_true')
     args = parser.parse_args()
     if args.self_test:
         print(json.dumps(common.policy_selftest(), ensure_ascii=False, indent=2))
         return 0
-    if not 0 < args.interval <= 30 or args.minimum_candidates < 1:
-        parser.error('Interval must be in (0,30]; minimum candidates must be positive')
+    if not 0 < args.interval <= 60 or args.minimum_candidates < 1:
+        parser.error('Interval must be in (0,60]; minimum candidates must be positive')
     prefix, run_root = args.output_prefix.resolve(), args.run_root.resolve()
     candidates, _ = discover(run_root)
     owner = next((run for run in candidates if prefix.is_relative_to(Path(run['archive_directory']))), None)

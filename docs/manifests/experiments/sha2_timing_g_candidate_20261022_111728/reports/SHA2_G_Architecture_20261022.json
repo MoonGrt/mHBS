@@ -1,0 +1,65 @@
+{
+  "schema": "mhbs.sha2_g.architecture.v1",
+  "candidate_source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+  "previous_failed_f1_source_manifest_sha256": "17b7146ad416e368697118c14a5730978a8a3e302d82322817d79af638baed4e",
+  "frequency_is_hard_requirement": true,
+  "target_mhz": {
+    "U1": 150,
+    "U2": 100
+  },
+  "implemented_constraint_ns": {
+    "U1": 6.666,
+    "U2": 10.0
+  },
+  "period_acceptance_tolerance_ns": 0,
+  "required_points": 14,
+  "backends": [
+    "sha2"
+  ],
+  "unchanged_rtl_files": [
+    "rtl/hash/keccak.sv",
+    "rtl/hash/shake-recipe.sv",
+    "rtl/memory/value.sv",
+    "rtl/memory/signature.sv",
+    "rtl/executor/sequencer.sv",
+    "rtl/executor/executor.sv",
+    "rtl/top/top.sv",
+    "rtl/top/common.sv"
+  ],
+  "changed_rtl": {
+    "rtl/hash/sha256.sv": "81a8e9a5f9b2ce64b550f3fe3330a639b4dcf457b086f9df947cd9e90c9b0542",
+    "rtl/hash/sha2-recipe.sv": "261d8873671a651d8864568998991cdb1982e90a0c17a92f821b66321ad442ec"
+  },
+  "changes": [
+    "H/K/W lookahead retained as64-bit carry-save pair, removing extra F1 carry-propagation at fresh injection",
+    "One-entry registered admission owns one of existing P tags; one-edge delayed allocation from captured fields",
+    "256-bit formatCV snapshot isolates bank-read from round-compression input",
+    "Final-block comparison uses registered format length and block number"
+  ],
+  "primitive_latency_unchanged": true,
+  "recipe_scalar_latency_vs_f1": "+1 clock; Hash/compression count unchanged",
+  "fullslot_delta_vs_f1_with_same_old_primitive": "+2 clocks per complete stress group; not extrapolated to full Sign",
+  "component_evidence": {
+    "primitive": {
+      "summary": "tmp/sha256_csa_lookahead_g_20261022/VALIDATION_SUMMARY.json",
+      "source": "tmp/sha256_csa_lookahead_g_20261022/SOURCE.json",
+      "summary_sha256": "18896b78557a2e3fb6da6f49c1227594eb8e37b04c10eaaaf97b0d9a6e537efd",
+      "source_sha256": "ae4e9b9fafcf3ccbf8ea08233e620a473109ae9cd1ccf97913d761d903295648"
+    },
+    "recipe_isolated": {
+      "summary": "tmp/sha2_admission_g_20261022/VALIDATION_SUMMARY.json",
+      "source": "tmp/sha2_admission_g_20261022/candidate/SOURCE.json",
+      "summary_sha256": "d31c50d2beb4826af244e5e4b71c5c2d22cea0b9a8b93e93d218a5f663a05c5f",
+      "source_sha256": "77e8b31bfd9d12ea39ff9e097c879533f1723aa8ddfe307ff2d05b52e6acba5a"
+    },
+    "combined_fullslots": {
+      "summary": "tmp/sha2_timing_g_20261022/candidate_20261022_111728/fullslots/SUMMARY.json",
+      "summary_sha256": "b4ef76ec16a64b892482b8576afc1afd3b6eab98b2c9ddb58a05d3071c8e479b"
+    }
+  },
+  "remaining_diagnostic_path": "Context block number to executor adjacent endpoint read address; a separate G2 boundary is being checked in a private fixture",
+  "no_p_u_specialization": true,
+  "no_second_hash_lane": true,
+  "h20_full_keygen_sign_run": false,
+  "actual_hard_frequency_result": "Pending actual all-14 route results; 100MHz diagnostics never satisfy the hard target"
+}

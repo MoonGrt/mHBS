@@ -190,7 +190,7 @@ def publish(expected_candidates=0):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--watch', action='store_true')
-    parser.add_argument('--interval', type=float, default=30)
+    parser.add_argument('--interval', type=float, default=60)
     parser.add_argument('--expected-candidates', type=int, default=0)
     args = parser.parse_args()
     require(args.interval >= 5, 'Refresh interval must be at least five seconds')

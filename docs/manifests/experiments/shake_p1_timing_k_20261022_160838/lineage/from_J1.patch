@@ -1,0 +1,251 @@
+--- J1/rtl/hash/shake-recipe.sv
++++ K1/rtl/hash/shake-recipe.sv
+@@ -362,6 +362,10 @@
+             logic [2:0] stream_payload_mode;
+             logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
++            wire [5:0] following_list_remainder = position < prefix_bytes ?
++                (following_position >= prefix_bytes ? 6'(following_position - prefix_bytes) :
++                 list_remainder) : next_remainder >= stream_node_bytes ?
++                6'(next_remainder - stream_node_bytes) : next_remainder[5:0];
+             function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+                 reg [12:0] remaining;
+                 reg [7:0] live_bytes, pad_bytes;
+@@ -393,9 +397,50 @@
+                         stream_source_mode = PAYLOAD_LIST_PREFIX;
+                 end
+             endfunction
++            // Decode endpoint selection before the RAM read. Each live byte has
++            // one fixed source among four aligned or four two-byte-offset words.
++            // The last two bytes can instead come from the adjacent node, or from
++            // the LMS list-prefix head. No node-length, shift, payload-mode or
++            // padding mux remains in series after endpoint data returns.
++            logic [67:0] endpoint_controls;
++            function automatic [67:0] stream_endpoint_controls(
++                input [12:0] next_position, input [5:0] next_list_remainder);
++                reg [67:0] controls;
++                reg [15:0] byte_controls;
++                reg [2:0] payload_mode;
++                begin
++                    controls = 0;
++                    byte_controls = stream_byte_controls(next_position);
++                    payload_mode = stream_source_mode(next_position);
++                    for (integer byte_index = 0; byte_index < 8; byte_index++) begin
++                        if (byte_controls[byte_index]) begin
++                            if (payload_mode == PAYLOAD_LIST_BODY) begin
++                                for (integer word_index = 0; word_index < 4; word_index++) begin
++                                    if (next_list_remainder[4:3] == 2'(word_index)) begin
++                                        if (!next_list_remainder[1])
++                                            controls[byte_index * 8 + word_index] = 1'b1;
++                                        else if (byte_index < 6 || word_index + 1 < node_words)
++                                            controls[byte_index * 8 + 4 + word_index] = 1'b1;
++                                        else controls[64 + byte_index - 6] = 1'b1;
++                                    end
++                                end
++                            end else if (payload_mode == PAYLOAD_LIST_PREFIX && byte_index >= 6)
++                                controls[66 + byte_index - 6] = 1'b1;
++                        end
++                    end
++                    stream_endpoint_controls = controls;
++                end
++            endfunction
++            always_ff @(posedge clk)
++                if (!rst) begin
++                    if (state == START && hash_ready)
++                        endpoint_controls <= stream_endpoint_controls(0, 0);
++                    else if (state == STREAM && stream_accept)
++                        endpoint_controls <= stream_endpoint_controls(
++                            following_position, following_list_remainder);
++                end
+             // Prepare byte enables with the source selectors, before the endpoint
+-            // RAM read. Returned node data then sees one mask gate; padding does
+-            // not add a comparator/priority mux behind the memory and list muxes.
++            // RAM read. Non-endpoint sources use the same registered byte masks.
+             always_ff @(posedge clk)
+                 if (!rst) begin
+                     if (state == START && hash_ready) begin
+@@ -466,12 +511,56 @@
+                 list_data0, {4'd0, list_remainder[4:3]}
+             )};
+             logic [127:0] stream_payload;
++            logic [63:0] nonendpoint_payload;
++            wire [63:0] endpoint_payload;
++            // Fixed slices let synthesis build a parallel selection tree, rather
++            // than first concatenating differently sized nodes and shifting them.
++            for (genvar byte_index = 0; byte_index < 8; byte_index++) begin : endpoint_bytes
++                wire [7:0] choices[0:7];
++                for (genvar word_index = 0; word_index < 4; word_index++) begin : words
++                    assign choices[word_index] = list_data0[word_index * 64 + byte_index * 8 +: 8] &
++                        {8{endpoint_controls[byte_index * 8 + word_index]}};
++                    if (byte_index < 6 || word_index < 3)
++                        assign choices[4 + word_index] =
++                            list_data0[word_index * 64 + (byte_index + 2) * 8 +: 8] &
++                            {8{endpoint_controls[byte_index * 8 + 4 + word_index]}};
++                    else assign choices[4 + word_index] = 0;
++                end
++                wire [7:0] adjacent_byte, prefix_byte;
++                if (byte_index >= 6) begin
++                    assign adjacent_byte = list_data1[(byte_index - 6) * 8 +: 8] &
++                        {8{endpoint_controls[64 + byte_index - 6]}};
++                    assign prefix_byte = list_data0[(byte_index - 6) * 8 +: 8] &
++                        {8{endpoint_controls[66 + byte_index - 6]}};
++                end else begin
++                    assign adjacent_byte = 0;
++                    assign prefix_byte = 0;
++                end
++                assign endpoint_payload[byte_index * 8 +: 8] =
++                    choices[0] | choices[1] | choices[2] | choices[3] |
++                    choices[4] | choices[5] | choices[6] | choices[7] |
++                    adjacent_byte | prefix_byte;
++            end
+             logic [127:0] source_window;
+             always_comb begin
+                 source_window = {
+                     source_word(source_control[1]),
+                     source_word(source_control[0])
+                 };
++                nonendpoint_payload = 0;
++                case (stream_payload_mode)
++                    PAYLOAD_ID_LO: nonendpoint_payload = identifier[63:0];
++                    PAYLOAD_ID_HI: nonendpoint_payload = identifier[127:64];
++                    PAYLOAD_MESSAGE: nonendpoint_payload = source_window[79:16];
++                    PAYLOAD_MESSAGE_PREFIX: begin
++                        nonendpoint_payload = source_window[79:16];
++                        nonendpoint_payload[47:0] = {16'h8181, be32(leaf)};
++                    end
++                    PAYLOAD_LIST_PREFIX:
++                        nonendpoint_payload = {16'd0, 16'h8080, be32(leaf)};
++                    PAYLOAD_LIST_BODY: begin end
++                    default: nonendpoint_payload = source_window[63:0];
++                endcase
+                 stream_payload = 0;
+                 case (stream_payload_mode)
+                     PAYLOAD_ID_LO: stream_payload[63:0] = identifier[63:0];
+@@ -700,12 +789,30 @@
+                 stream_data = 0;
+                 for (i = 0; i < 8; i = i + 1) begin
+                     stream_data[i*8+:8] =
+-                        (stream_payload[i*8+:8] & {8{stream_live_bytes[i]}}) |
+-                        (8'h1f & {8{stream_pad_bytes[i]}});
++                        (nonendpoint_payload[i*8+:8] & {8{stream_live_bytes[i]}}) |
++                        endpoint_payload[i*8+:8] | (8'h1f & {8{stream_pad_bytes[i]}});
+                     if (beat == 8 && stream_last && i == 7)
+                         stream_data[i*8+7] = 1'b1;
+                 end
+             end
++
++`ifndef SYNTHESIS
++            logic [63:0] reference_stream_data;
++            always_comb begin
++                for (integer byte_index = 0; byte_index < 8; byte_index++) begin
++                    reference_stream_data[byte_index*8+:8] =
++                        (stream_payload[byte_index*8+:8] & {8{stream_live_bytes[byte_index]}}) |
++                        (8'h1f & {8{stream_pad_bytes[byte_index]}});
++                    if (beat == 8 && stream_last && byte_index == 7)
++                        reference_stream_data[byte_index*8+7] = 1'b1;
++                end
++            end
++            always @(posedge clk) begin : debug_scalar_endpoint_decode
++                if (!rst && STREAM_ENABLE && state == STREAM &&
++                    stream_data[63:0] !== reference_stream_data)
++                    $fatal(1, "scalar predecoded endpoint byte selection differs from reference");
++            end
++`endif
+ 
+             assign batch_request_ready = 1'b0;
+             assign batch_response_valid = 1'b0;
+--- J1/rtl/executor/executor.sv
++++ K1/rtl/executor/executor.sv
+@@ -72,8 +72,7 @@
+     state_t state, continuation;
+     logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
+     logic direct_writeback_phase;
+-    logic node_pipe_first_phase, node_scalar_first_phase;
+-    logic node_tree_leaf_phase, node_terminal_chain_phase;
++    logic node_pipe_first_phase;
+     task automatic enter_state(input state_t next_state);
+         begin
+             state <= next_state;
+@@ -111,12 +110,6 @@
+             node_pipe_first_phase <= PIPELINE > 1 && standalone_chain && pipe_direct &&
+                 (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
+                  next_state == PIPE_VERIFY_INPUT);
+-            node_scalar_first_phase <= next_state == CHAIN_STORE &&
+-                standalone_chain && chain_cursor == 0;
+-            node_tree_leaf_phase <= next_state == LEAF_SETUP && !standalone_chain;
+-            node_terminal_chain_phase <= next_state == CHAIN_NEXT && !sign_only &&
+-                !(stateful && chain_descriptor[13:12] == 2) &&
+-                !(standalone_chain && chain_descriptor[13:12] == 0);
+         end
+     endtask
+     // Abort outstanding execution on an error. The autonomous wrapper halts
+@@ -890,15 +883,6 @@
+                 $fatal(1, "registered batch mode differs from execution state");
+             if (node_pipe_first_phase !== (direct_writeback_phase && standalone_chain))
+                 $fatal(1, "prepared pipeline node ownership differs from macro");
+-            if (node_scalar_first_phase !== (state == CHAIN_STORE &&
+-                standalone_chain && chain_cursor == 0))
+-                $fatal(1, "prepared scalar node ownership differs from macro");
+-            if (node_tree_leaf_phase !== (state == LEAF_SETUP && !standalone_chain))
+-                $fatal(1, "prepared tree-leaf node ownership differs from macro");
+-            if (node_terminal_chain_phase !== (state == CHAIN_NEXT && !sign_only &&
+-                !(stateful && chain_descriptor[13:12] == 2) &&
+-                !(standalone_chain && chain_descriptor[13:12] == 0)))
+-                $fatal(1, "prepared terminal-chain node ownership differs from macro");
+         end
+     end
+     always @(posedge clk) begin : rolling_allocator_equivalence
+@@ -1088,18 +1072,9 @@
+                         node_value <= pipe_response_result;
+                 end
+             end
+-            // These write causes are independent of the continuation branch.
+-            // Data is read on the original result-consumption edge, so no
+-            // node-sized staging register or extra controller cycle is needed.
+-            if (node_scalar_first_phase || node_tree_leaf_phase)
+-                node_value <= result[W-1:0];
+-            if (node_terminal_chain_phase &&
+-                !(indexing != 1 && chain_cursor + 1 < endpoint_count)) begin
+-                if (!verifying && macro_flags[3] && leaf_cursor == target)
+-                    node_value <= 0;
+-                else if (chain_descriptor[13:12] == 0)
+-                    node_value <= result[W-1:0];
+-            end
++            // Scalar writes stay in their owning states. Only batch ownership
++            // needs a prepared phase bit; duplicating scalar state predicates
++            // expands the shared node mux without shortening its RAM inputs.
+             case (state)
+                 IDLE:
+                 if (job_valid) begin
+@@ -1456,6 +1431,7 @@
+                     enter_state(CHAIN_STORE);
+                 end
+                 CHAIN_STORE: begin
++                    if (standalone_chain && chain_cursor == 0) node_value <= result[W-1:0];
+                     task_chain <= 0;
+                     if (sign_only || (!verifying && macro_flags[0] && leaf_cursor == target))
+                         enter_state(CHAIN_OUTPUT0);
+@@ -1476,6 +1452,7 @@
+                     end else if (standalone_chain && chain_descriptor[13:12] == 0)
+                         route_result(ROUTE_NODE);
+                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
++                        node_value <= 0;
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1484,6 +1461,7 @@
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+                     end else if (chain_descriptor[13:12] == 0) begin
++                        node_value <= result[W-1:0];
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1615,6 +1593,7 @@
+                 LEAF_SETUP:
+                 if (standalone_chain) route_result(ROUTE_HASH);
+                 else begin
++                    node_value <= result[W-1:0];
+                     node_level <= 0;
+                     target_at_level <= target;
+                     auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);

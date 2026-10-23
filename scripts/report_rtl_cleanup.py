@@ -245,7 +245,7 @@ def main():
         write_report(data, args.base.resolve())
         if not args.watch or data['area_complete']:
             break
-        time.sleep(30)
+        time.sleep(60)
 
 
 if __name__ == '__main__':

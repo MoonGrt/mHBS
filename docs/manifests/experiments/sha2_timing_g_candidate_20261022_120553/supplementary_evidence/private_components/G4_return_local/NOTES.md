@@ -1,0 +1,13 @@
+# G4 private constant-slot execution (2026-10-22)
+
+RecipeSHA:c925c9e3483c0bfa2278c9cc12d5c8f627b0e73694e411b72e367ba9af00946c. Primitive81a8e9a5unchanged. Production remainsG2. G3's smaller captured-only variant is retained independently.
+
+All25 context banks/flags now have one genvar-slot writer. Return tag feeds return_hit/return_final, not a metadata mux before phase/length/capture/iteration decisions. Every bankwrite index is constant slot. Dynamic next_hash/finish_node tasks are removed. Edge priority remains reset, consumption, formatter reserve/finalmetadata, compression return, registered allocation, last new reservation. Reset assignments matchG2 and do not add resets to CV/digest/key/capture/address/iteration data banks. Partial compression stores big-endian compression_cv; node/key/mask values use reversed returned bytes. Seed/step increment/capture/continuation comparisons run in parallel before phase selection.
+
+The single scalar_result register is retained. Each slot produces terminal-scalar orMGF0 clear/low event, MGF1upper event, and byte enable masks. Only masks OR across slots; every write uses the shared returned bus. MGF0/MGF1 remain generic, without scalar_slot restrictions; terminal scalar output requires no further chain step and scalar ownership. MGF0 clears fullresult then writeslowbytes, MGF1 updates upper bytes only, and later admissionzero/invalid overridesreturn exactly asG2. Normal onehot scalar-event assertion is included. An independent other-agent review found no functional discrepancy.
+
+690actualvalueRAM recipe vectors passed (P1U1normal/P4U2SYNTH), every cycle/count record equalG2, sums111366/63558. P12/P24bothviews fullslot tests passed432requests/12groups and all coverage/cycle metrics equalG2, including capture hold/same-edge reuse/unordered/request poisoning. Totalfamilycycles remain P12 5213/14946/2736 andP24 5523/15460/3038. Thirtyzero-step cases plus2pendingadmission reset/replay cases passed; response latency2, no stale work after reset.
+
+Two supplemental public-interface cases passed in both normal/SYNTHESIS: scalarHmsg49-byte output verifies MGF1high17bytes while retaininglow32, then batchtag3 Hmsg16 verifies MGF0 still writes sharedscalar_result when scalar_slot isfalse and clears the previous upper bytes. Independent hashlib expected bytes, output holds, total5Hash/10compressions checked perview.
+
+No productionRTL or frozenG2 file was changed and no hardware job was started/stopped. Actual area/timing/ATP are not claimed by this component suite. G4b adds only local registered allocation onehot in a separate private snapshot; combinedG4b/G5/H2 validation is separate.

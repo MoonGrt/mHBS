@@ -1,0 +1,94 @@
+{
+  "candidate": "N2 SHA2 registered chain lookahead",
+  "source": "rtl/hash/sha2-recipe.sv",
+  "source_sha256": "a2c62aaedb1c8746c929fe0fad4e000079a0b7921a922096d15bb39cb44e1e04",
+  "tests": [
+    {
+      "test": "scalar",
+      "pipeline": 6,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P6U1.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 6,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P6U1_SYNTHESIS.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 8,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P8U1.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 8,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P8U1_SYNTHESIS.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 1,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P1U1.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 1,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n2_sha2_timing/recipes_P1U1_SYNTHESIS.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "batch",
+      "pipeline": 6,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 12,
+      "passed": true,
+      "log": "build/n2_sha2_timing/batch_P6U1.log",
+      "log_sha256": "9d71d72b0c6dab0d3f28daf4e0e531dbfe343fc693270dbd910fbf109db5a2a3"
+    },
+    {
+      "test": "batch",
+      "pipeline": 8,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 12,
+      "passed": true,
+      "log": "build/n2_sha2_timing/batch_P8U1_SYNTHESIS.log",
+      "log_sha256": "197e2e6e536f7056cdc3a4f32e60377a4711227e3ae83180f6859f67f10844d0"
+    }
+  ],
+  "notes": [
+    "Restored K2 byte masks/reduction and result publication unchanged.",
+    "Each context gains one registered next_iteration<end_step bit; seed case remains end_step!=0.",
+    "Iteration/end_step only change at allocation or completed chain node. Formatting then compression separates this edge from the next return; a simulation assertion checks the old comparison at every final chain return.",
+    "Unsigned five-bit next_iteration and end_step preserve original wrap comparison semantics.",
+    "No extra hash lane, data bank, or cycle. No Vivado started by this subtask."
+  ]
+}

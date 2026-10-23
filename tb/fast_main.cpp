@@ -17,18 +17,63 @@ static void node(VlWide<8> &value,std::string hex) {
     while(hex.size()<64)hex="0"+hex;
     for(unsigned i=0;i<8;i++)value[i]=std::stoul(hex.substr(64-8*(i+1),8),nullptr,16);
 }
+static void dump_bytes(const std::string &path,const std::vector<uint8_t> &data) {
+    if(path.empty())return;
+    std::ofstream stream(path,std::ios::binary);
+    if(!stream)throw std::runtime_error("Cannot write "+path);
+    stream.write(reinterpret_cast<const char *>(data.data()),data.size());
+    if(!stream)throw std::runtime_error("Cannot finish writing "+path);
+}
 int main(int argc,char **argv) {
  try {
     VerilatedContext context;context.commandArgs(argc,argv);
-    std::string path;
-    for(int i=1;i<argc;i++)if(std::string(argv[i]).rfind("+VECTOR=",0)==0)path=argv[i]+8;
+    std::string path,output_path,cache_path;
+    for(int i=1;i<argc;i++) {
+        const std::string argument=argv[i];
+        if(argument.rfind("+VECTOR=",0)==0)path=argument.substr(8);
+        if(argument.rfind("+OUTPUT_BIN=",0)==0)output_path=argument.substr(12);
+        if(argument.rfind("+CACHE_BIN=",0)==0)cache_path=argument.substr(11);
+    }
     if(path.empty())throw std::runtime_error("VECTOR is required");
     auto meta=lines(path+"/meta.mem"),cfg=lines(path+"/job.mem"),msg=lines(path+"/message.mem");
     auto expected=lines(path+"/expected.mem"),nodes=lines(path+"/nodes.mem");
     auto number=[](const std::string &s){return std::stoull(s,nullptr,16);};
-    const uint64_t output_size=number(meta[0]),expected_hashes=number(meta[1]),expected_perms=number(meta[2]);
+    const uint64_t output_size=number(meta[0]),expected_hashes=number(meta[1]),logical_perms=number(meta[2]);
     const unsigned op=number(cfg[7]),message_size=op?number(cfg[8]):0,verify_nodes=number(meta[3]);
+    // Vector meta retains logical padded-block counts. SHA2 reuses a single
+    // raw chaining value for SLH address or XMSS public PRF prefixes per job;
+    // compression events count actual lane work, including its one cold fill.
+    const auto descriptors=lines(path+"/descriptor.mem");
+    const uint64_t profile=number(descriptors.at(1));
+    uint64_t expected_perms=logical_perms;
+    if((profile&32) && ((profile&31)==0 || (profile&31)==4)) {
+        const uint64_t mgf_hashes=(profile&31)==0 ? 2 : 1;
+        const uint64_t message_hashes=op==0 ? 0 : 1+mgf_hashes+(op==1 ? 2 : 0);
+        if(expected_hashes<message_hashes)throw std::runtime_error("Invalid SLH vector hash count");
+        const uint64_t address_hashes=expected_hashes-message_hashes;
+        if(address_hashes && logical_perms<address_hashes)
+            throw std::runtime_error("Invalid SLH vector compression count");
+        expected_perms=logical_perms-address_hashes+(address_hashes ? 1 : 0);
+    }
+    if((profile&32) && (profile&31)>=0x18 && (profile&31)<=0x1a) {
+        // From standard XMSS work: H=S+3*F+4*B+M. Every F uses two
+        // public-seed PRFs and every binary H uses three. Only their shared
+        // toByte(3,32)||PK.seed prefix is cached; keygen and index PRFs are not.
+        const unsigned height=(profile&31)==0x18 ? 10 : (profile&31)==0x19 ? 16 : 20;
+        const uint64_t leaves=uint64_t{1}<<height;
+        const uint64_t seeded=op==2 ? 0 : 67*(leaves+(op==1));
+        const uint64_t binary=op==2 ? 66+height : 67*leaves-1;
+        const uint64_t message_hashes=op==0 ? 0 : op==1 ? 2 : 1;
+        if(expected_hashes<seeded+message_hashes+4*binary)
+            throw std::runtime_error("Invalid XMSS vector hash structure");
+        const uint64_t numerator=2*(expected_hashes-seeded-message_hashes)+binary;
+        if(numerator%3)throw std::runtime_error("Invalid XMSS public PRF count");
+        const uint64_t public_prfs=numerator/3;
+        if(logical_perms<public_prfs)throw std::runtime_error("Invalid XMSS block count");
+        expected_perms=logical_perms-public_prfs+(public_prfs ? 1 : 0);
+    }
     Vtb_fast dut{&context};uint64_t ticks=0,hashes=0,perms=0,cursor=0,observed_cycles=0;
+    std::vector<uint8_t> output_bytes,cache_bytes;
     unsigned sent=0,accepted=0;
     auto tick=[&](bool observe) {
         dut.clk=0;dut.eval();
@@ -40,6 +85,7 @@ int main(int argc,char **argv) {
             if(dut.out_valid)for(unsigned i=0;i<dut.out_bytes;i++) {
                 if(cursor>=output_size || byte(dut.out_data,i)!=number(expected[cursor]))
                     throw std::runtime_error("Output byte mismatch at "+std::to_string(cursor));
+                if(!output_path.empty())output_bytes.push_back(byte(dut.out_data,i));
                 cursor++;
             }
         }
@@ -76,14 +122,19 @@ int main(int argc,char **argv) {
             for(unsigned b=0;b<dut.signature_read_bytes;b++) {
                 if(cursor>=output_size||byte(dut.signature_read_data,b)!=number(expected[cursor]))
                     throw std::runtime_error("Signature cache byte mismatch");
+                if(!cache_path.empty())cache_bytes.push_back(byte(dut.signature_read_data,b));
                 cursor++;
             }
         }
         if(cursor!=output_size)throw std::runtime_error("Signature cache length mismatch");
     }
+    if(!cache_path.empty()&&op!=1)throw std::runtime_error("CACHE_BIN requires Sign");
+    dump_bytes(output_path,output_bytes);
+    dump_bytes(cache_path,cache_bytes);
     std::cout<<"STATEFUL_PASS P"<<dut.configuration_pipeline<<"U"<<dut.configuration_unroll
              <<" op="<<op<<" cycles="<<cycles<<" total="<<total
              <<" hashes="<<hashes<<" permutations="<<perms<<" tamper=0"
+             <<" logical_permutations="<<logical_perms
              <<" seconds="<<std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()<<std::endl;
     dut.final();return 0;
  } catch(const std::exception &e) {std::cerr<<e.what()<<std::endl;return 1;}

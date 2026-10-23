@@ -1,0 +1,33 @@
+--- H2/rtl/hash/sha256.sv
++++ H3/rtl/hash/sha256.sv
+@@ -75,6 +75,19 @@
+         end
+     endfunction
+ 
++    // Select the upper half after independent carry-in-zero/one sums.
++    // Only the lower 16 bits propagate the carry used by the final mux.
++    function automatic [31:0] carry_select_16(input [31:0] x, y);
++        reg [16:0] lower;
++        reg [15:0] upper_zero, upper_one;
++        begin
++            lower = {1'b0,x[15:0]} + {1'b0,y[15:0]};
++            upper_zero = x[31:16] + y[31:16];
++            upper_one = x[31:16] + y[31:16] + 16'd1;
++            carry_select_16 = {lower[16] ? upper_one : upper_zero,lower[15:0]};
++        end
++    endfunction
++
+     function automatic [63:0] prepared_prefix(input [31:0] h, word_value, k);
+         // Preserve both carry-save terms. A complete addition here would
+         // precede the nonlinear round on a newly injected compression block.
+@@ -110,8 +123,8 @@
+             e_pair = carry_save(d, t1_pair[31:0], t1_pair[63:32]);
+             a_first = carry_save(sigma_a, majority, t1_pair[31:0]);
+             a_pair = carry_save(a_first[31:0], a_first[63:32], t1_pair[63:32]);
+-            next_a = a_pair[31:0] + a_pair[63:32];
+-            next_e = e_pair[31:0] + e_pair[63:32];
++            next_a = carry_select_16(a_pair[31:0],a_pair[63:32]);
++            next_e = carry_select_16(e_pair[31:0],e_pair[63:32]);
+ 
+             schedule_first = carry_save(
+                 rotate(w14,17) ^ rotate(w14,19) ^ (w14 >> 10),

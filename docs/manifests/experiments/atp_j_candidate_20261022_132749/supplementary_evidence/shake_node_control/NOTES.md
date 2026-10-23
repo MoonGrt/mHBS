@@ -1,0 +1,9 @@
+# SHAKE P6U2 shared node-write control retiming — 2026-10-22
+
+The actual 100 MHz routed baseline fails by 0.014 ns. Its worst path begins at `standalone_chain` and ends at bit 94 of the shared `node_value` register. It contains only two LUTs; 9.439 of 9.974 ns is routing, including a 275-load control net with 9.225 ns delay. This is shared executor control, so neither a Keccak round rewrite nor a SHAKE-only P/U branch addresses the observed path.
+
+The candidate prepares four node-write causes on the existing `enter_state` edge: the first standalone pipeline endpoint, the first scalar chain endpoint, a tree leaf result, and terminal-chain ownership. Their predicates include the stable standalone/tree and sign-only decisions. Only the associated `node_value` assignments move out of the continuation branches. Values are consumed on the original cycle; there is no added node register, Hash lane, state or wait cycle. Four one-bit controls replace the long-distance shared flag's direct connection to the wide writeback mux. All algorithms and every legal P/U use the same change.
+
+Non-synthesis assertions compare each prepared flag with the previous phase predicate on every cycle. Isolated Verify tests cover SHAKE P6U2, SHAKE P1U1 and SHA2 P4U2, both normal/SYNTHESIS, SLH128f/XMSSh10/LMSh10, with stalls, two replays and in-flight reset. Full Sign comparison and target-frequency setup/hold/full-route/DRC acceptance are separate measurements; no timing benefit is claimed before those finish.
+
+`rtl/hash/shake-recipe.sv` and `rtl/hash/keccak.sv` are unchanged. The first candidate changes only `rtl/executor/executor.sv`. The frozen before/after executor files, full isolated source manifest and exact patch are kept here. Detailed test logs remain in `validation/`; only summaries should enter experiment archives.

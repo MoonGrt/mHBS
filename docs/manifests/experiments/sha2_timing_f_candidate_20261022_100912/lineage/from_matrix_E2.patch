@@ -1,0 +1,391 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/dual_pu_route_matrix/20261022_093744/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_f/candidate_20261022_100912/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/dual_pu_route_matrix/20261022_093744/source/rtl/hash/sha2-recipe.sv	2026-10-22 09:37:44.276830409 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_f/candidate_20261022_100912/source/rtl/hash/sha2-recipe.sv	2026-10-22 10:09:12.155480765 +0800
+@@ -49,7 +49,7 @@
+     localparam [255:0] IV = 256'h6a09e667bb67ae853c6ef372a54ff53a510e527f9b05688c1f83d9ab5be0cd19;
+     typedef enum logic [3:0] { DIRECT, SEED, KEY, MASK0, MASK1, FINAL,
+         HMAC_IN, HMAC_OUT, HMSG_IN, MGF0, MGF1 } phase_t;
+-    typedef enum logic [1:0] { SELECT, BUILD, SEND } formatter_t;
++    typedef enum logic [2:0] { SELECT, DESCRIBE, PREPARE, BUILD, DRAIN, SEND } formatter_t;
+ 
+     // Only requests own contexts; completed results stay live until consumed.
+     // P=1 reduces these banks and selectors to a single scalar execution slot.
+@@ -71,6 +71,10 @@
+     // remains live through HMAC/H_msg/MGF, independently of digest/key/capture.
+     // Capture the executor's source selection once, outside the beat datapath.
+     logic [N*8-1:0] scalar_randomizer;
++    // Capture the initial value from the allocated context on the next edge.
++    // The executor's leaf/capture selection no longer drives a wide bank write.
++    logic initial_capture_pending;
++    logic [TAG_BITS-1:0] initial_capture_tag;
+ 
+     function automatic [255:0] reverse_bytes(input [255:0] data);
+         for (integer k=0;k<32;k=k+1) reverse_bytes[k*8+:8]=data[255-k*8-:8];
+@@ -149,6 +153,7 @@
+     wire [511:0] block_buffer;
+     logic [255:0] format_address;
+     logic [12:0] format_length;
++    logic [6:0] format_block;
+     logic [8:0] word_control[0:2];
+     window_t window_control;
+     logic [15:0] payload_mask, delimiter_mask;
+@@ -158,7 +163,7 @@
+         word_control[1][8:4] == SRC_LIST0 || word_control[1][8:4] == SRC_LIST1 ||
+         word_control[2][8:4] == SRC_LIST0 || word_control[2][8:4] == SRC_LIST1;
+     logic length_beat;
+-    wire [8:0] global_beat={block_index[format_tag],beat};
++    wire [8:0] global_beat={format_block,beat};
+ 
+     function automatic format_t selected_format(input integer t);
+         begin
+@@ -365,21 +370,29 @@
+             source_word=node_word(value,selected[1:0]) ^ literal;
+         end
+     endfunction
+-    wire [191:0] source_window={source_word(word_control[2],list_words[2]),source_word(word_control[1],list_words[1]),source_word(word_control[0],list_words[0])};
++    wire [191:0] selected_window={source_word(word_control[2],list_words[2]),source_word(word_control[1],list_words[1]),source_word(word_control[0],list_words[0])};
++    // Context/word selection and byte alignment occupy separate clock stages.
++    // This is one beat of storage, not a duplicate bank of context nodes.
++    // Non-list beats continue to enter the stage on consecutive clocks.
++    logic [191:0] source_window;
++    window_t staged_window;
++    logic [15:0] staged_payload_mask,staged_delimiter_mask;
++    logic staged_length_beat,beat_pending;
++    logic [1:0] staged_beat;
+     logic [127:0] payload,formatted_beat;
+     wire [63:0] encoded_length=be64({48'd0,format_length,3'd0});
+     always_comb begin
+-        case(window_control)
++        case(staged_window)
+             SHIFT_ONE: payload=source_window[135:8];
+             SHIFT_TWO: payload=source_window[143:16];
+             BRIDGE_SIX: payload={source_window[143:64],source_window[47:0]};
+             BRIDGE_SEVEN: payload={source_window[135:64],source_window[55:0]};
+             default: payload=source_window[127:0];
+         endcase
+-        if(length_beat) payload[127:64]=encoded_length;
++        if(staged_length_beat) payload[127:64]=encoded_length;
+         for(integer k=0;k<16;k=k+1)
+-            formatted_beat[127-k*8-:8]=(length_beat && k>=8) ? payload[k*8+:8] :
+-                payload_mask[k] ? payload[k*8+:8] : delimiter_mask[k] ? 8'h80 : 8'd0;
++            formatted_beat[127-k*8-:8]=(staged_length_beat && k>=8) ? payload[k*8+:8] :
++                staged_payload_mask[k] ? payload[k*8+:8] : staged_delimiter_mask[k] ? 8'h80 : 8'd0;
+     end
+     function automatic [INDEX_BITS-1:0] list_address(input format_t kind,input [8:0] pos);
+         case(kind)
+@@ -390,9 +403,6 @@
+     endfunction
+     assign list_index0=list_address(format_kind,global_beat);
+     assign list_index1=list_index0+1'b1;
+-    // In SEND, the old block already resides in block_buffer. Its acceptance
+-    // can also prepare the next slot and prefetch its first endpoint address.
+-    wire start_format=candidate_valid && (formatter==SELECT || (formatter==SEND && compression_ready));
+     function automatic [INDEX_BITS-1:0] first_list_address(input [3:0] recipe_shape,input [6:0] block_number);
+         // List recipes remain in DIRECT for their entire multi-block hash.
+         // Prefetch therefore needs the recipe shape, not the full phase/family
+@@ -403,8 +413,9 @@
+             default: first_list_address=0;
+         endcase
+     endfunction
+-    assign list_next_index0=start_format ? first_list_address(shape[candidate],block_index[candidate]) :
+-        list_address(format_kind,{block_index[format_tag],formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
++    assign list_next_index0=formatter==DESCRIBE ?
++        first_list_address(shape[format_tag],block_index[format_tag]) :
++        list_address(format_kind,{format_block,formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
+     function automatic logic prefix_block(input format_t kind);
+         case(kind)
+             SLH_SEED,SLH_VALUE,SLH_LIST,XMSS_INDEX,XMSS_MESSAGE,
+@@ -433,23 +444,11 @@
+             endcase
+         end
+     endfunction
+-    task automatic prepare_block(input integer t);
+-        format_t kind;
++    task automatic reserve_block(input integer t);
+         begin
+-            kind=selected_format(t);
+-            format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; list_words_valid<=0;
+-            final_compression[t]<=block_index[t]==last_block(t);
+-            format_kind<=kind; format_length<=input_length(t);
+-            // Full first blocks contain only fixed prefix fields. They need
+-            // no byte masks, endpoint reads or four-cycle beat serialization.
+-            // This still submits the same compression from the same input CV.
+-            if(block_index[t]==0 && prefix_block(kind)) begin
+-                formatter<=SEND;
+-            end else begin
+-                formatter<=BUILD;
+-                format_address<=packed_address(t,kind);
+-                prepare_beat(kind,{block_index[t],2'd0},input_length(t));
+-            end
++            // Round-robin arbitration ends at the tag register. Context reads,
++            // descriptor decoding and first-block data do not share this path.
++            format_tag<=TAG_BITS'(t); need_block[t]<=0; formatter<=DESCRIBE;
+             schedule_cursor<=t==PIPELINE-1 ? TAG_BITS'(0) : TAG_BITS'(t+1);
+         end
+     endtask
+@@ -475,10 +474,9 @@
+         candidate_valid=upper_valid || lower_valid;
+         candidate=upper_valid ? upper_candidate : lower_candidate;
+     end
+-    wire write_prefix=start_format && block_index[candidate]==0 &&
+-        prefix_block(selected_format(int'(candidate)));
+-    wire write_beat=formatter==BUILD && (!list_beat || list_words_valid);
+-    wire [511:0] prepared_prefix=prefix_data(int'(candidate),selected_format(int'(candidate)));
++    wire write_prefix=formatter==PREPARE && format_block==0 && prefix_block(format_kind);
++    wire write_beat=beat_pending;
++    wire [511:0] prepared_prefix=prefix_data(int'(format_tag),format_kind);
+     // Constant word addresses let each 128-bit bank own its write enable.
+     // Mixing a full prefix write with a dynamic part-select update would
+     // create a much wider update/retention mux around this same 512-bit store.
+@@ -486,7 +484,7 @@
+         logic [127:0] data;
+         assign block_buffer[511-word_index*128-:128]=data;
+         always_ff @(posedge clk)
+-            if(!rst && (write_prefix || (write_beat && beat==2'(word_index))))
++            if(!rst && (write_prefix || (write_beat && staged_beat==2'(word_index))))
+                 data<=write_prefix ? prepared_prefix[511-word_index*128-:128] : formatted_beat;
+     end
+     wire compression_ready, compression_valid;
+@@ -509,7 +507,9 @@
+     always_comb begin
+         completed_tag=0; completed_valid=0;
+         for(integer k=0;k<PIPELINE;k=k+1)
+-            if(!completed_valid && complete[k] && !scalar_slot[k] && (!response_held || held_tag!=TAG_BITS'(k))) begin
++            if(!completed_valid && complete[k] && !scalar_slot[k] &&
++                !(initial_capture_pending && initial_capture_tag==TAG_BITS'(k)) &&
++                (!response_held || held_tag!=TAG_BITS'(k))) begin
+                 completed_valid=1; completed_tag=TAG_BITS'(k);
+             end
+     end
+@@ -519,7 +519,8 @@
+     assign batch_response_capture=captured[held_tag];
+     assign batch_read_digest=digest[batch_read_tag];
+     assign batch_read_capture=captured[batch_read_tag];
+-    assign response_valid=complete[0] && scalar_slot[0];
++    assign response_valid=complete[0] && scalar_slot[0] &&
++        !(initial_capture_pending && initial_capture_tag==TAG_BITS'(0));
+     assign response_value=scalar_result;
+     assign response_capture=captured[0][N*8-1:0];
+     assign request_ready=!rst && !batch_mode && busy_slot==0;
+@@ -585,12 +586,18 @@
+             final_compression<=0;
+             capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
++            beat_pending<=0;
++            initial_capture_pending<=0; initial_capture_tag<=0;
+             scalar_result<=0;
+             for(integer k=0;k<PIPELINE;k=k+1) begin
+                 phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+                 arity[k]<=0; output_bytes[k]<=0;
+             end
+         end else begin
++            beat_pending<=0;
++            initial_capture_pending<=0;
++            if(initial_capture_pending && capture_step[initial_capture_tag]==iteration[initial_capture_tag])
++                captured[initial_capture_tag]<=digest[initial_capture_tag];
+             // Match the common executor's idle-tag contract: after draining a
+             // batch, tag zero selects the first retained signature capture.
+             if(!response_held || batch_response_ready) begin
+@@ -601,7 +608,24 @@
+             end
+             if(response_valid && response_ready) begin complete[0]<=0; busy_slot[0]<=0; end
+             case(formatter)
+-                SELECT: if(candidate_valid) prepare_block(int'(candidate));
++                SELECT: if(candidate_valid) reserve_block(int'(candidate));
++                DESCRIBE: begin
++                    format_kind<=selected_format(int'(format_tag));
++                    format_length<=input_length(int'(format_tag));
++                    format_address<=packed_address(int'(format_tag),selected_format(int'(format_tag)));
++                    format_block<=block_index[format_tag];
++                    final_compression[format_tag]<=block_index[format_tag]==last_block(int'(format_tag));
++                    beat<=0; list_words_valid<=0; formatter<=PREPARE;
++                end
++                PREPARE: begin
++                    // Decode byte controls only from registered descriptors.
++                    // Fixed first blocks still use one full 512-bit write.
++                    if(write_prefix) formatter<=SEND;
++                    else begin
++                        prepare_beat(format_kind,{format_block,2'd0},format_length);
++                        formatter<=BUILD;
++                    end
++                end
+                 // Select only the three required RAM words before registering.
+                 // The following cycle performs common source selection, window
+                 // alignment and padding. Non-list beats retain their cadence.
+@@ -614,16 +638,25 @@
+                         end
+                         list_words_valid<=1;
+                     end else begin
++                        source_window<=selected_window;
++                        staged_window<=window_control;
++                        staged_payload_mask<=payload_mask;
++                        staged_delimiter_mask<=delimiter_mask;
++                        staged_length_beat<=length_beat;
++                        staged_beat<=beat; beat_pending<=1;
+                         list_words_valid<=0;
+-                        if(beat==3) formatter<=SEND;
++                        if(beat==3) formatter<=DRAIN;
+                         else begin
+                             beat<=beat+1'b1;
+-                            prepare_beat(format_kind,{block_index[format_tag],beat+2'd1},format_length);
++                            prepare_beat(format_kind,{format_block,beat+2'd1},format_length);
+                         end
+                     end
+                 end
++                // Commit the last registered beat before compression samples
++                // the complete block on its SEND handshake.
++                DRAIN: formatter<=SEND;
+                 SEND: if(compression_ready) begin
+-                    if(candidate_valid) prepare_block(int'(candidate));
++                    if(candidate_valid) reserve_block(int'(candidate));
+                     else formatter<=SELECT;
+                 end
+                 default: formatter<=SELECT;
+@@ -657,6 +690,8 @@
+             if(accept) begin
+                 t=int'(incoming_tag);
+                 if(scalar_accept) scalar_randomizer<=randomizer;
++                initial_capture_pending<=incoming_shape==0 && incoming_no_seed && incoming_capture;
++                initial_capture_tag<=incoming_tag;
+                 busy_slot[t]<=1; complete[t]<=0; need_block[t]<=1; scalar_slot[t]<=scalar_accept;
+                 shape[t]<=incoming_shape; family[t]<=incoming_family; paired[t]<=incoming_pair;
+                 phase[t]<=initial_phase(incoming_shape,incoming_family,incoming_no_seed);
+@@ -673,8 +708,6 @@
+                 arity[t]<=scalar_accept ? request_recipe[47:40] : 8'd1;
+                 output_bytes[t]<=scalar_accept ? request_recipe[37:32] : incoming_family==0 ? 6'd16 : 6'd32;
+                 if(incoming_shape==0 && incoming_no_seed) begin
+-                    if(incoming_capture && incoming_capture_step==incoming_start)
+-                        captured[t]<=node_result(incoming_value,incoming_family);
+                     if(incoming_steps==0) begin
+                         need_block[t]<=0; complete[t]<=1;
+                         if(scalar_accept) scalar_result<=(DIGEST_BYTES*8)'(node_result(incoming_value,incoming_family));
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/dual_pu_route_matrix/20261022_093744/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_f/candidate_20261022_100912/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/dual_pu_route_matrix/20261022_093744/source/rtl/hash/sha256.sv	2026-10-22 09:37:44.276922059 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_f/candidate_20261022_100912/source/rtl/hash/sha256.sv	2026-10-22 10:09:12.155647938 +0800
+@@ -75,8 +75,16 @@
+         end
+     endfunction
+ 
++    function automatic [31:0] prepared_prefix(input [31:0] h, word_value, k);
++        reg [63:0] pair;
++        begin
++            pair = carry_save(h, word_value, k);
++            prepared_prefix = pair[31:0] + pair[63:32];
++        end
++    endfunction
++
+     function automatic [767:0] advance_round(input [767:0] value,
+-        input [31:0] round_constant, input round_active);
++        input [31:0] round_constant, prefix, input prefix_ready, round_active);
+         reg [31:0] a, b, c, d, e, f, g, h, next_a, next_e;
+         reg [31:0] sigma_a, sigma_e, choose, majority;
+         reg [31:0] w0, w1, w9, w14, new_word;
+@@ -91,10 +99,18 @@
+             sigma_a = rotate(a,2) ^ rotate(a,13) ^ rotate(a,22);
+             majority = (a & b) ^ (a & c) ^ (b & c);
+ 
+-            t1_first = carry_save(h, round_constant, w0);
+-            t1_second = carry_save(sigma_e, choose, t1_first[31:0]);
+-            t1_pair = carry_save(t1_first[63:32], t1_second[31:0],
+-                t1_second[63:32]);
++            if (prefix_ready) begin
++                // H + K + W was prepared one stage before the nonlinear
++                // E/A inputs arrive. No carry propagates through T1 here.
++                t1_pair = carry_save(sigma_e, choose, prefix);
++                t1_first = '0;
++                t1_second = '0;
++            end else begin
++                t1_first = carry_save(h, round_constant, w0);
++                t1_second = carry_save(sigma_e, choose, t1_first[31:0]);
++                t1_pair = carry_save(t1_first[63:32], t1_second[31:0],
++                    t1_second[63:32]);
++            end
+             e_pair = carry_save(d, t1_pair[31:0], t1_pair[63:32]);
+             a_first = carry_save(sigma_a, majority, t1_pair[31:0]);
+             a_pair = carry_save(a_first[31:0], a_first[63:32], t1_pair[63:32]);
+@@ -118,6 +134,8 @@
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
+     logic [31:0] next_constant[0:PIPELINE-1][0:UNROLL-1];
++    localparam integer PREFIX_ROUNDS = UNROLL < 4 ? UNROLL : 4;
++    logic [31:0] next_prefix[0:PIPELINE-1][0:PREFIX_ROUNDS-1];
+     logic return_pending;
+     wire stalled = output_valid && !output_ready;
+     wire recycle = return_pending;
+@@ -170,30 +188,61 @@
+             end else begin : partial_tail
+                 assign round_active = source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
+             end
+-            wire [31:0] round_constant;
+-            if (stage == 0) begin : entering_constant
+-                assign round_constant = recycle ? next_constant[PIPELINE-1][r] :
+-                    constant_word(7'(r));
+-            end else begin : advancing_constant
+-                assign round_constant = next_constant[stage-1][r];
+-            end
+-            always_ff @(posedge clk) begin
+-                if (!rst && !stalled && source_valid)
+-                    next_constant[stage][r] <= following_constant(source_traversal);
++            wire [31:0] round_constant, round_prefix;
++            if (r < PREFIX_ROUNDS) begin : prepared_round
++                wire [767:0] completed_state = unrolled[UNROLL-1].result;
++                // During the first four rounds, H is the source H/G/F/E,
++                // and W is already present in the source schedule window.
++                // Thus next-stage prefixes need no future round arithmetic.
++                always_ff @(posedge clk) begin
++                    if (!rst && !stalled && source_valid)
++                        next_prefix[stage][r] <= prepared_prefix(
++                            completed_state[512+32*r+:32],
++                            completed_state[511-32*r-:32],
++                            following_constant(source_traversal));
++                end
++                if (stage == 0) begin : entering_prefix
++                    assign round_prefix = recycle ? next_prefix[PIPELINE-1][r] :
++                        prepared_prefix(input_cv[32*r+:32],
++                            input_block[511-32*r-:32], constant_word(7'(r)));
++                end else begin : advancing_prefix
++                    assign round_prefix = next_prefix[stage-1][r];
++                end
++                assign round_constant = 32'd0;
++            end else begin : ordinary_round
++                if (stage == 0) begin : entering_constant
++                    assign round_constant = recycle ? next_constant[PIPELINE-1][r] :
++                        constant_word(7'(r));
++                end else begin : advancing_constant
++                    assign round_constant = next_constant[stage-1][r];
++                end
++                always_ff @(posedge clk) begin
++                    if (!rst && !stalled && source_valid)
++                        next_constant[stage][r] <= following_constant(source_traversal);
++                end
++                assign round_prefix = 32'd0;
+             end
+ `ifndef SYNTHESIS
+             always_ff @(posedge clk) begin
+-                if (!rst && !stalled && source_valid &&
+-                    round_constant !== constant_word(7'(int'(source_traversal) * ROUNDS + ROUND_OFFSET)))
+-                    $fatal(1, "SHA256 lookahead constant lost token alignment");
++                if (!rst && !stalled && source_valid) begin
++                    if (r < PREFIX_ROUNDS) begin
++                        if (round_prefix !== prepared_prefix(source_state[512+32*r+:32],
++                            source_state[511-32*r-:32],
++                            constant_word(7'(int'(source_traversal) * ROUNDS + ROUND_OFFSET))))
++                            $fatal(1, "SHA256 lookahead prefix lost token alignment");
++                    end else if (round_constant !== constant_word(
++                        7'(int'(source_traversal) * ROUNDS + ROUND_OFFSET)))
++                        $fatal(1, "SHA256 lookahead constant lost token alignment");
++                end
+             end
+ `endif
+             wire [767:0] result;
+             if (r == 0) begin : first_round
+-                assign result = advance_round(source_state, round_constant, round_active);
++                assign result = advance_round(source_state, round_constant,
++                    round_prefix, r < PREFIX_ROUNDS, round_active);
+             end else begin : following_round
+                 assign result = advance_round(unrolled[r-1].result,
+-                    round_constant, round_active);
++                    round_constant, round_prefix, r < PREFIX_ROUNDS, round_active);
+             end
+         end
+         if (stage == PIPELINE-1) begin : returning_control

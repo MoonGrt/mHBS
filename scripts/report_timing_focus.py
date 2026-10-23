@@ -259,7 +259,7 @@ def main():
         result = publish(args.run_root.resolve())
         if not args.watch:
             return
-        time.sleep(30)
+        time.sleep(60)
 
 
 if __name__ == '__main__':

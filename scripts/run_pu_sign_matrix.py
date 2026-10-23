@@ -528,7 +528,7 @@ def main():
                 print(now(), 'MATRIX_REPORT_UPDATED', state['counts'], flush=True)
             if not args.watch or state.get('complete') or state.get('stopped_by_user'):
                 return 0
-            time.sleep(2)
+            time.sleep(60)
     return Runner(args.run_root.resolve()).execute()
 
 

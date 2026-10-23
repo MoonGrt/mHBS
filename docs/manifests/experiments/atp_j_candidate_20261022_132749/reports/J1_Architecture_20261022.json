@@ -1,0 +1,58 @@
+{
+  "schema": "mhbs.atp_j.architecture.v1",
+  "source_manifest_sha256": "e59fee9453346d684880b1e0e2ac2ec45a815d0ef764263f36642905ec85a7c7",
+  "baseline_sha2_source_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+  "baseline_shake_source_sha256": "6361eeed6936b3714835aade83b7b8e04ce9140c679b455bf1893d25f30d9c7d",
+  "changed_rtl": {
+    "rtl/hash/sha2-recipe.sv": "c19f147142ac6632f288b2cdc93f0c467824fba0f70f8e0356606a41f0c8fd92",
+    "rtl/hash/sha256.sv": "e7affefe71404930b739dd8d8ccab23a118628be75e8455a9cc4e932dd185e4f",
+    "rtl/executor/executor.sv": "bbb168601df17daa84066b24782ffd4284b4c293dd7347b35b224b4ff043a5d3"
+  },
+  "changes": [
+    "Block-ready/tag decouple completed SHA2 block from formatter so next context descriptor overlaps compression input handshake",
+    "Retain list words while fetching following endpoint beat, one list beat per cycle after first fetch",
+    "Retain P*256 CV data in a private-order single-write bank instead of shifting wide CVs through each compression stage",
+    "Register node-value write causes in executor transitions to remove high-fanout standalone_chain selection"
+  ],
+  "capacity_and_workload": "Single lane, P contexts, existing endpoint and signature capacities and every algorithmic Hash/compression retained; no P6 or P4 specialization",
+  "acceptance": {
+    "sha2_configs": [
+      "P1U1",
+      "P4U1",
+      "P12U1",
+      "P4U2"
+    ],
+    "shake_configs": [
+      "P6U2"
+    ],
+    "period_ns_by_unroll": {
+      "1": 6.666,
+      "2": 10.0
+    },
+    "required": "Same frozen source; actual setup/hold, full route, DRC=0 before ATP/frequency acceptance"
+  },
+  "component_results": {
+    "sha256": {
+      "normal_configurations": 30,
+      "synthesis_configurations": 30,
+      "vectors_per_config": 181,
+      "metrics_equal_to_I": true
+    },
+    "executor_verify": {
+      "cases": 18,
+      "stalls_replay_reset": true
+    },
+    "combined_fullslots": {
+      "groups": 12,
+      "requests": 432,
+      "returns": 432,
+      "passed": true
+    }
+  },
+  "unconfirmed": [
+    "Synthesis RAM mapping and net area savings",
+    "CV-bank read and feed-forward timing/hold",
+    "SHAKE P6U2 actual100MHz closure",
+    "All four SHA2 actual target frequencies and net routed ATP"
+  ]
+}

@@ -1,0 +1,160 @@
+{
+  "schema": "mhbs.sha2_xmss_prefix_cache_audit.v1",
+  "passed": true,
+  "scope": "Read-only review of frozen candidate B and repaired frozen candidate C; private four-context XMSS cold-fill race reproduction; independent pinned XMSS C h10 Keygen/Sign. No production RTL edits, synthesis or routing by auditor.",
+  "candidate_b": {
+    "source_manifest": "build/sha2_atp_round/20261023_172538/candidate_b/SOURCE.json",
+    "sha2_recipe_sha256": "9b99089e2cb9040de7326715e4a89f939d47e8cc059a8a18d00777855939d521",
+    "status": "rejected_due_to_reproduced_race"
+  },
+  "candidate_c": {
+    "source_manifest": "build/sha2_atp_round/20261023_172538/candidate_c/SOURCE.json",
+    "sha2_recipe_sha256": "b1a42d00960e46f06bd39269e2de24add687ae7983802f8f49450e1af5400ad0",
+    "status": "static_review_and_targeted_race_regression_passed"
+  },
+  "static_checks": [
+    {
+      "check": "Initial eligibility",
+      "passed": true,
+      "evidence": "cached_public_phase(initial_phase): XMSS batch SEED excluded, no-seed chains and scalar shape8 KEY included; scalar INDEX/seed generation excluded."
+    },
+    {
+      "check": "Restart eligibility",
+      "passed": true,
+      "evidence": "Recomputed from following_phase on final restart: SEED/FINAL→KEY eligible; KEY→MASK0 and MASK0→MASK1 eligible; final mask→FINAL excluded."
+    },
+    {
+      "check": "Cache identity",
+      "passed": true,
+      "evidence": "One raw256-bit CV bank reused. Algorithm bit separates SLH and XMSS; SLH compares low128 seed bits, XMSS compares all256. Prefix_data uses domain3||public_seed, while INDEX uses secret_prf and keygen uses domain4||secret_seed."
+    },
+    {
+      "check": "Cold/warm/pending and arbitration",
+      "passed": true,
+      "evidence": "C adds return_schedulable guard on next-phase eligibility during pending/described fill; normal scheduler already gates eligible block0. Intermediate block returns bypass the guard and can finish the cold fill."
+    },
+    {
+      "check": "Reset",
+      "passed": true,
+      "evidence": "valid/pending, descriptor flag, context eligibility, and lane in-flight state reset. Uninitialized CV/identity payload is inaccessible while valid=0."
+    },
+    {
+      "check": "Bank liveness",
+      "passed": true,
+      "evidence": "Cache CV is separate from per-context intermediate CV/key/digest/captured. Block0 explicitly selects IV, warm block1 selects cached CV, later blocks select returned intermediate CV. KEY/MASK0/MASK1 capture sequencing unchanged."
+    },
+    {
+      "check": "Physical compression accounting",
+      "passed": true,
+      "evidence": "Logical padded-block vectors/native counters retained. H=S+3U+4B+M and PRFs=2U+3B=[2(H−S−M)+B]/3; actual blocks=logical−PRFs+1 cold fill. Each completed logical hash still increments hash_count once."
+    }
+  ],
+  "race_regression": {
+    "private_testbench": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/tb_prefix_trace.sv",
+    "private_testbench_sha256": "e3d4e3c942a7ad71f9e5ed568c2a35b6fd9e31a5f8366a4a789552e29153321d",
+    "configuration": "P4U1",
+    "stimulus": "Only batch group3, four XMSS contexts, family1, leaf65536, a1..4, seeded chains steps1/2/3/4, midpoint captures and held responses; COUNT=0 skips scalar cases.",
+    "baseline_b": {
+      "passed": false,
+      "expected_failure": true,
+      "returncode": -6,
+      "log": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/reproduce_b.log",
+      "trace": [
+        {
+          "cycle": 207,
+          "event": "tag0 SEED final return direct-reserved KEY"
+        },
+        {
+          "cycle": 209,
+          "event": "tag0 cold public PRF prefix launched"
+        },
+        {
+          "cycle": 212,
+          "event": "tag1 SEED final return direct-reserved KEY despite pending=1"
+        },
+        {
+          "cycle": 214,
+          "event": "tag1 second cold launch with pending=1 triggers already-in-flight assertion"
+        }
+      ]
+    },
+    "repaired_c": {
+      "passed": true,
+      "returncode": 0,
+      "log": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/reproduce_c.log",
+      "trace": [
+        {
+          "cycle": 212,
+          "event": "tag1 final return blocked from direct reservation; its KEY need_block retained"
+        },
+        {
+          "cycle": 214,
+          "event": "tag2 likewise waits"
+        },
+        {
+          "cycle": 275,
+          "event": "tag0 cold intermediate block return remains schedulable"
+        },
+        {
+          "cycle": 276,
+          "event": "fill valid, waiting tags arbitrate normally"
+        }
+      ],
+      "checks": "All four final digests and captures match independent full-message hashlib vectors; held responses and raw hash/block/prefix transaction counts pass.",
+      "note": "The inherited bench final display says batch_groups=6; this private reduction actually executes exactly one XMSS group, as shown by its source loop bounds."
+    },
+    "compile_logs": {
+      "b": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/compile.log",
+      "c": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/compile_c.log"
+    }
+  },
+  "independent_xmss_c": {
+    "reference": "pinned XMSS/xmss-reference 171ccbd26f098542a67eb5d2b128281c80bd71a6",
+    "hash_backend": "sha2",
+    "profile": "xmss_h10",
+    "q": 0,
+    "message_bytes": 1,
+    "signature_bytes": 2500,
+    "signature_sha256": "015c07d59be5552aaf067a3b00093c56d266f769e1bb4f51e1caf26c491a88d1",
+    "matches_existing_vector": true,
+    "counts": [
+      3430396,
+      6998007,
+      3431950,
+      7001183
+    ],
+    "seconds": 3.562483170069754,
+    "passed": true,
+    "pins": {
+      "xmss": [
+        "https://github.com/XMSS/xmss-reference.git",
+        "171ccbd26f098542a67eb5d2b128281c80bd71a6"
+      ],
+      "lms": [
+        "https://github.com/cisco/hash-sigs.git",
+        "cea4dda4f937e56ab42e1a74665f6397473a2838"
+      ]
+    },
+    "reference_manifest": "build/reference_native/manifest.json",
+    "reference_manifest_sha256": "609a790f34b3abc826142459094766cc764b5bfe2da6486b560f86588e05569d",
+    "reference_library": "build/reference_native/reference.so",
+    "reference_library_sha256": "e82e7582dea973ed7288f962a50ff38545f58c4cef5ea0272046f2e06b0b57a0",
+    "reference_adapter": "scripts/reference_stateful.c",
+    "reference_adapter_sha256": "6b16de039df8a0a338ddad148a0c38b1a2a0b8277e5d1bcba0b5ef6b4a97cd07",
+    "command": "Python: model.reference.stateful_native.generate(\"xmss_h10\", Job loaded from tb/vectors/sha2/xmss_h10/sign/job.mem, message from message.mem, \"sha2\"); pinned C signer also verifies generated signature internally.",
+    "summary": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/XMSS_NATIVE_REFERENCE.json",
+    "public_key": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/xmss_h10_c_public_key.bin",
+    "signature": "build/sha2_atp_round/20261023_172538/audit_b_cache_race/xmss_h10_c_signature.bin",
+    "rtl_comparison_limit": "Independent C output equals frozen target vector; complete candidate-C RTL Sign comparison remains the main validation runner responsibility.",
+    "actual_blocks_expected_after_cache": {
+      "keygen": 4733947,
+      "sign": 4736133,
+      "verify": 2500
+    }
+  },
+  "limitations": [
+    "This audit does not claim complete matrix/function regression or new routed frequency closure.",
+    "No h20 complete Keygen/Sign was generated or run.",
+    "Raw detailed logs remain in run directory; only this summary is intended for archive."
+  ]
+}

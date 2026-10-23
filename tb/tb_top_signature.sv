@@ -36,6 +36,7 @@ module tb_top_signature;
     integer cursor = 0;
     integer observed_cycles = 0;
     longint unsigned observed_hashes = 0, observed_permutations = 0;
+    longint unsigned expected_compressions;
     logic message_sent = 0;
 
     task automatic tick;
@@ -57,7 +58,7 @@ module tb_top_signature;
             message_sent = 0;
         end else begin
             observed_cycles++;
-            if (observed_cycles > 2_000_000) $fatal(1, "top timeout");
+            if (observed_cycles > metadata[2]*80) $fatal(1, "top timeout");
             if (message_valid && message_ready) message_sent = 1;
             if (out_valid) begin
                 for (integer byte_index = 0; byte_index < out_bytes; byte_index++) begin
@@ -92,11 +93,17 @@ module tb_top_signature;
         $readmemh("tb/vectors/slh_128f/sign/message.mem", message);
         $readmemh("tb/vectors/slh_128f/sign/meta.mem", metadata);
 `endif
+        expected_compressions=metadata[2];
+`ifdef MHBS_SHA2
+        // This top fixture is SHA2-128f Sign: five non-address SHA256 calls,
+        // and exactly one cold public-prefix compression after reset.
+        expected_compressions=metadata[2]-(metadata[1]-5)+1;
+`endif
         repeat (5) tick();
         rst = 0;
         while (!done && !error) tick();
         if (error || cursor != metadata[0] || result_kind != 1) $fatal(1, "top result");
-        if (observed_hashes != metadata[1] || observed_permutations != metadata[2])
+        if (observed_hashes != metadata[1] || observed_permutations != expected_compressions)
             $fatal(1, "top functional event counts");
 `ifndef SYNTHESIS
         if (hash_count != observed_hashes || permutation_count != observed_permutations)

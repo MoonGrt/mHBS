@@ -1,0 +1,1136 @@
+{
+  "schema": "mhbs.sha2_i.architecture.v1",
+  "created_at": "2026-10-22T12:14:36+08:00",
+  "label": "I_G4b_G5_H2_local_control_late_sigma_hard_frequency",
+  "run_root": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553",
+  "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+  "rtl_sha256": {
+    "rtl/hash/keccak.sv": "fcd027336e194d1f2b9d3d67f3abf5792346adf9ef8fa572f3b66a5a34458769",
+    "rtl/hash/shake-recipe.sv": "c34a7b19ad1b72d16e66dd1329f6715c02d37cd50a8be75a533a4b39c8355972",
+    "rtl/hash/sha256.sv": "140c3a7d13addd05aa60f4972164facc5c463df348f2a8d779999c907e1c3d11",
+    "rtl/hash/sha2-recipe.sv": "924a8a28b23a1515c7b2fc522af354abc958980acbb78bfd4aaae7e531d07e61",
+    "rtl/memory/value.sv": "f608604bd5b5cd4cbc8c20d16135b6399e154e647ef0e78cfb4e1e34d143dbd9",
+    "rtl/memory/signature.sv": "98ce7287800ba3e073bcc5a08919a4f899b7827a3e7387b3d3d828c4ad787149",
+    "rtl/executor/sequencer.sv": "e26cd2d731254a787262fa2cf7ab7aee5321b9a230a662d8873b167539e62de8",
+    "rtl/executor/executor.sv": "bfa343af6e9bb411652575e457c3d7978ec55621258869293c4f48abe51e93e7",
+    "rtl/top/top.sv": "b7e2dbead379f5d909291c7db6d670efafdac9b71e79ae0264c08727cb7dd67e",
+    "rtl/top/common.sv": "9fcfa23e0c6312b5b78c51021f29578a5edc3b365c75f0eae3a241f6b608da80"
+  },
+  "reference_baseline_source_manifest_sha256": "470f38215f763d0d8845548ecbd58cbb1b3ecf20449e05f89845f84d8710a873",
+  "components": [
+    {
+      "name": "G4b",
+      "change": "Constant-index per-slot return/context writers; registered onehot allocation_pending in existing admission beat; local scalar publication mask",
+      "added_FSM_cycles": 0,
+      "standalone_G4b_pass_not_claimed": true
+    },
+    {
+      "name": "G5",
+      "change": "DESCRIBE registers 78 bits of address metadata; PREPARE wires the existing 256-bit packed address",
+      "metadata_bits": 78,
+      "added_FSM_cycles": 0,
+      "additional_full_node_registers": 0
+    },
+    {
+      "name": "H2",
+      "change": "CSA grouping moves Sigma1(E) later into the shared T1 tree",
+      "compressors_per_round": 5,
+      "new_arithmetic_operators": 0,
+      "new_pipeline_registers": 0,
+      "added_primitive_cycles": 0,
+      "SigmaE_compressor_depth_before_to_A": 4,
+      "SigmaE_compressor_depth_after_to_A": 3,
+      "SigmaE_compressor_depth_before_to_E": 3,
+      "SigmaE_compressor_depth_after_to_E": 2,
+      "tradeoff": "Stored prefix-carry path grows from three to four compressors; target STA decides the result."
+    }
+  ],
+  "preserved": [
+    "standard algorithms",
+    "external interfaces",
+    "one hash lane",
+    "legal P/U set",
+    "64 SHA256 rounds and tail bypass",
+    "tags/stalls/reset",
+    "complete authentication-path recomputation",
+    "signature/output byte serialization"
+  ],
+  "historical_physical_motivation": [
+    {
+      "config": "sha2/P12U2",
+      "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+      "source": "core/lane/compression/stages[10].state_reg[10][614]/C",
+      "destination": "core/lane/compression/stages[11].state_reg[11][766]/D",
+      "wns_ns": -0.094,
+      "whs_ns": 0.069,
+      "actual_period_ns": 10.0,
+      "data_path_ns": 10.053,
+      "logic_ns": 3.763,
+      "logic_pct": 37.431,
+      "route_ns": 6.29,
+      "route_pct": 62.569,
+      "logic_levels": 22,
+      "route_fully_completed": true,
+      "drc_errors": 0,
+      "source_unchanged": true,
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/jobs/sha2/P12U2/route/critical_paths.rpt",
+      "report_sha256": "aaa03b9c3c52c30e50483f1ca601311c8332095729697bd29b31f4bc5d4bfd00",
+      "classification": "SHA256 compression internal unrolled datapath; arithmetic/core placement, independent of endpoint formatter",
+      "carry4_levels": 12
+    },
+    {
+      "config": "sha2/P6U1",
+      "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+      "source": "core/lane/admission_reg[tag][0]/C",
+      "destination": "core/lane/digest_reg[3][179]/D",
+      "wns_ns": -0.177,
+      "whs_ns": 0.086,
+      "actual_period_ns": 6.666,
+      "data_path_ns": 6.841,
+      "logic_ns": 0.625,
+      "logic_pct": 9.136,
+      "route_ns": 6.216,
+      "route_pct": 90.864,
+      "logic_levels": 2,
+      "route_fully_completed": true,
+      "drc_errors": 0,
+      "source_unchanged": true,
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/jobs/sha2/P6U1/route/critical_paths.rpt",
+      "report_sha256": "24b097645184e593cd575c14654c24997233eebce4bc65cef49f517f65452c48",
+      "classification": "Admission tag decode and data selection fanout to slot digest; per-slot registered allocation indication is the targeted boundary",
+      "dominant_nets": [
+        {
+          "name": "core/lane/admission_reg[tag_n_0_][0]",
+          "fanout": 145,
+          "delay_ns": 1.161
+        },
+        {
+          "name": "core/lane/compression/scalar_slot[3]",
+          "fanout": 553,
+          "delay_ns": 5.056
+        }
+      ]
+    },
+    {
+      "source_manifest": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/SOURCE.json",
+      "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+      "config": "sha2/P8U1",
+      "wns_ns": -0.348,
+      "whs_ns": 0.083,
+      "constraint_period_ns": 6.666,
+      "source": "core/lane/compression/output_tag_reg[0]_rep__0/C",
+      "destination": "core/lane/scalar_result_reg[370]/CE",
+      "data_path_ns": 6.793,
+      "logic_ns": 1.253,
+      "route_ns": 5.54,
+      "route_pct": 81.556,
+      "logic_levels": 7,
+      "muxf7_count": 1,
+      "output_tag_net_fanout": 129,
+      "classification": "Dynamic return tag selects phase/iteration and scalar result CE; supports per-slot event locality, not another hash lane",
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/jobs/sha2/P8U1/route/critical_paths.rpt",
+      "report_sha256": "5198c318fa65c6a3771b033db455b4d1f3476738081e1fb80e2b5ad93915d574",
+      "route_status": {
+        "routable": 42937,
+        "fully_routed": 42937,
+        "routing_errors": 0,
+        "passed": true
+      },
+      "drc_errors": 0,
+      "hard_frequency_passed": false,
+      "atp_accepted": null,
+      "no_successor_frequency_inference": true
+    },
+    {
+      "config": "sha2/P12U1",
+      "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+      "source": "core/lane/compression/output_tag_reg[0]_rep__0/C",
+      "destination": "core/lane/captured_reg[2][173]/CE",
+      "wns_ns": -0.694,
+      "whs_ns": 0.096,
+      "actual_period_ns": 6.666,
+      "data_path_ns": 7.139,
+      "logic_ns": 1.072,
+      "logic_pct": 15.015,
+      "route_ns": 6.067,
+      "route_pct": 84.985,
+      "logic_levels": 7,
+      "route_fully_completed": true,
+      "drc_errors": 0,
+      "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/jobs/sha2/P12U1/route/critical_paths.rpt",
+      "report_sha256": "aa8b0afe0e497db501f7c2ebd1579a4a0941ffb0d7f19142f89814366b22bd22",
+      "classification": "Dynamic return tag to captured bank CE; motivates constant-slot local return control"
+    }
+  ],
+  "validation": {
+    "private_combined": {
+      "passed": true,
+      "source_manifest_sha256": "635f494b81729bedcb42b9fecac0a746beaead36b71393a4f9a5f7aa4edf39c4",
+      "recipe_cases_actual_value_RAM": 690,
+      "fullslot_groups": 12,
+      "fullslot_requests": 432,
+      "zero_step_cases": 30,
+      "admission_reset_replay": 2,
+      "generic_MGF_cases": 4,
+      "cycles_equal_G2_in_component_cases": true,
+      "summary": "supplementary_evidence/private_components/I_combined/VALIDATION_SUMMARY.json"
+    },
+    "primitive": {
+      "normal_configurations": 30,
+      "synthesis_configurations": 30,
+      "vectors_per_configuration": 181,
+      "metrics_equal_G": true,
+      "summary": "supplementary_evidence/private_components/H2_late_sigma_e/VALIDATION_SUMMARY.json"
+    },
+    "frozen_fullslots": {
+      "passed": true,
+      "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+      "groups": 12,
+      "requests": 432,
+      "returns": 432,
+      "all_context_occupancy": true,
+      "normal_synthesis_metric_equality": true,
+      "summary": "supplementary_evidence/fullslots/SUMMARY.json",
+      "summary_sha256": "02d954df792b96d866988cd0711ddb61bcc926ff842a5929a5220b48a70667eb",
+      "scope_note": "The inherited raw summary scope text says frozen F RTL; its exact source_manifest and all ten RTL hashes bind I, not F."
+    },
+    "same_source_functional": {
+      "passed": 36,
+      "planned": 36,
+      "complete": true,
+      "failed": 0,
+      "source_unchanged": true,
+      "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+      "summary": "supplementary_evidence/functional/SUMMARY.json"
+    },
+    "sign_snapshot": {
+      "passed": 17,
+      "planned": 42,
+      "failed": [],
+      "whole_source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+      "completed_comparison_to_G2": [
+        {
+          "test": "sha2/P1U1/slh_128f",
+          "cycles": 15198218,
+          "G2_cycles": 15198218,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P2U1/slh_128f",
+          "cycles": 8033185,
+          "G2_cycles": 8033185,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P4U1/slh_128f",
+          "cycles": 4338609,
+          "G2_cycles": 4338609,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P4U1/xmss_h10",
+          "cycles": 134594624,
+          "G2_cycles": 134594624,
+          "cycle_delta": 0,
+          "hashes": 3431950,
+          "permutations": 7001183,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P4U1/lms_h10",
+          "cycles": 24217789,
+          "G2_cycles": 24217789,
+          "cycle_delta": 0,
+          "hashes": 1101347,
+          "permutations": 1136162,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P6U1/slh_128f",
+          "cycles": 3067778,
+          "G2_cycles": 3067778,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P6U1/xmss_h10",
+          "cycles": 97269283,
+          "G2_cycles": 97269283,
+          "cycle_delta": 0,
+          "hashes": 3431950,
+          "permutations": 7001183,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P6U1/lms_h10",
+          "cycles": 18380558,
+          "G2_cycles": 18380558,
+          "cycle_delta": 0,
+          "hashes": 1101347,
+          "permutations": 1136162,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P8U1/slh_128f",
+          "cycles": 2563270,
+          "G2_cycles": 2563270,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U1/slh_128f",
+          "cycles": 1970570,
+          "G2_cycles": 1970570,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U1/xmss_h10",
+          "cycles": 60491679,
+          "G2_cycles": 60491679,
+          "cycle_delta": 0,
+          "hashes": 3431950,
+          "permutations": 7001183,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U1/lms_h10",
+          "cycles": 12869006,
+          "G2_cycles": 12869006,
+          "cycle_delta": 0,
+          "hashes": 1101347,
+          "permutations": 1136162,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P4U2/slh_128f",
+          "cycles": 2479153,
+          "G2_cycles": 2479153,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P4U2/xmss_h10",
+          "cycles": 76552672,
+          "G2_cycles": 76552672,
+          "cycle_delta": 0,
+          "hashes": 3431950,
+          "permutations": 7001183,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U2/slh_128f",
+          "cycles": 1465811,
+          "G2_cycles": 1465811,
+          "cycle_delta": 0,
+          "hashes": 104925,
+          "permutations": 211432,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U2/xmss_h10",
+          "cycles": 44928288,
+          "G2_cycles": 44928288,
+          "cycle_delta": 0,
+          "hashes": 3431950,
+          "permutations": 7001183,
+          "hashes_equal": true,
+          "compressions_equal": true
+        },
+        {
+          "test": "sha2/P12U2/lms_h10",
+          "cycles": 11097110,
+          "G2_cycles": 11097110,
+          "cycle_delta": 0,
+          "hashes": 1101347,
+          "permutations": 1136162,
+          "hashes_equal": true,
+          "compressions_equal": true
+        }
+      ],
+      "scope": "Snapshot only. Dynamic timing report remains authoritative as background tasks complete."
+    }
+  },
+  "acceptance": {
+    "required_routes": 14,
+    "targets_MHz": {
+      "U1": 150,
+      "U2": 100
+    },
+    "constraint_period_ns": {
+      "U1": 6.666,
+      "U2": 10.0
+    },
+    "actual_period_must_not_exceed": "1000/target_MHz",
+    "quantization_tolerance_ns": 0,
+    "setup_hold_and_DRC_and_full_route_required": true,
+    "per_point_gate": "three complete Sign tests + same-source36 +100MHz diagnostic",
+    "route_source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+    "prior_G1_G2_passes_not_imported": true,
+    "frequency_search": false,
+    "automatic_frequency_fallback": false,
+    "area_and_cycles_and_ATP_costs_required": true
+  },
+  "current_snapshot": {
+    "at": "2026-10-22T12:14:36+08:00",
+    "diagnostics": {
+      "sha2/P1U1": "pending",
+      "sha2/P2U1": "pending",
+      "sha2/P3U1": "pending",
+      "sha2/P4U1": "running",
+      "sha2/P6U1": "passed",
+      "sha2/P8U1": "running",
+      "sha2/P12U1": "passed",
+      "sha2/P24U1": "pending",
+      "sha2/P1U2": "pending",
+      "sha2/P2U2": "pending",
+      "sha2/P3U2": "pending",
+      "sha2/P4U2": "running",
+      "sha2/P6U2": "pending",
+      "sha2/P12U2": "passed"
+    },
+    "routes": {
+      "sha2/P1U1": "waiting_for_validation",
+      "sha2/P2U1": "waiting_for_validation",
+      "sha2/P3U1": "waiting_for_validation",
+      "sha2/P4U1": "waiting_for_validation",
+      "sha2/P6U1": "waiting_for_capacity",
+      "sha2/P8U1": "waiting_for_validation",
+      "sha2/P12U1": "waiting_for_capacity",
+      "sha2/P24U1": "waiting_for_validation",
+      "sha2/P1U2": "waiting_for_validation",
+      "sha2/P2U2": "waiting_for_validation",
+      "sha2/P3U2": "waiting_for_validation",
+      "sha2/P4U2": "waiting_for_validation",
+      "sha2/P6U2": "waiting_for_validation",
+      "sha2/P12U2": "waiting_for_capacity"
+    },
+    "actual_frequency_acceptance": "pending",
+    "area_cycle_ATP_conclusion": "pending actual same-source measurements"
+  },
+  "processes": {
+    "measurement_pid": 3742702,
+    "functional_pid": 3742705,
+    "physical_pid": 3742717,
+    "old_jobs_preserved": true,
+    "maximum_top_level_Vivado": 12,
+    "threads_per_Vivado": 2,
+    "synthesis_analysis_deferred_after_seconds": 600,
+    "deferred_tasks_continue": true
+  },
+  "artifact_policy": {
+    "private_manifest_inputs_packaged": true,
+    "component_index": "supplementary_evidence/private_components/COMPONENT_INDEX.json",
+    "detailed_sim_validation_logs_archived": false,
+    "raw_logs_retained_in_run_directories": true,
+    "output_formats": [
+      "Markdown",
+      "JSON"
+    ],
+    "README_generated": false,
+    "CSV_generated": false
+  },
+  "first_100MHz_diagnostics": {
+    "passed_points": 3,
+    "common_clock_ns": 10.0,
+    "rows": [
+      {
+        "config": "sha2/P12U2",
+        "G1": {
+          "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+          "area": {
+            "lut": 47270.0,
+            "ff": 30492.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 15629.0
+          },
+          "timing": {
+            "data_path_ns": 8.643,
+            "logic_levels": 22,
+            "source": "core/lane/compression/stages[10].state_reg[10][618]/C",
+            "destination": "core/lane/compression/stages[11].state_reg[11][764]/D"
+          },
+          "report_sha256": {
+            "timing.rpt": "0ccc23e91af3cd576df7a262601c2b2179d82b214863b049dd6e5ddf7bbb310a",
+            "utilization.rpt": "2c2ade693564b04ceed874395a5a1d48a685fb64987571e3f60afd5e24173a2d",
+            "settings.txt": "13cc277fc051ec83d54f6e9bc204721644fb7a859c0fbec3cc232e71909717b3",
+            "critical_paths.rpt": "3d606536fa27f699eae8dc881cb07aeb63e33ccd44139220a840b46872267320",
+            "hierarchical.rpt": "7264e66a810e7b5a2dbddd44dfd94d573416ed100fc057af5172d3ef70033baa",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "cf36927e151a1f108fb1500921ff5b9d054e18e75a14956a0748a3c9cb7e3313"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/synth/sha2/P12U2"
+        },
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "area": {
+            "lut": 48796.0,
+            "ff": 30502.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 16011.75
+          },
+          "timing": {
+            "data_path_ns": 8.643,
+            "logic_levels": 22,
+            "source": "core/lane/compression/stages[10].state_reg[10][618]/C",
+            "destination": "core/lane/compression/stages[11].state_reg[11][764]/D"
+          },
+          "report_sha256": {
+            "timing.rpt": "f79612256ff670a183d4d9a0dad8135be43b4b2472b50d7b3639f3c1d58ca528",
+            "utilization.rpt": "6e399cbc26ef0c0a4005aea8df10e1cff91a5b84069a5bbfbfaa9ed34b8d89aa",
+            "settings.txt": "13cc277fc051ec83d54f6e9bc204721644fb7a859c0fbec3cc232e71909717b3",
+            "critical_paths.rpt": "4c3b880067975e93f578c858cf2b44e0dafea0331e768b7da938166d9b97603e",
+            "hierarchical.rpt": "2efaa3265ebe286f2ced562c546f9d418d314b4e4464ea3f9101a8ea2d5a40a6",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "fb6d0afc886e9d8708e4cc5ea6124758a65fc80ab9ba1b8eef906aa1300bf057"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P12U2"
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "area": {
+            "lut": 52662.0,
+            "ff": 34537.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 17482.625
+          },
+          "timing": {
+            "data_path_ns": 8.557,
+            "logic_levels": 24,
+            "source": "core/lane/compression/stages[10].state_reg[10][545]/C",
+            "destination": "core/lane/compression/stages[11].state_reg[11][764]/D"
+          },
+          "report_sha256": {
+            "timing.rpt": "f68155c203dda99b0bcf8bfe0b4feda2991bc470361dfa4064001f211120e4fc",
+            "utilization.rpt": "5987d2f88e81f474b319b1ba9146d4cad00b3ad0eaaf7caa8cbd93e54fa2ba5d",
+            "settings.txt": "13cc277fc051ec83d54f6e9bc204721644fb7a859c0fbec3cc232e71909717b3",
+            "critical_paths.rpt": "937fe4e570f1325ea323c0e0779aedd74c529b004cb5171e9f39196292cf46ca",
+            "hierarchical.rpt": "8befdb235a41f2a135bd298fb6e3d7e0a798fbe373a2556b73d2293b35babfd9",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "5fade40a1754fab4cf7ef26f29a5e8f1d13de7fb311eca6d1d49823bd99ea413"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P12U2"
+        },
+        "I_vs_G2_area_change_pct": 9.186222617765072,
+        "I_vs_G2_diagnostic_path_change_pct": -0.9950248756218971
+      },
+      {
+        "config": "sha2/P6U1",
+        "G1": {
+          "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+          "area": {
+            "lut": 29001.0,
+            "ff": 18100.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 9512.75
+          },
+          "timing": {
+            "data_path_ns": 5.134,
+            "logic_levels": 6,
+            "source": "core/lane/shape_reg[3][2]/C",
+            "destination": "core/lane/format_address_reg[162]/R"
+          },
+          "report_sha256": {
+            "timing.rpt": "8bf16cf08c0d0b58c4cd92f357f2ab10327771aa9b2134066e3dce39cbd09bff",
+            "utilization.rpt": "9f90d03361cfbf5f41ad926dad732f1b7f28cab457905a4208ba69b01d34f3bd",
+            "settings.txt": "11b31f2633f9031e75b2dccda2d9b410531b2f17274672370fef20261f6b4f2d",
+            "critical_paths.rpt": "def72ae77631742b5ee90bd10a190ed538d52425b1fe14bcb1d7e42624a75387",
+            "hierarchical.rpt": "172d828422ed16662525bcf96a82f89cad989ddd151cbe51c29e1f573e003383",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "62d99f000c611c384383ab1b28db2d0f562f140f74458d476c9b3193b4055449"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/synth/sha2/P6U1"
+        },
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "area": {
+            "lut": 29258.0,
+            "ff": 18144.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 9582.5
+          },
+          "timing": {
+            "data_path_ns": 5.463,
+            "logic_levels": 8,
+            "source": "core/lane/phase_reg[3][3]/C",
+            "destination": "core/lane/scalar_result_reg[0]/CE"
+          },
+          "report_sha256": {
+            "timing.rpt": "d28a862233b4da6e8b3e31aba553435bdea119c3c3e2d90c417112fd06f30fd2",
+            "utilization.rpt": "39e26a3fb273e159a6384b15604086e90261ea569da6f6bad99e242cc3f4d113",
+            "settings.txt": "11b31f2633f9031e75b2dccda2d9b410531b2f17274672370fef20261f6b4f2d",
+            "critical_paths.rpt": "2e8558464216e2567169dcc90e4db1d23df1d69ecafc51565be5cdea45cf437c",
+            "hierarchical.rpt": "a31ea486f41a8551a1ae321f2eb37def5ade24d0f5186e4cd4d5c474b49b7539",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "488b3227605c8df9aa4b83bc93332a742a7336ecafee17031fde9b0104952e7e"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P6U1"
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "area": {
+            "lut": 31552.0,
+            "ff": 20186.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 10411.25
+          },
+          "timing": {
+            "data_path_ns": 5.2,
+            "logic_levels": 7,
+            "source": "core/lane/contexts[3].end_step_reg[3][2]/C",
+            "destination": "core/lane/scalar_result_reg[32]/CE"
+          },
+          "report_sha256": {
+            "timing.rpt": "a74be8f0df3e81f1ae27ab934772744f4a07023ed7eaf2a9517ed6c6c26fd22c",
+            "utilization.rpt": "12017cba60706088f81bc20b54e21323fa382aa710b87f7bf651507c972faf48",
+            "settings.txt": "11b31f2633f9031e75b2dccda2d9b410531b2f17274672370fef20261f6b4f2d",
+            "critical_paths.rpt": "310c549b920a59657cd9fd4c4a915653c10432de7959ba7f7fccd3e84baa4dcf",
+            "hierarchical.rpt": "bb21d153d08d1e4577f3da03d021e10e8932c469cba37768dad9517f4efbcd33",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "95c25391a9aa8c3cd2ea7192edfb64867aa16c5bccefb2218a0c9a1e6dafb53b"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P6U1"
+        },
+        "I_vs_G2_area_change_pct": 8.648578137229324,
+        "I_vs_G2_diagnostic_path_change_pct": -4.814204649459997
+      },
+      {
+        "config": "sha2/P12U1",
+        "G1": {
+          "source_manifest_sha256": "1130a3a0f81046f662ea6cf8dc1514376178a58decab6e745f6846958426f2b2",
+          "area": {
+            "lut": 42975.0,
+            "ff": 29590.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 14442.5
+          },
+          "timing": {
+            "data_path_ns": 6.622,
+            "logic_levels": 13,
+            "source": "core/lane/block_index_reg[11][1]/C",
+            "destination": "core/read_addresses.adjacent_address_reg[1]/D"
+          },
+          "report_sha256": {
+            "timing.rpt": "120f6690e25f06ddba6ff5dc1931d3951c7add5a95e7ee340b9af926738da546",
+            "utilization.rpt": "51c3a4ce0caed9c7e1f53745ebaf1536cbc861b12e7a80128188d67be9238a50",
+            "settings.txt": "8027542887eabb8dff58f6cb3f9c9e00040a416f9301769e0419d911032d7a9a",
+            "critical_paths.rpt": "d59e4e9fb62f6b98226c8502669659cec4d620f64107a040599ac69c50b6ac53",
+            "hierarchical.rpt": "8478cb5263b6423c77a3b280d1ddc2ff3700c703ba560cd99a95ae5ae3573c3e",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "7b7428391b534454c271ca85138415a7ab7a90ffb95955de0b29579158af5ceb"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/synth/sha2/P12U1"
+        },
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "area": {
+            "lut": 42774.0,
+            "ff": 29648.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 14399.5
+          },
+          "timing": {
+            "data_path_ns": 6.279,
+            "logic_levels": 9,
+            "source": "core/lane/phase_reg[3][3]/C",
+            "destination": "core/lane/scalar_result_reg[384]/CE"
+          },
+          "report_sha256": {
+            "timing.rpt": "67d16d332b8a7123a04934f499acca146d6e01a1c43a024e2230effbdb82796f",
+            "utilization.rpt": "68ffb33b18df7c8cc80f0cb3c98ab9c73ec33d55732db3b4112248cce4f4bd8b",
+            "settings.txt": "8027542887eabb8dff58f6cb3f9c9e00040a416f9301769e0419d911032d7a9a",
+            "critical_paths.rpt": "7fd7af53ffa30ec98263fadf1a9d96a9365c1f776deba56597498910707e08c9",
+            "hierarchical.rpt": "d8532cfbd27379f3d2bcdecb112d287421ad06838d100b5f6de413a781af307b",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "c4a1adb28e16fc40dda6f60d28e3ed10a0ab7ea60766bccdd33016cb42fa0efc"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P12U1"
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "area": {
+            "lut": 47235.0,
+            "ff": 33658.0,
+            "bram36": 0.0,
+            "dsp": 0.0,
+            "equivalent_slice": 16016.0
+          },
+          "timing": {
+            "data_path_ns": 5.589,
+            "logic_levels": 7,
+            "source": "core/lane/contexts[11].iteration_reg[11][2]/C",
+            "destination": "core/lane/scalar_result_reg[128]/CE"
+          },
+          "report_sha256": {
+            "timing.rpt": "67d8c01d3745e371374f69b9388ed2989d3918ec4cb2883341e73a847a303860",
+            "utilization.rpt": "03b2a57f98a525a5c12d6044838eccf4c25e90c0f17320b6807ddb820fa9c8a1",
+            "settings.txt": "8027542887eabb8dff58f6cb3f9c9e00040a416f9301769e0419d911032d7a9a",
+            "critical_paths.rpt": "79ff1944a80c37972b56a0b0e82769f1d50c37dc533c2040b9ac121bf772077a",
+            "hierarchical.rpt": "0408da01028b80b817144e6326abaa0816802ff8acbf180e910c6ec036b2f835",
+            "diagnostic_clock.xdc": "60d14fdff23c21247d0407074c3812338a87166bc11145b5222c02146433c161",
+            "vivado.log": "2553043ab7c689c64363fd72e2189a67ab127b2a4d0f303a67d453bd6416a0a2"
+          },
+          "report_directory": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P12U1"
+        },
+        "I_vs_G2_area_change_pct": 11.226084239036084,
+        "I_vs_G2_diagnostic_path_change_pct": -10.989010989010984
+      }
+    ],
+    "low_frequency_only": true,
+    "actual_frequency_acceptance_inferred": false
+  },
+  "backup_candidates": [
+    {
+      "name": "H3_16plus16_carry_select",
+      "status": "not_selected",
+      "production_primitive_remains": "140c3a7d13addd05aa60f4972164facc5c463df348f2a8d779999c907e1c3d11",
+      "backup_primitive": "ef6c9c04105b3eab91b24634ca2fd115611bd7d2eae95c44e7e439890622c13f",
+      "part_of_I": false,
+      "hardware_jobs_launched": 0,
+      "timing_measured": false,
+      "area_measured": false,
+      "ATP_measured": false,
+      "raw_logs_archived": false,
+      "summary_scope": "Independent functionality fallback only; no contribution to I frequency evidence.",
+      "archive": "supplementary_evidence/backup_candidates/H3",
+      "independent_followup_diagnostic": {
+        "run_root": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_h3_diagnostic/candidate_20261022_121638",
+        "source_manifest_sha256": "a7f2267cd420f3c06bfed92233ae26ddfd1c829dcb4f971fd211908dbe5ec04a",
+        "config": "sha2/P12U2",
+        "frequency_MHz": 100,
+        "purpose": "independent one-point low-frequency diagnostic only",
+        "route_authorized": false,
+        "route_started": false,
+        "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_f_candidate_20261022_121638/reports/H3_One_Point_Diagnostic_20261022_121638.md",
+        "source_is_distinct_from_I": true,
+        "production_I_unchanged": true
+      },
+      "hardware_jobs_launched_scope": "Original private H3 component package only; separate P12U2 diagnostic has now been launched."
+    }
+  ],
+  "hierarchical_area_attribution": {
+    "schema": "mhbs.sha2_i.hierarchical_area_attribution.v1",
+    "created_at": "2026-10-22T12:19:21+08:00",
+    "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+    "independent_run_and_archive_reports_verified": true,
+    "method": "Use exclusive (lane) recipe row; compression is its separate sha256 child. Do not add inclusive lane totals twice. Equivalent Slice=Total LUTs/4+FFs/8.",
+    "rows": [
+      {
+        "config": "sha2/P12U1",
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P12U1/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_112923/synth/sha2/P12U1/hierarchical.rpt",
+          "report_sha256": "d8532cfbd27379f3d2bcdecb112d287421ad06838d100b5f6de413a781af307b",
+          "modules": {
+            "common": {
+              "total_lut": 42774,
+              "logic_lut": 41858,
+              "lutram": 916,
+              "srl": 0,
+              "ff": 29648,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 14399.5
+            },
+            "recipe_exclusive": {
+              "total_lut": 16180,
+              "logic_lut": 15956,
+              "lutram": 224,
+              "srl": 0,
+              "ff": 12546,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 5613.25
+            },
+            "sha256": {
+              "total_lut": 19438,
+              "logic_lut": 19438,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 13367,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 6530.375
+            }
+          }
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P12U1/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_120553/synth/sha2/P12U1/hierarchical.rpt",
+          "report_sha256": "0408da01028b80b817144e6326abaa0816802ff8acbf180e910c6ec036b2f835",
+          "modules": {
+            "common": {
+              "total_lut": 47235,
+              "logic_lut": 46543,
+              "lutram": 692,
+              "srl": 0,
+              "ff": 33658,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 16016.0
+            },
+            "recipe_exclusive": {
+              "total_lut": 18131,
+              "logic_lut": 18131,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 16598,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 6607.5
+            },
+            "sha256": {
+              "total_lut": 21988,
+              "logic_lut": 21988,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 13339,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 7164.375
+            }
+          }
+        },
+        "delta_I_minus_G2": {
+          "common": {
+            "total_lut": 4461,
+            "logic_lut": 4685,
+            "lutram": -224,
+            "srl": 0,
+            "ff": 4010,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 1616.5
+          },
+          "recipe_exclusive": {
+            "total_lut": 1951,
+            "logic_lut": 2175,
+            "lutram": -224,
+            "srl": 0,
+            "ff": 4052,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 994.25
+          },
+          "sha256": {
+            "total_lut": 2550,
+            "logic_lut": 2550,
+            "lutram": 0,
+            "srl": 0,
+            "ff": -28,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 634.0
+          }
+        },
+        "recipe_share_of_total_equivalent_slice_increase_pct": 61.50634085988246,
+        "sha256_share_of_total_equivalent_slice_increase_pct": 39.22053819981441,
+        "other_hierarchy_equivalent_slice_delta": -11.75
+      },
+      {
+        "config": "sha2/P6U1",
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P6U1/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_112923/synth/sha2/P6U1/hierarchical.rpt",
+          "report_sha256": "a31ea486f41a8551a1ae321f2eb37def5ade24d0f5186e4cd4d5c474b49b7539",
+          "modules": {
+            "common": {
+              "total_lut": 29258,
+              "logic_lut": 28342,
+              "lutram": 916,
+              "srl": 0,
+              "ff": 18144,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 9582.5
+            },
+            "recipe_exclusive": {
+              "total_lut": 12303,
+              "logic_lut": 12079,
+              "lutram": 224,
+              "srl": 0,
+              "ff": 7674,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 4035.0
+            },
+            "sha256": {
+              "total_lut": 10214,
+              "logic_lut": 10214,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 6766,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 3399.25
+            }
+          }
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P6U1/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_120553/synth/sha2/P6U1/hierarchical.rpt",
+          "report_sha256": "bb21d153d08d1e4577f3da03d021e10e8932c469cba37768dad9517f4efbcd33",
+          "modules": {
+            "common": {
+              "total_lut": 31552,
+              "logic_lut": 30860,
+              "lutram": 692,
+              "srl": 0,
+              "ff": 20186,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 10411.25
+            },
+            "recipe_exclusive": {
+              "total_lut": 13202,
+              "logic_lut": 13202,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 9741,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 4518.125
+            },
+            "sha256": {
+              "total_lut": 11593,
+              "logic_lut": 11593,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 6748,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 3741.75
+            }
+          }
+        },
+        "delta_I_minus_G2": {
+          "common": {
+            "total_lut": 2294,
+            "logic_lut": 2518,
+            "lutram": -224,
+            "srl": 0,
+            "ff": 2042,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 828.75
+          },
+          "recipe_exclusive": {
+            "total_lut": 899,
+            "logic_lut": 1123,
+            "lutram": -224,
+            "srl": 0,
+            "ff": 2067,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 483.125
+          },
+          "sha256": {
+            "total_lut": 1379,
+            "logic_lut": 1379,
+            "lutram": 0,
+            "srl": 0,
+            "ff": -18,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 342.5
+          }
+        },
+        "recipe_share_of_total_equivalent_slice_increase_pct": 58.29562594268477,
+        "sha256_share_of_total_equivalent_slice_increase_pct": 41.32730015082956,
+        "other_hierarchy_equivalent_slice_delta": 3.125
+      },
+      {
+        "config": "sha2/P12U2",
+        "G2": {
+          "source_manifest_sha256": "ab5d8af4567af69ef516e5451fa5785f048ed6d67cd601db9300e9dadf02aa0a",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/synth/sha2/P12U2/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_112923/synth/sha2/P12U2/hierarchical.rpt",
+          "report_sha256": "2efaa3265ebe286f2ced562c546f9d418d314b4e4464ea3f9101a8ea2d5a40a6",
+          "modules": {
+            "common": {
+              "total_lut": 48796,
+              "logic_lut": 47876,
+              "lutram": 920,
+              "srl": 0,
+              "ff": 30502,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 16011.75
+            },
+            "recipe_exclusive": {
+              "total_lut": 16165,
+              "logic_lut": 15937,
+              "lutram": 228,
+              "srl": 0,
+              "ff": 12572,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 5612.75
+            },
+            "sha256": {
+              "total_lut": 25459,
+              "logic_lut": 25459,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 14203,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 8140.125
+            }
+          }
+        },
+        "I": {
+          "source_manifest_sha256": "4350a4db61a8b68e2428733ad05e85eb17a6818d41f9e8a6998a235834f34da9",
+          "report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_120553/synth/sha2/P12U2/hierarchical.rpt",
+          "archive_report": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/docs/manifests/experiments/sha2_timing_g_candidate_20261022_120553/synth/sha2/P12U2/hierarchical.rpt",
+          "report_sha256": "8befdb235a41f2a135bd298fb6e3d7e0a798fbe373a2556b73d2293b35babfd9",
+          "modules": {
+            "common": {
+              "total_lut": 52662,
+              "logic_lut": 51970,
+              "lutram": 692,
+              "srl": 0,
+              "ff": 34537,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 17482.625
+            },
+            "recipe_exclusive": {
+              "total_lut": 19723,
+              "logic_lut": 19723,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 16651,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 7012.125
+            },
+            "sha256": {
+              "total_lut": 25767,
+              "logic_lut": 25767,
+              "lutram": 0,
+              "srl": 0,
+              "ff": 14162,
+              "ramb36": 0,
+              "ramb18": 0,
+              "dsp": 0,
+              "equivalent_slice": 8212.0
+            }
+          }
+        },
+        "delta_I_minus_G2": {
+          "common": {
+            "total_lut": 3866,
+            "logic_lut": 4094,
+            "lutram": -228,
+            "srl": 0,
+            "ff": 4035,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 1470.875
+          },
+          "recipe_exclusive": {
+            "total_lut": 3558,
+            "logic_lut": 3786,
+            "lutram": -228,
+            "srl": 0,
+            "ff": 4079,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 1399.375
+          },
+          "sha256": {
+            "total_lut": 308,
+            "logic_lut": 308,
+            "lutram": 0,
+            "srl": 0,
+            "ff": -41,
+            "ramb36": 0,
+            "ramb18": 0,
+            "dsp": 0,
+            "equivalent_slice": 71.875
+          }
+        },
+        "recipe_share_of_total_equivalent_slice_increase_pct": 95.1389479051585,
+        "sha256_share_of_total_equivalent_slice_increase_pct": 4.8865471233109545,
+        "other_hierarchy_equivalent_slice_delta": -0.375
+      }
+    ],
+    "interpretation": [
+      "The constant-index local context writer implementation coincides with elimination of recipe LUTRAM and increased FF mapping; it is the main area cost. No new algorithmic data capacity is claimed.",
+      "Recipe exclusive FF increases 4052/2067/4079 for P12U1/P6U1/P12U2 while LUTRAM decreases 224/224/228 to zero.",
+      "H2 increases SHA256 LUTs by2550/1379 in the two U1 points, with FF slightly lower; U2 SHA256 increase is only308 LUTs.",
+      "The recipe changes and H2 were measured as a combined candidate; hierarchical attribution locates resource increments but is not a controlled single-change synthesis ablation.",
+      "Hardware timing and ATP remain independently measured at hard targets; synthesis hierarchy does not prove frequency."
+    ]
+  }
+}

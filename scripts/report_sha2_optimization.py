@@ -169,7 +169,7 @@ def main():
     while True:
         complete = report(run, validation)
         if not args.watch or complete: break
-        time.sleep(30)
+        time.sleep(60)
     if complete:
         # The matrix runner publishes status before archive files. Wait for its final publication.
         for _ in range(30):

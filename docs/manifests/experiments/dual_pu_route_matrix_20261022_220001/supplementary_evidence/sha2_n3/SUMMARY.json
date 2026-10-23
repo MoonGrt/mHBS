@@ -1,0 +1,59 @@
+{
+  "source_manifest_sha256": "23bdc80bd6098b0f73e80e4a9b62ce5521c7b40eef6b0c990afaec2346fc711d",
+  "micro_summary": {
+    "candidate": "N3 SHA2 compression hierarchy preservation",
+    "source": "rtl/hash/sha2-recipe.sv",
+    "source_sha256": "319334a1d73cd24da4de2bfb350fc4697aa070e3618a1806dbdf6f85cb12894e",
+    "baseline_source_sha256": "c19f147142ac6632f288b2cdc93f0c467824fba0f70f8e0356606a41f0c8fd92",
+    "functional_source_identical_after_removing_attribute_and_comment": true,
+    "tests": [
+      {
+        "test": "scalar",
+        "pipeline": 6,
+        "unroll": 1,
+        "synthesis": false,
+        "groups_or_cases": 345,
+        "passed": true,
+        "log": "build/n3_sha2_timing/recipes_P6U1.log",
+        "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+      },
+      {
+        "test": "scalar",
+        "pipeline": 8,
+        "unroll": 1,
+        "synthesis": true,
+        "groups_or_cases": 345,
+        "passed": true,
+        "log": "build/n3_sha2_timing/recipes_P8U1_SYNTHESIS.log",
+        "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+      },
+      {
+        "test": "batch",
+        "pipeline": 6,
+        "unroll": 1,
+        "synthesis": true,
+        "groups_or_cases": 12,
+        "passed": true,
+        "log": "build/n3_sha2_timing/batch_P6U1_SYNTHESIS.log",
+        "log_sha256": "9d71d72b0c6dab0d3f28daf4e0e531dbfe343fc693270dbd910fbf109db5a2a3"
+      },
+      {
+        "test": "batch",
+        "pipeline": 8,
+        "unroll": 1,
+        "synthesis": false,
+        "groups_or_cases": 12,
+        "passed": true,
+        "log": "build/n3_sha2_timing/batch_P8U1.log",
+        "log_sha256": "197e2e6e536f7056cdc3a4f32e60377a4711227e3ae83180f6859f67f10844d0"
+      }
+    ],
+    "notes": [
+      "Restored all K2 SHA2 functional RTL. Only KEEP_HIERARCHY=yes added to SHA256 compression instance.",
+      "K2 routed P6 scalar publication critical path: source fanout 8; downstream fanout <=12; route delay 5.144ns (79.383%). It is not a very high-fanout source path.",
+      "Several scalar publication control nodes are rebuilt under compression hierarchy, so attributed compression LUT increases do not establish growth in SHA256 arithmetic.",
+      "Preserving hierarchy prevents recipe control from being optimized across the compression boundary; no functional register, latency, port or counter changes.",
+      "No Vivado started by this subtask; timing and area remain for same-frozen-source full matrix signoff."
+    ]
+  }
+}

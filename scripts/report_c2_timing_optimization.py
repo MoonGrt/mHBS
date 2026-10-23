@@ -461,13 +461,13 @@ def main():
     parser.add_argument('--selection-file', type=Path)
     parser.add_argument('--watch', action='store_true')
     parser.add_argument('--self-test', action='store_true', help='Run synthetic report-policy checks; no hardware jobs')
-    parser.add_argument('--interval', type=float, default=30)
+    parser.add_argument('--interval', type=float, default=60)
     args = parser.parse_args()
     if args.self_test:
         print(json.dumps(policy_selftest(), ensure_ascii=False, indent=2))
         return 0
-    if not 0 < args.interval <= 30:
-        parser.error('--interval must be positive and at most 30 seconds')
+    if not 0 < args.interval <= 60:
+        parser.error('--interval must be positive and at most 60 seconds')
     run_root = args.run_root.resolve()
     runs, _ = discover(run_root)
     candidates = [run for run in runs if not run['reference']]

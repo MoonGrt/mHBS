@@ -1,0 +1,228 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/sha2-recipe.sv	2026-10-21 22:14:13.129540547 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/sha2-recipe.sv	2026-10-21 22:16:27.564844591 +0800
+@@ -402,15 +402,64 @@
+     // In SEND, the old block already resides in block_buffer. Its acceptance
+     // can also prepare the next slot and prefetch its first endpoint address.
+     wire start_format=candidate_valid && (formatter==SELECT || (formatter==SEND && compression_ready));
+-    assign list_next_index0=start_format ? list_address(selected_format(int'(candidate)),{block_index[candidate],2'd0}) :
++    function automatic [INDEX_BITS-1:0] first_list_address(input [3:0] recipe_shape,input [6:0] block_number);
++        // List recipes remain in DIRECT for their entire multi-block hash.
++        // Prefetch therefore needs the recipe shape, not the full phase/family
++        // formatter decoder behind the round-robin selection.
++        case(recipe_shape)
++            12: first_list_address=block_number>=2 ? INDEX_BITS'({block_number,2'b00}-9'd6) : INDEX_BITS'(0);
++            13: first_list_address=block_number!=0 ? INDEX_BITS'({block_number,1'b0}-8'd1) : INDEX_BITS'(0);
++            default: first_list_address=0;
++        endcase
++    endfunction
++    assign list_next_index0=start_format ? first_list_address(shape[candidate],block_index[candidate]) :
+         list_address(format_kind,{block_index[format_tag],formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
++    function automatic logic prefix_block(input format_t kind);
++        case(kind)
++            SLH_SEED,SLH_VALUE,SLH_LIST,XMSS_INDEX,XMSS_MESSAGE,
++            XMSS_SEED,XMSS_PRF,XMSS_FINAL,SLH_HMAC_IN,SLH_HMAC_OUT,
++            SLH_MGF0,SLH_MGF1: prefix_block=1'b1;
++            default: prefix_block=1'b0;
++        endcase
++    endfunction
++    function automatic [511:0] prefix_data(input integer t,input format_t kind);
++        reg [255:0] public_bytes,random_bytes,prf_bytes;
++        begin
++            public_bytes=reverse_bytes(256'(public_seed));
++            random_bytes=reverse_bytes(256'(scalar_randomizer));
++            prf_bytes=reverse_bytes(256'(secret_prf));
++            case(kind)
++                SLH_SEED,SLH_VALUE,SLH_LIST: prefix_data={public_bytes[255:128],384'd0};
++                XMSS_INDEX: prefix_data={256'd3,prf_bytes};
++                XMSS_MESSAGE: prefix_data={256'd2,random_bytes};
++                XMSS_SEED: prefix_data={256'd4,reverse_bytes(256'(secret_seed))};
++                XMSS_PRF: prefix_data={256'd3,public_bytes};
++                XMSS_FINAL: prefix_data={255'd0,paired[t],reverse_bytes(key_value[t])};
++                SLH_HMAC_IN: prefix_data={prf_bytes[255:128]^{16{8'h36}},{48{8'h36}}};
++                SLH_HMAC_OUT: prefix_data={prf_bytes[255:128]^{16{8'h5c}},{48{8'h5c}}};
++                SLH_MGF0,SLH_MGF1: prefix_data={random_bytes[255:128],public_bytes[255:128],reverse_bytes(key_value[t])};
++                default: prefix_data=0;
++            endcase
++        end
++    endfunction
+     task automatic prepare_block(input integer t);
++        format_t kind;
+         begin
+-            format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD; list_words_valid<=0;
++            kind=selected_format(t);
++            format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; list_words_valid<=0;
+             final_compression[t]<=block_index[t]==last_block(t);
+-            format_kind<=selected_format(t); format_length<=input_length(t);
+-            format_address<=packed_address(t,selected_format(t));
+-            prepare_beat(selected_format(t),{block_index[t],2'd0},input_length(t));
++            format_kind<=kind; format_length<=input_length(t);
++            // Full first blocks contain only fixed prefix fields. They need
++            // no byte masks, endpoint reads or four-cycle beat serialization.
++            // This still submits the same compression from the same input CV.
++            if(block_index[t]==0 && prefix_block(kind)) begin
++                block_buffer<=prefix_data(t,kind);
++                formatter<=SEND;
++            end else begin
++                formatter<=BUILD;
++                format_address<=packed_address(t,kind);
++                prepare_beat(kind,{block_index[t],2'd0},input_length(t));
++            end
+             schedule_cursor<=t==PIPELINE-1 ? TAG_BITS'(0) : TAG_BITS'(t+1);
+         end
+     endtask
+@@ -418,14 +467,23 @@
+     logic candidate_valid;
+     logic [TAG_BITS-1:0] candidate;
+     logic [TAG_BITS-1:0] schedule_cursor;
+-    integer scan;
++    logic upper_valid, lower_valid;
++    logic [TAG_BITS-1:0] upper_candidate, lower_candidate;
+     always_comb begin
+-        candidate_valid=0; candidate=0; scan=0;
++        upper_valid=0; lower_valid=0; upper_candidate=0; lower_candidate=0;
++        // Read each request bit at a constant index. Two priority encoders
++        // replace cursor addition/modulo and a variable request-bit mux in
++        // every scan entry, while retaining the same round-robin order.
+         for(integer k=0;k<PIPELINE;k=k+1) begin
+-            scan=int'(schedule_cursor)+k;
+-            if(scan>=PIPELINE) scan=scan-PIPELINE;
+-            if(!candidate_valid && need_block[scan]) begin candidate_valid=1; candidate=TAG_BITS'(scan); end
++            if(!upper_valid && need_block[k] && TAG_BITS'(k)>=schedule_cursor) begin
++                upper_valid=1; upper_candidate=TAG_BITS'(k);
++            end
++            if(!lower_valid && need_block[k]) begin
++                lower_valid=1; lower_candidate=TAG_BITS'(k);
++            end
+         end
++        candidate_valid=upper_valid || lower_valid;
++        candidate=upper_valid ? upper_candidate : lower_candidate;
+     end
+     wire compression_ready, compression_valid;
+     wire [255:0] compression_cv;
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/sha256.sv	2026-10-21 22:14:13.129661549 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/sha256.sv	2026-10-21 22:16:27.564997846 +0800
+@@ -118,9 +118,9 @@
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
+     logic [31:0] next_constant[0:PIPELINE-1][0:UNROLL-1];
+-    logic more_rounds;
++    logic return_pending;
+     wire stalled = output_valid && !output_ready;
+-    wire recycle = valid[PIPELINE-1] && more_rounds;
++    wire recycle = return_pending;
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
+ 
+@@ -197,13 +197,14 @@
+             end
+         end
+         if (stage == PIPELINE-1) begin : returning_control
+-            // This flag belongs to the same last-stage token as state and tag.
+-            // Its register cuts the traversal comparator out of the wide ring
+-            // input selection; stalls hold all of them together.
++            // Register both ownership and continuation. A bubble clears the
++            // return token, so the wide ring selector needs no valid gate;
++            // global stalls hold this bit together with state, tag and valid.
+             always_ff @(posedge clk) begin
+-                if (rst) more_rounds <= 1'b0;
+-                else if (!stalled && source_valid)
+-                    more_rounds <= source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
++                if (rst) return_pending <= 1'b0;
++                else if (!stalled)
++                    return_pending <= source_valid &&
++                        source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
+             end
+         end
+         always_ff @(posedge clk) begin
+@@ -238,9 +239,9 @@
+ 
+ `ifndef SYNTHESIS
+     always_ff @(posedge clk) begin
+-        if (!rst && valid[PIPELINE-1] &&
+-            more_rounds !== (traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1)))
+-            $fatal(1, "SHA256 registered recycle flag lost token alignment");
++        if (!rst && return_pending !== (valid[PIPELINE-1] &&
++            traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1)))
++            $fatal(1, "SHA256 registered return token lost valid/round alignment");
+     end
+     initial begin
+         if (PIPELINE < 1 || PIPELINE > 24 || UNROLL < 1 || ROUNDS > 24 ||
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/shake-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/shake-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/baseline_20261021_221413/source/rtl/hash/shake-recipe.sv	2026-10-21 22:14:13.129890515 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_e/candidate_20261021_221627/source/rtl/hash/shake-recipe.sv	2026-10-21 22:16:27.565322939 +0800
+@@ -299,8 +299,10 @@
+             wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
+             wire [7:0] address_domain = chain_feedback_valid ? request_step_recipe[55:48] : domain;
+             wire [31:0] leaf = {12'd0, request_leaf};
+-            wire [12:0] input_length = MASKED_ENABLE && shapes[MASKED_VALUE] && compound <
+-                arity + 1 ? 13'd96 : request_chain && !seed_phase ? step_length : seed_length;
++            // Lengths were decoded at request acceptance. The compound XMSS
++            // key/mask hashes are fixed blocks and never enter STREAM, so their
++            // transient 96-byte length must not feed stream control arithmetic.
++            wire [12:0] input_length = request_chain && !seed_phase ? step_length : seed_length;
+             wire [5:0] stream_node_bytes = {stream_node_words, 3'b0};
+             logic [1087:0] fast_block;
+             logic [127:0] stream_data;
+@@ -363,15 +365,19 @@
+             logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
+             function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+-                reg [12:0] remaining;
++                reg full_word, final_word;
+                 reg [7:0] live_bytes, pad_bytes;
+                 begin
+-                    remaining = input_length - next_position;
++                    // Every producer position is eight-byte aligned, including
++                    // the 136-byte rate boundary. Compare word coordinates and
++                    // decode the final low-three-bit byte index without a wide
++                    // remaining-length subtraction behind the length selector.
++                    full_word = next_position[12:3] < input_length[12:3];
++                    final_word = next_position[12:3] == input_length[12:3];
+                     for (integer byte_index = 0; byte_index < 8; byte_index++) begin
+-                        live_bytes[byte_index] = next_position <= input_length &&
+-                            remaining > 13'(byte_index);
+-                        pad_bytes[byte_index] = next_position <= input_length &&
+-                            remaining == 13'(byte_index);
++                        live_bytes[byte_index] = full_word ||
++                            (final_word && input_length[2:0] > 3'(byte_index));
++                        pad_bytes[byte_index] = final_word && input_length[2:0] == 3'(byte_index);
+                     end
+                     stream_byte_controls = {pad_bytes, live_bytes};
+                 end
+@@ -420,10 +426,31 @@
+                     end
+             end
+ `ifndef SYNTHESIS
++            function automatic [15:0] reference_stream_byte_controls(input [12:0] next_position);
++                reg [12:0] reference_length, remaining;
++                reg [7:0] live_bytes, pad_bytes;
++                begin
++                    reference_length = MASKED_ENABLE && shapes[MASKED_VALUE] &&
++                        compound < arity + 1 ? 13'd96 : input_length;
++                    remaining = reference_length - next_position;
++                    for (integer byte_index = 0; byte_index < 8; byte_index++) begin
++                        live_bytes[byte_index] = next_position <= reference_length &&
++                            remaining > 13'(byte_index);
++                        pad_bytes[byte_index] = next_position <= reference_length &&
++                            remaining == 13'(byte_index);
++                    end
++                    reference_stream_byte_controls = {pad_bytes, live_bytes};
++                end
++            endfunction
+             always @(posedge clk) begin : debug_scalar_stream_controls
+-                if (!rst && STREAM_ENABLE && state == STREAM &&
+-                    {stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
+-                    $fatal(1, "scalar byte controls lost stream position");
++                if (!rst && STREAM_ENABLE && state == STREAM) begin
++                    if (position[2:0] !== 0)
++                        $fatal(1, "scalar stream position is not word aligned");
++                    if ({stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
++                        $fatal(1, "scalar byte controls lost stream position");
++                    if ({stream_pad_bytes, stream_live_bytes} !== reference_stream_byte_controls(position))
++                        $fatal(1, "scalar aligned byte controls differ from original length arithmetic");
++                end
+             end
+ `endif
+             function automatic [63:0] source_word(input [12:0] control);

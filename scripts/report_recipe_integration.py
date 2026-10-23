@@ -154,7 +154,7 @@ def main():
         complete = report(args)
         if complete or not args.watch:
             break
-        time.sleep(30)
+        time.sleep(60)
 
 
 if __name__ == '__main__':

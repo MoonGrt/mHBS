@@ -1,0 +1,106 @@
+--- tmp/shake_p6u2_node_control_20261022/executor.before.sv	2026-10-22 13:23:06.642113035 +0800
++++ rtl/executor/executor.sv	2026-10-22 13:23:40.372876930 +0800
+@@ -72,6 +72,8 @@
+     state_t state, continuation;
+     logic lane_request_active, batch_issue_phase, batch_verify_phase, pipe_response_accept;
+     logic direct_writeback_phase;
++    logic node_pipe_first_phase, node_scalar_first_phase;
++    logic node_tree_leaf_phase, node_terminal_chain_phase;
+     task automatic enter_state(input state_t next_state);
+         begin
+             state <= next_state;
+@@ -102,6 +104,19 @@
+             direct_writeback_phase <= PIPELINE > 1 && pipe_direct &&
+                 (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
+                  next_state == PIPE_VERIFY_INPUT);
++            // The standalone/tree decision is immutable through each result
++            // phase. Resolve it on the existing transition edge, close to
++            // node writeback, rather than distributing the macro flag across
++            // every bit of its shared data-selection network.
++            node_pipe_first_phase <= PIPELINE > 1 && standalone_chain && pipe_direct &&
++                (next_state == PIPE_ISSUE || next_state == PIPE_WAIT ||
++                 next_state == PIPE_VERIFY_INPUT);
++            node_scalar_first_phase <= next_state == CHAIN_STORE &&
++                standalone_chain && chain_cursor == 0;
++            node_tree_leaf_phase <= next_state == LEAF_SETUP && !standalone_chain;
++            node_terminal_chain_phase <= next_state == CHAIN_NEXT && !sign_only &&
++                !(stateful && chain_descriptor[13:12] == 2) &&
++                !(standalone_chain && chain_descriptor[13:12] == 0);
+         end
+     endtask
+     // Abort outstanding execution on an error. The autonomous wrapper halts
+@@ -873,6 +888,17 @@
+                  state == LT_PIPE_ISSUE || state == LT_PIPE_WAIT || state == FORS_LEFT ||
+                  state == FORS_ISSUE || state == FORS_WAIT)))
+                 $fatal(1, "registered batch mode differs from execution state");
++            if (node_pipe_first_phase !== (direct_writeback_phase && standalone_chain))
++                $fatal(1, "prepared pipeline node ownership differs from macro");
++            if (node_scalar_first_phase !== (state == CHAIN_STORE &&
++                standalone_chain && chain_cursor == 0))
++                $fatal(1, "prepared scalar node ownership differs from macro");
++            if (node_tree_leaf_phase !== (state == LEAF_SETUP && !standalone_chain))
++                $fatal(1, "prepared tree-leaf node ownership differs from macro");
++            if (node_terminal_chain_phase !== (state == CHAIN_NEXT && !sign_only &&
++                !(stateful && chain_descriptor[13:12] == 2) &&
++                !(standalone_chain && chain_descriptor[13:12] == 0)))
++                $fatal(1, "prepared terminal-chain node ownership differs from macro");
+         end
+     end
+     always @(posedge clk) begin : rolling_allocator_equivalence
+@@ -1057,10 +1083,23 @@
+             if (pipe_mode) begin
+                 if(pipe_valid && pipe_response_accept)begin
+                     pipe_done_mask[pipe_tag] <= 1;
+-                    if(!lt_pipe && pipe_direct && (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0) && standalone_chain)
++                    if(node_pipe_first_phase &&
++                        (pipe_rolling ? pipe_chain_index[pipe_tag]==0 : chain_cursor==0 && pipe_tag==0))
+                         node_value <= pipe_response_result;
+                 end
+             end
++            // These write causes are independent of the continuation branch.
++            // Data is read on the original result-consumption edge, so no
++            // node-sized staging register or extra controller cycle is needed.
++            if (node_scalar_first_phase || node_tree_leaf_phase)
++                node_value <= result[W-1:0];
++            if (node_terminal_chain_phase &&
++                !(indexing != 1 && chain_cursor + 1 < endpoint_count)) begin
++                if (!verifying && macro_flags[3] && leaf_cursor == target)
++                    node_value <= 0;
++                else if (chain_descriptor[13:12] == 0)
++                    node_value <= result[W-1:0];
++            end
+             case (state)
+                 IDLE:
+                 if (job_valid) begin
+@@ -1417,7 +1456,6 @@
+                     enter_state(CHAIN_STORE);
+                 end
+                 CHAIN_STORE: begin
+-                    if (standalone_chain && chain_cursor == 0) node_value <= result[W-1:0];
+                     task_chain <= 0;
+                     if (sign_only || (!verifying && macro_flags[0] && leaf_cursor == target))
+                         enter_state(CHAIN_OUTPUT0);
+@@ -1438,7 +1476,6 @@
+                     end else if (standalone_chain && chain_descriptor[13:12] == 0)
+                         route_result(ROUTE_NODE);
+                     else if (!verifying && macro_flags[3] && leaf_cursor == target) begin
+-                        node_value <= 0;
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1447,7 +1484,6 @@
+                         node_index <= leaf_cursor;
+                         enter_state(PUSH_NODE);
+                     end else if (chain_descriptor[13:12] == 0) begin
+-                        node_value <= result[W-1:0];
+                         node_level <= 0;
+                         target_at_level <= target;
+                         auth_node_match <= leaf_cursor == (target ^ 21'd1);
+@@ -1579,7 +1615,6 @@
+                 LEAF_SETUP:
+                 if (standalone_chain) route_result(ROUTE_HASH);
+                 else begin
+-                    node_value <= result[W-1:0];
+                     node_level <= 0;
+                     target_at_level <= target;
+                     auth_node_match <= (verifying ? target : leaf_cursor) == (target ^ 21'd1);

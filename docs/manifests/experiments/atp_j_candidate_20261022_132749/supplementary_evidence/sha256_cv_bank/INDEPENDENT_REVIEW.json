@@ -1,0 +1,32 @@
+{
+  "schema": "mhbs.sha256.cv_bank_independent_review.v1",
+  "review_date": "2026-10-22",
+  "reviewer": "shake_p6u2_j",
+  "read_only": true,
+  "rtl_sha256": "e7affefe71404930b739dd8d8ccab23a118628be75e8455a9cc4e932dd185e4f",
+  "recipe_sha256": "c19f147142ac6632f288b2cdc93f0c467824fba0f70f8e0356606a41f0c8fd92",
+  "correctness_findings": [],
+  "verdict": "No functional defect found by independent control/liveness review. Hardware timing acceptance remains pending.",
+  "allocation_invariants": [
+    "Private pointer starts at zero and advances only on input_valid && input_ready, wrapping at P-1. Valid tokens carry this private slot; external tags are payload only.",
+    "Every compression has the same P*ceil(64/(P*U)) unstalled-edge latency to the feed-forward edge. Partial final rounds bypass data/schedule without changing occupancy or latency.",
+    "At most P active tokens occupy the ring. Uniform token latency preserves admission/completion order, so the (n+P)th admission cannot reuse slot n before token n reaches feed-forward.",
+    "Same-edge feed-forward and slot reuse read the old CV, then write the new CV through nonblocking clocked updates. The old response afterward resides in output_cv, not the CV bank.",
+    "Output backpressure freezes all ring metadata/data and the pointer because stalled forces input_ready low; reset clears valid, return_pending, output_valid and pointer. Stale unreset CV storage is therefore never read by a valid token.",
+    "For non-power-of-two P, the explicit P-1 wrap maintains 0 <= pointer < P; only a valid admission pointer or carried valid slot reaches the bank read."
+  ],
+  "timing_risks": [
+    "New path: cv_slot[last] -> distributed-bank address decode/read -> eight parallel 32-bit feed-forward additions -> output_cv FF. This path did not exist when full CVs shifted with tokens.",
+    "Input CV write-data/write-enable distribution may affect placement. Distributed storage inference and netlist area are tool-dependent.",
+    "Same-address reuse is architecturally old-data-before-edge semantics; actual minimum delay/clock skew and setup/hold must be checked in the routed netlist.",
+    "A failed target route must not be converted into an inferred Fmax or physical ATP."
+  ],
+  "recipe_overlap_review": [
+    "block_tag is retained separately while format_tag reserves the next context. DESCRIBE changes format_cv/address/length only when the prior block is absent or accepted on that same edge.",
+    "Block data writes occur only in PREPARE or a retained beat commit. DRAIN commits the last old beat before asserting block_ready; no subsequent prefix/beat write can overlap an unaccepted block.",
+    "During list streaming, PREPARE primes the current pair. A missing-list beat captures only current words; an already valid/current beat consumes retained words and fetches following words. list_next_index0 advances the registered endpoint pair one cycle ahead.",
+    "At a block boundary list_words_valid is cleared and the next PREPARE primes the block-specific first index; speculative end-of-block addresses do not create a valid stale word."
+  ],
+  "evidence_existing": "/media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/tmp/sha256_cv_bank_j_20261022/VALIDATION_SUMMARY.json",
+  "evidence_scope": "Root supplied all30 legalPU normal/SYNTH 181 independent vectors with equal cycle/stall/tag/replay metrics; this review did not rerun or edit RTL."
+}

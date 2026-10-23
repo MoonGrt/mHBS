@@ -1,0 +1,35 @@
+{
+  "schema": "mhbs.timing_n.architecture.v1",
+  "source_manifest_sha256": "5fbcae4f2416c9e086a1dc0448037e51cb9d2b4e9fae458f3dc5b789b6274574",
+  "label": "N2_preserve_RAM_limit_tag_fanout_rolling_chain_predicate",
+  "baseline_source_manifest_sha256": "2caa69ccd872dbfe7ae7115624d7fef40317315d6e9c16eb40c0477c04283817",
+  "rejected_runs": [
+    "dual_pu_route_matrix_20261022_211258",
+    "timing_n_20261022_214314"
+  ],
+  "reason_M1_rejected": "SHAKE lost inferred distributed RAM; SHA2 timing-driven mapping grew area",
+  "reason_N1_rejected": "SHA2 P6U1 paired diagnostic area +3.187% exceeded the 2% experiment planning gate",
+  "changes": [
+    {
+      "file": "rtl/hash/shake-recipe.sv",
+      "description": "Restore K2 full-width inferred RAMs; MAX_FANOUT=64 on address tags instead of preserved sliced memories",
+      "functional_rtl_unchanged": true,
+      "extra_pipeline_cycles": 0,
+      "source_sha256": "8ec9577e73982eb1c8260f9174b597b194d06053e449a55f106f3af342573ada"
+    },
+    {
+      "file": "rtl/hash/sha2-recipe.sv",
+      "description": "Keep K2 scalar masks/reduction and data banks; one-bit per-context chain lookahead samples next_iteration<end_step before return",
+      "extra_data_registers": 0,
+      "extra_control_bits": "P",
+      "extra_pipeline_cycles": 0,
+      "source_sha256": "a2c62aaedb1c8746c929fe0fad4e000079a0b7921a922096d15bb39cb44e1e04"
+    }
+  ],
+  "source_stability": "Iteration/end-step update at allocation or completed nodes; existing formatter and compression latency give the lookahead at least one stable edge before return. Non-synthesis assertions compare every applicable returned node with the original expression.",
+  "diagnostic_reuse": "K2 baselines and identical selected SHAKE backend RTL reuse completed N1 probes with original SOURCE, tool, DCP and report checksums. SHAKE comparison excludes only the entirely compiled-out SHA2 recipe.",
+  "cadence_seconds": 60,
+  "maximum_vivado_processes": 12,
+  "threads_per_vivado": 2,
+  "acceptance": "100MHz is diagnostic only. The automatically launched complete dual-backend matrix measures 28 actual routes at 150/100MHz and 84 full Sign jobs; no frequency claim before setup/hold, full routing and DRC pass."
+}

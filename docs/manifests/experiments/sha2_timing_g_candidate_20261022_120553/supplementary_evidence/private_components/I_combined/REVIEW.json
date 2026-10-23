@@ -1,0 +1,77 @@
+{
+  "schema": "mhbs.sha2_combined_i.read_only_review.v1",
+  "review_passed": true,
+  "review_type": "Independent read-only source and edge-order review; no test or frequency claim",
+  "production_edited": false,
+  "reviewed_rtl_edited": false,
+  "hardware_started": false,
+  "sources": {
+    "combined_recipe_sha256": "924a8a28b23a1515c7b2fc522af354abc958980acbb78bfd4aaae7e531d07e61",
+    "combined_primitive_sha256": "140c3a7d13addd05aa60f4972164facc5c463df348f2a8d779999c907e1c3d11",
+    "G4b_recipe_sha256": "982a03fad40efc4ea1562fc7c2ce41744990d5eaca5ee1559c54363622989640",
+    "G4_recipe_sha256": "c925c9e3483c0bfa2278c9cc12d5c8f627b0e73694e411b72e367ba9af00946c",
+    "G5_recipe_sha256": "c0dfc5bcb1ce0fdfbf6e9735cb5a48936e9ceb4918c434ad15fc5b9a9458e18d",
+    "G_primitive_sha256": "81a8e9a5f9b2ce64b550f3fe3330a639b4dcf457b086f9df947cd9e90c9b0542",
+    "from_G4b_patch_sha256": "061227527fa01ac3206968c386d3ec1d3e29dfe04358a5e103d8d29c0d142ef8"
+  },
+  "checks": {
+    "from_G4b_contains_only_G5_address_boundary": true,
+    "G5_fragments_byte_equal": {
+      "address_fields": true,
+      "staged_address": true,
+      "address_debug": true
+    },
+    "all_context_banks_single_constant_slot_writer": {
+      "busy_slot": 3,
+      "complete": 8,
+      "need_block": 8,
+      "scalar_slot": 2,
+      "final_compression": 2,
+      "capture_enable": 2,
+      "paired": 2,
+      "phase": 3,
+      "shape": 2,
+      "family": 2,
+      "block_index": 4,
+      "arity": 2,
+      "output_bytes": 3,
+      "cv": 3,
+      "digest": 5,
+      "key_value": 2,
+      "captured": 4,
+      "leaf": 1,
+      "address_a": 1,
+      "address_b": 1,
+      "seed_domain": 1,
+      "step_domain": 1,
+      "iteration": 2,
+      "end_step": 1,
+      "capture_step": 1,
+      "allocation_pending": 2
+    },
+    "final_compression_only_context_owner": true,
+    "G4b_local_allocation_event_equivalent": true,
+    "new_allocation_FF_adds_no_clock": true,
+    "reset_discards_admission_and_local_allocation_together": true,
+    "same_edge_retire_refill_last_reservation_priority_preserved": true,
+    "generic_MGF0_clear_low_and_MGF1_upper_semantics_preserved": true,
+    "address_boundary_no_FSM_cycle_added": true,
+    "all_fast_prefix_kinds_independent_of_format_address": true,
+    "normal_staged_address_assertion_retained": true,
+    "H2_delta_only_T1_CSA_operand_regrouping": true,
+    "H2_sum_mod_2pow32_invariant": true,
+    "H2_state_schedule_tag_stall_tail_control_unchanged": true
+  },
+  "reasoning": [
+    "At an acceptance edge, admission data, ingress_pending and the one-hot allocation_pending vector capture the same request. At the following edge allocation_pending selects exactly the slot selected by ingress_pending plus admission.tag. Pending ingress forbids another acceptance, and reset clears both validity representations.",
+    "Each slot owner preserves consume -> formatter reservation/final metadata -> compression return -> registered admission -> fresh reservation nonblocking assignment priority. No old dynamic next_hash/finish_node context writer survives.",
+    "DESCRIBE samples small address metadata and PREPARE writes the existing packed address register before BUILD reads it. Fast first prefix blocks read seeds/random/key/paired values, never the packed address. Global tree/layer/identifier fields remain governed by their existing active-job lifetime.",
+    "H2 replaces CS(SigmaE,Ch,prefix_sum) then CS(prefix_carry,second_sum,second_carry) with CS(prefix_sum,prefix_carry,Ch) then CS(second_sum,second_carry,SigmaE). Each compressor preserves sum modulo2^32; all downstream A/E and message schedule expressions are unchanged."
+  ],
+  "remaining_risks": [
+    "Local combinational event and scalar-byte-mask OR logic can still be merged by synthesis; only actual target routing proves the hard frequency.",
+    "Constant-slot context writers may change RAM/FF mapping and area.",
+    "G5 relies on the existing job-common tree/layer/identifier stability contract, which already spans each multi-block hash.",
+    "Component evidence is not substituted for the combined-source 690 actual-RAM/432 full-slot and further integration tests being run independently by the validation owner."
+  ]
+}

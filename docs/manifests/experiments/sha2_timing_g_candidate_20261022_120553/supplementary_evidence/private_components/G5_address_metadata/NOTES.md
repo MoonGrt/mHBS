@@ -1,0 +1,15 @@
+# Private G5 address field boundary
+
+Source: G2 recipe286f869d, primitive81a8e9a5. Tested private recipe: c0dfc5bcb1ce0fdfbf6e9735cb5a48936e9ceb4918c434ad15fc5b9a9458e18d. Production and G4's private fixture were not edited. No hardware task was launched.
+
+G1 physical/diagnostic reports showed the next remaining phase/shape-to-format_address control path at6.211ns. G5 separates context selection from the full256-bit packed address. DESCRIBE captures78 bits: leaf20, A8, raw B32, iteration5, domain8, chain/seed/tree-domain flags3 and XMSS compound2. PREPARE performs the format-dependent byte wiring into the existing format_address register. No FSM state or extra clock is added, and no node/hash data register is added.
+
+All prefix_data cases were inspected. Fast SLH prefixes use public_seed or HMAC/MGF material; XMSS prefixes use fixed domains and seed/random/key/paired fields. None reads format_address. LMS uses no fast prefix. Therefore writing format_address in PREPARE is safe even when that edge also writes a full first prefix block. Non-prefix PREPARE establishes address and source controls before the next BUILD samples its source window. Existing block data, DRAIN/SEND handshakes, endpoint lookahead and context scheduling are unchanged.
+
+The original packed_address function remains only as a normal-view independent equivalence assertion at PREPARE; SYNTHESIS does not call it. The staged implementation preserves the distinction between raw B for LMS parent/leaf numbers, effective B for SLH/XMSS chains, LMS chain iteration, seed0xff and XMSS mask compound0/1/2. Common request_tree, request_layer, identifier and seeds continue to follow the existing job lifetime contract: they remain stable while the active job and its multi-block hashes execute. Their read moves one clock inside that existing lifetime, without another wide common-field snapshot.
+
+690 scalar recipes passed through the actual parity-banked value.sv and registered read-address fixture: P1U1 normal and P4U2 SYNTHESIS,345 each. This covers all formats, message and padding boundaries, multi-block LMS lists, compressed SLH addresses and XMSS KEY/MASK/binary recipes. All345 per-case cycle, hash and compression records equal G2 for each view. The normal assertion compares every staged address with the old live-context formatter.
+
+Full-slot tests use P12/P24 normal and SYNTHESIS:12family groups,432requests/returns. All-P occupancy/completion, retained captures, same-edge reuse, tag poisoning and output/count/cycle metrics exactly equal the G2 fixture. Total cycles remain P12 5213/14946/2736 and P24 5523/15460/3038 per family in both views. Detailed raw logs remain under this private directory; VALIDATION_SUMMARY.json carries source and evidence hashes.
+
+This patch is independent of G4's constant-index return bank refactor. Merge into a separate private combined candidate and validate that exact combination before final frequency/area/ATP claims. No frequency or area benefit is inferred from this functional component test.

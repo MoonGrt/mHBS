@@ -1,0 +1,41 @@
+{
+  "review": "read-only frozen E/F architecture audit",
+  "production_files_edited_by_reviewer": [],
+  "findings": [
+    {
+      "candidate": "E",
+      "status": "pass_static_review",
+      "finding": "The shared last block template can replay only while formatter SELECT, no candidate, no block_ready, no beat_pending and matching registered output tag. Any ordinary block write reassigns or invalidates the owner."
+    },
+    {
+      "candidate": "E",
+      "status": "pass_static_review",
+      "finding": "SLH replay changes domain byte, hash-step word, 128-bit digest; LMS replay changes step byte and 256-bit digest. Remaining frame, initial CV and tag retain the same owner."
+    },
+    {
+      "candidate": "F",
+      "status": "pass_static_review",
+      "finding": "Direct injection starts from registered SHA256 output_cv. The feed-forward arithmetic remains behind the original output register."
+    },
+    {
+      "candidate": "F",
+      "status": "pass_static_review",
+      "finding": "compression_ready gate prevents dropping replay when another token occupies the recycled ring; fallback uses ordinary formatter."
+    },
+    {
+      "candidate": "F",
+      "status": "measure_synthesis",
+      "finding": "SLH first 22 bytes are ADRS; U1/U2 initial A/E round uses address words while returned digest reaches message schedule. Input control/mux and message schedule must be examined in actual synthesis."
+    },
+    {
+      "candidate": "G",
+      "status": "pass_static_review",
+      "finding": "block_ready-only data selection is observationally equivalent to replay_take selection on all accepted compression inputs: block_ready=1 excludes replay_take and chooses normal data; block_ready=0 can present input_valid only through replay_take and chooses replay data. Invalid-input data changes are unobserved. The data path no longer depends on replay handshake/arbitration/reset decode."
+    }
+  ],
+  "limitations": [
+    "Static audit is not functional verification. Root agent runs recipe and full Sign regressions.",
+    "100MHz synthesis is diagnostic only and is not proof of 150MHz routed timing.",
+    "No layout or routing launched."
+  ]
+}

@@ -1,0 +1,31 @@
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_111728/source/rtl/hash/sha2-recipe.sv	2026-10-22 11:17:28.171240587 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/source/rtl/hash/sha2-recipe.sv	2026-10-22 11:29:23.834195066 +0800
+@@ -168,6 +168,7 @@
+     logic [255:0] format_cv;
+     logic [12:0] format_length;
+     logic [6:0] format_block;
++    logic [INDEX_BITS-1:0] format_first_index;
+     logic [8:0] word_control[0:2];
+     window_t window_control;
+     logic [15:0] payload_mask, delimiter_mask;
+@@ -427,8 +428,10 @@
+             default: first_list_address=0;
+         endcase
+     endfunction
+-    assign list_next_index0=formatter==DESCRIBE ?
+-        first_list_address(shape[format_tag],block_index[format_tag]) :
++    // The endpoint workspace registers this address in PREPARE, one clock
++    // before BUILD can fetch its first list words. Context selection and the
++    // first-index arithmetic terminate at this local descriptor register.
++    assign list_next_index0=formatter==PREPARE ? format_first_index :
+         list_address(format_kind,{format_block,formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
+     function automatic logic prefix_block(input format_t kind);
+         case(kind)
+@@ -627,6 +630,7 @@
+                     format_length<=input_length(int'(format_tag));
+                     format_address<=packed_address(int'(format_tag),selected_format(int'(format_tag)));
+                     format_block<=block_index[format_tag];
++                    format_first_index<=first_list_address(shape[format_tag],block_index[format_tag]);
+                     format_cv<=cv[format_tag];
+                     beat<=0; list_words_valid<=0; formatter<=PREPARE;
+                 end

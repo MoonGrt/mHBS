@@ -90,6 +90,14 @@ python3 scripts/report_atp.py          # 从归档证据重建 Markdown / JSON
 
 SHA2 的 `hash_count` 统计完整 SHA256 调用（HMAC 内外层、MGF1 各次分别计数），`permutation_count` 统计实际64字节压缩块次数。SHAKE 仍统计完整 SHAKE 与 Keccak 置换。两种算法工作量不同，不能直接沿用 SHAKE 的 Hash 计数或 ATP 基线。
 
+SHA2 的 SLH 地址哈希与 XMSS 的 KEY/MASK 公共种子 PRF 共用一个首块中间态缓存，分别保存 `PK.seed || zero padding` 和 `toByte(3,32) || PK.seed`，所有合法 P/U 均适用。冷启动由现有压缩通道计算一次，后续从第二块续算；算法或相关种子变化时重建，复位时失效。秘密种子的 INDEX/PRFkeygen 不使用该缓存。向量 `meta.mem` 保留算法的逻辑块数，快仿日志 `logical_permutations` 对应这一数值；日志 `permutations` 和 RTL 统计端口均为缓存后的实际压缩次数，仿真严格检查两者。
+
+SHA2 的固定格式块直接写入现有512位输入寄存器，列表和变长消息继续使用128位流式路径；压缩返回时可提前预约下一描述符。P1U1、SLH128f Sign 的同33字节KAT实测 Remaining 从1,030,190降至410,621，总周期从7,953,600降至7,334,031，完整签名及缓存保持一致。三点面积、周期和假定同频ATP，以及候选取舍见 [SHA2 Remaining 优化](docs/manifests/experiments/sha2_remaining_optimization_20261023_162334/reports/SHA2_Remaining_Optimization_20261023_162334.md)。本轮只做100MHz诊断综合，实际布线频率尚未重新验收。
+
+后续链反馈版本G复用原块寄存器作为模板，从已寄存的压缩输出直接启动下一步，连续SLH/LMS链不再返回格式器。相同KAT的P1U1 Remaining进一步降到127,895，总周期7,051,305，Hash占98.19%。P1面积增加1.20%；多槽反馈命中较少，并有面积/同频ATP代价，具体见 [SHA2 链反馈对照](docs/manifests/experiments/sha2_chain_replay_20261023_165540/reports/SHA2_Chain_Replay_20261023_165540.md)。所有P/U共用同一运行时条件和通用回退路径，未新增P/U专用开关；频率仍需实际布线验收。
+
+最新C候选精简逐槽描述符和初始CV写入，并把同一缓存银行用于XMSS公共PRF。相对G，P4U1/P12U1 common等效Slice下降7.93%/4.04%，P1U1增加1.09%；XMSS h10 Sign三点实测周期下降约32%，假定150MHz的辅助ATP下降31.54%～37.62%。SLH/LMS周期不变，其ATP随面积变化；P1的两项ATP增加1.09%。冷填充竞争失败候选及修复、完整签名/计数对照、独立C参考和三点100MHz诊断综合见 [本轮SHA2 ATP报告](docs/manifests/experiments/sha2_atp_round_20261023_172538/reports/SHA2_ATP_Round_20261023_172538.md)。本轮没有重新布局布线，尚未验证150MHz闭合。
+
 实测比较和剩余瓶颈见 [ATP 优化报告](docs/manifests/experiments/atp_optimization_20261013/reports/ATP_Optimization_20261013.md)。基线与候选源码、面积/时序报告及测试日志随文档归档。
 
 2026-10-14 聚焦 P12U1、P4U1、P1U1 的 SLH-DSA 128f、XMSS h10、LMS h10 Sign，见 [三点优化报告](docs/manifests/experiments/atp_focus_20261014/reports/ATP_Focus_P12_P4_P1_20261014.md)。结果包含同一候选的 common 面积、九项实测周期、150MHz 假定 ATP、单点回退及逐阶段取舍。可用以下命令冻结源码并只测这三个配置：
@@ -107,6 +115,7 @@ python3 scripts/check_recipes.py
 python3 scripts/check_pipeline.py     # recipe 内部上下文、标签与捕获测试
 python3 scripts/check_recipes.py --hash sha2
 python3 scripts/check_pipeline.py --hash sha2 --pipeline 12 --unroll 1  # 当前局部bench覆盖低4标签
+python3 scripts/check_sha2_prefix_cache.py --pipeline 12 --unroll 1  # 全槽冷填充、换种子、复位与捕获
 python3 scripts/check_sha256.py --all  # 全部合法 P/U 的压缩、尾轮、停顿与复位
 python3 scripts/check_statistics.py   # 实际置换事件驱动的 64 位统计进位
 scripts/validate_p4.sh build/p4_validation
@@ -128,6 +137,10 @@ Vivado 2025.2，器件 `xc7a200tffg1156-3`，2 线程，约束 6.666667 ns。综
 SHA2 输出目录另加 `_sha2`；仿真与综合的源码身份、缓存和结果均记录后端。双后端验收入口 `scripts/run_hash_backends.py --launch --gate <通过的局部验证JSON>` 冻结两版源码，在后台运行完整非 h20 回归以及两后端 P1U1/P4U1/P12U1 的100 MHz共同核综合；不自动布线。
 
 SHA2 formatter采用共享64位／128位固定窗口，已完成P1U1/P4U1/P12U1三点common综合及九项目标Sign；后续并行轮询仲裁尝试因P4/P12面积与固定频率ATP回退而撤回，最终保留候选1：见[实测结果](docs/manifests/experiments/sha2_optimization_candidate_20261019_175821/reports/SHA2_Optimization_20261019_175821.md)、[资源与关键路径归因](docs/manifests/experiments/sha2_optimization_candidate_20261019_175821/reports/SHA2_Formatter_Analysis_20261019_175821.md)和[候选阶段记录](docs/manifests/experiments/sha2_optimization_candidate_20261019_175821/reports/SHA2_Optimization_Stages.md)。ATP使用100MHz假设频率；综合路径时延不作为布线频率。
+
+2026-10-22 的 SHA2 I 候选已覆盖当前 RTL：请求先登记再分配，每槽单独译码和写回，首个列表地址及地址字段分别提前登记；SHA256 预存 H/K/W 的 carry-save 对，并把 Sigma(E) 后接到共享加法树。保留单 Hash lane、P 个上下文和原接口。I 相对 G2 的690项真实 RAM 配方及432个满槽请求逐项周期、输出与计数一致；原语全部30个合法 P/U 的普通和综合视图均通过独立向量验证。
+
+本轮硬目标为 U1≥150MHz、U2≥100MHz，14点使用同一冻结源码运行42项完整Sign、100MHz诊断和实际布线。U1使用6.666ns约束，实际周期验收容差为零；完整路由、setup/hold和DRC均通过才算达标。新候选频率、面积及ATP仍待测量，不沿用旧候选通过点，进度见[I候选报告](docs/manifests/experiments/sha2_timing_g_candidate_20261022_120553/reports/SHA2_Timing_G_20261022_120553.md)。
 
 
 后续又完成五组SHA2面积／时序候选（共45项Sign、15次common综合），均未降低三个算法在本轮三点中的最佳固定100MHz假设ATP，因此当前RTL仍保留上述固定窗口版本。候选的面积／路径取舍、未采用原因及完整证据见[五候选对照](docs/manifests/experiments/sha2_optimization_candidate_20261019_184135/reports/SHA2_Five_Candidate_Review_20261019.md)。
@@ -193,7 +206,7 @@ XMSS/LMS 的 `KEY_INDEX`／`job_index` 为 q（0～2^h−1），LMS 的 `IDENTIF
 | `message.mem` | 消息字节 |
 | `nodes.mem` | Verify 输入节点；其他操作不使用 |
 | `expected.mem` | Keygen/Sign 期望输出字节；Verify 没有输出数据流 |
-| `meta.mem` | 输出字节数、Hash 次数、置换次数、Verify 节点数、预期 Verify 通过标记 |
+| `meta.mem` | 输出字节数、Hash 次数、逻辑置换／压缩块数、Verify 节点数、预期 Verify 通过标记；SHA2 SLH 的实际缓存后压缩数由仿真另行核对 |
 
 随包保留默认向量，也可全部由包内软件重新生成。使用新的输入时，运行生成脚本一次即可同步更新镜像、Job、节点和期望结果。
 

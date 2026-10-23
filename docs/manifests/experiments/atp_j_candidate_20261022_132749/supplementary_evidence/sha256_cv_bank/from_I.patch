@@ -1,0 +1,69 @@
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/tmp/sha256_cv_bank_j_20261022/baseline/rtl/hash/sha256.sv	2026-10-22 13:23:45.842673739 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/tmp/sha256_cv_bank_j_20261022/candidate/rtl/hash/sha256.sv	2026-10-22 13:23:45.843250595 +0800
+@@ -125,7 +125,13 @@
+     endfunction
+ 
+     logic [767:0] state[0:PIPELINE-1];
+-    logic [255:0] initial_cv[0:PIPELINE-1];
++    // Feed-forward CVs do not change during a compression. Store them once
++    // per accepted token, rather than shifting 256 bits through every stage.
++    // Allocation follows token order and is independent of external tag values.
++    localparam integer CV_SLOT_BITS = PIPELINE > 1 ? $clog2(PIPELINE) : 1;
++    (* ram_style = "distributed" *) logic [255:0] initial_cv[0:PIPELINE-1];
++    logic [CV_SLOT_BITS-1:0] cv_slot[0:PIPELINE-1];
++    logic [CV_SLOT_BITS-1:0] cv_write_slot;
+     logic [TRAVERSAL_BITS-1:0] traversal[0:PIPELINE-1];
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
+@@ -137,22 +143,30 @@
+     wire recycle = return_pending;
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
++    always_ff @(posedge clk) begin
++        if (rst) cv_write_slot <= '0;
++        else if (input_valid && input_ready) begin
++            initial_cv[cv_write_slot] <= input_cv;
++            cv_write_slot <= cv_write_slot == CV_SLOT_BITS'(PIPELINE-1) ?
++                CV_SLOT_BITS'(0) : cv_write_slot + 1'b1;
++        end
++    end
+ 
+     for (genvar stage=0; stage<PIPELINE; stage=stage+1) begin : stages
+         wire [767:0] source_state;
+-        wire [255:0] source_cv;
++        wire [CV_SLOT_BITS-1:0] source_cv_slot;
+         wire [TRAVERSAL_BITS-1:0] source_traversal;
+         wire [TAG_BITS-1:0] source_tag;
+         wire source_valid;
+         if (stage == 0) begin : first
+             assign source_state = recycle ? state[PIPELINE-1] : {input_cv,input_block};
+-            assign source_cv = recycle ? initial_cv[PIPELINE-1] : input_cv;
++            assign source_cv_slot = recycle ? cv_slot[PIPELINE-1] : cv_write_slot;
+             assign source_traversal = recycle ? traversal[PIPELINE-1] + 1'b1 : '0;
+             assign source_tag = recycle ? tag[PIPELINE-1] : input_tag;
+             assign source_valid = recycle || (input_valid && input_ready);
+         end else begin : following
+             assign source_state = state[stage-1];
+-            assign source_cv = initial_cv[stage-1];
++            assign source_cv_slot = cv_slot[stage-1];
+             assign source_traversal = traversal[stage-1];
+             assign source_tag = tag[stage-1];
+             assign source_valid = valid[stage-1];
+@@ -259,7 +273,7 @@
+                 valid[stage] <= source_valid;
+                 if (source_valid) begin
+                     state[stage] <= unrolled[UNROLL-1].result;
+-                    initial_cv[stage] <= source_cv;
++                    cv_slot[stage] <= source_cv_slot;
+                     traversal[stage] <= source_traversal;
+                     tag[stage] <= source_tag;
+                 end
+@@ -278,7 +292,7 @@
+                 for (integer word_index=0; word_index<8; word_index=word_index+1)
+                     output_cv[32*word_index+:32] <=
+                         state[PIPELINE-1][512+32*word_index+:32] +
+-                        initial_cv[PIPELINE-1][32*word_index+:32];
++                        initial_cv[cv_slot[PIPELINE-1]][32*word_index+:32];
+             end
+         end
+     end

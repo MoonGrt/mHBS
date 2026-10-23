@@ -66,10 +66,18 @@ def main():
             assert captured is not None
             packed = int.from_bytes(captured, 'little') | int.from_bytes(value, 'little') << 256 | int.from_bytes(initial, 'little') << 512 | steps << 768 | capture_after << 773 | no_seed << 778
             rows.append(f'{packed:0195x}\n')
+        logical_permutations = permutations
+        if args.hash_backend=='sha2' and family in (0,1):
+            # Each process starts cold. SLH address hashes and XMSS public
+            # PRFs reuse their actual first blocks; seed generation is uncached.
+            eligible_hashes = hashes if family==0 else 2*sum((0,15,1,7,2,0,3,1))
+            permutations -= eligible_hashes-1
         vector = work/f'family{family}_q{leaf}.mem';vector.write_text(''.join(rows))
         result = subprocess.run([str(obj/'Vtb_pipeline'), f'+VECTOR={vector}', f'+FAMILY={family}', f'+LEAF={leaf}', f'+HASHES={hashes}', f'+PERMUTATIONS={permutations}'], cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         (work/f'family{family}_q{leaf}.log').write_text(result.stdout)
         print(result.stdout, end='');result.check_returncode()
+        if args.hash_backend=='sha2' and family in (0,1):
+            print(f'PREFIX_COUNT logical={logical_permutations} physical={permutations} hashes={hashes}')
     (work/'coverage.json').write_text(json.dumps(dict(hash_backend=args.hash_backend, pipeline=args.pipeline, unroll=args.unroll, synthesis=args.synthesis, passed=True, groups=12, active_tags=[0,1,2,3], full_context_occupancy=args.pipeline==4, scope='Four live tags; P>4 does not claim all contexts occupied'),indent=2)+'\n')
 
 if __name__ == '__main__': main()

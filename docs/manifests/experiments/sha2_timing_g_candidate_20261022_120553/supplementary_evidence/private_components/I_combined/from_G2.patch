@@ -1,0 +1,406 @@
+--- a/rtl/hash/sha2-recipe.sv
++++ b/rtl/hash/sha2-recipe.sv
+@@ -88,6 +88,7 @@
+     } admission_t;
+     admission_t admission;
+     logic ingress_pending;
++    logic [PIPELINE-1:0] allocation_pending;
+ 
+     function automatic [255:0] reverse_bytes(input [255:0] data);
+         for (integer k=0;k<32;k=k+1) reverse_bytes[k*8+:8]=data[255-k*8-:8];
+@@ -165,6 +166,17 @@
+     logic [1:0] beat;
+     wire [511:0] block_buffer;
+     logic [255:0] format_address;
++    // Address selection ends at small context fields. PREPARE performs only
++    // byte wiring and format selection before BUILD reads the address words.
++    typedef struct packed {
++        logic [19:0] leaf;
++        logic [7:0] address_a,domain_value;
++        logic [31:0] address_b;
++        logic [4:0] iteration;
++        logic chain,seed_phase,tree_domain;
++        logic [1:0] compound;
++    } address_fields_t;
++    address_fields_t address_fields;
+     logic [255:0] format_cv;
+     logic [12:0] format_length;
+     logic [6:0] format_block;
+@@ -238,6 +250,34 @@
+             endcase
+         end
+     endfunction
++    function automatic [255:0] staged_address(input address_fields_t fields,input format_t kind);
++        reg [31:0] chain_b;
++        reg [7:0] chain_step;
++        reg [15:0] separator;
++        begin
++            chain_b=fields.chain && !fields.seed_phase && !fields.tree_domain ?
++                {27'd0,fields.iteration} : fields.address_b;
++            chain_step=kind==LMS_SEED ? 8'hff : fields.chain ?
++                {3'd0,fields.iteration} : fields.address_b[7:0];
++            separator=kind==LMS_MESSAGE ? 16'h8181 : kind==LMS_LIST ? 16'h8080 :
++                kind==LMS_LEAF ? 16'h8282 : 16'h8383;
++            case(kind)
++                SLH_SEED,SLH_VALUE,SLH_LIST: staged_address={80'd0,
++                    be32(chain_b),be32({24'd0,fields.address_a}),be32({12'd0,fields.leaf}),
++                    fields.domain_value,be64(request_tree),3'd0,request_layer};
++                XMSS_INDEX,XMSS_MESSAGE: staged_address={be32({12'd0,fields.leaf}),224'd0};
++                XMSS_SEED,XMSS_PRF: staged_address={be32({30'd0,fields.compound}),be32(chain_b),
++                    be32({24'd0,fields.address_a}),be32({12'd0,fields.leaf}),
++                    be32({24'd0,fields.domain_value}),96'd0};
++                LMS_SEED,LMS_CHAIN: staged_address={72'd0,chain_step,fields.address_a,
++                    8'd0,be32({12'd0,fields.leaf}),identifier};
++                LMS_MESSAGE,LMS_LIST,LMS_LEAF,LMS_PARENT: staged_address={80'd0,separator,
++                    be32(kind==LMS_LEAF || kind==LMS_PARENT ? fields.address_b :
++                        {12'd0,fields.leaf}),identifier};
++                default: staged_address=0;
++            endcase
++        end
++    endfunction
+     function automatic [8:0] control(input source_t source,input [3:0] word_index);
+         control={source,word_index};
+     endfunction
+@@ -465,7 +505,7 @@
+         begin
+             // Round-robin arbitration ends at the tag register. Context reads,
+             // descriptor decoding and first-block data do not share this path.
+-            format_tag<=TAG_BITS'(t); need_block[t]<=0; formatter<=DESCRIBE;
++            format_tag<=TAG_BITS'(t); formatter<=DESCRIBE;
+             schedule_cursor<=t==PIPELINE-1 ? TAG_BITS'(0) : TAG_BITS'(t+1);
+         end
+     endtask
+@@ -515,7 +555,11 @@
+     wire compression_complete_event=compression_valid && !rst;
+     // Completion metadata travels with the outstanding block. Avoid decoding
+     // phase, message length and arity again behind the compression return tag.
+-    wire hash_complete_event=compression_complete_event && final_compression[compression_tag];
++    wire [PIPELINE-1:0] return_hit,return_final;
++    wire [PIPELINE-1:0] scalar_clear_event,scalar_upper_event;
++    wire [DIGEST_BYTES-1:0] scalar_byte_mask[0:PIPELINE-1];
++    logic [DIGEST_BYTES-1:0] scalar_write_mask;
++    wire hash_complete_event=|return_final;
+     wire [255:0] returned=reverse_bytes(compression_cv);
+ 
+     logic response_held;
+@@ -571,73 +615,192 @@
+         endcase
+     endfunction
+ 
+-    // A full SHA256 call starts from IV. Intermediate compression returns only
+-    // update CV/offset; only a full call can change a recipe or chain phase.
+-    task automatic next_hash(input integer t,input phase_t next_phase);
+-        begin phase[t]<=next_phase; cv[t]<=IV; block_index[t]<=0; need_block[t]<=1; end
+-    endtask
+-    task automatic finish_node(input integer t,input [255:0] value);
+-        reg [255:0] node;
+-        reg [4:0] reached;
+-        begin
+-            node=node_result(value,family[t]);
+-            reached=phase[t]==SEED ? 5'd0 : iteration[t]+1'b1;
+-            digest[t]<=node;
+-            if(capture_enable[t] && capture_step[t]==(shape[t]==7 ? 5'd0 : reached)) captured[t]<=node;
+-            if(shape[t]==0 && reached<end_step[t]) begin
+-                iteration[t]<=reached;
+-                next_hash(t,family[t]==1 ? KEY : DIRECT);
++    // Return decode ends at a one-hot bank event. All phase/length/capture
++    // decisions below read a constant slot, independently of the return tag.
++    wire reserve_format=candidate_valid &&
++        (formatter==SELECT || (formatter==SEND && compression_ready));
++    for(genvar slot=0;slot<PIPELINE;slot=slot+1) begin : contexts
++        wire allocate=allocation_pending[slot];
++        wire reserve=accept && incoming_tag==TAG_BITS'(slot);
++        wire consume=(batch_response_valid && batch_response_ready && held_tag==TAG_BITS'(slot)) ||
++            (slot==0 && response_valid && response_ready);
++        assign return_hit[slot]=compression_complete_event && compression_tag==TAG_BITS'(slot);
++        assign return_final[slot]=return_hit[slot] && final_compression[slot];
++        wire seed_phase=phase[slot]==SEED;
++        wire [4:0] next_iteration=iteration[slot]+5'd1;
++        wire [4:0] reached=seed_phase ? 5'd0 : next_iteration;
++        // Compare seed/step cases in parallel: late phase selection chooses
++        // boolean results rather than feeding an incrementer/comparator chain.
++        wire continues_node=shape[slot]==0 &&
++            (seed_phase ? end_step[slot]!=0 : next_iteration<end_step[slot]);
++        wire capture_node=capture_enable[slot] &&
++            ((shape[slot]==7 || seed_phase) ? capture_step[slot]==0 :
++                capture_step[slot]==next_iteration);
++        logic finishing_node,restart_hash;
++        phase_t following_phase;
++        always_comb begin
++            case(phase[slot])
++                KEY,MASK0,MASK1,HMAC_IN,HMSG_IN,MGF0,MGF1: finishing_node=1'b0;
++                default: finishing_node=1'b1;
++            endcase
++            case(phase[slot])
++                KEY: following_phase=MASK0;
++                MASK0: following_phase=paired[slot] ? MASK1 : FINAL;
++                MASK1: following_phase=FINAL;
++                HMAC_IN: following_phase=HMAC_OUT;
++                HMSG_IN: following_phase=MGF0;
++                MGF0: following_phase=MGF1;
++                default: following_phase=family[slot]==1 ? KEY : DIRECT;
++            endcase
++            restart_hash=phase[slot]==KEY || phase[slot]==MASK0 || phase[slot]==MASK1 ||
++                phase[slot]==HMAC_IN || phase[slot]==HMSG_IN ||
++                (phase[slot]==MGF0 && output_bytes[slot]>32) ||
++                (finishing_node && continues_node);
++        end
++        // MGF writes retain their generic batch semantics. Only terminal node
++        // publication requires a scalar-owned slot; MGF0/MGF1 do not.
++        assign scalar_clear_event[slot]=return_final[slot] &&
++            (phase[slot]==MGF0 || (finishing_node && !continues_node && scalar_slot[slot]));
++        assign scalar_upper_event[slot]=return_final[slot] && phase[slot]==MGF1;
++        for(genvar byte_index=0;byte_index<DIGEST_BYTES;byte_index=byte_index+1) begin : scalar_bytes
++            assign scalar_byte_mask[slot][byte_index]=byte_index<int'(output_bytes[slot]) &&
++                ((byte_index<32 && scalar_clear_event[slot]) ||
++                 (byte_index>=32 && scalar_upper_event[slot]));
++        end
++        always_ff @(posedge clk) begin
++            if(rst) begin
++                allocation_pending[slot]<=0;
++                busy_slot[slot]<=0; complete[slot]<=0; need_block[slot]<=0; scalar_slot[slot]<=0;
++                final_compression[slot]<=0; capture_enable[slot]<=0; paired[slot]<=0;
++                phase[slot]<=DIRECT; shape[slot]<=0; family[slot]<=0; block_index[slot]<=0;
++                arity[slot]<=0; output_bytes[slot]<=0;
+             end else begin
+-                complete[t]<=1;
+-                if(scalar_slot[t]) begin
+-                    scalar_result<=0;
+-                    for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                        if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=value[k*8+:8];
++                // Reserve and admission data enter on the same edge. A local
++                // one-hot register removes the binary-tag decode from wide
++                // allocation enables without adding a context or clock.
++                allocation_pending[slot]<=reserve;
++                // Preserve the original edge priority: consume, formatter,
++                // compression return, registered allocation, new reservation.
++                if(consume) begin complete[slot]<=0; busy_slot[slot]<=0; end
++                if(reserve_format && candidate==TAG_BITS'(slot)) need_block[slot]<=0;
++                if(formatter==PREPARE && format_tag==TAG_BITS'(slot))
++                    final_compression[slot]<=format_block==7'((format_length+13'd8)>>6);
++                if(return_hit[slot]) begin
++                    if(!final_compression[slot]) begin
++                        cv[slot]<=compression_cv;
++                        block_index[slot]<=block_index[slot]+7'd1; need_block[slot]<=1;
++                    end else begin
++                        if(restart_hash) begin
++                            phase[slot]<=following_phase; cv[slot]<=IV;
++                            block_index[slot]<=0; need_block[slot]<=1;
++                        end
++                        case(phase[slot])
++                            KEY: key_value[slot]<=returned;
++                            MASK0: digest[slot]<=digest[slot]^returned;
++                            MASK1: captured[slot]<=captured[slot]^returned;
++                            HMAC_IN: digest[slot]<=returned;
++                            HMSG_IN: key_value[slot]<=returned;
++                            MGF0: if(output_bytes[slot]<=32) begin
++                                digest[slot]<=returned; complete[slot]<=1;
++                            end
++                            MGF1: complete[slot]<=1;
++                            default: begin
++                                digest[slot]<=node_result(returned,family[slot]);
++                                if(capture_node) captured[slot]<=node_result(returned,family[slot]);
++                                if(continues_node) iteration[slot]<=reached;
++                                else complete[slot]<=1;
++                            end
++                        endcase
++                    end
++                end
++                if(allocate) begin
++                    need_block[slot]<=1; scalar_slot[slot]<=admission.scalar;
++                    shape[slot]<=admission.shape; family[slot]<=admission.family;
++                    paired[slot]<=admission.pair;
++                    phase[slot]<=initial_phase(admission.shape,admission.family,admission.no_seed);
++                    cv[slot]<=IV; block_index[slot]<=0;
++                    digest[slot]<=node_result(admission.value,admission.family);
++                    captured[slot]<=admission.pair ? admission.right : 256'd0;
++                    leaf[slot]<=admission.leaf;
++                    address_a[slot]<=admission.address_a; address_b[slot]<=admission.address_b;
++                    seed_domain[slot]<=admission.seed_domain; step_domain[slot]<=admission.step_domain;
++                    iteration[slot]<=admission.start; end_step[slot]<=admission.start+admission.steps;
++                    capture_step[slot]<=admission.capture_step; capture_enable[slot]<=admission.capture;
++                    arity[slot]<=admission.arity; output_bytes[slot]<=admission.output_bytes;
++                    if(admission.shape==0 && admission.no_seed) begin
++                        if(admission.capture && admission.capture_step==admission.start)
++                            captured[slot]<=node_result(admission.value,admission.family);
++                        if(admission.steps==0) begin need_block[slot]<=0; complete[slot]<=1; end
++                    end
++                    if(admission.invalid) begin need_block[slot]<=0; complete[slot]<=1; end
++                end
++                if(reserve) begin
++                    busy_slot[slot]<=1; complete[slot]<=0; need_block[slot]<=0;
+                 end
+             end
+         end
+-    endtask
++    end
++    always_comb begin
++        scalar_write_mask=0;
++        for(integer slot=0;slot<PIPELINE;slot=slot+1)
++            scalar_write_mask=scalar_write_mask | scalar_byte_mask[slot];
++    end
++    // All banks share the same returned bytes. OR only the local write masks,
++    // retaining one result register and no P-wide node-data selection tree.
++    always_ff @(posedge clk) begin : scalar_publication
++        if(rst) scalar_result<=0;
++        else begin
++            if(|scalar_clear_event) scalar_result<=0;
++            for(integer byte_index=0;byte_index<DIGEST_BYTES;byte_index=byte_index+1)
++                if(scalar_write_mask[byte_index]) begin
++                    if(byte_index<32) scalar_result[byte_index*8+:8]<=returned[byte_index*8+:8];
++                    else scalar_result[byte_index*8+:8]<=returned[(byte_index-32)*8+:8];
++                end
++            if(ingress_pending && admission.scalar && admission.shape==0 &&
++                admission.no_seed && admission.steps==0)
++                scalar_result<=(DIGEST_BYTES*8)'(node_result(admission.value,admission.family));
++            if(ingress_pending && admission.invalid) scalar_result<=0;
++        end
++    end
+     always_ff @(posedge clk) begin : execution
+-        integer t;
+         if(rst) begin
+-            busy_slot<=0; complete<=0; need_block<=0; scalar_slot<=0;
+-            final_compression<=0;
+-            capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
++            formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
+             beat_pending<=0;
+             ingress_pending<=0;
+-            scalar_result<=0;
+-            for(integer k=0;k<PIPELINE;k=k+1) begin
+-                phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+-                arity[k]<=0; output_bytes[k]<=0;
+-            end
+         end else begin
+             beat_pending<=0;
+             ingress_pending<=0;
++            if(ingress_pending && admission.invalid) error<=1;
+             // Match the common executor's idle-tag contract: after draining a
+             // batch, tag zero selects the first retained signature capture.
+             if(!response_held || batch_response_ready) begin
+                 response_held<=completed_valid; held_tag<=completed_tag;
+             end
+-            if(batch_response_valid && batch_response_ready) begin
+-                complete[held_tag]<=0; busy_slot[held_tag]<=0;
+-            end
+-            if(response_valid && response_ready) begin complete[0]<=0; busy_slot[0]<=0; end
+             case(formatter)
+                 SELECT: if(candidate_valid) reserve_block(int'(candidate));
+                 DESCRIBE: begin
+                     format_kind<=selected_format(int'(format_tag));
+                     format_length<=input_length(int'(format_tag));
+-                    format_address<=packed_address(int'(format_tag),selected_format(int'(format_tag)));
++                    address_fields.leaf<=leaf[format_tag];
++                    address_fields.address_a<=address_a[format_tag];
++                    address_fields.address_b<=address_b[format_tag];
++                    address_fields.iteration<=iteration[format_tag];
++                    address_fields.domain_value<=domain(int'(format_tag));
++                    address_fields.chain<=shape[format_tag]==0;
++                    address_fields.seed_phase<=phase[format_tag]==SEED;
++                    address_fields.tree_domain<=step_domain[format_tag]==3;
++                    address_fields.compound<=phase[format_tag]==MASK0 ? 2'd1 :
++                        phase[format_tag]==MASK1 ? 2'd2 : 2'd0;
+                     format_block<=block_index[format_tag];
+                     format_first_index<=first_list_address(shape[format_tag],block_index[format_tag]);
+                     format_cv<=cv[format_tag];
+                     beat<=0; list_words_valid<=0; formatter<=PREPARE;
+                 end
+                 PREPARE: begin
++                    format_address<=staged_address(address_fields,format_kind);
+                     // Decode byte controls only from registered descriptors.
+                     // Fixed first blocks still use one full 512-bit write.
+-                    final_compression[format_tag]<=format_block==7'((format_length+13'd8)>>6);
+                     if(write_prefix) formatter<=SEND;
+                     else begin
+                         prepare_beat(format_kind,{format_block,2'd0},format_length);
+@@ -679,63 +842,9 @@
+                 end
+                 default: formatter<=SELECT;
+             endcase
+-            if(compression_complete_event) begin
+-                t=int'(compression_tag);
+-                if(!hash_complete_event) begin
+-                    cv[t]<=compression_cv; block_index[t]<=block_index[t]+7'd1; need_block[t]<=1;
+-                end else case(phase[t])
+-                    KEY: begin key_value[t]<=returned; next_hash(t,MASK0); end
+-                    MASK0: begin digest[t]<=digest[t]^returned; next_hash(t,paired[t] ? MASK1 : FINAL); end
+-                    MASK1: begin captured[t]<=captured[t]^returned; next_hash(t,FINAL); end
+-                    HMAC_IN: begin digest[t]<=returned; next_hash(t,HMAC_OUT); end
+-                    HMSG_IN: begin key_value[t]<=returned; next_hash(t,MGF0); end
+-                    MGF0: begin
+-                        scalar_result<=0;
+-                        for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                            if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[k*8+:8];
+-                        if(output_bytes[t]>32) next_hash(t,MGF1);
+-                        else begin digest[t]<=returned; complete[t]<=1; end
+-                    end
+-                    MGF1: begin
+-                        for(integer k=32;k<DIGEST_BYTES;k=k+1)
+-                            if(k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[(k-32)*8+:8];
+-                        complete[t]<=1;
+-                    end
+-                    default: finish_node(t,returned);
+-                endcase
+-            end
+-            // The reservation already owns this slot. No response can become
+-            // visible until its result/capture and context metadata are ready.
+-            if(ingress_pending) begin
+-                t=int'(admission.tag);
+-                need_block[t]<=1; scalar_slot[t]<=admission.scalar;
+-                shape[t]<=admission.shape; family[t]<=admission.family; paired[t]<=admission.pair;
+-                phase[t]<=initial_phase(admission.shape,admission.family,admission.no_seed);
+-                cv[t]<=IV; block_index[t]<=0; digest[t]<=node_result(admission.value,admission.family);
+-                captured[t]<=admission.pair ? admission.right : 256'd0;
+-                leaf[t]<=admission.leaf;
+-                address_a[t]<=admission.address_a; address_b[t]<=admission.address_b;
+-                seed_domain[t]<=admission.seed_domain; step_domain[t]<=admission.step_domain;
+-                iteration[t]<=admission.start; end_step[t]<=admission.start+admission.steps;
+-                capture_step[t]<=admission.capture_step; capture_enable[t]<=admission.capture;
+-                arity[t]<=admission.arity; output_bytes[t]<=admission.output_bytes;
+-                if(admission.shape==0 && admission.no_seed) begin
+-                    if(admission.capture && admission.capture_step==admission.start)
+-                        captured[t]<=node_result(admission.value,admission.family);
+-                    if(admission.steps==0) begin
+-                        need_block[t]<=0; complete[t]<=1;
+-                        if(admission.scalar) scalar_result<=(DIGEST_BYTES*8)'(node_result(admission.value,admission.family));
+-                    end
+-                end
+-                if(admission.invalid) begin
+-                    error<=1; need_block[t]<=0; complete[t]<=1; scalar_result<=0;
+-                end
+-            end
+-            // Reservation is last so an output can retire and the same tag can
+-            // be admitted on this edge. Pending admission blocks further input.
++            // Slot owners reserve on this same acceptance edge. Only the
++            // shared admission record is written here.
+             if(accept) begin
+-                t=int'(incoming_tag);
+-                busy_slot[t]<=1; complete[t]<=0; need_block[t]<=0;
+                 ingress_pending<=1;
+                 admission.tag<=incoming_tag; admission.scalar<=scalar_input;
+                 admission.shape<=incoming_shape; admission.family<=incoming_family;
+@@ -760,6 +869,24 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin : debug_allocation_events
++        if(!rst) begin
++            if(!$onehot0(allocation_pending))
++                $fatal(1,"multiple SHA2 allocation slots pending");
++            for(integer slot=0;slot<PIPELINE;slot=slot+1)
++                if(allocation_pending[slot] !== (ingress_pending && admission.tag==TAG_BITS'(slot)))
++                    $fatal(1,"local SHA2 allocation differs from registered admission tag");
++        end
++    end
++    always_ff @(posedge clk) begin : debug_scalar_events
++        if(!rst && !$onehot0(scalar_clear_event | scalar_upper_event))
++            $fatal(1,"multiple SHA2 scalar publication events on one return");
++    end
++    always_ff @(posedge clk) begin : debug_staged_address
++        if(!rst && formatter==PREPARE &&
++            staged_address(address_fields,format_kind) !== packed_address(int'(format_tag),format_kind))
++            $fatal(1,"SHA2 staged address differs from live-context reference");
++    end
+     always_ff @(posedge clk) begin : debug_prefix_only_sources
+         if(!rst && formatter==BUILD)
+             for(integer k=0;k<3;k=k+1)

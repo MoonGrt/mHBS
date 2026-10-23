@@ -1,0 +1,627 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha2-recipe.sv	2026-10-21 21:40:38.904240948 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/sha2-recipe.sv	2026-10-21 21:56:34.936241969 +0800
+@@ -54,6 +54,7 @@
+     // Only requests own contexts; completed results stay live until consumed.
+     // P=1 reduces these banks and selectors to a single scalar execution slot.
+     logic [PIPELINE-1:0] busy_slot, complete, need_block, scalar_slot, capture_enable, paired;
++    logic [PIPELINE-1:0] final_compression;
+     phase_t phase[0:PIPELINE-1];
+     logic [3:0] shape[0:PIPELINE-1];
+     logic [1:0] family[0:PIPELINE-1];
+@@ -65,7 +66,12 @@
+     logic [5:0] output_bytes[0:PIPELINE-1];
+     logic [6:0] block_index[0:PIPELINE-1];
+     logic [255:0] cv[0:PIPELINE-1], digest[0:PIPELINE-1], key_value[0:PIPELINE-1], captured[0:PIPELINE-1];
+-    logic [DIGEST_BYTES*8-1:0] scalar_result;
++    localparam integer TAIL_BYTES = DIGEST_BYTES > 32 ? DIGEST_BYTES - 32 : 1;
++    logic [TAIL_BYTES*8-1:0] scalar_tail;
++    // Scalar jobs drain all batch contexts before allocation. Their randomizer
++    // remains live through HMAC/H_msg/MGF, independently of digest/key/capture.
++    // Capture the executor's source selection once, outside the beat datapath.
++    logic [N*8-1:0] scalar_randomizer;
+ 
+     function automatic [255:0] reverse_bytes(input [255:0] data);
+         for (integer k=0;k<32;k=k+1) reverse_bytes[k*8+:8]=data[255-k*8-:8];
+@@ -348,7 +354,7 @@
+                 SRC_PRF: value=256'(secret_prf);
+                 SRC_PUBLIC: value=256'(public_seed);
+                 SRC_ROOT: value=256'(root);
+-                SRC_RANDOM: value=256'(randomizer);
++                SRC_RANDOM: value=256'(scalar_randomizer);
+                 SRC_VALUE: value=digest[format_tag];
+                 SRC_KEY: value=key_value[format_tag];
+                 SRC_RIGHT: value=captured[format_tag];
+@@ -397,11 +403,22 @@
+     // In SEND, the old block already resides in block_buffer. Its acceptance
+     // can also prepare the next slot and prefetch its first endpoint address.
+     wire start_format=candidate_valid && (formatter==SELECT || (formatter==SEND && compression_ready));
+-    assign list_next_index0=start_format ? list_address(selected_format(int'(candidate)),{block_index[candidate],2'd0}) :
++    function automatic [INDEX_BITS-1:0] first_list_address(input [3:0] recipe_shape,input [6:0] block_number);
++        // List recipes remain in DIRECT for their entire multi-block hash.
++        // Prefetch therefore needs the recipe shape, not the full phase/family
++        // formatter decoder behind the round-robin selection.
++        case(recipe_shape)
++            12: first_list_address=block_number>=2 ? INDEX_BITS'({block_number,2'b00}-9'd6) : INDEX_BITS'(0);
++            13: first_list_address=block_number!=0 ? INDEX_BITS'({block_number,1'b0}-8'd1) : INDEX_BITS'(0);
++            default: first_list_address=0;
++        endcase
++    endfunction
++    assign list_next_index0=start_format ? first_list_address(shape[candidate],block_index[candidate]) :
+         list_address(format_kind,{block_index[format_tag],formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
+     task automatic prepare_block(input integer t);
+         begin
+             format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD; list_words_valid<=0;
++            final_compression[t]<=block_index[t]==last_block(t);
+             format_kind<=selected_format(t); format_length<=input_length(t);
+             format_address<=packed_address(t,selected_format(t));
+             prepare_beat(selected_format(t),{block_index[t],2'd0},input_length(t));
+@@ -412,14 +429,23 @@
+     logic candidate_valid;
+     logic [TAG_BITS-1:0] candidate;
+     logic [TAG_BITS-1:0] schedule_cursor;
+-    integer scan;
++    logic upper_valid, lower_valid;
++    logic [TAG_BITS-1:0] upper_candidate, lower_candidate;
+     always_comb begin
+-        candidate_valid=0; candidate=0; scan=0;
++        upper_valid=0; lower_valid=0; upper_candidate=0; lower_candidate=0;
++        // Read each request bit at a constant index. Two priority encoders
++        // replace cursor addition/modulo and a variable request-bit mux in
++        // every scan entry, while retaining the same round-robin order.
+         for(integer k=0;k<PIPELINE;k=k+1) begin
+-            scan=int'(schedule_cursor)+k;
+-            if(scan>=PIPELINE) scan=scan-PIPELINE;
+-            if(!candidate_valid && need_block[scan]) begin candidate_valid=1; candidate=TAG_BITS'(scan); end
++            if(!upper_valid && need_block[k] && TAG_BITS'(k)>=schedule_cursor) begin
++                upper_valid=1; upper_candidate=TAG_BITS'(k);
++            end
++            if(!lower_valid && need_block[k]) begin
++                lower_valid=1; lower_candidate=TAG_BITS'(k);
++            end
+         end
++        candidate_valid=upper_valid || lower_valid;
++        candidate=upper_valid ? upper_candidate : lower_candidate;
+     end
+     wire compression_ready, compression_valid;
+     wire [255:0] compression_cv;
+@@ -430,7 +456,9 @@
+         .output_valid(compression_valid),.output_ready(1'b1),.output_cv(compression_cv),.output_tag(compression_tag)
+     );
+     wire compression_complete_event=compression_valid && !rst;
+-    wire hash_complete_event=compression_complete_event && block_index[compression_tag]==last_block(int'(compression_tag));
++    // Completion metadata travels with the outstanding block. Avoid decoding
++    // phase, message length and arity again behind the compression return tag.
++    wire hash_complete_event=compression_complete_event && final_compression[compression_tag];
+     wire [255:0] returned=reverse_bytes(compression_cv);
+ 
+     logic response_held;
+@@ -450,7 +478,13 @@
+     assign batch_read_digest=digest[batch_read_tag];
+     assign batch_read_capture=captured[batch_read_tag];
+     assign response_valid=complete[0] && scalar_slot[0];
+-    assign response_value=scalar_result;
++    // A completed scalar request owns slot zero until its response is consumed.
++    // Its digest bank can hold the full output; only a second MGF digest needs
++    // an additional tail. Chain intermediates retain their usual node form.
++    for(genvar k=0;k<DIGEST_BYTES;k=k+1) begin : scalar_output
++        if(k<32) assign response_value[k*8+:8]=scalar_slot[0] && k<int'(output_bytes[0]) ? digest[0][k*8+:8] : 8'd0;
++        else assign response_value[k*8+:8]=scalar_slot[0] && k<int'(output_bytes[0]) ? scalar_tail[(k-32)*8+:8] : 8'd0;
++    end
+     assign response_capture=captured[0][N*8-1:0];
+     assign request_ready=!rst && !batch_mode && busy_slot==0;
+     assign batch_request_ready=!rst && batch_mode && int'(batch_request_tag)<PIPELINE &&
+@@ -501,9 +535,8 @@
+             end else begin
+                 complete[t]<=1;
+                 if(scalar_slot[t]) begin
+-                    scalar_result<=0;
+-                    for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                        if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=value[k*8+:8];
++                    digest[t]<=value;
++                    scalar_tail<=0;
+                 end
+             end
+         end
+@@ -512,9 +545,10 @@
+         integer t;
+         if(rst) begin
+             busy_slot<=0; complete<=0; need_block<=0; scalar_slot<=0;
++            final_compression<=0;
+             capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
+             response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
+-            scalar_result<=0;
++            scalar_tail<=0;
+             for(integer k=0;k<PIPELINE;k=k+1) begin
+                 phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+                 arity[k]<=0; output_bytes[k]<=0;
+@@ -569,15 +603,14 @@
+                     HMAC_IN: begin digest[t]<=returned; next_hash(t,HMAC_OUT); end
+                     HMSG_IN: begin key_value[t]<=returned; next_hash(t,MGF0); end
+                     MGF0: begin
+-                        scalar_result<=0;
+-                        for(integer k=0;k<DIGEST_BYTES;k=k+1)
+-                            if(k<32 && k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[k*8+:8];
++                        digest[t]<=returned;
++                        scalar_tail<=0;
+                         if(output_bytes[t]>32) next_hash(t,MGF1);
+-                        else begin digest[t]<=returned; complete[t]<=1; end
++                        else complete[t]<=1;
+                     end
+                     MGF1: begin
+                         for(integer k=32;k<DIGEST_BYTES;k=k+1)
+-                            if(k<int'(output_bytes[t])) scalar_result[k*8+:8]<=returned[(k-32)*8+:8];
++                            if(k<int'(output_bytes[t])) scalar_tail[(k-32)*8+:8]<=returned[(k-32)*8+:8];
+                         complete[t]<=1;
+                     end
+                     default: finish_node(t,returned);
+@@ -586,6 +619,7 @@
+             // Allocation is last so a retiring tag can be refilled on this edge.
+             if(accept) begin
+                 t=int'(incoming_tag);
++                if(scalar_accept) scalar_randomizer<=randomizer;
+                 busy_slot[t]<=1; complete[t]<=0; need_block[t]<=1; scalar_slot[t]<=scalar_accept;
+                 shape[t]<=incoming_shape; family[t]<=incoming_family; paired[t]<=incoming_pair;
+                 phase[t]<=initial_phase(incoming_shape,incoming_family,incoming_no_seed);
+@@ -606,17 +640,24 @@
+                         captured[t]<=node_result(incoming_value,incoming_family);
+                     if(incoming_steps==0) begin
+                         need_block[t]<=0; complete[t]<=1;
+-                        if(scalar_accept) scalar_result<=(DIGEST_BYTES*8)'(node_result(incoming_value,incoming_family));
++                        if(scalar_accept) scalar_tail<=0;
+                     end
+                 end
+                 if(scalar_accept && (!RECIPE_MASK[scalar_shape] || scalar_shape==0)) begin
+-                    error<=1; need_block[t]<=0; complete[t]<=1; scalar_result<=0;
++                    error<=1; need_block[t]<=0; complete[t]<=1; scalar_tail<=0;
++                    digest[t]<=0;
+                 end
+             end
+         end
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin : debug_prepared_completion
++        if(!rst && compression_complete_event && int'(compression_tag)<PIPELINE &&
++            final_compression[compression_tag] !==
++                (block_index[compression_tag]==last_block(int'(compression_tag))))
++            $fatal(1,"SHA2 prepared completion metadata differs from recipe length");
++    end
+     logic [63:0] counted_batch_hashes,counted_batch_permutations;
+     assign batch_hashes=counted_batch_hashes;
+     assign batch_permutations=counted_batch_permutations;
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/sha256.sv	2026-10-21 21:40:38.904361710 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/sha256.sv	2026-10-21 21:56:34.936373716 +0800
+@@ -76,7 +76,7 @@
+     endfunction
+ 
+     function automatic [767:0] advance_round(input [767:0] value,
+-        input [31:0] round_constant, input round_active);
++        input [31:0] round_constant, input round_active, input prepared_h);
+         reg [31:0] a, b, c, d, e, f, g, h, next_a, next_e;
+         reg [31:0] sigma_a, sigma_e, choose, majority;
+         reg [31:0] w0, w1, w9, w14, new_word;
+@@ -91,10 +91,17 @@
+             sigma_a = rotate(a,2) ^ rotate(a,13) ^ rotate(a,22);
+             majority = (a & b) ^ (a & c) ^ (b & c);
+ 
+-            t1_first = carry_save(h, round_constant, w0);
+-            t1_second = carry_save(sigma_e, choose, t1_first[31:0]);
+-            t1_pair = carry_save(t1_first[63:32], t1_second[31:0],
+-                t1_second[63:32]);
++            // A registered stage boundary can hold h+K+W in h's word:
++            // h has no other consumer before this first round overwrites it.
++            // Fresh input retains the original combinational first round.
++            if (prepared_h) begin
++                t1_pair = carry_save(h, sigma_e, choose);
++            end else begin
++                t1_first = carry_save(h, round_constant, w0);
++                t1_second = carry_save(sigma_e, choose, t1_first[31:0]);
++                t1_pair = carry_save(t1_first[63:32], t1_second[31:0],
++                    t1_second[63:32]);
++            end
+             e_pair = carry_save(d, t1_pair[31:0], t1_pair[63:32]);
+             a_first = carry_save(sigma_a, majority, t1_pair[31:0]);
+             a_pair = carry_save(a_first[31:0], a_first[63:32], t1_pair[63:32]);
+@@ -117,8 +124,10 @@
+     logic [TRAVERSAL_BITS-1:0] traversal[0:PIPELINE-1];
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
++    logic [31:0] next_constant[0:PIPELINE-1][0:UNROLL-1];
++    logic more_rounds;
+     wire stalled = output_valid && !output_ready;
+-    wire recycle = valid[PIPELINE-1] && traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1);
++    wire recycle = valid[PIPELINE-1] && more_rounds;
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
+ 
+@@ -144,17 +153,21 @@
+         for (genvar r=0; r<UNROLL; r=r+1) begin : unrolled
+             localparam integer ROUND_OFFSET = stage * UNROLL + r;
+ 
+-            // This physical round only sees one constant per traversal.
+-            // Elaborating the comparison table here removes the full 64-word
+-            // ROM and the base-plus-offset adder from every round datapath.
+-            function automatic [31:0] traversal_constant(
++            localparam integer NEXT_OFFSET = ((stage + 1) % PIPELINE) * UNROLL + r;
++            localparam integer NEXT_TRAVERSAL = stage == PIPELINE-1 ? 1 : 0;
++
++            // Decode the constants for the next physical stage in parallel
++            // with this stage's arithmetic. At the ring boundary, the same
++            // token advances to its next traversal before consuming them.
++            function automatic [31:0] following_constant(
+                 input [TRAVERSAL_BITS-1:0] index);
+                 integer visit;
+                 begin
+-                    traversal_constant = 32'd0;
++                    following_constant = 32'd0;
+                     for (visit=0; visit<TRAVERSALS; visit=visit+1)
+                         if (index == TRAVERSAL_BITS'(visit))
+-                            traversal_constant = constant_word(7'(visit * ROUNDS + ROUND_OFFSET));
++                            following_constant = constant_word(
++                                7'((visit + NEXT_TRAVERSAL) * ROUNDS + NEXT_OFFSET));
+                 end
+             endfunction
+ 
+@@ -164,13 +177,85 @@
+             end else begin : partial_tail
+                 assign round_active = source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
+             end
+-            wire [31:0] round_constant = traversal_constant(source_traversal);
++            wire [31:0] following_round_constant = following_constant(source_traversal);
++            wire [31:0] round_constant;
++            if (r == 0) begin : prepared_constant
++                // The bank's h word already includes this round's K. Only
++                // a fresh stage-zero input still needs its initial constant.
++                assign round_constant = constant_word(7'(ROUND_OFFSET));
++            end else begin : stored_constant
++                if (stage == 0) begin : entering
++                    assign round_constant = recycle ? next_constant[PIPELINE-1][r] :
++                        constant_word(7'(r));
++                end else begin : advancing
++                    assign round_constant = next_constant[stage-1][r];
++                end
++                always_ff @(posedge clk) begin
++                    if (!rst && !stalled && source_valid)
++                        next_constant[stage][r] <= following_round_constant;
++                end
++`ifndef SYNTHESIS
++                always_ff @(posedge clk) begin
++                    if (!rst && !stalled && source_valid &&
++                        round_constant !== constant_word(7'(int'(source_traversal) * ROUNDS + ROUND_OFFSET)))
++                        $fatal(1, "SHA256 lookahead constant lost token alignment");
++                end
++`endif
++            end
+             wire [767:0] result;
+             if (r == 0) begin : first_round
+-                assign result = advance_round(source_state, round_constant, round_active);
++                assign result = advance_round(source_state, round_constant, round_active,
++                    stage != 0 || recycle);
+             end else begin : following_round
+                 assign result = advance_round(unrolled[r-1].result,
+-                    round_constant, round_active);
++                    round_constant, round_active, 1'b0);
++            end
++        end
++        wire [767:0] completed_state = unrolled[UNROLL-1].result;
++        wire following_active;
++        if ((TRAVERSALS-1) * ROUNDS + (stage+1) * UNROLL < 64) begin : continuing_tail
++            assign following_active = 1'b1;
++        end else begin : finishing_tail
++            assign following_active = source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
++        end
++        wire [63:0] prepared_pair = carry_save(completed_state[543:512],
++            unrolled[0].following_round_constant, completed_state[511:480]);
++        wire [31:0] following_prepared_h = prepared_pair[31:0] + prepared_pair[63:32];
++        // Once round 63 has completed, retain real h through all bypassed
++        // stages so the existing feed-forward still receives all eight words.
++        wire [767:0] stored_state = {completed_state[767:544],
++            following_active ? following_prepared_h : completed_state[543:512],
++            completed_state[511:0]};
++`ifndef SYNTHESIS
++        logic [31:0] reference_h;
++        wire [31:0] source_reference_h;
++        if (stage == 0) begin : reference_entering
++            assign source_reference_h = recycle ? stages[PIPELINE-1].reference_h : input_cv[31:0];
++        end else begin : reference_advancing
++            assign source_reference_h = stages[stage-1].reference_h;
++        end
++        always_ff @(posedge clk) begin
++            if (!rst && !stalled && source_valid) begin
++                if ((stage != 0 || recycle) && unrolled[0].round_active &&
++                    source_state[543:512] !== (source_reference_h +
++                        constant_word(7'(int'(source_traversal) * ROUNDS + stage * UNROLL)) +
++                        source_state[511:480]))
++                    $fatal(1, "SHA256 prepared h lost token/round alignment");
++                if ((stage != 0 || recycle) && !unrolled[0].round_active &&
++                    source_state[543:512] !== source_reference_h)
++                    $fatal(1, "SHA256 final h changed in a bypassed stage");
++                reference_h <= completed_state[543:512];
++            end
++        end
++`endif
++        if (stage == PIPELINE-1) begin : returning_control
++            // This flag belongs to the same last-stage token as state and tag.
++            // Its register cuts the traversal comparator out of the wide ring
++            // input selection; stalls hold all of them together.
++            always_ff @(posedge clk) begin
++                if (rst) more_rounds <= 1'b0;
++                else if (!stalled && source_valid)
++                    more_rounds <= source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
+             end
+         end
+         always_ff @(posedge clk) begin
+@@ -178,7 +263,7 @@
+             else if (!stalled) begin
+                 valid[stage] <= source_valid;
+                 if (source_valid) begin
+-                    state[stage] <= unrolled[UNROLL-1].result;
++                    state[stage] <= stored_state;
+                     initial_cv[stage] <= source_cv;
+                     traversal[stage] <= source_traversal;
+                     tag[stage] <= source_tag;
+@@ -204,6 +289,11 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin
++        if (!rst && valid[PIPELINE-1] &&
++            more_rounds !== (traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1)))
++            $fatal(1, "SHA256 registered recycle flag lost token alignment");
++    end
+     initial begin
+         if (PIPELINE < 1 || PIPELINE > 24 || UNROLL < 1 || ROUNDS > 24 ||
+             24 % ROUNDS != 0 || TAG_BITS < 1)
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/shake-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/shake-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/baseline_20261021_214038/source/rtl/hash/shake-recipe.sv	2026-10-21 21:40:38.904589888 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_timing_refine/candidate_20261021_215634/source/rtl/hash/shake-recipe.sv	2026-10-21 21:56:34.936599795 +0800
+@@ -299,8 +299,10 @@
+             wire [N*8-1:0] left_value = request_chain ? current_value : request_left;
+             wire [7:0] address_domain = chain_feedback_valid ? request_step_recipe[55:48] : domain;
+             wire [31:0] leaf = {12'd0, request_leaf};
+-            wire [12:0] input_length = MASKED_ENABLE && shapes[MASKED_VALUE] && compound <
+-                arity + 1 ? 13'd96 : request_chain && !seed_phase ? step_length : seed_length;
++            // Lengths were decoded at request acceptance. The compound XMSS
++            // key/mask hashes are fixed blocks and never enter STREAM, so their
++            // transient 96-byte length must not feed stream control arithmetic.
++            wire [12:0] input_length = request_chain && !seed_phase ? step_length : seed_length;
+             wire [5:0] stream_node_bytes = {stream_node_words, 3'b0};
+             logic [1087:0] fast_block;
+             logic [127:0] stream_data;
+@@ -356,31 +358,59 @@
+             // the current beat. START provides the first selectors; backpressure
+             // holds both selectors and position without another data stage.
+             logic [12:0] source_control[0:1];
++            localparam [2:0] PAYLOAD_SOURCE = 0, PAYLOAD_MESSAGE = 1,
++                PAYLOAD_ID_LO = 2, PAYLOAD_ID_HI = 3, PAYLOAD_MESSAGE_PREFIX = 4,
++                PAYLOAD_LIST_PREFIX = 5, PAYLOAD_LIST_BODY = 6;
++            logic [2:0] stream_payload_mode;
+             logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
+             function automatic [15:0] stream_byte_controls(input [12:0] next_position);
+-                reg [12:0] remaining;
++                reg full_word, final_word;
+                 reg [7:0] live_bytes, pad_bytes;
+                 begin
+-                    remaining = input_length - next_position;
++                    // Every producer position is eight-byte aligned, including
++                    // the 136-byte rate boundary. Compare word coordinates and
++                    // decode the final low-three-bit byte index without a wide
++                    // remaining-length subtraction behind the length selector.
++                    full_word = next_position[12:3] < input_length[12:3];
++                    final_word = next_position[12:3] == input_length[12:3];
+                     for (integer byte_index = 0; byte_index < 8; byte_index++) begin
+-                        live_bytes[byte_index] = next_position <= input_length &&
+-                            remaining > 13'(byte_index);
+-                        pad_bytes[byte_index] = next_position <= input_length &&
+-                            remaining == 13'(byte_index);
++                        live_bytes[byte_index] = full_word ||
++                            (final_word && input_length[2:0] > 3'(byte_index));
++                        pad_bytes[byte_index] = final_word && input_length[2:0] == 3'(byte_index);
+                     end
+                     stream_byte_controls = {pad_bytes, live_bytes};
+                 end
+             endfunction
++            function automatic [2:0] stream_source_mode(input [12:0] next_position);
++                begin
++                    stream_source_mode = PAYLOAD_SOURCE;
++                    if (shapes[PREFIX_MESSAGE]) begin
++                        case (next_position)
++                            0: stream_source_mode = PAYLOAD_ID_LO;
++                            8: stream_source_mode = PAYLOAD_ID_HI;
++                            16: stream_source_mode = PAYLOAD_MESSAGE_PREFIX;
++                            default: stream_source_mode = PAYLOAD_MESSAGE;
++                        endcase
++                    end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) &&
++                                 next_position >= prefix_bytes)
++                        stream_source_mode = PAYLOAD_LIST_BODY;
++                    else if (shapes[PREFIX_LIST] && next_position == 16)
++                        stream_source_mode = PAYLOAD_LIST_PREFIX;
++                end
++            endfunction
+             // Prepare byte enables with the source selectors, before the endpoint
+             // RAM read. Returned node data then sees one mask gate; padding does
+             // not add a comparator/priority mux behind the memory and list muxes.
+             always_ff @(posedge clk)
+                 if (!rst) begin
+-                    if (state == START && hash_ready)
++                    if (state == START && hash_ready) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(0);
+-                    else if (state == STREAM && stream_accept)
++                        stream_payload_mode <= stream_source_mode(0);
++                    end else if (state == STREAM && stream_accept) begin
+                         {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(following_position);
++                        stream_payload_mode <= stream_source_mode(following_position);
++                    end
+                 end
+             for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                 always_ff @(posedge clk)
+@@ -396,10 +426,31 @@
+                     end
+             end
+ `ifndef SYNTHESIS
++            function automatic [15:0] reference_stream_byte_controls(input [12:0] next_position);
++                reg [12:0] reference_length, remaining;
++                reg [7:0] live_bytes, pad_bytes;
++                begin
++                    reference_length = MASKED_ENABLE && shapes[MASKED_VALUE] &&
++                        compound < arity + 1 ? 13'd96 : input_length;
++                    remaining = reference_length - next_position;
++                    for (integer byte_index = 0; byte_index < 8; byte_index++) begin
++                        live_bytes[byte_index] = next_position <= reference_length &&
++                            remaining > 13'(byte_index);
++                        pad_bytes[byte_index] = next_position <= reference_length &&
++                            remaining == 13'(byte_index);
++                    end
++                    reference_stream_byte_controls = {pad_bytes, live_bytes};
++                end
++            endfunction
+             always @(posedge clk) begin : debug_scalar_stream_controls
+-                if (!rst && STREAM_ENABLE && state == STREAM &&
+-                    {stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
+-                    $fatal(1, "scalar byte controls lost stream position");
++                if (!rst && STREAM_ENABLE && state == STREAM) begin
++                    if (position[2:0] !== 0)
++                        $fatal(1, "scalar stream position is not word aligned");
++                    if ({stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
++                        $fatal(1, "scalar byte controls lost stream position");
++                    if ({stream_pad_bytes, stream_live_bytes} !== reference_stream_byte_controls(position))
++                        $fatal(1, "scalar aligned byte controls differ from original length arithmetic");
++                end
+             end
+ `endif
+             function automatic [63:0] source_word(input [12:0] control);
+@@ -407,9 +458,11 @@
+                 reg [63:0] literal;
+                 begin
+                     selected_index = control[5:0];
+-                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
+-                    // Source-range decoding bounds live node reads to four words;
+-                    // ADDRESS_LIST body beats use list_window instead.
++                    // Endpoint data has two live uses: the LMS prefix's first
++                    // sixteen bits, and the list body. Both bypass this general
++                    // seed/message/address mux below. Source 7 and the remaining
++                    // literal node words are never observed by a scalar stream.
++                    literal = source_literal(control[12:9], leaf, identifier, '0);
+                     case (control[8:6])
+                         1: source_word = node_word_indexed(secret_prf, selected_index[1:0]);
+                         2: source_word = node_word_indexed(randomizer, selected_index[1:0]);
+@@ -417,7 +470,7 @@
+                         4: source_word = node_word_indexed(root, selected_index[1:0]);
+                         5: source_word = message_word(selected_index);
+                         6: source_word = node_word_indexed(address, selected_index[1:0]);
+-                        7: source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        7: source_word = 0;
+                         default: source_word = literal;
+                     endcase
+                 end
+@@ -446,16 +499,62 @@
+                     source_word(source_control[1]),
+                     source_word(source_control[0])
+                 };
+-                stream_payload = {64'd0, source_window[63:0]};
++                stream_payload = 0;
++                case (stream_payload_mode)
++                    PAYLOAD_ID_LO: stream_payload[63:0] = identifier[63:0];
++                    PAYLOAD_ID_HI: stream_payload[63:0] = identifier[127:64];
++                    PAYLOAD_MESSAGE: stream_payload[63:0] = source_window[79:16];
++                    PAYLOAD_MESSAGE_PREFIX: begin
++                        stream_payload[63:0] = source_window[79:16];
++                        stream_payload[47:0] = {16'h8181, be32(leaf)};
++                    end
++                    PAYLOAD_LIST_PREFIX:
++                        stream_payload[63:0] = {list_data0[15:0], 16'h8080, be32(leaf)};
++                    PAYLOAD_LIST_BODY: stream_payload = list_window;
++                    default: stream_payload[63:0] = source_window[63:0];
++                endcase
++            end
++`ifndef SYNTHESIS
++            function automatic [63:0] reference_source_word(input [12:0] control);
++                reg [5:0] selected_index;
++                reg [63:0] literal;
++                begin
++                    selected_index = control[5:0];
++                    literal = source_literal(control[12:9], leaf, identifier, list_data0);
++                    case (control[8:6])
++                        1: reference_source_word = node_word_indexed(secret_prf, selected_index[1:0]);
++                        2: reference_source_word = node_word_indexed(randomizer, selected_index[1:0]);
++                        3: reference_source_word = node_word_indexed(public_seed, selected_index[1:0]);
++                        4: reference_source_word = node_word_indexed(root, selected_index[1:0]);
++                        5: reference_source_word = message_word(selected_index);
++                        6: reference_source_word = node_word_indexed(address, selected_index[1:0]);
++                        7: reference_source_word = node_word_indexed(list_data0, selected_index[1:0]);
++                        default: reference_source_word = literal;
++                    endcase
++                end
++            endfunction
++            logic [127:0] reference_source_window, reference_stream_payload;
++            always_comb begin
++                reference_source_window = {reference_source_word(source_control[1]),
++                                          reference_source_word(source_control[0])};
++                reference_stream_payload = {64'd0, reference_source_window[63:0]};
+                 if (shapes[PREFIX_MESSAGE]) begin
+-                    stream_payload = {64'd0, source_window[79:16]};
+-                    if (position == 0) stream_payload = {64'd0, identifier[63:0]};
+-                    else if (position == 8) stream_payload[63:0] = identifier[127:64];
+-                    else if (position == 16) stream_payload[47:0] = {16'h8181, be32(leaf)};
+-                end else
+-                    if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
+-                    stream_payload = list_window;
++                    reference_stream_payload = {64'd0, reference_source_window[79:16]};
++                    if (position == 0) reference_stream_payload = {64'd0, identifier[63:0]};
++                    else if (position == 8) reference_stream_payload[63:0] = identifier[127:64];
++                    else if (position == 16) reference_stream_payload[47:0] = {16'h8181, be32(leaf)};
++                end else if ((shapes[ADDRESS_LIST] || shapes[PREFIX_LIST]) && position >= prefix_bytes)
++                    reference_stream_payload = list_window;
++            end
++            always @(posedge clk) begin : debug_scalar_payload_sources
++                if (!rst && STREAM_ENABLE && state == STREAM) begin
++                    if (stream_payload_mode !== stream_source_mode(position))
++                        $fatal(1, "scalar source mode lost stream position");
++                    if (stream_payload !== reference_stream_payload)
++                        $fatal(1, "scalar endpoint bypass differs from generic source mux");
++                end
+             end
++`endif
+ 
+             integer i;
+             always @* begin
+@@ -695,21 +794,9 @@
+             wire take_feedback = permutation_complete && saved_chain_enable && chains_remaining > 1;
+             assign chain_feedback_valid   = take_feedback;
+             assign chain_feedback_counter = transition_counter;
+-            logic [127:0] previous_rate;
+-            always_comb begin
+-                case (append_index)
+-                    0: previous_rate = sponge_state[0+:128];
+-                    1: previous_rate = sponge_state[128+:128];
+-                    2: previous_rate = sponge_state[256+:128];
+-                    3: previous_rate = sponge_state[384+:128];
+-                    4: previous_rate = sponge_state[512+:128];
+-                    5: previous_rate = sponge_state[640+:128];
+-                    6: previous_rate = sponge_state[768+:128];
+-                    7: previous_rate = sponge_state[896+:128];
+-                    default: previous_rate = {64'd0, sponge_state[1024+:64]};
+-                endcase
+-            end
+-            wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
++            // The absorb destination already has a word enable. XOR its local
++            // retained word instead of selecting a 128-bit old-rate window and
++            // routing it back across all seventeen rate words.
+ `ifndef SYNTHESIS
+             logic [1087:0] feedback_block_reference;
+             always_comb begin
+@@ -727,8 +814,9 @@
+                 wire [63:0] fast_word;
+                 if (w < 17) assign fast_word = fast_block[w*64+:64];
+                 else assign fast_word = 64'd0;
+-                wire [63:0]
+-                    absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
++                wire [63:0] staged_word = w % 2 == 0 ? staged_data[63:0] : staged_data[127:64];
++                wire [63:0] absorb_word = staged_word ^
++                    (sponge_state[w*64+:64] & {64{!clear_stream}});
+                 // A compact SLH chain reuses this state on the final-round edge.
+                 // Its digest has a fixed word offset for each node length. Route
+                 // those words directly, so the final Keccak round does not feed

@@ -1,0 +1,62 @@
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/source/tb/tb_recipe.sv	2026-10-22 11:29:23.846347782 +0800
++++ tmp/sha2_first_list_g2_20261022/candidate/tb/tb_recipe.sv	2026-10-22 11:25:04.409114675 +0800
+@@ -13,6 +13,18 @@
+  logic [695:0] message_buffer;
+  wire [7:0] list_index0,list_index1,list_next_index0;
+  logic [255:0] nodes[0:135];
++ logic workspace_write=0;
++ logic [7:0] workspace_write_address=0,workspace_read0=0,workspace_read1=1;
++ wire [255:0] workspace_value0,workspace_value1;
++ always_ff @(posedge clk) begin
++  workspace_read0<=list_next_index0;
++  workspace_read1<=list_next_index0==8'd135 ? 8'd134 : list_next_index0+8'd1;
++ end
++ value #(.WIDTH(256),.DEPTH(136),.ADDRESS_BITS(8)) list_workspace (
++  .clk,.write_enable(workspace_write),.write_address(workspace_write_address),
++  .write_data(nodes[workspace_write_address]),.read0(workspace_read0),.read1(workspace_read1),
++  .value0(workspace_value0),.value1(workspace_value1)
++ );
+  wire [391:0] response_value;
+  wire [255:0] response_capture;
+  logic capture_requested=0;
+@@ -34,8 +46,7 @@
+   .request_layer(5'd3),.request_tree(64'h0123456789abcdef),.request_leaf(leaf),
+   .request_a(8'd67),.request_b(32'h12345678),.request_left(left),.request_right(right),
+   .list_index0,.list_index1,.list_next_index0,
+-  .list_data0(list_index0<136 ? nodes[list_index0] : 256'd0),
+-  .list_data1(list_index1<136 ? nodes[list_index1] : 256'd0),
++  .list_data0(workspace_value0),.list_data1(workspace_value1),
+   .response_valid,.response_ready,.response_value,.response_capture,.error
+ `ifndef SYNTHESIS
+   ,.hash_count(hashes),.permutation_count(permutations)
+@@ -121,6 +132,11 @@
+   for(integer k=0;k<16;k++)identifier[k*8+:8]=8'(k+225);
+   for(integer k=0;k<87;k++)message_buffer[k*8+:8]=8'(17+3*k);
+   for(integer j=0;j<136;j++)for(integer k=0;k<32;k++)nodes[j][k*8+:8]=8'(13*j+k);
++  // Preload the same 136 nodes through the single write port before jobs.
++  for(integer j=0;j<136;j++) begin
++   @(negedge clk);workspace_write=1;workspace_write_address=8'(j);tick();
++  end
++  workspace_write=0;
+   if(!$value$plusargs("VECTOR=%s",vector_file) || !$value$plusargs("COUNT=%d",count))$fatal(1,"VECTOR/COUNT");
+   $readmemh(vector_file,vectors);
+   for(integer c=0;c<count;c++)begin
+@@ -141,6 +157,7 @@
+    tick();request_valid=0;
+    timeout=0;
+    while(!response_valid)begin tick();timeout++;if(timeout>10000 || error)$fatal(1,"case %0d timeout/error",c);end
++   $display("RECIPE_CYCLES case=%0d shape=%0d cycles=%0d hashes=%0d permutations=%0d",c,request_recipe[59:56],timeout,hashes+batch_hashes-hash_baseline,permutations+batch_permutations-permutation_baseline);
+    if(response_value!==vectors[c][391:0])$fatal(1,"case %0d n=%0d shape=%0d arity=%0d len=%0d got=%h expected=%h",c,node_bytes,request_recipe[59:56],request_recipe[47:40],message_length,response_value,vectors[c][391:0]);
+    if(capture_requested && response_capture!==vectors[c][255:0])$fatal(1,"case %0d non-chain capture got=%h expected=%h",c,response_capture,vectors[c][255:0]);
+    if(hashes+batch_hashes-hash_baseline!=vectors[c][420:417] || permutations+batch_permutations-permutation_baseline!=vectors[c][431:421])$fatal(1,"case %0d counts %0d/%0d",c,hashes+batch_hashes-hash_baseline,permutations+batch_permutations-permutation_baseline);
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/sha2_timing_g/candidate_20261022_112923/source/scripts/check_recipes.py	2026-10-22 11:29:23.836600135 +0800
++++ tmp/sha2_first_list_g2_20261022/candidate/scripts/check_recipes.py	2026-10-22 11:25:04.409191669 +0800
+@@ -149,7 +149,7 @@
+     vector = work / 'recipes.mem'
+     vector.write_text(''.join(values))
+     obj = work / 'obj'
+-    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/shake-recipe.sv', 'rtl/hash/sha256.sv', 'rtl/hash/sha2-recipe.sv', 'tb/tb_recipe.sv']
++    cmd = [os.environ.get('VERILATOR', 'verilator'), '--binary', '--timing', '-O3', '-j', '2', '-Wno-fatal', '--top-module', 'tb_recipe', f'-GPIPELINE={args.pipeline}', f'-GUNROLL={args.unroll}', f'-GRECIPE_MASK={args.recipe_mask}', '--Mdir', str(obj), 'rtl/hash/keccak.sv', 'rtl/hash/shake-recipe.sv', 'rtl/hash/sha256.sv', 'rtl/hash/sha2-recipe.sv', 'rtl/memory/value.sv', 'tb/tb_recipe.sv']
+     if args.synthesis: cmd.append('-DSYNTHESIS')
+     if args.hash_backend == 'sha2': cmd.append('-DMHBS_SHA2')
+     with (work / 'compile.log').open('w') as log:

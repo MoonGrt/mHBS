@@ -1,0 +1,94 @@
+{
+  "candidate": "SHA2 scalar tag-zero publication",
+  "source": "rtl/hash/sha2-recipe.sv",
+  "source_sha256": "fd357de9e28a0b6320f0e97e714695b2dc30f9435eebebe1fc0ada8ba6006d9c",
+  "tests": [
+    {
+      "test": "scalar",
+      "pipeline": 6,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n_sha2_timing/recipes_P6U1.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 8,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n_sha2_timing/recipes_P8U1_SYNTHESIS.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "batch",
+      "pipeline": 6,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 12,
+      "passed": true,
+      "log": "build/n_sha2_timing/batch_P6U1_SYNTHESIS.log",
+      "log_sha256": "9d71d72b0c6dab0d3f28daf4e0e531dbfe343fc693270dbd910fbf109db5a2a3"
+    },
+    {
+      "test": "batch",
+      "pipeline": 8,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 12,
+      "passed": true,
+      "log": "build/n_sha2_timing/batch_P8U1.log",
+      "log_sha256": "197e2e6e536f7056cdc3a4f32e60377a4711227e3ae83180f6859f67f10844d0"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 1,
+      "unroll": 1,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n_sha2_timing/recipes_P1U1.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 1,
+      "unroll": 1,
+      "synthesis": true,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n_sha2_timing/recipes_P1U1_SYNTHESIS.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "scalar",
+      "pipeline": 6,
+      "unroll": 2,
+      "synthesis": false,
+      "groups_or_cases": 345,
+      "passed": true,
+      "log": "build/n_sha2_timing/recipes_P6U2.log",
+      "log_sha256": "eada36eb3698b057ab678bd9dcfe5251e648f7b9f2b790ffb1c0602f90c0b14c"
+    },
+    {
+      "test": "batch",
+      "pipeline": 6,
+      "unroll": 2,
+      "synthesis": true,
+      "groups_or_cases": 12,
+      "passed": true,
+      "log": "build/n_sha2_timing/batch_P6U2_SYNTHESIS.log",
+      "log_sha256": "cd8a6687aa7a4c892b48c26b4f5a37a95d0c02b8f52e373c5301663c2b225ed5"
+    }
+  ],
+  "notes": [
+    "Scalar requests are admitted only at tag zero; batch digest/capture banks and compression control unchanged.",
+    "Final-block publication metadata is registered only for tag zero; scalar byte masks do not reduce P context expressions.",
+    "MGF0 retains lower bytes and clears upper bytes; MGF1 writes upper bytes without replacing lower bytes.",
+    "Inactive scalar response_value during batch work is unspecified; valid scalar outputs remain checked.",
+    "No Vivado started by this subtask."
+  ]
+}

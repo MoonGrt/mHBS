@@ -1,0 +1,414 @@
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/sha2-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/sha2-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/sha2-recipe.sv	2026-10-21 20:27:53.789444483 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/sha2-recipe.sv	2026-10-21 20:45:22.083236858 +0800
+@@ -54,6 +54,7 @@
+     // Only requests own contexts; completed results stay live until consumed.
+     // P=1 reduces these banks and selectors to a single scalar execution slot.
+     logic [PIPELINE-1:0] busy_slot, complete, need_block, scalar_slot, capture_enable, paired;
++    logic [PIPELINE-1:0] final_compression;
+     phase_t phase[0:PIPELINE-1];
+     logic [3:0] shape[0:PIPELINE-1];
+     logic [1:0] family[0:PIPELINE-1];
+@@ -147,6 +148,11 @@
+     logic [8:0] word_control[0:2];
+     window_t window_control;
+     logic [15:0] payload_mask, delimiter_mask;
++    logic [63:0] list_words[0:2];
++    logic list_words_valid;
++    wire list_beat = word_control[0][8:4] == SRC_LIST0 || word_control[0][8:4] == SRC_LIST1 ||
++        word_control[1][8:4] == SRC_LIST0 || word_control[1][8:4] == SRC_LIST1 ||
++        word_control[2][8:4] == SRC_LIST0 || word_control[2][8:4] == SRC_LIST1;
+     logic length_beat;
+     wire [8:0] global_beat={block_index[format_tag],beat};
+ 
+@@ -332,7 +338,7 @@
+         endcase
+     endfunction
+     wire [703:0] padded_message=704'(message_buffer);
+-    function automatic [63:0] source_word(input [8:0] selected);
++    function automatic [63:0] source_word(input [8:0] selected,input [63:0] fetched_list_word);
+         reg [255:0] value;
+         reg [63:0] literal;
+         reg [63:0] key_pad;
+@@ -348,8 +354,7 @@
+                 SRC_KEY: value=key_value[format_tag];
+                 SRC_RIGHT: value=captured[format_tag];
+                 SRC_ADDRESS: value=format_address;
+-                SRC_LIST0: value=256'(list_data0);
+-                SRC_LIST1: value=256'(list_data1);
++                SRC_LIST0,SRC_LIST1: literal=fetched_list_word;
+                 SRC_IPAD_KEY: begin value=256'(secret_prf); key_pad=64'h3636363636363636; end
+                 SRC_OPAD_KEY: begin value=256'(secret_prf); key_pad=64'h5c5c5c5c5c5c5c5c; end
+                 SRC_MESSAGE: literal=selected[3:0]<11 ? padded_message[selected[3:0]*64+:64] : 64'd0;
+@@ -365,7 +370,7 @@
+             source_word=node_word(value,selected[1:0]) ^ key_pad ^ literal;
+         end
+     endfunction
+-    wire [191:0] source_window={source_word(word_control[2]),source_word(word_control[1]),source_word(word_control[0])};
++    wire [191:0] source_window={source_word(word_control[2],list_words[2]),source_word(word_control[1],list_words[1]),source_word(word_control[0],list_words[0])};
+     logic [127:0] payload,formatted_beat;
+     wire [63:0] encoded_length=be64({48'd0,format_length,3'd0});
+     always_comb begin
+@@ -397,7 +402,8 @@
+         list_address(format_kind,{block_index[format_tag],formatter==BUILD && beat!=3 ? beat+2'd1 : beat});
+     task automatic prepare_block(input integer t);
+         begin
+-            format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD;
++            format_tag<=TAG_BITS'(t); need_block[t]<=0; beat<=0; formatter<=BUILD; list_words_valid<=0;
++            final_compression[t]<=block_index[t]==last_block(t);
+             format_kind<=selected_format(t); format_length<=input_length(t);
+             format_address<=packed_address(t,selected_format(t));
+             prepare_beat(selected_format(t),{block_index[t],2'd0},input_length(t));
+@@ -426,7 +432,9 @@
+         .output_valid(compression_valid),.output_ready(1'b1),.output_cv(compression_cv),.output_tag(compression_tag)
+     );
+     wire compression_complete_event=compression_valid && !rst;
+-    wire hash_complete_event=compression_complete_event && block_index[compression_tag]==last_block(int'(compression_tag));
++    // Return tags select already prepared completion metadata. Decoding recipe
++    // length here would put the formatter's control mux on every result enable.
++    wire hash_complete_event=compression_complete_event && final_compression[compression_tag];
+     wire [255:0] returned=reverse_bytes(compression_cv);
+ 
+     logic response_held;
+@@ -508,8 +516,9 @@
+         integer t;
+         if(rst) begin
+             busy_slot<=0; complete<=0; need_block<=0; scalar_slot<=0;
++            final_compression<=0;
+             capture_enable<=0; paired<=0; formatter<=SELECT; format_tag<=0; beat<=0;
+-            response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0;
++            response_held<=0; held_tag<=0; schedule_cursor<=0; error<=0; list_words_valid<=0;
+             scalar_result<=0;
+             for(integer k=0;k<PIPELINE;k=k+1) begin
+                 phase[k]<=DIRECT; shape[k]<=0; family[k]<=0; block_index[k]<=0;
+@@ -527,12 +536,25 @@
+             if(response_valid && response_ready) begin complete[0]<=0; busy_slot[0]<=0; end
+             case(formatter)
+                 SELECT: if(candidate_valid) prepare_block(int'(candidate));
++                // Select only the three required RAM words before registering.
++                // The following cycle performs common source selection, window
++                // alignment and padding. Non-list beats retain their cadence.
+                 BUILD: begin
+-                    block_buffer[511-int'(beat)*128-:128]<=formatted_beat;
+-                    if(beat==3) formatter<=SEND;
+-                    else begin
+-                        beat<=beat+1'b1;
+-                        prepare_beat(format_kind,{block_index[format_tag],beat+2'd1},format_length);
++                    if(list_beat && !list_words_valid) begin
++                        for(integer k=0;k<3;k=k+1) begin
++                            list_words[k] <= word_control[k][8:4] == SRC_LIST0 ?
++                                node_word(256'(list_data0),word_control[k][1:0]) :
++                                node_word(256'(list_data1),word_control[k][1:0]);
++                        end
++                        list_words_valid<=1;
++                    end else begin
++                        block_buffer[511-int'(beat)*128-:128]<=formatted_beat;
++                        list_words_valid<=0;
++                        if(beat==3) formatter<=SEND;
++                        else begin
++                            beat<=beat+1'b1;
++                            prepare_beat(format_kind,{block_index[format_tag],beat+2'd1},format_length);
++                        end
+                     end
+                 end
+                 SEND: if(compression_ready) begin
+@@ -600,6 +622,12 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin
++        if(!rst && compression_complete_event && int'(compression_tag)<PIPELINE &&
++            final_compression[compression_tag] !==
++                (block_index[compression_tag]==last_block(int'(compression_tag))))
++            $fatal(1,"SHA2 prepared completion metadata differs from recipe length");
++    end
+     logic [63:0] counted_batch_hashes,counted_batch_permutations;
+     assign batch_hashes=counted_batch_hashes;
+     assign batch_permutations=counted_batch_permutations;
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/sha256.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/sha256.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/sha256.sv	2026-10-21 20:27:53.789586721 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/sha256.sv	2026-10-21 20:45:22.083354535 +0800
+@@ -18,6 +18,8 @@
+ );
+ // verilog_format: on
+     localparam integer ROUNDS = PIPELINE * UNROLL;
++    localparam integer TRAVERSALS = (64 + ROUNDS - 1) / ROUNDS;
++    localparam integer TRAVERSAL_BITS = TRAVERSALS > 1 ? $clog2(TRAVERSALS) : 1;
+ 
+     function automatic [31:0] rotate(input [31:0] value, input integer amount);
+         rotate = (value >> amount) | (value << (32 - amount));
+@@ -62,7 +64,7 @@
+     endfunction
+ 
+     function automatic [767:0] advance_round(input [767:0] value,
+-        input [6:0] round_index);
++        input [31:0] round_constant, input round_active);
+         reg [31:0] a, b, c, d, e, f, g, h, t1, t2, next_a, next_e;
+         reg [31:0] w0, w1, w9, w14, new_word;
+         begin
+@@ -70,53 +72,76 @@
+             w0=value[511:480]; w1=value[479:448];
+             w9=value[223:192]; w14=value[63:32];
+             t1 = h + (rotate(e,6) ^ rotate(e,11) ^ rotate(e,25)) +
+-                ((e & f) ^ (~e & g)) + constant_word(round_index) + w0;
++                ((e & f) ^ (~e & g)) + round_constant + w0;
+             t2 = (rotate(a,2) ^ rotate(a,13) ^ rotate(a,22)) +
+                 ((a & b) ^ (a & c) ^ (b & c));
+             next_a=t1+t2; next_e=d+t1;
+             new_word = (rotate(w14,17) ^ rotate(w14,19) ^ (w14 >> 10)) +
+                 w9 + (rotate(w1,7) ^ rotate(w1,18) ^ (w1 >> 3)) + w0;
+-            advance_round = round_index < 64 ?
++            advance_round = round_active ?
+                 {next_a,a,b,c,next_e,e,f,g,value[479:0],new_word} : value;
+         end
+     endfunction
+ 
+     logic [767:0] state[0:PIPELINE-1];
+     logic [255:0] initial_cv[0:PIPELINE-1];
+-    logic [6:0] base[0:PIPELINE-1];
++    logic [TRAVERSAL_BITS-1:0] traversal[0:PIPELINE-1];
+     logic [TAG_BITS-1:0] tag[0:PIPELINE-1];
+     logic [PIPELINE-1:0] valid;
+     wire stalled = output_valid && !output_ready;
+-    wire recycle = valid[PIPELINE-1] && base[PIPELINE-1] + 7'(ROUNDS) < 64;
++    wire recycle = valid[PIPELINE-1] && traversal[PIPELINE-1] != TRAVERSAL_BITS'(TRAVERSALS - 1);
+     wire finished = valid[PIPELINE-1] && !recycle;
+     assign input_ready = !rst && !stalled && !recycle;
+ 
+     for (genvar stage=0; stage<PIPELINE; stage=stage+1) begin : stages
+         wire [767:0] source_state;
+         wire [255:0] source_cv;
+-        wire [6:0] source_base;
++        wire [TRAVERSAL_BITS-1:0] source_traversal;
+         wire [TAG_BITS-1:0] source_tag;
+         wire source_valid;
+         if (stage == 0) begin : first
+             assign source_state = recycle ? state[PIPELINE-1] : {input_cv,input_block};
+             assign source_cv = recycle ? initial_cv[PIPELINE-1] : input_cv;
+-            assign source_base = recycle ? base[PIPELINE-1] + 7'(ROUNDS) : 7'd0;
++            assign source_traversal = recycle ? traversal[PIPELINE-1] + 1'b1 : '0;
+             assign source_tag = recycle ? tag[PIPELINE-1] : input_tag;
+             assign source_valid = recycle || (input_valid && input_ready);
+         end else begin : following
+             assign source_state = state[stage-1];
+             assign source_cv = initial_cv[stage-1];
+-            assign source_base = base[stage-1];
++            assign source_traversal = traversal[stage-1];
+             assign source_tag = tag[stage-1];
+             assign source_valid = valid[stage-1];
+         end
+         for (genvar r=0; r<UNROLL; r=r+1) begin : unrolled
++            localparam integer ROUND_OFFSET = stage * UNROLL + r;
++
++            // This physical round only sees one constant per traversal.
++            // Elaborating the comparison table here removes the full 64-word
++            // ROM and the base-plus-offset adder from every round datapath.
++            function automatic [31:0] traversal_constant(
++                input [TRAVERSAL_BITS-1:0] index);
++                integer visit;
++                begin
++                    traversal_constant = 32'd0;
++                    for (visit=0; visit<TRAVERSALS; visit=visit+1)
++                        if (index == TRAVERSAL_BITS'(visit))
++                            traversal_constant = constant_word(7'(visit * ROUNDS + ROUND_OFFSET));
++                end
++            endfunction
++
++            wire round_active;
++            if ((TRAVERSALS-1) * ROUNDS + ROUND_OFFSET < 64) begin : full_tail
++                assign round_active = 1'b1;
++            end else begin : partial_tail
++                assign round_active = source_traversal != TRAVERSAL_BITS'(TRAVERSALS - 1);
++            end
++            wire [31:0] round_constant = traversal_constant(source_traversal);
+             wire [767:0] result;
+             if (r == 0) begin : first_round
+-                assign result = advance_round(source_state, source_base + 7'(stage*UNROLL));
++                assign result = advance_round(source_state, round_constant, round_active);
+             end else begin : following_round
+                 assign result = advance_round(unrolled[r-1].result,
+-                    source_base + 7'(stage*UNROLL+r));
++                    round_constant, round_active);
+             end
+         end
+         always_ff @(posedge clk) begin
+@@ -126,7 +151,7 @@
+                 if (source_valid) begin
+                     state[stage] <= unrolled[UNROLL-1].result;
+                     initial_cv[stage] <= source_cv;
+-                    base[stage] <= source_base;
++                    traversal[stage] <= source_traversal;
+                     tag[stage] <= source_tag;
+                 end
+             end
+diff -ru /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/shake-recipe.sv /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/shake-recipe.sv
+--- /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/baseline_20261021_202753/source/rtl/hash/shake-recipe.sv	2026-10-21 20:27:53.789790652 +0800
++++ /media/sk1/25700d07-be6e-4225-bd06-13baa4403116/Vivado/mHBS/tmp/mHBS/build/p1sha_atp_optimization/candidate_20261021_204522/source/rtl/hash/shake-recipe.sv	2026-10-21 20:45:22.083587853 +0800
+@@ -356,7 +356,32 @@
+             // the current beat. START provides the first selectors; backpressure
+             // holds both selectors and position without another data stage.
+             logic [12:0] source_control[0:1];
++            logic [7:0] stream_live_bytes, stream_pad_bytes;
+             wire [12:0] following_position = position + 13'(stream_advance);
++            function automatic [15:0] stream_byte_controls(input [12:0] next_position);
++                reg [12:0] remaining;
++                reg [7:0] live_bytes, pad_bytes;
++                begin
++                    remaining = input_length - next_position;
++                    for (integer byte_index = 0; byte_index < 8; byte_index++) begin
++                        live_bytes[byte_index] = next_position <= input_length &&
++                            remaining > 13'(byte_index);
++                        pad_bytes[byte_index] = next_position <= input_length &&
++                            remaining == 13'(byte_index);
++                    end
++                    stream_byte_controls = {pad_bytes, live_bytes};
++                end
++            endfunction
++            // Prepare byte enables with the source selectors, before the endpoint
++            // RAM read. Returned node data then sees one mask gate; padding does
++            // not add a comparator/priority mux behind the memory and list muxes.
++            always_ff @(posedge clk)
++                if (!rst) begin
++                    if (state == START && hash_ready)
++                        {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(0);
++                    else if (state == STREAM && stream_accept)
++                        {stream_pad_bytes, stream_live_bytes} <= stream_byte_controls(following_position);
++                end
+             for (genvar word_slot = 0; word_slot < 2; word_slot++) begin : source_selectors
+                 always_ff @(posedge clk)
+                     if (!rst) begin
+@@ -370,6 +395,13 @@
+                             );
+                     end
+             end
++`ifndef SYNTHESIS
++            always @(posedge clk) begin : debug_scalar_stream_controls
++                if (!rst && STREAM_ENABLE && state == STREAM &&
++                    {stream_pad_bytes, stream_live_bytes} !== stream_byte_controls(position))
++                    $fatal(1, "scalar byte controls lost stream position");
++            end
++`endif
+             function automatic [63:0] source_word(input [12:0] control);
+                 reg [5:0] selected_index;
+                 reg [63:0] literal;
+@@ -454,8 +486,7 @@
+                         frame_layout = 0;
+                         frame0 = public_seed;
+                         frame1 = address;
+-                        frame2 = chain_feedback_valid ? finish_digest[N*8-1:0] :
+-                            shapes[ADDRESS_SEED] ? secret_seed : left_value;
++                        frame2 = shapes[ADDRESS_SEED] ? secret_seed : left_value;
+                         frame_two = !chain_feedback_valid && shapes[ADDRESS_VALUE] && arity == 2;
+                         frame3 = frame_two ? request_right : 256'd0;
+                     end
+@@ -527,8 +558,7 @@
+                     16: begin
+                         fast_block[0+:128] = public_seed[127:0];
+                         fast_block[128+:256] = address;
+-                        fast_block[384+:128] = chain_feedback_valid ? finish_digest[127:0] :
+-                            shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
++                        fast_block[384+:128] = shapes[ADDRESS_SEED] ? secret_seed[127:0] : left_value[127:0];
+                         if (shapes[ADDRESS_VALUE] && arity == 2) begin
+                             fast_block[512+:128] = request_right[127:0];
+                             fast_block[640+:8]   = 8'h1f;
+@@ -537,8 +567,7 @@
+                     24: begin
+                         fast_block[0+:192] = public_seed[191:0];
+                         fast_block[192+:256] = address;
+-                        fast_block[448+:192] = chain_feedback_valid ? finish_digest[191:0] :
+-                            shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
++                        fast_block[448+:192] = shapes[ADDRESS_SEED] ? secret_seed[191:0] : left_value[191:0];
+                         if (shapes[ADDRESS_VALUE] && arity == 2) begin
+                             fast_block[640+:192] = request_right[191:0];
+                             fast_block[832+:8]   = 8'h1f;
+@@ -595,18 +624,12 @@
+                 endcase
+                 fast_block[1087] = 1'b1;
+             end
+-            // Share one remaining-length subtraction across the eight output
+-            // bytes instead of adding position to each byte's comparison index.
+-            wire [12:0] remaining_bytes = input_length - position;
+-            wire padding_reached = position > input_length;
+-            wire partial_beat = remaining_bytes < 8;
+             always_comb begin
+-                stream_data = {64'd0, stream_payload[63:0]};
++                stream_data = 0;
+                 for (i = 0; i < 8; i = i + 1) begin
+-                    if (padding_reached || (partial_beat && remaining_bytes[2:0] <= 3'(i)))
+-                        stream_data[i*8+:8] = 0;
+-                    if (!padding_reached && partial_beat && remaining_bytes[2:0] == 3'(i))
+-                        stream_data[i*8+:8] = 8'h1f;
++                    stream_data[i*8+:8] =
++                        (stream_payload[i*8+:8] & {8{stream_live_bytes[i]}}) |
++                        (8'h1f & {8{stream_pad_bytes[i]}});
+                     if (beat == 8 && stream_last && i == 7)
+                         stream_data[i*8+7] = 1'b1;
+                 end
+@@ -687,6 +710,18 @@
+                 endcase
+             end
+             wire [127:0] absorbed_block = staged_data ^ (previous_rate & {128{!clear_stream}});
++`ifndef SYNTHESIS
++            logic [1087:0] feedback_block_reference;
++            always_comb begin
++                feedback_block_reference = fast_block;
++                case (node_bytes)
++                    16: feedback_block_reference[384+:128] = advanced_state[127:0];
++                    24: feedback_block_reference[448+:192] = advanced_state[191:0];
++                    32: feedback_block_reference[512+:256] = advanced_state[255:0];
++                    default: begin end
++                endcase
++            end
++`endif
+             for (genvar w = 0; w < 25; w = w + 1) begin : state_words
+                 wire select_stream = w < 17 && take_stream && append_index == w / 2;
+                 wire [63:0] fast_word;
+@@ -694,15 +729,47 @@
+                 else assign fast_word = 64'd0;
+                 wire [63:0]
+                     absorb_word = w % 2 == 0 ? absorbed_block[63:0] : absorbed_block[127:64];
++                // A compact SLH chain reuses this state on the final-round edge.
++                // Its digest has a fixed word offset for each node length. Route
++                // those words directly, so the final Keccak round does not feed
++                // the recipe/frame/layout mux before reaching the state register.
++                wire feedback_word16 = node_bytes == 16 && w >= 6 && w < 8;
++                wire feedback_word24 = node_bytes == 24 && w >= 7 && w < 10;
++                wire feedback_word32 = node_bytes == 32 && w >= 8 && w < 12;
++                wire feedback_word = feedback_word16 || feedback_word24 || feedback_word32;
++                wire [63:0] feedback_value16, feedback_value24, feedback_value32;
++                if (w >= 6 && w < 8)
++                    assign feedback_value16 = advanced_state[(w-6)*64+:64];
++                else assign feedback_value16 = 0;
++                if (w >= 7 && w < 10)
++                    assign feedback_value24 = advanced_state[(w-7)*64+:64];
++                else assign feedback_value24 = 0;
++                if (w >= 8 && w < 12)
++                    assign feedback_value32 = advanced_state[(w-8)*64+:64];
++                else assign feedback_value32 = 0;
++                wire [63:0] feedback_value =
++                    (feedback_value16 & {64{feedback_word16}}) |
++                    (feedback_value24 & {64{feedback_word24}}) |
++                    (feedback_value32 & {64{feedback_word32}});
+                 // These sources are disjoint in the hash FSM. Initialization
+                 // clears unselected words by enabling a write with no source.
+                 wire [63:0] next_word =
+-                    (fast_word & {64{take_fast || take_feedback}}) |
++                    (fast_word & {64{take_fast || (take_feedback && !feedback_word)}}) |
++                    (feedback_value & {64{take_feedback}}) |
+                     (absorb_word & {64{select_stream}}) |
+                     (advanced_state[w*64+:64] & {64{round_update && !take_feedback}});
+                 always_ff @(posedge clk)
+                     if (!rst && (round_update || take_fast || select_stream || clear_stream))
+                         sponge_state[w*64+:64] <= next_word;
++`ifndef SYNTHESIS
++                wire [63:0] feedback_reference_word;
++                if (w < 17)
++                    assign feedback_reference_word = feedback_block_reference[w*64+:64];
++                else assign feedback_reference_word = 0;
++                always @(posedge clk)
++                    if (!rst && take_feedback && next_word !== feedback_reference_word)
++                        $fatal(1, "scalar compact-chain direct feedback mismatch word=%0d", w);
++`endif
+             end
+ 
+             always_ff @(posedge clk) begin

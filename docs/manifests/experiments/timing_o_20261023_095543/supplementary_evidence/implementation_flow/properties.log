@@ -1,0 +1,425 @@
+
+****** Vivado v2025.2 (64-bit)
+  **** SW Build 6299465 on Fri Nov 14 12:34:56 MST 2025
+  **** IP Build 6300035 on Fri Nov 14 10:48:45 MST 2025
+  **** SharedData Build 6298862 on Thu Nov 13 04:50:51 MST 2025
+  **** Start of session at: Fri Oct 23 09:46:22 2026
+    ** Copyright 1986-2022 Xilinx, Inc. All Rights Reserved.
+    ** Copyright 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+
+source build/implementation_flow_help_20261023/properties.tcl -notrace
+Run is defaulting to srcset: sources_1
+Run is defaulting to constrset: constrs_1
+Run is defaulting to parent run srcset: sources_1
+Run is defaulting to parent run constrset: constrs_1
+FLOW_RUNS synth_1 impl_1 synth_probe impl_probe
+FLOW_PROBE impl_probe
+list_property_value
+
+Description: 
+List legal property values of object
+
+Syntax: 
+list_property_value  [-default] [-class <arg>] [-quiet] [-verbose] <name>
+                     [<object>]
+
+Returns: 
+list of property values
+
+Usage: 
+  Name        Description
+  -----------------------
+  [-default]  Show only the default value.
+  [-class]    Object type to query for legal property values. Ignored if 
+              object is specified.
+  [-quiet]    Ignore command errors
+  [-verbose]  Suspend message limits during command execution
+  <name>      Name of property whose legal values is to be retrieved
+  [<object>]  Object to query for legal properties values
+
+Categories: 
+Object, PropertyAndParameter
+
+Description:
+
+  Gets a list of valid values for an enumerated type property of either a
+  class of objects or a specific object.
+
+  Note: The command cannot be used to return valid values for properties
+  other than Enum properties. The report_property command will return the
+  type of property to help you identify Enum properties.
+
+Arguments:
+
+  -default - (Optional) Return the default property value for the specified
+  class of objects.
+
+  -class <arg> - (Optional) Return the property values of the specified class
+  instead of a specific object. The class argument is case sensitive, and
+  most class names are lower case.
+
+  Note: -class cannot be used together with an <object>.
+
+  -quiet - (Optional) Execute the command quietly, returning no messages from
+  the command. The command also returns TCL_OK regardless of any errors
+  encountered during execution.
+
+  Note: Any errors encountered on the command-line, while launching the
+  command, will be returned. Only errors occurring inside the command will be
+  trapped.
+
+  -verbose - (Optional) Temporarily override any message limits and return
+  all messages from this command.
+
+  Note: Message limits can be defined with the set_msg_config command.
+
+  <name> - (Required) The name of the property to be queried. Only properties
+  with an enumerated value, or a predefined value set, can be queried with
+  this command. All valid values of the specified property will be returned.
+
+  <object> - (Optional) A single object on which to report properties.
+
+  Note: If you specify multiple objects you will get an error.
+
+Examples:
+
+  The following example returns the list of valid values for the
+  KEEP_HIERARCHY property from cell objects:
+
+    list_property_value KEEP_HIERARCHY -class cell 
+    
+
+  The following example returns the same result, but uses an actual cell
+  object in place of the general cell class:
+
+    list_property_value KEEP_HIERARCHY [get_cells cpuEngine] 
+    
+
+  The following example returns the default value for the specified property
+  by using the current design as a representative of the design class:
+
+    list_property_value -default BITSTREAM.GENERAL.COMPRESS [current_design] 
+    
+
+See Also:
+
+   *  create_property
+   *  current_design
+   *  get_cells
+   *  get_property
+   *  list_property
+   *  report_property
+   *  reset_property
+   *  set_property
+
+FLOW_VALUES STEPS.PLACE_DESIGN.ARGS.DIRECTIVE 0 Explore WLDrivenBlockPlacement ExtraNetDelay_high ExtraNetDelay_low AltSpreadLogic_low AltSpreadLogic_medium AltSpreadLogic_high ExtraPostPlacementOpt ExtraTimingOpt SSI_SpreadLogic_high SSI_SpreadLogic_low SSI_SpreadSLLs SSI_BalanceSLLs SSI_BalanceSLRs SSI_HighUtilSLRs RuntimeOptimized Quick Default EarlyBlockPlacement RQS Auto_1 Auto_2 Auto_3
+FLOW_VALUES STEPS.PHYS_OPT_DESIGN.ARGS.DIRECTIVE 0 Explore ExploreWithHoldFix AggressiveExplore AlternateReplication AggressiveFanoutOpt AddRetime AlternateFlowWithRetiming RuntimeOptimized ExploreWithAggressiveHoldFix RQS Default
+FLOW_VALUES STEPS.ROUTE_DESIGN.ARGS.DIRECTIVE 0 Explore NoTimingRelaxation MoreGlobalIterations HigherDelayCost AdvancedSkewModeling RuntimeOptimized Quick AlternateCLBRouting AggressiveExplore RQS Default
+FLOW_SET_PLACE AltSpreadLogic_high AltSpreadLogic_high
+FLOW_SET_PLACE AltSpreadLogic_medium AltSpreadLogic_medium
+FLOW_SET_PLACE AltSpreadLogic_low AltSpreadLogic_low
+FLOW_SET_PLACE Explore Explore
+FLOW_SET_PHYS Explore Explore
+FLOW_SET_PHYS AggressiveFanoutOpt AggressiveFanoutOpt
+FLOW_SET_ROUTE Default Default
+FLOW_SET_ROUTE Explore Explore
+FLOW_SET_ROUTE AlternateCLBRouting AlternateCLBRouting
+FLOW_COMMANDS ::place_design
+FLOW_HELP_CLASSIC_BEGIN
+place_design
+
+Description: 
+Automatically place ports and leaf-level instances
+
+Syntax: 
+place_design  [-directive <arg>] [-subdirective <args>] [-no_timing_driven]
+              [-eco] [-timing_summary] [-unplace] [-post_place_opt] [-no_psip]
+              [-psip_options <args>] [-sll_align_opt] [-clock_vtree_type <arg>]
+              [-no_bufg_opt] [-ultrathreads] [-no_noc_opt]
+              [-net_delay_weight <arg>] [-quiet] [-verbose]
+
+Usage: 
+  Name                 Description
+  --------------------------------
+  [-directive]         Mode of behavior (directive) for this command. Please 
+                       refer to Arguments section of this help for values for
+                       this option.
+                       Default: Default
+  [-subdirective]      (Advanced Flow) Mode of behavior (subdirective) for 
+                       this command. Please refer to Arguments section of 
+                       this help for values for this option.
+  [-no_timing_driven]  Do not run in timing driven mode
+  [-eco]               (Advanced Flow) Run placer in ECO mode
+  [-timing_summary]    Enable accurate post-placement timing summary.
+  [-unplace]           Unplace all the instances which are not locked by 
+                       Constraints.
+  [-post_place_opt]    (Not applicable for Advanced Flow) Run only the post 
+                       commit optimizer
+  [-no_psip]           Disable PSIP (Physical Synthesis In Placer) 
+                       optimization during placement.
+  [-psip_options]      (Advanced Flow) Run place_design with specified PSIP 
+                       optimizations. Please refer to Arguments section of 
+                       this help for values for this option.
+  [-sll_align_opt]     (Not applicable for Advanced Flow) Run only the sll 
+                       alignment optimizer in PCO
+  [-clock_vtree_type]  Specify v-tree template to be used in place_design, 
+                       valid values are balanced, intraSLR, interSLR. For the
+                       Advanced Flow, the default is balanced; otherwise, 
+                       default is interSLR.
+  [-no_bufg_opt]       Disable global buffer insertion during placement
+  [-ultrathreads]      (Not applicable for Advanced Flow) Enable 
+                       ultra-threads mode to speed up place_design
+  [-no_noc_opt]        To result in better NoC QoS during place_design
+  [-net_delay_weight]  Specify net delay weight to be used, valid options are
+                       low, medium, high
+                       Default: low
+  [-quiet]             Ignore command errors
+  [-verbose]           Suspend message limits during command execution
+
+Categories: 
+Tools
+
+Description:
+
+  Place the specified ports and logic cells in the current design, or all
+  ports and logic cells, onto device resources on the target part. The tool
+  optimizes placement to minimize negative timing slack and reduce overall
+  wire length, while also attempting to spread out placement to reduce
+  routing congestion.
+
+  Placement is one step of the complete design implementation process, which
+  can be run automatically through the use of the launch_runs command when
+  running the Vivado tools in Project Mode.
+
+  In Non-Project Mode, the implementation process must be run manually with
+  the individual commands: opt_design, place_design, phys_opt_design,
+  power_opt_design, and route_design. Refer to the Vivado Design Suite User
+  Guide: Design Flows Overview (UG892) for a complete description of Project
+  Mode and Non-Project Mode.
+
+  Both placement and routing can be completed incrementally, based on prior
+  results stored in a Design Checkpoint file (DCP), using the incremental
+  implementation flow. Refer to the read_checkpoint command, or to Vivado
+  Design Suite User Guide: Implementation (UG904) for more information on
+  incremental place and route.
+
+  Tip: The place_design can be multi-threaded to speed the process. Refer to
+  the set_param command for more information on setting the
+  general.maxThreads parameter.
+
+  You can also manually place some elements of the design using place_ports,
+  or by setting LOC properties on the cell, and then automatically place the
+  remainder of the design using place_design.
+
+  This command requires an open synthesized design, and it is recommended
+  that you run the opt_design command prior to running place_design to avoid
+  placing a suboptimal netlist.
+
+Arguments:
+
+  -directive <arg> - (Optional) Direct placement to achieve specific design
+  objectives. Only one directive can be specified for a single place_design
+  command, and values are case-sensitive. Supported values include:
+
+   *  Explore - Increased placer effort in detail placement and
+      post-placement optimization.
+
+   *  EarlyBlockPlacement - Timing-driven placement of RAM and DSP blocks.
+      The RAM and DSP block locations are finalized early in the placement
+      process and are used as anchors to place the remaining logic.
+
+   *  WLDrivenBlockPlacement - Wire length-driven placement of RAM and DSP
+      blocks. Override timing-driven placement by directing the Vivado placer
+      to minimize the distance of connections to and from blocks.
+
+   *  ExtraNetDelay_high - Increases estimated delay of high fanout and
+      long-distance nets. Three levels of pessimism are supported: high,
+      medium, and low. ExtraNetDelay_high applies the highest level of
+      pessimism.
+
+   *  ExtraNetDelay_low - Increases estimated delay of high fanout and
+      long-distance nets. Three levels of pessimism are supported: high,
+      medium, and low. ExtraNetDelay_low applies the lowest level of
+      pessimism.
+
+   *  AltSpreadLogic_high - Spreads logic throughout the device to avoid
+      creating congested regions. Three levels are supported: high, medium,
+      and low. AltSpreadLogic_high achieves the highest level of spreading.
+
+   *  AltSpreadLogic_medium - Spreads logic throughout the device to avoid
+      creating congested regions. Three levels are supported: high, medium,
+      and low. AltSpreadLogic_medium achieves a medium level of spreading
+      compared to low and high.
+
+   *  AltSpreadLogic_low - Spreads logic throughout the device to avoid
+      creating congested regions. Three levels are supported: high, medium,
+      and low. AltSpreadLogic_low achieves the lowest level of spreading.
+
+   *  ExtraPostPlacementOpt - Increased placer effort in post-placement
+      optimization.
+
+   *  ExtraTimingOpt - Use an alternate algorithm for timing-driven placement
+      with greater effort for timing.
+
+   *  SSI_SpreadLogic_high - Distribute logic across SLRs.
+      SSI_SpreadLogic_high achieves the highest level of distribution.
+
+   *  SSI_SpreadLogic_low - Distribute logic across SLRs. SSI_SpreadLogic_low
+      achieves a minimum level of logic distribution, while reducing
+      placement runtime.
+
+   *  SSI_SpreadSLLs - Partition across SLRs and allocate extra area for
+      regions of higher connectivity.
+
+   *  SSI_BalanceSLLs - Partition across SLRs while attempting to balance
+      SLLs between SLRs.
+
+   *  SSI_BalanceSLRs - Partition across SLRs to balance number of cells
+      between SLRs.
+
+   *  SSI_HighUtilSLRs - Direct the placer to attempt to place logic closer
+      together in each SLR.
+
+   *  RuntimeOptimized - Run fewest iterations, trade higher design
+      performance for faster runtime.
+
+   *  Quick - Absolute, fastest runtime, non-timing-driven, performs the
+      minimum required placement for a legal design.
+
+   *  RQS - Instructs place_design to select the place_design directive
+      specified by the report_qor_suggestion strategy suggestion. Requires an
+      RQS file with a strategy suggestion to be read in prior to calling this
+      directive. See report_qor_suggestions -help for more details.
+
+   *  Auto_1 - Instructs place_design to use machine learning to select the
+      best predicted directive.
+
+   *  Auto_2 - Instructs place_design to use machine learning to select the
+      second best predicted directive.
+
+   *  Auto_3 - Instructs place_design to use machine learning to select the
+      third best predicted directive.
+   
+   *  Default - Run place_design with default settings.
+
+  Important: The -directive option controls the overall placement strategy,
+  and is not compatible with some place_design options. It can be used with
+  -no_psip, -no_bufg_opt, -quiet and -verbose. Only the Explore, Quick, and
+  Default directives are compatible with high reuse designs and the
+  incremental implementation flow as defined by read_checkpoint -incremental.
+  Refer to the Vivado Design Suite User Guide: Implementation (UG904) for
+  more information on placement strategies and the use of the -directive
+  option.
+
+  -no_timing_driven - (Optional) Disables the default timing driven placement
+  algorithm. This results in a faster placement based on wire lengths, but
+  ignores any timing constraints during the placement process.
+
+  -timing_summary - (Optional) Report the post-placement worst negative slack
+  (WNS) using results from static timing analysis. The WNS value is identical
+  to that of report_timing_summary when run on the post-placement design. By
+  default the placer reports an estimated WNS based on incremental placement
+  updates during the design implementation. The -timing_summary option incurs
+  additional runtime to run a full timing analysis.
+
+  -unplace - (Optional) Unplace all the instances which are not locked by
+  constraints. Cells with fixed placement (IS_LOC_FIXED set to TRUE), are not
+  affected.
+
+  Tip: Use the set_property to change IS_LOC_FIXED to FALSE prior to
+  unplacing fixed cells.
+
+  -post_place_opt - (Optional) Run optimization after placement to improve
+  critical path timing at the expense of additional placement and routing
+  runtime. This optimization can be run at any stage after placement. The
+  optimization examines the worst case timing paths and tries to improve
+  placement to reduce delay.
+
+  Tip: Any placement changes will result in unrouted connections, so
+  route_design will need to be run after -post_place_opt.
+
+  -no_psip - (Optional) Disable PSIP (Physical Synthesis In Placer)
+  optimization during placement. By default, to improve delay the Vivado
+  placer performs optimizations such as replicating drivers of high-fanout
+  nets and drivers of loads that are far-apart. This option disables those
+  optimizations.
+
+  -clock_vtree_type <arg> - (Optional) Specifies the type of clock tree to 
+  be used as the default option for Versal SSIT devices. Depending on the 
+  value, the clock tree is optimized for different design targets.
+
+   * Select intraSLR to minimize clock skew within each SLR
+   * Select interSLR to minimize clock skew on paths between SLRs
+   * Select balanced for the best compromise between intraSLR and interSLR
+
+  Placer clock v-tree type properties are case sensitive. Using the wrong 
+  case generates an error message stopping the placer flow.
+
+  -no_bufg_opt - (Optional) By default, global buffers are inserted during
+  placement to drive high-fanout nets. This option disables global buffer
+  insertion to reduce the number of routing resources consumed by high fanout
+  nets that are not timing-critical.
+
+  -ultrathreads - (Optional) This option (UltraScale+ SSI and vu440 devices 
+  only) speeds up placement by distributing multiple threads indicated by 
+  general.maxThreads as evenly as possible across multiple SLRs. 
+  The ultrathreads option can be used with any place_design directive, however
+  it is automatically enabled for UltraScale+ SSI for the directives: Default, 
+  RuntimeOptimized, and Quick. The ultrathreads option is only active when 
+  available threads are greater than or equal to the number of device SLRs, 
+  otherwise the option is ignored. Placement results will differ slightly 
+  depending on whether or not ultrathreads is used.
+
+  -quiet - (Optional) Execute the command quietly, returning no messages from
+  the command. The command also returns TCL_OK regardless of any errors
+  encountered during execution.
+
+  Note: Any errors encountered on the command-line, while launching the
+  command, will be returned. Only errors occurring inside the command will be
+  trapped.
+
+  -verbose - (Optional) Temporarily override any message limits and return
+  all messages from this command.
+
+  Note: Message limits can be defined with the set_msg_config command.
+
+Examples:
+
+  The following example places the current design, runs optimization, routes
+  the design, runs post placement optimization, and then reroutes the design
+  to cleanup any unconnected nets as a result of post placement optimization:
+
+    place_design
+    phys_opt_design
+    route_design
+    place_design -post_place_opt
+    phys_opt_design
+    route_design
+
+  The following example directs the Vivado placer to try different placement
+  algorithms to achieve a better placement result:
+
+    place_design -directive Explore
+
+  The following example directs the Vivado placer to use the Machine Learning
+  based predictor to select the top directive:
+
+    place_design -directive Auto_1
+
+  This example unplaces the current design:
+
+    place_design -unplace
+
+See Also:
+
+   *  launch_runs
+   *  opt_design
+   *  place_ports
+   *  phys_opt_design
+   *  power_opt_design
+   *  read_checkpoint
+   *  route_design
+   *  set_property
+
+FLOW_HELP_CLASSIC_END
+INFO: [Common 17-206] Exiting Vivado at Fri Oct 23 09:46:30 2026...

@@ -1,0 +1,17 @@
+--- G/rtl/hash/sha256.sv
++++ H2_late_sigma_e/rtl/hash/sha256.sv
+@@ -102,9 +102,11 @@
+             // Fresh inputs use the same carry-save reduction, with no added
+             // carry-propagating addition before this round's A/E results.
+             t1_first = prefix_ready ? prefix : carry_save(h, round_constant, w0);
+-            t1_second = carry_save(sigma_e, choose, t1_first[31:0]);
+-            t1_pair = carry_save(t1_first[63:32], t1_second[31:0],
+-                t1_second[63:32]);
++            // Ch is one Boolean level, whereas Sigma(E) rotates and XORs.
++            // Reduce the early prefix/Ch terms before the later Sigma(E).
++            // Keep the shared T1 pair and the A-side compressor depth.
++            t1_second = carry_save(t1_first[31:0], t1_first[63:32], choose);
++            t1_pair = carry_save(t1_second[31:0], t1_second[63:32], sigma_e);
+             e_pair = carry_save(d, t1_pair[31:0], t1_pair[63:32]);
+             a_first = carry_save(sigma_a, majority, t1_pair[31:0]);
+             a_pair = carry_save(a_first[31:0], a_first[63:32], t1_pair[63:32]);

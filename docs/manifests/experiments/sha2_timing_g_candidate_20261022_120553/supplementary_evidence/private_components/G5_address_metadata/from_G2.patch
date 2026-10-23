@@ -1,0 +1,92 @@
+--- tmp/sha2_address_local_g5_20261022/sha2-recipe.g2.sv	2026-10-22 11:25:04.408997099 +0800
++++ tmp/sha2_address_local_g5_20261022/candidate/rtl/hash/sha2-recipe.sv	2026-10-22 11:52:02.990863090 +0800
+@@ -165,6 +165,17 @@
+     logic [1:0] beat;
+     wire [511:0] block_buffer;
+     logic [255:0] format_address;
++    // Address selection ends at small context fields. PREPARE performs only
++    // byte wiring and format selection before BUILD reads the address words.
++    typedef struct packed {
++        logic [19:0] leaf;
++        logic [7:0] address_a,domain_value;
++        logic [31:0] address_b;
++        logic [4:0] iteration;
++        logic chain,seed_phase,tree_domain;
++        logic [1:0] compound;
++    } address_fields_t;
++    address_fields_t address_fields;
+     logic [255:0] format_cv;
+     logic [12:0] format_length;
+     logic [6:0] format_block;
+@@ -238,6 +249,34 @@
+             endcase
+         end
+     endfunction
++    function automatic [255:0] staged_address(input address_fields_t fields,input format_t kind);
++        reg [31:0] chain_b;
++        reg [7:0] chain_step;
++        reg [15:0] separator;
++        begin
++            chain_b=fields.chain && !fields.seed_phase && !fields.tree_domain ?
++                {27'd0,fields.iteration} : fields.address_b;
++            chain_step=kind==LMS_SEED ? 8'hff : fields.chain ?
++                {3'd0,fields.iteration} : fields.address_b[7:0];
++            separator=kind==LMS_MESSAGE ? 16'h8181 : kind==LMS_LIST ? 16'h8080 :
++                kind==LMS_LEAF ? 16'h8282 : 16'h8383;
++            case(kind)
++                SLH_SEED,SLH_VALUE,SLH_LIST: staged_address={80'd0,
++                    be32(chain_b),be32({24'd0,fields.address_a}),be32({12'd0,fields.leaf}),
++                    fields.domain_value,be64(request_tree),3'd0,request_layer};
++                XMSS_INDEX,XMSS_MESSAGE: staged_address={be32({12'd0,fields.leaf}),224'd0};
++                XMSS_SEED,XMSS_PRF: staged_address={be32({30'd0,fields.compound}),be32(chain_b),
++                    be32({24'd0,fields.address_a}),be32({12'd0,fields.leaf}),
++                    be32({24'd0,fields.domain_value}),96'd0};
++                LMS_SEED,LMS_CHAIN: staged_address={72'd0,chain_step,fields.address_a,
++                    8'd0,be32({12'd0,fields.leaf}),identifier};
++                LMS_MESSAGE,LMS_LIST,LMS_LEAF,LMS_PARENT: staged_address={80'd0,separator,
++                    be32(kind==LMS_LEAF || kind==LMS_PARENT ? fields.address_b :
++                        {12'd0,fields.leaf}),identifier};
++                default: staged_address=0;
++            endcase
++        end
++    endfunction
+     function automatic [8:0] control(input source_t source,input [3:0] word_index);
+         control={source,word_index};
+     endfunction
+@@ -628,13 +667,23 @@
+                 DESCRIBE: begin
+                     format_kind<=selected_format(int'(format_tag));
+                     format_length<=input_length(int'(format_tag));
+-                    format_address<=packed_address(int'(format_tag),selected_format(int'(format_tag)));
++                    address_fields.leaf<=leaf[format_tag];
++                    address_fields.address_a<=address_a[format_tag];
++                    address_fields.address_b<=address_b[format_tag];
++                    address_fields.iteration<=iteration[format_tag];
++                    address_fields.domain_value<=domain(int'(format_tag));
++                    address_fields.chain<=shape[format_tag]==0;
++                    address_fields.seed_phase<=phase[format_tag]==SEED;
++                    address_fields.tree_domain<=step_domain[format_tag]==3;
++                    address_fields.compound<=phase[format_tag]==MASK0 ? 2'd1 :
++                        phase[format_tag]==MASK1 ? 2'd2 : 2'd0;
+                     format_block<=block_index[format_tag];
+                     format_first_index<=first_list_address(shape[format_tag],block_index[format_tag]);
+                     format_cv<=cv[format_tag];
+                     beat<=0; list_words_valid<=0; formatter<=PREPARE;
+                 end
+                 PREPARE: begin
++                    format_address<=staged_address(address_fields,format_kind);
+                     // Decode byte controls only from registered descriptors.
+                     // Fixed first blocks still use one full 512-bit write.
+                     final_compression[format_tag]<=format_block==7'((format_length+13'd8)>>6);
+@@ -760,6 +809,11 @@
+     end
+ 
+ `ifndef SYNTHESIS
++    always_ff @(posedge clk) begin : debug_staged_address
++        if(!rst && formatter==PREPARE &&
++            staged_address(address_fields,format_kind) !== packed_address(int'(format_tag),format_kind))
++            $fatal(1,"SHA2 staged address differs from live-context reference");
++    end
+     always_ff @(posedge clk) begin : debug_prefix_only_sources
+         if(!rst && formatter==BUILD)
+             for(integer k=0;k<3;k=k+1)

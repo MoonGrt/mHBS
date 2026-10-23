@@ -1,0 +1,36 @@
+{
+  "schema": "mhbs.timing_o.architecture.v1",
+  "source_manifest_sha256": "30a38b47deb873afa510081279ce481cc6a689f61c1ae0769a6aeafb610a11bd",
+  "baseline_source_manifest_sha256": "23bdc80bd6098b0f73e80e4a9b62ce5521c7b40eef6b0c990afaec2346fc711d",
+  "rtl_changes": [
+    {
+      "file": "rtl/hash/keccak.sv",
+      "change": "Generic 64-bit Theta/Chi local hierarchy; preserve state/round registers and context RAM",
+      "sha256": "bcff53a6fd5aaf3d16f505ec658ced1d6e37725c55754a1218c7e32064fb5f43"
+    },
+    {
+      "file": "rtl/hash/sha2-recipe.sv",
+      "change": "Scalar tag-zero publication metadata; one-hot current/following endpoint word selection; registered list addresses",
+      "sha256": "2472a6b077740d69d37b59bb25ecf793cadb2b2f78d81c1d15a951d28f217f29"
+    }
+  ],
+  "implementation_flow": {
+    "id": "congestion_spread_v1",
+    "place": "AltSpreadLogic_high",
+    "phys_opt": "Default",
+    "route": "Explore",
+    "diagnostics_on_failure": true
+  },
+  "flow_differs_from_baseline": true,
+  "no_new_hash_lane": true,
+  "no_P_U_specialization": true,
+  "declared_functional_latency_change": false,
+  "targets_mhz": {
+    "U1": 150,
+    "U2": 100
+  },
+  "failure_evidence": "failed partial DCP and independent timing/hierarchy/congestion/route-status/DRC reports; error remains non-success; no frequency or ATP accepted for illegal routes",
+  "acceptance": "Actual same-source constrained setup/hold, full routing and DRC. 100MHz probes diagnose area only.",
+  "source_scope": "common OOC; external ROM/signature cache and board I/O timing excluded",
+  "python_failure_path_test_passed": true
+}

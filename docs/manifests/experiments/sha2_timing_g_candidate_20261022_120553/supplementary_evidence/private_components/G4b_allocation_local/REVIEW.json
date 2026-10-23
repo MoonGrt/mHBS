@@ -1,0 +1,14 @@
+{
+  "recipe_sha256": "982a03fad40efc4ea1562fc7c2ce41744990d5eaca5ee1559c54363622989640",
+  "baseline_recipe_sha256": "c925c9e3483c0bfa2278c9cc12d5c8f627b0e73694e411b72e367ba9af00946c",
+  "scope": "Minimal G4b local allocation one-hot FF only; no standalone regression claimed. Combined G4b/G5/H2 suite will test this exact change.",
+  "invariant": "allocation_pending[k] == (ingress_pending && admission.tag==k)",
+  "proof": "Both valid representations capture identical accept/incoming_tag on admission; otherwise each valid bit becomes zero; reset clears both. Therefore old/new allocate predicates match on every edge.",
+  "additional_bits": "PIPELINE",
+  "additional_cycles": 0,
+  "normal_assertions": [
+    "onehot0(allocation_pending)",
+    "per-slot equivalence to ingress_pending/admission.tag"
+  ],
+  "production_edited": false
+}
